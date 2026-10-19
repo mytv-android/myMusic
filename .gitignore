@@ -1,0 +1,33 @@
+# Gradle / Android
+.gradle/
+.kotlin/
+build/
+**/build/
+.cxx/
+local.properties
+captures/
+.externalNativeBuild/
+
+# Generated GoMobile artifacts
+app/libs/*.aar
+core/*.aar
+core/*.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Signing and release outputs
+*.jks
+*.keystore
+signing.properties
+keystore.properties
+*.apk
+*.aab
+*.apks
+dist/
+
+# OS
+.DS_Store
+Thumbs.db

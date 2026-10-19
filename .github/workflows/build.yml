@@ -1,0 +1,74 @@
+name: Build
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: gomobile/musicbridge/go.mod, cache-dependency-path: gomobile/musicbridge/go.sum }
+      - run: go test ./...
+        working-directory: gomobile/musicbridge
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x ./gradlew && ./gradlew test
+
+  release:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: gomobile/musicbridge/go.mod, cache-dependency-path: gomobile/musicbridge/go.sum }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21, cache: gradle }
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK and NDK
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0" "ndk;27.0.12077973"
+      - name: Build music bridge
+        env: { ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.0.12077973 }
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
+          gomobile init
+          cd gomobile/musicbridge
+          gomobile bind -target android -androidapi 23 -javapkg com.mytv.mymusic -o "$GITHUB_WORKSPACE/app/libs/musicbridge.aar" .
+      - name: Configure signing
+        env: { SIGNING_PROPERTIES: ${{ secrets.SIGNING_PROPERTIES }}, SIGN_KEY: ${{ secrets.SIGN_KEY }} }
+        run: |
+          if [ -n "$SIGNING_PROPERTIES" ] && [ -n "$SIGN_KEY" ]; then
+            echo "$SIGNING_PROPERTIES" | base64 -d > signing.properties
+            echo "$SIGN_KEY" | base64 -d > keystore.jks
+          fi
+      - name: Build release
+        run: chmod +x ./gradlew && ./gradlew assembleRelease --no-daemon --max-workers=1 -Porg.gradle.jvmargs=-Xmx3g
+        env: { VERSION_CODE: ${{ github.run_number }} }
+      - name: Rename APKs
+        id: apk
+        run: |
+          metadata=$(find app/build/outputs/apk/release -name output-metadata.json | head -1)
+          version=$(jq -r '.elements[0].versionName' "$metadata")
+          code=$(jq -r '.elements[0].versionCode' "$metadata")
+          mkdir -p dist
+          find app/build/outputs/apk/release -name '*.apk' -exec cp {} dist/ \;
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.apk.outputs.tag }}
+          name: myMusic ${{ steps.apk.outputs.version }}
+          body: Android 6.0+ 通用安装包。versionCode ${{ steps.apk.outputs.code }}。
+          files: dist/*.apk
+          prerelease: ${{ github.ref_name != 'main' }}
+          make_latest: ${{ github.ref_name == 'main' && 'true' || 'false' }}

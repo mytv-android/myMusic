@@ -1,0 +1,3 @@
+-keep class go.** { *; }
+-keep class com.mytv.mymusic.musicbridge.** { *; }
+-dontwarn go.**
