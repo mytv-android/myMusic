@@ -52,6 +52,22 @@ jobs:
             echo "$SIGNING_PROPERTIES" | base64 -d > signing.properties
             echo "$SIGN_KEY" | base64 -d > keystore.jks
           fi
+      - name: Inspect signing setup
+        run: |
+          echo "properties bytes: $(wc -c < signing.properties 2>/dev/null || echo 0)"
+          echo "keystore bytes: $(wc -c < keystore.jks 2>/dev/null || echo 0)"
+          file signing.properties keystore.jks || true
+          if grep -aq '^storeFile=' signing.properties; then
+            echo "property keys:"
+            grep -aE '^[A-Za-z][A-Za-z0-9_.-]*=' signing.properties | cut -d= -f1 | sort -u
+            store=$(grep -a '^storeFile=' signing.properties | head -1 | cut -d= -f2- | tr -d '\r')
+            echo "storeFile path: $store"
+            echo "store exists: $(test -f "$store" && echo yes || echo no)"
+          else
+            echo "signing.properties has no storeFile key"
+          fi
+      - name: Signing report
+        run: chmod +x ./gradlew && ./gradlew :app:signingReport --no-daemon
       - name: Build release
         env:
           VERSION_CODE: ${{ github.run_number }}
