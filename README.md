@@ -35,7 +35,7 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 
 提交或拉取请求会运行 Go 与 Android 单元测试。推送到 `main` 或 `dev` 时，GitHub Actions 会构建 Android 6.0+ 的通用 APK，并发布到 GitHub Release。
 
-配置以下仓库 Secrets 后，Release 会使用正式签名；未配置时生成未签名的 Release 包：
+配置以下仓库或组织 Secrets 后，Release 会使用正式签名；未配置时使用 debug 签名：
 
 - `SIGNING_PROPERTIES`：Base64 编码的 properties，包含 `storeFile=keystore.jks`、`storePassword`、`keyAlias`、`keyPassword`。
 - `SIGN_KEY`：Base64 编码的 JKS 密钥库。

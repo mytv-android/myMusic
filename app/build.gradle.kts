@@ -8,11 +8,18 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-val signingProperties = Properties()
-val signingPropertiesFile = rootProject.file("signing.properties")
-if (signingPropertiesFile.exists()) {
-    signingProperties.load(FileInputStream(signingPropertiesFile))
+val keystorePropertiesFile = rootProject.file("signing.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
+
+val localKeystore = rootProject.file("keystore.jks")
+val userKeystore = project.file(
+    System.getenv("KEYSTORE") ?: keystoreProperties.getProperty("storeFile")
+        ?: "keystore.jks"
+)
+val hasReleaseKeystore = userKeystore.exists() || localKeystore.exists()
 
 android {
     namespace = "com.mytv.mymusic"
@@ -31,13 +38,11 @@ android {
 
     signingConfigs {
         create("release") {
-            val configuredStore = System.getenv("KEYSTORE") ?: signingProperties.getProperty("storeFile")
-            if (!configuredStore.isNullOrBlank()) {
-                storeFile = rootProject.file(configuredStore)
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: signingProperties.getProperty("storePassword")
-                keyAlias = System.getenv("KEY_ALIAS") ?: signingProperties.getProperty("keyAlias")
-                keyPassword = System.getenv("KEY_PASSWORD") ?: signingProperties.getProperty("keyPassword")
-            }
+            storeFile = if (userKeystore.exists()) userKeystore else localKeystore
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+                ?: keystoreProperties.getProperty("storePassword")
+            keyAlias = System.getenv("KEY_ALIAS") ?: keystoreProperties.getProperty("keyAlias")
+            keyPassword = System.getenv("KEY_PASSWORD") ?: keystoreProperties.getProperty("keyPassword")
         }
     }
 
@@ -46,8 +51,11 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            val releaseSigning = signingConfigs.getByName("release")
-            if (releaseSigning.storeFile?.exists() == true) signingConfig = releaseSigning
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
