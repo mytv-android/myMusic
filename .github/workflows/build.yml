@@ -23,7 +23,7 @@ jobs:
             SDKMANAGER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -name sdkmanager -type f | head -1)
           fi
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "platforms;android-37" "build-tools;36.0.0"
+          "$SDKMANAGER" "platforms;android-37.0" "build-tools;36.0.0" "build-tools;36.1.0"
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x ./gradlew && ./gradlew test
 
@@ -42,7 +42,7 @@ jobs:
             SDKMANAGER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -name sdkmanager -type f | head -1)
           fi
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "platforms;android-37" "build-tools;36.0.0"
+          "$SDKMANAGER" "platforms;android-37.0" "build-tools;36.0.0" "build-tools;36.1.0"
       - name: Configure signing
         env:
           SIGNING_PROPERTIES: ${{ secrets.SIGNING_PROPERTIES }}
