@@ -130,17 +130,6 @@ data class SongMatchResult(
     val matched: Boolean get() = song != null
 }
 
-data class MatchProgress(
-    val targetProvider: String,
-    val total: Int,
-    val completed: Int,
-    val matched: Int,
-    val currentSong: Song? = null,
-    val currentResult: SongMatchResult? = null,
-    val done: Boolean = false,
-    val error: String = "",
-)
-
 @Serializable
 data class AggregationSettings(
     val enabledProviders: List<String> = listOf("netease", "qq", "kugou", "kuwo", "migu"),

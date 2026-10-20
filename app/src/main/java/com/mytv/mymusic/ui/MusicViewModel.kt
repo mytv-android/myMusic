@@ -19,8 +19,6 @@ import com.mytv.mymusic.aggregate.CanonicalCollection
 import com.mytv.mymusic.aggregate.CanonicalTrack
 import com.mytv.mymusic.aggregate.CollectionMatcher
 import com.mytv.mymusic.aggregate.MatchJob
-import com.mytv.mymusic.aggregate.MatchMethod
-import com.mytv.mymusic.aggregate.MatchProgress
 import com.mytv.mymusic.aggregate.MatchStrictness
 import com.mytv.mymusic.aggregate.PlaybackMode
 import com.mytv.mymusic.aggregate.ProviderSearchState
@@ -29,11 +27,11 @@ import com.mytv.mymusic.aggregate.Resolution
 import com.mytv.mymusic.aggregate.SearchScope
 import com.mytv.mymusic.aggregate.SearchStatus
 import com.mytv.mymusic.aggregate.SearchUpdate
-import com.mytv.mymusic.aggregate.SongMatchResult
 import com.mytv.mymusic.aggregate.SourceResolver
 import com.mytv.mymusic.aggregate.TrackMatcher
 import com.mytv.mymusic.aggregate.TrackSource
 import com.mytv.mymusic.aggregate.availabilityOf
+import com.mytv.mymusic.data.AppSettings
 import com.mytv.mymusic.data.CanonicalSourceEntity
 import com.mytv.mymusic.data.CanonicalTrackEntity
 import com.mytv.mymusic.data.DownloadRecord
@@ -53,13 +51,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
@@ -79,6 +78,8 @@ data class ProviderHome(
     val recommendations: List<Playlist> = emptyList(),
     val charts: List<TopList> = emptyList(),
     val hotSongs: List<Song> = emptyList(),
+    val loading: Boolean = false,
+    val error: String = "",
 )
 
 data class MusicUiState(
@@ -86,9 +87,14 @@ data class MusicUiState(
     val providerId: String = "netease",
     val theme: String = "system",
     val cookies: Map<String, String> = emptyMap(),
-    val homes: List<ProviderHome> = emptyList(),
+    val home: ProviderHome? = null,
     val recommendations: List<Playlist> = emptyList(),
     val categories: List<PlaylistCategory> = emptyList(),
+    val categoriesLoading: Boolean = false,
+    val categoriesError: String = "",
+    val categoryId: String = "",
+    val categoryName: String = "",
+    val categoryOpen: Boolean = false,
     val categoryPlaylists: List<Playlist> = emptyList(),
     val charts: List<TopList> = emptyList(),
     val hotSongs: List<Song> = emptyList(),
@@ -97,6 +103,7 @@ data class MusicUiState(
     val albums: List<Playlist> = emptyList(),
     val collectionTitle: String = "",
     val collectionSongs: List<Song> = emptyList(),
+    val collectionOpen: Boolean = false,
     val query: String = "",
     val searchKind: SearchKind = SearchKind.Song,
     val searchScope: SearchScope = SearchScope.Aggregated,
@@ -134,9 +141,6 @@ data class MusicUiState(
     val playbackNotice: String = "",
     val deepLink: String = "",
     val collectionSource: String = "",
-    val collectionMatches: Map<String, SongMatchResult> = emptyMap(),
-    val collectionMatchTarget: String = "",
-    val collectionMatchProgress: MatchProgress? = null,
 )
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
@@ -144,6 +148,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val http = OkHttpClient()
     private val base = MutableStateFlow(MusicUiState())
+    private val settingsState = app.settings.state.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        AppSettings(provider = "netease", theme = "system", cookies = emptyMap()),
+    )
     private var controller: MediaController? = null
     private var progressJob: Job? = null
     private var loginJob: Job? = null
@@ -151,7 +160,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var aggregateSearchGeneration = 0
     private var collectionSearchJob: Job? = null
     private var collectionSearchGeneration = 0
-    private var collectionMatchJob: Job? = null
+    private var homeGeneration = 0
     private var failoverInProgress = false
     private var splitOverrideKeys: Set<String> = emptySet()
     private var mergeTargets: Map<String, String> = emptyMap()
@@ -175,21 +184,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val searchEngine = AggregateSearchEngine(
         repository = app.repository,
-        cookies = { state.value.cookies },
-        settings = { state.value.aggregation },
+        cookies = { settingsState.value.cookies },
+        settings = { settingsState.value.aggregation },
         splitOverrides = { splitOverrideKeys },
         mergeOverrides = { mergeTargets },
     )
     private val resolver = SourceResolver(
         repository = app.repository,
-        cookies = { state.value.cookies },
-        settings = { state.value.aggregation },
+        cookies = { settingsState.value.cookies },
+        settings = { settingsState.value.aggregation },
     )
     private val matchJob = MatchJob(
         repository = app.repository,
-        cookies = { state.value.cookies },
+        cookies = { settingsState.value.cookies },
         dao = aggregateDao,
-        settings = { state.value.aggregation },
+        settings = { settingsState.value.aggregation },
     )
 
     init {
@@ -201,7 +210,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }, MoreExecutors.directExecutor())
         viewModelScope.launch {
             runCatching { base.value = base.value.copy(providers = app.repository.providers()) }
-            refreshHome()
+            val providerId = runCatching { app.settings.state.first().provider }.getOrDefault("netease")
+            refreshHome(providerId)
         }
         viewModelScope.launch(Dispatchers.IO) {
             val cutoff = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000
@@ -224,8 +234,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectProvider(id: String) = viewModelScope.launch {
         app.settings.provider(id)
-        base.value = base.value.copy(page = 1, categories = emptyList(), categoryPlaylists = emptyList())
-        loadProviderDetails()
+        base.value = base.value.copy(
+            page = 1,
+            home = null,
+            categories = emptyList(),
+            categoriesLoading = false,
+            categoriesError = "",
+            categoryId = "",
+            categoryName = "",
+            categoryOpen = false,
+            categoryPlaylists = emptyList(),
+        )
+        refreshHome(id)
     }
 
     fun selectTheme(value: String) = viewModelScope.launch { app.settings.theme(value) }
@@ -242,34 +262,99 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun clearError() { base.value = base.value.copy(error = "") }
     fun clearNotice() { base.value = base.value.copy(playbackNotice = "") }
 
-    fun refreshHome() = launchAction {
-        val homes = coroutineScope {
-            state.value.providers.map { provider ->
-                async {
-                    val cookie = cookieFor(provider.id)
-                    ProviderHome(
-                        provider = provider,
-                        recommendations = if (provider.recommendedPlaylists) runCatching { app.repository.recommended(provider.id, cookie) }.getOrDefault(emptyList()) else emptyList(),
-                        charts = if (provider.topLists) runCatching { app.repository.topLists(provider.id, cookie) }.getOrDefault(emptyList()) else emptyList(),
-                        hotSongs = if (provider.hotSongs) runCatching { app.repository.hotSongs(provider.id, cookie, 12) }.getOrDefault(emptyList()) else emptyList(),
-                    )
+    fun refreshHome(providerId: String? = null) = launchAction {
+        val generation = ++homeGeneration
+        val providers = base.value.providers
+        val id = providerId ?: settingsState.value.provider
+        val provider = providers.find { it.id == id } ?: providers.firstOrNull() ?: return@launchAction
+        base.value = base.value.copy(
+            page = 1,
+            home = ProviderHome(provider = provider, loading = true),
+            categories = emptyList(),
+            categoriesLoading = provider.playlistCategories,
+            categoriesError = "",
+            categoryId = "",
+            categoryName = "",
+            categoryOpen = false,
+            categoryPlaylists = emptyList(),
+        )
+        val cookie = cookieFor(provider.id)
+        val (recommended, charts, hot) = coroutineScope {
+            val recommendedJob = async {
+                if (provider.recommendedPlaylists) {
+                    runCatching { app.repository.recommended(provider.id, cookie) }
+                } else {
+                    Result.success(emptyList())
                 }
-            }.awaitAll()
-        }.filter { it.recommendations.isNotEmpty() || it.charts.isNotEmpty() || it.hotSongs.isNotEmpty() }
-        base.value = base.value.copy(homes = homes)
-        loadProviderDetails()
+            }
+            val chartsJob = async {
+                if (provider.topLists) {
+                    runCatching { app.repository.topLists(provider.id, cookie) }
+                } else {
+                    Result.success(emptyList())
+                }
+            }
+            val hotJob = async {
+                if (provider.hotSongs) {
+                    runCatching { app.repository.hotSongs(provider.id, cookie, 12) }
+                } else {
+                    Result.success(emptyList())
+                }
+            }
+            Triple(recommendedJob.await(), chartsJob.await(), hotJob.await())
+        }
+        if (generation != homeGeneration) return@launchAction
+        val error = listOfNotNull(recommended.exceptionOrNull(), charts.exceptionOrNull(), hot.exceptionOrNull())
+            .firstOrNull()?.message.orEmpty()
+        base.update {
+            it.copy(
+                home = ProviderHome(
+                    provider = provider,
+                    recommendations = recommended.getOrDefault(emptyList()),
+                    charts = charts.getOrDefault(emptyList()),
+                    hotSongs = hot.getOrDefault(emptyList()),
+                    error = error,
+                ),
+            )
+        }
+        loadProviderDetails(provider.id, generation)
     }
 
-    private suspend fun loadProviderDetails() {
-        val id = state.value.providerId
-        val provider = state.value.providers.find { it.id == id } ?: return
-        val categories = if (provider.playlistCategories) runCatching { app.repository.categories(id, cookieFor(id)) }.getOrDefault(emptyList()) else emptyList()
-        base.value = base.value.copy(categories = categories)
+    private suspend fun loadProviderDetails(providerId: String? = null, generation: Int = homeGeneration) {
+        val id = providerId ?: settingsState.value.provider
+        val provider = base.value.providers.find { it.id == id } ?: return
+        if (!provider.playlistCategories) {
+            if (generation == homeGeneration) {
+                base.value = base.value.copy(categories = emptyList(), categoriesLoading = false, categoriesError = "")
+            }
+            return
+        }
+        val result = runCatching { app.repository.categories(id, cookieFor(id)) }
+        if (generation != homeGeneration) return
+        base.value = base.value.copy(
+            categories = result.getOrDefault(emptyList()),
+            categoriesLoading = false,
+            categoriesError = result.exceptionOrNull()?.message.orEmpty(),
+        )
     }
 
-    fun loadCategory(categoryId: String, page: Int = base.value.page) = launchAction {
-        val lists = app.repository.categoryPlaylists(state.value.providerId, cookieFor(state.value.providerId), categoryId, page, 30)
-        base.value = base.value.copy(categoryPlaylists = lists, page = page)
+    fun loadCategory(categoryId: String, page: Int = 1) = launchAction {
+        val generation = homeGeneration
+        val providerId = base.value.home?.provider?.id ?: settingsState.value.provider
+        val categoryName = base.value.categories.find { it.id == categoryId }?.name.orEmpty()
+        val lists = app.repository.categoryPlaylists(providerId, cookieFor(providerId), categoryId, page.coerceAtLeast(1), 30)
+        if (generation != homeGeneration) return@launchAction
+        base.value = base.value.copy(
+            categoryId = categoryId,
+            categoryName = categoryName,
+            categoryOpen = true,
+            categoryPlaylists = lists,
+            page = page.coerceAtLeast(1),
+        )
+    }
+
+    fun clearCategory() {
+        base.value = base.value.copy(categoryId = "", categoryName = "", categoryOpen = false, categoryPlaylists = emptyList(), page = 1)
     }
 
     fun search(page: Int = 1, force: Boolean = true) {
@@ -290,11 +375,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         launchAction {
-            val ui = state.value
+            val providerId = settingsState.value.provider
             when (kind) {
-                SearchKind.Song -> base.value = base.value.copy(songs = app.repository.searchSongs(ui.providerId, cookieFor(ui.providerId), value))
-                SearchKind.Playlist -> base.value = base.value.copy(playlists = app.repository.searchPlaylists(ui.providerId, cookieFor(ui.providerId), value))
-                SearchKind.Album -> base.value = base.value.copy(albums = app.repository.searchAlbums(ui.providerId, cookieFor(ui.providerId), value))
+                SearchKind.Song -> base.value = base.value.copy(songs = app.repository.searchSongs(providerId, cookieFor(providerId), value))
+                SearchKind.Playlist -> base.value = base.value.copy(playlists = app.repository.searchPlaylists(providerId, cookieFor(providerId), value))
+                SearchKind.Album -> base.value = base.value.copy(albums = app.repository.searchAlbums(providerId, cookieFor(providerId), value))
                 SearchKind.Link -> openLink(value)
             }
             base.value = base.value.copy(page = page)
@@ -419,7 +504,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             val names = providers.associate { it.id to it.name }
-            val priority = state.value.aggregation.priorityFor(providers.map { it.id })
+            val priority = settingsState.value.aggregation.priorityFor(providers.map { it.id })
             val results = ConcurrentHashMap<String, List<Playlist>>()
             val states = ConcurrentHashMap<String, ProviderSearchState>()
             val semaphore = Semaphore(3)
@@ -495,40 +580,44 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun enabledProviders(): List<ProviderInfo> {
-        val all = state.value.providers.filter { it.search }
+        val all = base.value.providers.filter { it.search }
         if (all.isEmpty()) return emptyList()
-        val ids = state.value.aggregation.enabledOrDefault(all.map { it.id })
+        val ids = settingsState.value.aggregation.enabledOrDefault(all.map { it.id })
         return all.filter { it.id in ids }.ifEmpty { all.take(5) }
     }
 
     fun openPlaylist(item: Playlist, album: Boolean) = launchAction {
-        val source = item.source.ifBlank { state.value.providerId }
-        val songs = if (album) app.repository.albumSongs(source, cookieFor(source), item.id)
-        else app.repository.playlistSongs(source, cookieFor(source), item.id)
+        val source = item.source.ifBlank { settingsState.value.provider }
         base.value = base.value.copy(
             collectionTitle = item.name,
-            collectionSongs = songs,
+            collectionSongs = emptyList(),
             collectionSource = source,
-            collectionMatches = emptyMap(),
-            collectionMatchProgress = null,
-            collectionMatchTarget = defaultMatchTarget(source),
+            collectionOpen = true,
         )
+        val songs = if (album) app.repository.albumSongs(source, cookieFor(source), item.id)
+        else app.repository.playlistSongs(source, cookieFor(source), item.id)
+        base.value = base.value.copy(collectionSongs = songs)
     }
 
     fun openChart(item: TopList) = launchAction {
-        val source = item.source.ifBlank { state.value.providerId }
+        val source = item.source.ifBlank { settingsState.value.provider }
         base.value = base.value.copy(
             collectionTitle = item.name,
-            collectionSongs = app.repository.topListSongs(source, cookieFor(source), item.id),
+            collectionSongs = emptyList(),
             collectionSource = source,
-            collectionMatches = emptyMap(),
-            collectionMatchProgress = null,
-            collectionMatchTarget = defaultMatchTarget(source),
+            collectionOpen = true,
+        )
+        base.value = base.value.copy(
+            collectionSongs = app.repository.topListSongs(source, cookieFor(source), item.id),
         )
     }
 
+    fun closeCollection() {
+        base.value = base.value.copy(collectionOpen = false)
+    }
+
     fun openLink(link: String) = launchAction {
-        val id = state.value.providerId
+        val id = settingsState.value.provider
         val result = runCatching { app.repository.parsePlaylist(id, cookieFor(id), link) }.getOrNull()
             ?: runCatching { app.repository.parseAlbum(id, cookieFor(id), link) }.getOrNull()
         if (result != null) {
@@ -537,9 +626,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 collectionTitle = result.item.name,
                 collectionSongs = result.songs,
                 collectionSource = source,
-                collectionMatches = emptyMap(),
-                collectionMatchProgress = null,
-                collectionMatchTarget = defaultMatchTarget(source),
+                collectionOpen = true,
             )
         } else {
             val song = app.repository.parseSong(id, cookieFor(id), link)
@@ -551,7 +638,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val selected = canonicalForSong(song)
         val tracks = queue.map { canonicalForSong(it) }.ifEmpty { listOf(selected) }
         val ordered = listOf(selected) + tracks.filter { it.id != selected.id }
-        playTrack(selected, ordered, song.source.takeIf { it.isNotBlank() })
+        playTrack(selected, ordered)
     }
 
     fun playTrack(track: CanonicalTrack, queue: List<CanonicalTrack> = listOf(track), pinnedProvider: String? = null) {
@@ -563,55 +650,56 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             val ordered = (listOf(track) + queue.filter { it.id != track.id }).distinctBy { it.id }
             val local = localFileFor(track)
-            val resolution = if (local == null) {
-                resolver.resolve(track, pinnedProvider, emptySet(), resolver.buildPolicy(track, pinnedProvider))
-            } else {
-                null
+            var playableTrack = track
+            var ready: Resolution.Ready? = null
+            var autoMatched = false
+            if (local == null) {
+                val result = resolvePlayable(track, pinnedProvider)
+                playableTrack = result.track
+                ready = result.resolution as? Resolution.Ready
+                autoMatched = result.autoMatched
+                if (ready == null) {
+                    base.value = base.value.copy(
+                        playbackNotice = noSourceMessage(playableTrack, result.resolution),
+                        deepLink = (result.resolution as? Resolution.None)?.deepLink.orEmpty(),
+                    )
+                    return@launch
+                }
             }
-            if (local == null && resolution !is Resolution.Ready) {
-                val message = noSourceMessage(track, resolution!!)
-                base.value = base.value.copy(
-                    playbackNotice = message,
-                    deepLink = (resolution as? Resolution.None)?.deepLink.orEmpty(),
-                )
-                return@launch
-            }
-            if (pinnedProvider != null) pinnedProviders[track.id] = pinnedProvider
-            val source = local?.first ?: (resolution as Resolution.Ready).source
+            if (pinnedProvider != null) pinnedProviders[playableTrack.id] = pinnedProvider
+            val source = local?.first ?: ready!!.source
             val resolvedSong = if (local != null) {
                 source.song.copy(url = Uri.fromFile(local.second).toString())
             } else {
-                source.song.copy(url = (resolution as Resolution.Ready).url)
+                source.song.copy(url = ready!!.url)
             }
-            val queueSongs = ordered.map { item ->
-                if (item.id == track.id) resolvedSong else preferredSong(item)
-            }.toMutableList()
-            val fallbackNotice = if (local != null) {
-                ""
-            } else {
-                val ready = resolution as Resolution.Ready
-                when {
-                    pinnedProvider != null && ready.source.providerId != pinnedProvider ->
-                        "所选平台没有返回可播放地址，已回退到${ready.source.providerName}"
-                    ready.isPreview -> "当前为试听片段"
-                    else -> ""
-                }
+            val canonicalQueue = ordered.map { if (it.id == track.id) playableTrack else it }
+            val queueSongs = canonicalQueue.map { item ->
+                if (item.id == playableTrack.id) resolvedSong else preferredSong(item)
+            }
+            val fallbackNotice = when {
+                local != null -> ""
+                ready!!.isPreview -> "当前为试听片段"
+                autoMatched -> "原音源不可用，已自动匹配到${ready.source.providerName}"
+                pinnedProvider != null && ready.source.providerId != pinnedProvider ->
+                    "所选平台没有返回可播放地址，已切换到${ready.source.providerName}"
+                else -> ""
             }
             player.setMediaItems(queueSongs.map(::mediaItem), 0, 0)
             player.prepare()
             player.play()
             base.value = base.value.copy(
                 queue = queueSongs,
-                canonicalQueue = ordered,
+                canonicalQueue = canonicalQueue,
                 current = resolvedSong,
-                currentTrack = track,
+                currentTrack = playableTrack,
                 currentSource = source,
                 playerOpen = true,
                 playbackNotice = fallbackNotice,
                 error = "",
                 deepLink = "",
             )
-            rememberCanonical(track)
+            rememberCanonical(playableTrack)
             remember("history", historySong(resolvedSong))
             loadLyrics(resolvedSong)
         }
@@ -680,25 +768,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val updated = if (existing != null) track else TrackMatcher.withSource(track, source)
             if (remember) {
                 app.settings.saveAggregation(
-                    state.value.aggregation.copy(
+                    settingsState.value.aggregation.copy(
                         playbackMode = PlaybackMode.Pinned,
                         pinnedProvider = providerId,
                     )
                 )
             }
             pinnedProviders[updated.id] = providerId
-            val originalKey = track.sources.firstOrNull()?.song?.key
-            val newMatches = if (existing == null && originalKey != null && base.value.collectionSongs.any { it.key == originalKey }) {
-                base.value.collectionMatches + (originalKey to SongMatchResult(source.song, source.matchScore, source.matchMethod))
-            } else {
-                base.value.collectionMatches
-            }
             base.value = base.value.copy(
                 sourcePickerTrack = null,
                 sourcePickerQueue = emptyList(),
                 sourcePickerBusy = "",
                 aggregateGroups = base.value.aggregateGroups.map { if (it.id == updated.id) updated else it },
-                collectionMatches = newMatches,
             )
             playTrack(updated, queue.map { if (it.id == updated.id) updated else it }, providerId)
         }
@@ -709,61 +790,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             source.song,
             source.providerName,
             source.providerId,
-            state.value.cookies[source.providerId].orEmpty(),
+            cookieFor(source.providerId),
         )
         pinnedProviders[single.id] = source.providerId
         base.value = base.value.copy(sourcePickerTrack = null, sourcePickerQueue = emptyList(), sourcePickerError = "")
         playTrack(single, listOf(single), source.providerId)
     }
 
-    fun matchCollection(targetProvider: String) {
-        val songs = base.value.collectionSongs
-        if (songs.isEmpty() || targetProvider.isBlank()) return
-        collectionMatchJob?.cancel()
-        base.value = base.value.copy(
-            collectionMatchTarget = targetProvider,
-            collectionMatches = emptyMap(),
-            collectionMatchProgress = MatchProgress(targetProvider, songs.size, 0, 0),
-        )
-        collectionMatchJob = viewModelScope.launch {
-            try {
-                matchJob.matchMany(songs, targetProvider).collect { progress ->
-                    val songKey = progress.currentSong?.key
-                    val result = progress.currentResult
-                    val matches = if (songKey != null && result != null) {
-                        base.value.collectionMatches + (songKey to result)
-                    } else {
-                        base.value.collectionMatches
-                    }
-                    base.value = base.value.copy(
-                        collectionMatches = matches,
-                        collectionMatchProgress = progress,
-                    )
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                base.value = base.value.copy(
-                    collectionMatchProgress = null,
-                    error = error.message ?: "换源匹配失败",
-                )
-            }
-        }
-    }
-
-    fun setMatchTarget(providerId: String) {
-        if (base.value.collectionMatchTarget == providerId) return
-        base.value = base.value.copy(
-            collectionMatchTarget = providerId,
-            collectionMatches = emptyMap(),
-            collectionMatchProgress = null,
-        )
-    }
-
     fun clearMatchCache() {
         searchEngine.clearCache()
         resolver.clearCache()
-        base.value = base.value.copy(collectionMatches = emptyMap(), collectionMatchProgress = null)
         viewModelScope.launch(Dispatchers.IO) { runCatching { aggregateDao.clearMatches() } }
     }
 
@@ -798,7 +834,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 source.song,
                 source.providerName,
                 source.providerId,
-                state.value.cookies[source.providerId].orEmpty(),
+                cookieFor(source.providerId),
             )
             val separated = if (remaining.sources.isNotEmpty() && separatedRaw.id == track.id) {
                 separatedRaw.copy(id = "${separatedRaw.id}-split-${source.song.key.hashCode()}")
@@ -972,14 +1008,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             collectionTitle = playlist.name,
             collectionSongs = json.decodeFromString(playlist.songs),
             collectionSource = "local",
-            collectionMatches = emptyMap(),
-            collectionMatchProgress = null,
-            collectionMatchTarget = defaultMatchTarget("local"),
+            collectionOpen = true,
         )
     }
 
     fun toggleAggregateProvider(id: String) = viewModelScope.launch {
-        val current = state.value.aggregation
+        val current = settingsState.value.aggregation
         val enabled = current.enabledProviders.toMutableList()
         if (id in enabled) enabled.remove(id) else enabled.add(id)
         searchEngine.clearCache()
@@ -987,12 +1021,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setPlaybackMode(mode: PlaybackMode) = viewModelScope.launch {
-        app.settings.saveAggregation(state.value.aggregation.copy(playbackMode = mode))
+        app.settings.saveAggregation(settingsState.value.aggregation.copy(playbackMode = mode))
     }
 
     fun setPinnedProvider(id: String?) = viewModelScope.launch {
         app.settings.saveAggregation(
-            state.value.aggregation.copy(
+            settingsState.value.aggregation.copy(
                 pinnedProvider = id,
                 playbackMode = if (id == null) PlaybackMode.Auto else PlaybackMode.Pinned,
             )
@@ -1001,17 +1035,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setAllowPreview(value: Boolean) = viewModelScope.launch {
         searchEngine.clearCache()
-        app.settings.saveAggregation(state.value.aggregation.copy(allowPreview = value))
+        app.settings.saveAggregation(settingsState.value.aggregation.copy(allowPreview = value))
     }
 
     fun setMatchStrictness(value: MatchStrictness) = viewModelScope.launch {
         searchEngine.clearCache()
-        app.settings.saveAggregation(state.value.aggregation.copy(matchStrictness = value))
+        app.settings.saveAggregation(settingsState.value.aggregation.copy(matchStrictness = value))
     }
 
     fun moveProviderPriority(id: String, delta: Int) = viewModelScope.launch {
-        val available = state.value.providers.filter { it.search }.map { it.id }
-        val current = state.value.aggregation
+        val available = base.value.providers.filter { it.search }.map { it.id }
+        val current = settingsState.value.aggregation
         val list = current.priorityFor(available).toMutableList()
         val index = list.indexOf(id)
         if (index < 0) return@launch
@@ -1026,14 +1060,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun startLogin(type: String = "qq") {
         loginJob?.cancel()
         loginJob = viewModelScope.launch {
-            val created = app.repository.createLogin(state.value.providerId, type)
+            val created = app.repository.createLogin(settingsState.value.provider, type)
             base.value = base.value.copy(login = created, loginStatus = "等待扫码")
             repeat(40) {
                 delay(3000)
                 val result = app.repository.checkLogin(created.sessionId, created.session.key)
                 base.value = base.value.copy(loginStatus = result.message.ifBlank { result.status })
                 if (result.status == "success" && result.cookie.isNotBlank()) {
-                    app.settings.cookie(state.value.providerId, result.cookie)
+                    app.settings.cookie(settingsState.value.provider, result.cookie)
                     base.value = base.value.copy(login = null)
                     return@launch
                 }
@@ -1045,13 +1079,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun saveCookie(cookie: String) = viewModelScope.launch {
         resolver.clearCache()
         searchEngine.clearCache()
-        app.settings.cookie(state.value.providerId, cookie)
+        app.settings.cookie(settingsState.value.provider, cookie)
         base.value = base.value.copy(login = null)
     }
     fun logout() = viewModelScope.launch {
         resolver.clearCache()
         searchEngine.clearCache()
-        app.settings.cookie(state.value.providerId, "")
+        app.settings.cookie(settingsState.value.provider, "")
     }
 
     private fun loadLyrics(song: Song) = viewModelScope.launch {
@@ -1059,17 +1093,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun canonicalForSong(song: Song): CanonicalTrack {
-        val providerId = song.source.ifBlank { state.value.providerId }
-        val track = TrackMatcher.singleSource(song, providerName(providerId), providerId, state.value.cookies[providerId].orEmpty())
-        val match = state.value.collectionMatches[song.key]?.song ?: return track
-        val targetId = match.source.ifBlank { state.value.collectionMatchTarget }
-        if (targetId.isBlank() || targetId == providerId) return track
-        val score = state.value.collectionMatches[song.key]?.score ?: 1f
-        val method = state.value.collectionMatches[song.key]?.method ?: MatchMethod.Meta
-        return TrackMatcher.withSource(
-            track,
-            TrackSource(targetId, providerName(targetId), match, score, method),
-        )
+        val providerId = song.source.ifBlank { settingsState.value.provider }
+        return TrackMatcher.singleSource(song, providerName(providerId), providerId, cookieFor(providerId))
     }
 
     private fun preferredSong(track: CanonicalTrack): Song {
@@ -1096,22 +1121,81 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (song.url.startsWith("file:")) song.copy(url = "") else song
 
     private fun noSourceMessage(track: CanonicalTrack, resolution: Resolution): String {
-        val reasons = (resolution as? Resolution.None)?.attempts?.map { it.reason }.orEmpty()
+        val attempts = (resolution as? Resolution.None)?.attempts.orEmpty()
+        val reasons = attempts.map { it.reason }
+        val tried = attempts.map { it.source.providerName }.distinct()
         return when {
             reasons.any { it.contains("登录") || it.contains("会员") } -> "这首歌需要登录或会员后才能播放"
             reasons.any { it.contains("试听") } -> "只有试听片段可用，请在设置中允许试听"
             track.sources.any { it.song.isVip } -> "这首歌需要会员或登录后才能播放"
             track.sources.any { it.isPreview } -> "只有试听片段可用，请在设置中允许试听"
-            else -> "暂无可用播放源，可在平台 App 中打开"
+            tried.isNotEmpty() -> "已尝试${tried.joinToString("、")}，都没有返回可播放地址"
+            else -> "暂无可用播放源"
         }
     }
 
-    private fun defaultMatchTarget(source: String): String {
-        val enabled = enabledProviders().map { it.id }
-        return enabled.firstOrNull { it != source } ?: enabled.firstOrNull().orEmpty()
+    private data class AutoResolution(
+        val track: CanonicalTrack,
+        val resolution: Resolution,
+        val autoMatched: Boolean,
+    )
+
+    private suspend fun resolvePlayable(
+        track: CanonicalTrack,
+        pinnedProvider: String? = null,
+        excludeProviders: Set<String> = emptySet(),
+    ): AutoResolution {
+        val initial = resolver.resolve(
+            track,
+            pinnedProvider,
+            excludeProviders,
+            resolver.buildPolicy(track, pinnedProvider),
+        )
+        if (initial is Resolution.Ready) return AutoResolution(track, initial, autoMatched = false)
+
+        val original = track.sources.firstOrNull()?.song
+            ?: return AutoResolution(track, initial, autoMatched = false)
+        val attempted = (track.sources.map { it.providerId } + excludeProviders).toMutableSet()
+        var current = track
+        var last = initial
+        for (providerId in autoMatchProviders(attempted)) {
+            val result = withTimeoutOrNull(AUTO_MATCH_TIMEOUT_MS) {
+                runCatching { matchJob.matchOne(original, providerId) }.getOrNull()
+            } ?: continue
+            val song = result.song ?: continue
+            current = TrackMatcher.withSource(
+                current,
+                TrackSource(
+                    providerId = providerId,
+                    providerName = providerName(providerId),
+                    song = song,
+                    matchScore = result.score,
+                    matchMethod = result.method,
+                ),
+            )
+            val resolution = resolver.resolve(
+                current,
+                pinnedProvider,
+                excludeProviders,
+                resolver.buildPolicy(current, pinnedProvider),
+            )
+            if (resolution is Resolution.Ready) {
+                return AutoResolution(current, resolution, autoMatched = true)
+            }
+            last = resolution
+        }
+        return AutoResolution(current, last, autoMatched = false)
     }
 
-    private fun providerName(id: String): String = state.value.providers.find { it.id == id }?.name ?: id
+    private fun autoMatchProviders(exclude: Set<String>): List<String> {
+        val searchable = base.value.providers.filter { it.search }.map { it.id }
+        if (searchable.isEmpty()) return emptyList()
+        val aggregation = settingsState.value.aggregation
+        val enabled = aggregation.enabledOrDefault(searchable).filter { it in searchable }
+        return aggregation.priorityFor(enabled).filterNot { it in exclude }
+    }
+
+    private fun providerName(id: String): String = base.value.providers.find { it.id == id }?.name ?: id
 
     private fun rememberCanonical(track: CanonicalTrack) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -1138,7 +1222,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             payload = json.encodeToString(source.song),
                             matchScore = source.matchScore,
                             matchMethod = source.matchMethod.name,
-                            availability = availabilityOf(source, state.value.cookies[source.providerId].orEmpty()).name,
+                            availability = availabilityOf(source, cookieFor(source.providerId)).name,
                             isPreview = source.isPreview,
                             checkedAt = System.currentTimeMillis(),
                         )
@@ -1155,7 +1239,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun fail(message: String) { base.value = base.value.copy(error = message, loading = false) }
-    private fun cookieFor(providerId: String) = state.value.cookies[providerId.ifBlank { state.value.providerId }].orEmpty()
+    private fun cookieFor(providerId: String) = settingsState.value.cookies[providerId.ifBlank { settingsState.value.provider }].orEmpty()
     private suspend fun remember(bucket: String, song: Song) = app.database.dao().save(SavedSong(song.key, bucket, json.encodeToString(song), System.currentTimeMillis()))
 
     private fun mediaItem(song: Song) = MediaItem.Builder().setMediaId(song.key).setUri(song.url).setMediaMetadata(
@@ -1198,9 +1282,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
                 val pinned = pinnedProviders[track.id]
-                val resolution = resolver.resolve(track, pinned, emptySet(), resolver.buildPolicy(track, pinned))
-                if (resolution !is Resolution.Ready) {
-                    base.value = base.value.copy(playbackNotice = noSourceMessage(track, resolution))
+                val result = resolvePlayable(track, pinned)
+                val resolution = result.resolution as? Resolution.Ready
+                if (resolution == null) {
+                    base.value = base.value.copy(playbackNotice = noSourceMessage(result.track, result.resolution))
                     return@launch
                 }
                 val resolved = resolution.source.song.copy(url = resolution.url)
@@ -1209,10 +1294,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 controller?.replaceMediaItem(index, mediaItem(resolved))
                 base.value = base.value.copy(
                     queue = base.value.queue.mapIndexed { i, queued -> if (i == index) resolved else queued },
+                    canonicalQueue = base.value.canonicalQueue.mapIndexed { i, queued -> if (i == index) result.track else queued },
                     current = resolved,
+                    currentTrack = result.track,
                     currentSource = resolution.source,
-                    playbackNotice = if (resolution.isPreview) "当前为试听片段" else "",
+                    playbackNotice = when {
+                        result.autoMatched -> "原音源不可用，已自动匹配到${resolution.source.providerName}"
+                        resolution.isPreview -> "当前为试听片段"
+                        else -> ""
+                    },
                 )
+                rememberCanonical(result.track)
                 remember("history", historySong(resolved))
                 loadLyrics(resolved)
             }
@@ -1247,8 +1339,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 failedSource?.let { resolver.invalidate(it) }
                 val exclude = setOfNotNull(failedSource?.providerId)
-                val resolution = resolver.resolve(track, null, exclude, resolver.buildPolicy(track, null))
-                if (resolution is Resolution.Ready) {
+                val result = resolvePlayable(track, null, exclude)
+                val resolution = result.resolution as? Resolution.Ready
+                if (resolution != null) {
                     val player = controller
                     if (player == null) {
                         failoverInProgress = false
@@ -1263,14 +1356,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     base.value = base.value.copy(
                         queue = base.value.queue.mapIndexed { i, queued -> if (i == index) resolved else queued },
+                        canonicalQueue = base.value.canonicalQueue.mapIndexed { i, queued -> if (i == index) result.track else queued },
                         current = resolved,
+                        currentTrack = result.track,
                         currentSource = resolution.source,
-                        playbackNotice = "当前音源中断，已切换到${resolution.source.providerName}，并从 ${formatPosition(position)} 继续播放",
+                        playbackNotice = if (result.autoMatched) {
+                            "当前音源中断，已自动匹配到${resolution.source.providerName}，并从 ${formatPosition(position)} 继续播放"
+                        } else {
+                            "当前音源中断，已切换到${resolution.source.providerName}，并从 ${formatPosition(position)} 继续播放"
+                        },
                     )
+                    rememberCanonical(result.track)
                     loadLyrics(resolved)
                 } else {
                     controller?.pause()
-                    base.value = base.value.copy(playbackNotice = noSourceMessage(track, resolution))
+                    base.value = base.value.copy(playbackNotice = noSourceMessage(result.track, result.resolution))
                 }
                 failoverInProgress = false
             }
@@ -1310,11 +1410,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         progressJob?.cancel()
         aggregateSearchJob?.cancel()
         collectionSearchJob?.cancel()
-        collectionMatchJob?.cancel()
         controller?.release()
         super.onCleared()
     }
 }
+
+private const val AUTO_MATCH_TIMEOUT_MS = 8_000L
 
 fun SavedSong.song(json: Json = Json { ignoreUnknownKeys = true }) = json.decodeFromString<Song>(payload)
 fun DownloadRecord.song(json: Json = Json { ignoreUnknownKeys = true }) = json.decodeFromString<Song>(payload)

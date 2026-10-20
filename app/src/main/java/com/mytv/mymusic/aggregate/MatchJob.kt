@@ -5,9 +5,6 @@ import com.mytv.mymusic.data.MatchCacheEntity
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.Song
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -74,31 +71,6 @@ class MatchJob(
             )
         }
         result
-    }
-
-    fun matchMany(songs: List<Song>, targetProvider: String): Flow<MatchProgress> = channelFlow {
-        var completed = 0
-        var matched = 0
-        send(MatchProgress(targetProvider, songs.size, 0, 0))
-        for (song in songs) {
-            val result = runCatching { matchOne(song, targetProvider) }
-                .getOrElse { SongMatchResult(reason = it.message ?: "匹配失败") }
-            completed += 1
-            if (result.matched) matched += 1
-            send(
-                MatchProgress(
-                    targetProvider = targetProvider,
-                    total = songs.size,
-                    completed = completed,
-                    matched = matched,
-                    currentSong = song,
-                    currentResult = result,
-                    done = completed == songs.size,
-                    error = if (result.reason.startsWith("检索失败")) result.reason else "",
-                )
-            )
-            if (completed < songs.size) delay(120)
-        }
     }
 
     private fun searchQuery(song: Song): String {

@@ -1,6 +1,7 @@
 package com.mytv.mymusic.ui
 
 import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -160,6 +162,7 @@ fun MyMusicApp(
             }
         }
     }
+    if (state.collectionOpen) CollectionPage(state, television, actions)
     if (state.playerOpen && state.current != null) PlayerPage(state, television, actions)
     if (state.sourcePickerTrack != null) SourcePickerDialog(state, actions)
     if (state.mergeTrack != null) MergeDialog(state, actions)
@@ -173,18 +176,19 @@ class MusicActions(private val model: MusicViewModel) {
     fun searchScope(value: SearchScope) = model.setSearchScope(value)
     fun search() = model.search()
     fun searchMore() = model.searchMore()
-    fun category(id: String) = model.loadCategory(id)
+    fun category(id: String, page: Int = 1) = model.loadCategory(id, page)
+    fun clearCategory() = model.clearCategory()
+    fun refreshHome() = model.refreshHome()
     fun playlist(item: Playlist, album: Boolean) = model.openPlaylist(item, album)
     fun chart(item: com.mytv.mymusic.data.TopList) = model.openChart(item)
     fun play(song: Song, queue: List<Song>) = model.play(song, queue)
     fun playTrack(track: CanonicalTrack, queue: List<CanonicalTrack>) = model.playTrack(track, queue)
     fun openSource(track: CanonicalTrack, queue: List<CanonicalTrack>) = model.openSource(track, queue)
     fun openSourceForSong(song: Song) = model.openSourceForSong(song)
+    fun closeCollection() = model.closeCollection()
     fun closeSource() = model.closeSource()
     fun chooseSource(providerId: String, remember: Boolean) = model.chooseSource(providerId, remember)
     fun playAlternative(track: CanonicalTrack, source: TrackSource) = model.playAlternative(track, source)
-    fun matchCollection(providerId: String) = model.matchCollection(providerId)
-    fun setMatchTarget(providerId: String) = model.setMatchTarget(providerId)
     fun splitSource(track: CanonicalTrack, source: TrackSource) = model.splitSource(track, source)
     fun clearOverrides() = model.clearOverrides()
     fun openMerge(track: CanonicalTrack) = model.openMerge(track)
@@ -221,17 +225,145 @@ class MusicActions(private val model: MusicViewModel) {
 
 @Composable
 private fun HomePage(state: MusicUiState, television: Boolean, actions: MusicActions) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(22.dp)) {
-        items(state.homes) { home ->
-            Section(home.provider.name) {
-                if (home.recommendations.isNotEmpty()) MediaRow(home.recommendations, television) { actions.playlist(it, false) }
-                if (home.charts.isNotEmpty()) MediaRow(home.charts.map { Playlist(it.id, it.name, it.cover, source = it.source) }, television) { selected -> home.charts.find { it.id == selected.id }?.let(actions::chart) }
-                if (home.hotSongs.isNotEmpty()) SongList(home.hotSongs, actions)
+    val home = state.home
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(20.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("发现", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                    TextButton(actions::refreshHome) { Text("刷新") }
+                }
+                ProviderPicker(state, actions)
             }
         }
-        item { Section("歌单分类") { ProviderPicker(state, actions); LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(state.categories) { FocusChip(it.name) { actions.category(it.id) } } } } }
-        if (state.categoryPlaylists.isNotEmpty()) item { MediaGrid(state.categoryPlaylists, television) { actions.playlist(it, false) } }
-        if (state.collectionSongs.isNotEmpty()) item { CollectionSection(state, actions) }
+        when {
+            home == null || home.loading -> item { HomeLoading(home?.provider?.name ?: state.providers.find { it.id == state.providerId }?.name) }
+            home.error.isNotBlank() && home.recommendations.isEmpty() && home.charts.isEmpty() && home.hotSongs.isEmpty() ->
+                item { HomeError(home.error, actions) }
+            else -> {
+                if (home.error.isNotBlank()) {
+                    item { Text("部分内容加载失败：${home.error}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                }
+                if (home.recommendations.isNotEmpty()) {
+                    item { Section("推荐歌单") { MediaRow(home.recommendations, television) { actions.playlist(it, false) } } }
+                }
+                if (home.charts.isNotEmpty()) {
+                    item {
+                        val charts = home.charts.map {
+                            Playlist(
+                                id = it.id,
+                                name = it.name,
+                                cover = it.cover,
+                                creator = it.updateFrequency.ifBlank { it.description },
+                                source = it.source,
+                            )
+                        }
+                        Section("排行榜") {
+                            MediaRow(charts, television) { selected ->
+                                home.charts.find { it.id == selected.id }?.let(actions::chart)
+                            }
+                        }
+                    }
+                }
+                item { CategorySection(state, television, actions) }
+                if (home.hotSongs.isNotEmpty()) {
+                    item { Section("热门歌曲") { SongList(home.hotSongs.take(12), actions) } }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeLoading(providerName: String?) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        CircularProgressIndicator(Modifier.size(20.dp))
+        Text(
+            if (providerName.isNullOrBlank()) "正在加载推荐内容…" else "正在加载${providerName}的推荐内容…",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun HomeError(message: String, actions: MusicActions) {
+    Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.errorContainer) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("首页加载失败：$message", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            TextButton(actions::refreshHome) { Text("重试") }
+        }
+    }
+}
+
+@Composable
+private fun CategorySection(state: MusicUiState, television: Boolean, actions: MusicActions) {
+    Section("歌单分类") {
+        when {
+            state.categoriesLoading -> HomeLoading(state.home?.provider?.name)
+            state.categoriesError.isNotBlank() -> HomeError(state.categoriesError, actions)
+            state.categories.isEmpty() -> Text(
+                "当前平台不提供歌单分类",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            else -> {
+                var group by remember(state.home?.provider?.id) { mutableStateOf("全部") }
+                val groups = remember(state.categories) {
+                    listOf("全部") + state.categories.map { it.group }.filter { it.isNotBlank() && it != "全部" }.distinct()
+                }
+                val visible = remember(state.categories, group) {
+                    if (group == "全部") state.categories else state.categories.filter { it.group == group }
+                }
+                if (groups.size > 1) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(groups) { name -> FilterChip(group == name, { group = name }, { Text(name) }) }
+                    }
+                }
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(visible, key = { "${it.group}:${it.id}" }) { category ->
+                        val selected = state.categoryOpen && state.categoryId == category.id
+                        FilterChip(
+                            selected,
+                            {
+                                if (selected) actions.clearCategory()
+                                else actions.category(category.id)
+                            },
+                            { Text(category.name) },
+                        )
+                    }
+                }
+                if (state.categoryOpen) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${state.categoryName.ifBlank { "分类" }} · 第 ${state.page} 页",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton({ actions.category(state.categoryId, state.page - 1) }, enabled = state.page > 1) { Text("上一页") }
+                        TextButton({ actions.category(state.categoryId, state.page + 1) }, enabled = state.categoryPlaylists.isNotEmpty()) { Text("下一页") }
+                        TextButton(actions::clearCategory) { Text("收起") }
+                    }
+                    if (state.categoryPlaylists.isEmpty()) {
+                        Text("这一页没有歌单", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        PlaylistRows(state.categoryPlaylists, television) { actions.playlist(it, false) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistRows(items: List<Playlist>, television: Boolean, select: (Playlist) -> Unit) {
+    val columns = if (television) 5 else 3
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        items.chunked(columns).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { MediaCard(it, television, select) }
+            }
+        }
     }
 }
 
@@ -505,65 +637,63 @@ private fun ProviderBadge(name: String) {
 }
 
 @Composable
-private fun CollectionSection(state: MusicUiState, actions: MusicActions) {
+private fun CollectionPage(state: MusicUiState, television: Boolean, actions: MusicActions) {
+    BackHandler(onBack = actions::closeCollection)
     val sourceName = providerName(state, state.collectionSource).ifBlank { "本地" }
-    val searchable = state.providers.filter { it.search }
-    val enabledIds = state.aggregation.enabledOrDefault(searchable.map { it.id })
-    val targetIds = enabledIds.filter { it != state.collectionSource }.ifEmpty { enabledIds }
-    val targets = state.aggregation.priorityFor(targetIds)
-    val target = state.collectionMatchTarget.ifBlank { targets.firstOrNull().orEmpty() }
-    Section(state.collectionTitle.ifBlank { "歌曲" }) {
-        Text("来源：$sourceName · ${state.collectionSongs.size} 首", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (targets.isNotEmpty()) {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(targets) { id ->
-                    FilterChip(target == id, { actions.setMatchTarget(id) }, { Text(providerName(state, id)) })
+    Surface(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.fillMaxSize().padding(if (television) 32.dp else 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        state.collectionTitle.ifBlank { "歌曲" },
+                        style = MaterialTheme.typography.headlineSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "来源：$sourceName · ${state.collectionSongs.size} 首，播放时会自动选择可用音源",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
+                TextButton(actions::closeCollection) { Text("关闭") }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button({ actions.matchCollection(target) }) { Text("整榜换源") }
-                Text("匹配到「${providerName(state, target)}」", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (state.collectionMatchProgress?.done == false) CircularProgressIndicator(Modifier.size(18.dp))
-            }
-            state.collectionMatchProgress?.let { progress ->
-                Text(
-                    if (progress.done) "已匹配 ${progress.matched}/${progress.total}" else "正在匹配 ${progress.completed}/${progress.total}",
-                    style = MaterialTheme.typography.bodySmall,
+            when {
+                state.loading && state.collectionSongs.isEmpty() -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CircularProgressIndicator(Modifier.size(20.dp))
+                    Text("正在加载…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                state.collectionSongs.isEmpty() -> Text(
+                    "没有加载到歌曲",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (progress.total > 0) {
-                    LinearProgressIndicator(
-                        progress = { progress.completed.toFloat() / progress.total },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    items(state.collectionSongs, key = { it.key }) { song ->
+                        CollectionSongRow(song, state, actions)
+                    }
                 }
             }
         }
-        CollectionSongList(state, actions)
     }
 }
 
 @Composable
-private fun CollectionSongList(state: MusicUiState, actions: MusicActions) {
-    Column {
-        state.collectionSongs.forEach { song ->
-            val match = state.collectionMatches[song.key]
-            FocusableRow({ actions.play(song, state.collectionSongs) }) {
-                Cover(song.cover, 52)
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(song.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ProviderBadge(providerName(state, song.source))
-                        if (match != null) {
-                            ProviderBadge(if (match.matched) "→ ${providerName(state, state.collectionMatchTarget)}" else "未匹配")
-                        }
-                    }
-                }
-                TextButton({ actions.openSourceForSong(song) }) { Text("换源") }
-            }
+private fun CollectionSongRow(song: Song, state: MusicUiState, actions: MusicActions) {
+    FocusableRow({ actions.play(song, state.collectionSongs) }) {
+        Cover(song.cover, 52)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(song.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            ProviderBadge(providerName(state, song.source))
         }
+        TextButton({ actions.openSourceForSong(song) }) { Text("换源") }
     }
 }
 
@@ -851,6 +981,7 @@ private fun AvailabilityTag(status: Availability) {
 @Composable
 private fun PlayerPage(state: MusicUiState, television: Boolean, actions: MusicActions) {
     val song = state.current ?: return
+    BackHandler(onBack = actions::closePlayer)
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(if (television) 48.dp else 20.dp), Arrangement.spacedBy(16.dp)) {
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
@@ -912,7 +1043,7 @@ private fun PlayerControls(state: MusicUiState, song: Song, actions: MusicAction
 @Composable private fun Cover(url: String, size: Int) { AsyncImage(url, null, Modifier.size(size.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentScale = ContentScale.Crop) }
 @Composable private fun FocusChip(text: String, selected: Boolean = false, onClick: () -> Unit) { var focused by remember { mutableStateOf(false) }; Surface(onClick, shape = RoundedCornerShape(50), color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface, modifier = Modifier.onFocusChanged { focused = it.isFocused }.border(if (focused) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(50))) { Text(text, Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) } }
 @Composable private fun FocusableColumn(onClick: () -> Unit, modifier: Modifier, content: @Composable () -> Unit) { var focused by remember { mutableStateOf(false) }; Column(modifier.clickable(onClick = onClick).onFocusChanged { focused = it.isFocused }.border(if (focused) 3.dp else 0.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)).padding(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { content() } }
-@Composable private fun FocusableRow(onClick: () -> Unit, content: @Composable () -> Unit) { var focused by remember { mutableStateOf(false) }; Row(Modifier.fillMaxWidth().clickable(onClick = onClick).onFocusChanged { focused = it.isFocused }.background(if (focused) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface).padding(6.dp), verticalAlignment = Alignment.CenterVertically) { content() } }
+@Composable private fun FocusableRow(onClick: () -> Unit, content: @Composable RowScope.() -> Unit) { var focused by remember { mutableStateOf(false) }; Row(Modifier.fillMaxWidth().clickable(onClick = onClick).onFocusChanged { focused = it.isFocused }.background(if (focused) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface).padding(6.dp), verticalAlignment = Alignment.CenterVertically) { content() } }
 @Composable private fun TransportButton(icon: ImageVector, label: String, onClick: () -> Unit) { var focused by remember { mutableStateOf(false) }; Surface(onClick, Modifier.size(48.dp).onFocusChanged { focused = it.isFocused }.border(if (focused) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(24.dp)), shape = RoundedCornerShape(24.dp)) { Box(contentAlignment = Alignment.Center) { Icon(icon, label) } } }
 @Composable private fun isTelevision(): Boolean { val configuration = LocalConfiguration.current; val uiMode = LocalContext.current.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK; return uiMode == Configuration.UI_MODE_TYPE_TELEVISION || (configuration.smallestScreenWidthDp >= 600 && configuration.screenWidthDp >= 960) }
 
