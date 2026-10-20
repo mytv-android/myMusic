@@ -14,12 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version-file: gomobile/musicbridge/go.mod, cache-dependency-path: gomobile/musicbridge/go.sum }
-      - run: go test ./...
-        working-directory: gomobile/musicbridge
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x ./gradlew && ./gradlew test
 
@@ -29,20 +28,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version-file: gomobile/musicbridge/go.mod, cache-dependency-path: gomobile/musicbridge/go.sum }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21, cache: gradle }
       - uses: android-actions/setup-android@v3
-      - name: Install Android SDK and NDK
-        run: sdkmanager "platforms;android-37" "build-tools;36.0.0" "ndk;27.0.12077973"
-      - name: Build music bridge
-        env: { ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.0.12077973 }
-        run: |
-          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
-          gomobile init
-          cd gomobile/musicbridge
-          gomobile bind -target android -androidapi 23 -javapkg com.mytv.mymusic -o "$GITHUB_WORKSPACE/app/libs/musicbridge.aar" .
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
       - name: Configure signing
         env: { SIGNING_PROPERTIES: ${{ secrets.SIGNING_PROPERTIES }}, SIGN_KEY: ${{ secrets.SIGN_KEY }} }
         run: |

@@ -7,4 +7,4 @@
 - License: GNU Affero General Public License v3.0
 - Location: third_party/music-lib
 
-The vendored source is the corresponding source for the Go code compiled into the Android application. Modifications to that code must retain this notice and the AGPL-3.0 terms.
+The vendored Go source is retained as the reference for the Kotlin native port in `app/src/main/java/com/mytv/mymusic/data/native`. The Kotlin port is a derivative work distributed under AGPL-3.0. Modifications must retain this notice and the AGPL-3.0 terms.
