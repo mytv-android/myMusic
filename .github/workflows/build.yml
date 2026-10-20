@@ -34,15 +34,18 @@ jobs:
       - name: Install Android SDK
         run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
       - name: Configure signing
-        env: { SIGNING_PROPERTIES: ${{ secrets.SIGNING_PROPERTIES }}, SIGN_KEY: ${{ secrets.SIGN_KEY }} }
+        env:
+          SIGNING_PROPERTIES: ${{ secrets.SIGNING_PROPERTIES }}
+          SIGN_KEY: ${{ secrets.SIGN_KEY }}
         run: |
           if [ -n "$SIGNING_PROPERTIES" ] && [ -n "$SIGN_KEY" ]; then
             echo "$SIGNING_PROPERTIES" | base64 -d > signing.properties
             echo "$SIGN_KEY" | base64 -d > keystore.jks
           fi
       - name: Build release
+        env:
+          VERSION_CODE: ${{ github.run_number }}
         run: chmod +x ./gradlew && ./gradlew assembleRelease --no-daemon --max-workers=1 -Porg.gradle.jvmargs=-Xmx3g
-        env: { VERSION_CODE: ${{ github.run_number }} }
       - name: Rename APKs
         id: apk
         run: |
