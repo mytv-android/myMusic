@@ -142,10 +142,8 @@ data class AggregationSettings(
 ) {
     fun threshold(): Float = if (matchStrictness == MatchStrictness.Strict) 0.92f else 0.88f
 
-    fun enabledOrDefault(available: List<String>): List<String> {
-        val filtered = enabledProviders.filter { it in available }
-        return if (filtered.isNotEmpty()) filtered else available.take(5)
-    }
+    fun enabledOrDefault(available: List<String>): List<String> =
+        enabledProviders.filter { it in available }
 
     fun priorityFor(available: List<String>): List<String> {
         val ordered = providerPriority.filter { it in available }.distinct()

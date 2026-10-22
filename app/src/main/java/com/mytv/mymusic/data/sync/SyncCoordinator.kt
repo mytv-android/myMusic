@@ -1,0 +1,971 @@
+package com.mytv.mymusic.data.sync
+
+import android.content.Context
+import android.net.Uri
+import androidx.room.withTransaction
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import com.mytv.mymusic.data.AppDatabase
+import com.mytv.mymusic.data.LibraryDao
+import com.mytv.mymusic.data.PlaylistEntity
+import com.mytv.mymusic.data.PlaylistEntryEntity
+import com.mytv.mymusic.data.SettingsStore
+import com.mytv.mymusic.data.SyncAccountEntity
+import com.mytv.mymusic.data.SyncBaseEntity
+import com.mytv.mymusic.data.SyncConflictEntity
+import com.mytv.mymusic.data.SyncDao
+import com.mytv.mymusic.data.Song
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.UUID
+import java.util.concurrent.TimeUnit
+
+enum class SyncStatus { NoAccount, Idle, Syncing, NeedsAttention, Error }
+
+data class SyncConflictUi(
+    val playlistId: String,
+    val name: String,
+    val localTracks: Int,
+    val remoteTracks: Int,
+    val localUpdatedAt: Long,
+    val remoteUpdatedAt: Long,
+    val localDeleted: Boolean,
+    val remoteDeleted: Boolean,
+)
+
+data class InitialMergePreview(
+    val provider: String,
+    val providerLabel: String,
+    val localPlaylists: Int,
+    val localTracks: Int,
+    val remotePlaylists: Int,
+    val remoteTracks: Int,
+)
+
+data class SyncUiState(
+    val account: SyncAccountEntity? = null,
+    val providerLabel: String = "",
+    val status: SyncStatus = SyncStatus.NoAccount,
+    val phase: String = "",
+    val message: String = "",
+    val error: String = "",
+    val conflicts: List<SyncConflictUi> = emptyList(),
+    val playlistCount: Int = 0,
+    val trackCount: Int = 0,
+    val initialMerge: InitialMergePreview? = null,
+)
+
+data class SyncEvent(val message: String, val error: Boolean = false)
+
+private data class PendingInitial(
+    val providerId: String,
+    val accountLabel: String,
+    val remoteId: String,
+    val remoteFile: RemoteFile,
+    val token: String,
+    val local: SyncSnapshot,
+    val remote: SyncSnapshot,
+)
+
+class SyncCoordinator(
+    private val context: Context,
+    private val db: AppDatabase,
+    private val libraryDao: LibraryDao,
+    private val syncDao: SyncDao,
+    private val secretStore: SecretStore,
+    private val settings: SettingsStore,
+    private val scope: CoroutineScope,
+) {
+    private val _state = MutableStateFlow(SyncUiState())
+    val state: StateFlow<SyncUiState> = _state.asStateFlow()
+    private val _events = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 8)
+    val events = _events.asSharedFlow()
+
+    private val providers: Map<String, PlaylistSyncProvider> = mapOf(
+        "gist" to GistSyncProvider(),
+        "gitee" to GiteeSyncProvider(),
+    )
+    fun availableProviders(): List<Pair<String, String>> =
+        providers.values.map { it.id to it.label }
+
+    private val mutex = Mutex()
+    private var pendingInitial: PendingInitial? = null
+
+    private val deviceId: String by lazy {
+        val preferences = context.getSharedPreferences("mymusic_device", Context.MODE_PRIVATE)
+        preferences.getString("device_id", null)?.takeIf { it.isNotBlank() } ?: run {
+            val created = UUID.randomUUID().toString().replace("-", "").take(8)
+            preferences.edit().putString("device_id", created).apply()
+            created
+        }
+    }
+
+    init {
+        scope.launch {
+            combine(
+                syncDao.accounts(),
+                syncDao.conflicts(),
+                libraryDao.playlists(),
+                libraryDao.entryCounts(),
+            ) { accounts, conflicts, playlists, counts ->
+                Derived(
+                    account = accounts.firstOrNull(),
+                    conflicts = conflicts,
+                    playlistCount = playlists.size,
+                    trackCount = counts.sumOf { it.total },
+                )
+            }.collect { derived ->
+                _state.update { current ->
+                    val account = derived.account
+                    val status = when {
+                        account == null -> SyncStatus.NoAccount
+                        current.status == SyncStatus.Syncing -> SyncStatus.Syncing
+                        current.status == SyncStatus.Error -> SyncStatus.Error
+                        derived.conflicts.isNotEmpty() -> SyncStatus.NeedsAttention
+                        else -> SyncStatus.Idle
+                    }
+                    current.copy(
+                        account = account,
+                        providerLabel = account?.let { providers[it.provider]?.label ?: it.provider }.orEmpty(),
+                        status = status,
+                        conflicts = derived.conflicts.map(::toConflictUi),
+                        playlistCount = derived.playlistCount,
+                        trackCount = derived.trackCount,
+                    )
+                }
+            }
+        }
+    }
+
+    private data class Derived(
+        val account: SyncAccountEntity?,
+        val conflicts: List<SyncConflictEntity>,
+        val playlistCount: Int,
+        val trackCount: Int,
+    )
+
+    fun requestSync(manual: Boolean) {
+        scope.launch { runSync(manual, notify = true) }
+    }
+
+    suspend fun runSync(manual: Boolean, notify: Boolean = false): Boolean = mutex.withLock {
+        val account = syncDao.accountOnce()
+        if (account == null) {
+            _state.update { it.copy(status = SyncStatus.NoAccount, phase = "", message = "", error = "") }
+            if (manual) emit("还没有连接同步账户。", error = true)
+            return@withLock false
+        }
+        if (!manual && !account.autoSync) return@withLock false
+        if (pendingInitial != null) {
+            if (manual) emit("请先完成首次合并方式的选择。", error = true)
+            return@withLock false
+        }
+        val provider = providers[account.provider]
+        if (provider == null) {
+            fail("同步后端不可用：${account.provider}")
+            return@withLock false
+        }
+        val token = secretStore.token(account.provider)
+        if (token.isNullOrBlank()) {
+            fail("同步令牌已失效，请在设置中重新连接。")
+            return@withLock false
+        }
+        if (account.remoteId.isBlank()) {
+            fail("同步账户缺少远端文件，请在设置中重新连接。")
+            return@withLock false
+        }
+        if (syncDao.conflictsOnce().isNotEmpty()) {
+            _state.update {
+                it.copy(
+                    status = SyncStatus.NeedsAttention,
+                    phase = "",
+                    message = "还有 ${syncDao.conflictsOnce().size} 个歌单需要处理冲突，处理前不会上传。",
+                    error = "",
+                )
+            }
+            if (manual) emit("请先处理同步冲突。", error = true)
+            return@withLock false
+        }
+
+        _state.update {
+            it.copy(
+                status = SyncStatus.Syncing,
+                phase = "正在读取云端文件",
+                message = "",
+                error = "",
+            )
+        }
+        return@withLock try {
+            val remoteFile = provider.read(token, account.remoteId)
+            val remote = SyncJson.decode(remoteFile.content)
+            val local = localSnapshot()
+            val base = syncDao.base(account.provider)?.snapshot?.let { raw ->
+                runCatching { SyncJson.format.decodeFromString<SyncSnapshot>(raw) }.getOrNull()
+            }
+            if (base == null) {
+                when {
+                    remote.playlists.isEmpty() && local.playlists.isEmpty() -> {
+                        saveAccount(account.copy(
+                            accountLabel = account.accountLabel,
+                            lastSyncedAt = System.currentTimeMillis(),
+                            remoteRevision = remoteFile.revision,
+                            remoteUrl = remoteFile.htmlUrl,
+                        ))
+                        saveBase(local, remoteFile.revision)
+                        finish("同步已就绪")
+                        true
+                    }
+                    remote.playlists.isEmpty() -> {
+                        val uploaded = upload(provider, token, account, local, remoteFile)
+                        saveBase(local, uploaded.revision)
+                        saveAccount(account.copy(
+                            lastSyncedAt = System.currentTimeMillis(),
+                            remoteRevision = uploaded.revision,
+                            remoteUrl = uploaded.htmlUrl,
+                        ))
+                        finish("已上传 ${local.playlists.count { it.deletedAt == null }} 个歌单")
+                        true
+                    }
+                    local.playlists.isEmpty() -> {
+                        applySnapshot(remote, removeAbsent = true)
+                        saveBase(remote, remoteFile.revision)
+                        saveAccount(account.copy(
+                            lastSyncedAt = System.currentTimeMillis(),
+                            remoteRevision = remoteFile.revision,
+                            remoteUrl = remoteFile.htmlUrl,
+                        ))
+                        finish("已从云端恢复 ${remote.playlists.count { it.deletedAt == null }} 个歌单")
+                        true
+                    }
+                    else -> {
+                        pendingInitial = PendingInitial(
+                            providerId = account.provider,
+                            accountLabel = account.accountLabel,
+                            remoteId = account.remoteId,
+                            remoteFile = remoteFile,
+                            token = token,
+                            local = local,
+                            remote = remote,
+                        )
+                        _state.update {
+                            it.copy(
+                                status = SyncStatus.NeedsAttention,
+                                phase = "",
+                                initialMerge = InitialMergePreview(
+                                    provider = account.provider,
+                                    providerLabel = provider.label,
+                                    localPlaylists = local.playlists.count { p -> p.deletedAt == null },
+                                    localTracks = local.playlists.sumOf { p -> p.tracks.size },
+                                    remotePlaylists = remote.playlists.count { p -> p.deletedAt == null },
+                                    remoteTracks = remote.playlists.sumOf { p -> p.tracks.size },
+                                ),
+                                message = "本机和云端都有歌单，请选择首次合并方式。",
+                                error = "",
+                            )
+                        }
+                        false
+                    }
+                }
+            } else {
+                _state.update { it.copy(phase = "正在合并歌单") }
+                val result = SyncMerge.merge(base, local, remote)
+                if (result.conflicts.isNotEmpty()) {
+                    db.withTransaction {
+                        syncDao.clearConflicts()
+                        result.conflicts.forEach { conflict ->
+                            syncDao.putConflict(
+                                SyncConflictEntity(
+                                    playlistId = conflict.playlistId,
+                                    localSnapshot = SyncJson.encodePlaylist(conflict.local),
+                                    remoteSnapshot = SyncJson.encodePlaylist(conflict.remote),
+                                    baseSnapshot = SyncJson.encodePlaylist(conflict.base),
+                                    detectedAt = System.currentTimeMillis(),
+                                )
+                            )
+                        }
+                    }
+                    if (result.playlists.isNotEmpty()) {
+                        applySnapshot(
+                            SyncSnapshot(deviceId = deviceId, playlists = result.playlists),
+                            removeAbsent = false,
+                            dirty = true,
+                        )
+                    }
+                    saveAccount(account.copy(remoteRevision = remoteFile.revision, remoteUrl = remoteFile.htmlUrl))
+                    _state.update {
+                        it.copy(
+                            status = SyncStatus.NeedsAttention,
+                            phase = "",
+                            message = "有 ${result.conflicts.size} 个歌单需要处理冲突，处理前不会上传。",
+                            error = "",
+                        )
+                    }
+                    if (notify) emit("发现 ${result.conflicts.size} 个同步冲突，请先处理。", error = true)
+                    false
+                } else if (snapshotSignature(local) == snapshotSignature(remote)) {
+                    saveBase(remote, remoteFile.revision)
+                    saveAccount(account.copy(
+                        lastSyncedAt = System.currentTimeMillis(),
+                        remoteRevision = remoteFile.revision,
+                        remoteUrl = remoteFile.htmlUrl,
+                    ))
+                    pruneTombstones()
+                    finish("已是最新")
+                    true
+                } else {
+                    if (snapshotSignature(localSnapshot()) != snapshotSignature(local)) {
+                        fail("同步过程中本机歌单有新的修改，请再次同步。")
+                        return@withLock false
+                    }
+                    val merged = SyncSnapshot(
+                        deviceId = deviceId,
+                        updatedAt = SyncTime.nowIso(),
+                        playlists = result.playlists,
+                    )
+                    applySnapshot(merged, removeAbsent = false, dirty = true)
+                    _state.update { it.copy(phase = "正在上传歌单") }
+                    val uploaded = upload(provider, token, account, merged, remoteFile)
+                    saveBase(merged, uploaded.revision)
+                    saveAccount(account.copy(
+                        lastSyncedAt = System.currentTimeMillis(),
+                        remoteRevision = uploaded.revision,
+                        remoteUrl = uploaded.htmlUrl,
+                    ))
+                    pruneTombstones()
+                    finish("已同步 ${merged.playlists.count { it.deletedAt == null }} 个歌单")
+                    true
+                }
+            }
+        } catch (error: SyncException) {
+            fail(error.message)
+            if (notify) emit(error.message, error = true)
+            false
+        } catch (error: Exception) {
+            val message = error.message ?: "同步失败"
+            fail(message)
+            if (notify) emit(message, error = true)
+            false
+        }
+    }
+
+    suspend fun connect(providerId: String, token: String, remoteInput: String): Boolean {
+        val provider = providers[providerId] ?: run {
+            emit("不支持的同步后端", error = true)
+            return false
+        }
+        _state.update {
+            it.copy(
+                status = SyncStatus.Syncing,
+                phase = "正在验证令牌",
+                message = "",
+                error = "",
+            )
+        }
+        return try {
+            val accountInfo = provider.validate(token)
+            _state.update { it.copy(phase = "正在读取云端文件") }
+            val local = localSnapshot()
+            val remoteId = extractRemoteId(remoteInput)
+            if (remoteId.isBlank()) {
+                _state.update { it.copy(phase = "正在创建私人 ${provider.label}") }
+                val content = encodeForUpload(local)
+                val remoteFile = provider.create(token, content)
+                secretStore.saveToken(providerId, token)
+                syncDao.clearAccounts()
+                syncDao.clearBases()
+                syncDao.clearConflicts()
+                saveAccount(
+                    SyncAccountEntity(
+                        provider = providerId,
+                        remoteId = remoteFile.id,
+                        fileName = provider.fileName,
+                        lastSyncedAt = System.currentTimeMillis(),
+                        remoteRevision = remoteFile.revision,
+                        autoSync = true,
+                        wifiOnly = false,
+                        remoteUrl = remoteFile.htmlUrl,
+                        accountLabel = accountInfo.login,
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                )
+                saveBase(local, remoteFile.revision)
+                markClean(local)
+                finish("已连接 ${provider.label}")
+                emit("已连接 ${provider.label}")
+                scheduleAutoSync()
+                true
+            } else {
+                val remoteFile = provider.read(token, remoteId)
+                val remote = SyncJson.decode(remoteFile.content)
+                when {
+                    remote.playlists.isEmpty() && local.playlists.isEmpty() -> {
+                        secretStore.saveToken(providerId, token)
+                        syncDao.clearAccounts()
+                        syncDao.clearBases()
+                        syncDao.clearConflicts()
+                        saveAccount(
+                            SyncAccountEntity(
+                                provider = providerId,
+                                remoteId = remoteFile.id,
+                                fileName = provider.fileName,
+                                lastSyncedAt = System.currentTimeMillis(),
+                                remoteRevision = remoteFile.revision,
+                                remoteUrl = remoteFile.htmlUrl,
+                                accountLabel = accountInfo.login,
+                                updatedAt = System.currentTimeMillis(),
+                            )
+                        )
+                        saveBase(remote, remoteFile.revision)
+                        finish("已连接 ${provider.label}")
+                        emit("已连接 ${provider.label}")
+                        true
+                    }
+                    remote.playlists.isEmpty() -> {
+                        secretStore.saveToken(providerId, token)
+                        syncDao.clearAccounts()
+                        syncDao.clearBases()
+                        syncDao.clearConflicts()
+                        val uploaded = provider.update(token, remoteFile.id, encodeForUpload(local))
+                        saveAccount(
+                            SyncAccountEntity(
+                                provider = providerId,
+                                remoteId = remoteFile.id,
+                                fileName = provider.fileName,
+                                lastSyncedAt = System.currentTimeMillis(),
+                                remoteRevision = uploaded.revision,
+                                remoteUrl = uploaded.htmlUrl,
+                                accountLabel = accountInfo.login,
+                                updatedAt = System.currentTimeMillis(),
+                            )
+                        )
+                        saveBase(local, uploaded.revision)
+                        markClean(local)
+                        finish("已上传本机歌单")
+                        emit("已连接 ${provider.label}，本机歌单已上传")
+                        true
+                    }
+                    local.playlists.isEmpty() -> {
+                        secretStore.saveToken(providerId, token)
+                        syncDao.clearAccounts()
+                        syncDao.clearBases()
+                        syncDao.clearConflicts()
+                        applySnapshot(remote, removeAbsent = true)
+                        saveAccount(
+                            SyncAccountEntity(
+                                provider = providerId,
+                                remoteId = remoteFile.id,
+                                fileName = provider.fileName,
+                                lastSyncedAt = System.currentTimeMillis(),
+                                remoteRevision = remoteFile.revision,
+                                remoteUrl = remoteFile.htmlUrl,
+                                accountLabel = accountInfo.login,
+                                updatedAt = System.currentTimeMillis(),
+                            )
+                        )
+                        saveBase(remote, remoteFile.revision)
+                        finish("已从云端恢复歌单")
+                        emit("已连接 ${provider.label}，已从云端恢复歌单")
+                        scheduleAutoSync()
+                        true
+                    }
+                    else -> {
+                        pendingInitial = PendingInitial(
+                            providerId = providerId,
+                            accountLabel = accountInfo.login,
+                            remoteId = remoteFile.id,
+                            remoteFile = remoteFile,
+                            token = token,
+                            local = local,
+                            remote = remote,
+                        )
+                        _state.update {
+                            it.copy(
+                                status = SyncStatus.Idle,
+                                phase = "",
+                                initialMerge = InitialMergePreview(
+                                    provider = providerId,
+                                    providerLabel = provider.label,
+                                    localPlaylists = local.playlists.count { p -> p.deletedAt == null },
+                                    localTracks = local.playlists.sumOf { p -> p.tracks.size },
+                                    remotePlaylists = remote.playlists.count { p -> p.deletedAt == null },
+                                    remoteTracks = remote.playlists.sumOf { p -> p.tracks.size },
+                                ),
+                                message = "本机和云端都有歌单，请选择首次合并方式。",
+                                error = "",
+                            )
+                        }
+                        false
+                    }
+                }
+            }
+        } catch (error: SyncException) {
+            fail(error.message)
+            emit(error.message, error = true)
+            false
+        } catch (error: Exception) {
+            val message = error.message ?: "连接失败"
+            fail(message)
+            emit(message, error = true)
+            false
+        }
+    }
+
+    suspend fun resolveInitial(strategy: SyncStrategy): Boolean = mutex.withLock {
+        val pending = pendingInitial ?: return@withLock false
+        if (!ensureBackup()) return@withLock false
+        _state.update { it.copy(status = SyncStatus.Syncing, phase = "正在合并本机与云端", error = "", message = "") }
+        return@withLock try {
+            val provider = providers[pending.providerId]
+                ?: throw SyncException(SyncFailureKind.Unknown, "同步后端不可用")
+            val playlists = if (strategy == SyncStrategy.Remote) {
+                pending.remote.playlists
+            } else {
+                SyncMerge.applyStrategy(pending.local, pending.remote, strategy)
+            }
+            val merged = SyncSnapshot(
+                deviceId = deviceId,
+                updatedAt = SyncTime.nowIso(),
+                playlists = playlists,
+            )
+            if (strategy == SyncStrategy.Remote) {
+                db.withTransaction { libraryDao.clearPlaylists() }
+            }
+            applySnapshot(merged, removeAbsent = strategy == SyncStrategy.Remote)
+            val uploaded = provider.update(pending.token, pending.remoteId, encodeForUpload(merged))
+            syncDao.clearAccounts()
+            syncDao.clearBases()
+            syncDao.clearConflicts()
+            secretStore.saveToken(pending.providerId, pending.token)
+            saveAccount(
+                SyncAccountEntity(
+                    provider = pending.providerId,
+                    remoteId = pending.remoteId,
+                    fileName = provider.fileName,
+                    lastSyncedAt = System.currentTimeMillis(),
+                    remoteRevision = uploaded.revision,
+                    remoteUrl = uploaded.htmlUrl,
+                    accountLabel = pending.accountLabel,
+                    updatedAt = System.currentTimeMillis(),
+                )
+            )
+            saveBase(merged, uploaded.revision)
+            pendingInitial = null
+            finish("首次合并完成")
+            emit("首次合并完成，已同步 ${merged.playlists.count { it.deletedAt == null }} 个歌单")
+            scheduleAutoSync()
+            true
+        } catch (error: Exception) {
+            fail(error.message ?: "首次合并失败")
+            emit(error.message ?: "首次合并失败", error = true)
+            false
+        }
+    }
+
+    suspend fun resolveConflict(playlistId: String, strategy: SyncStrategy): Boolean {
+        val conflict = syncDao.conflictsOnce().firstOrNull { it.playlistId == playlistId } ?: return false
+        if (!ensureBackup()) return false
+        val local = SyncJson.decodePlaylist(conflict.localSnapshot)
+        val remote = SyncJson.decodePlaylist(conflict.remoteSnapshot)
+        val resolved = SyncMerge.resolve(local, remote, strategy)
+        val remaining = try {
+            mutex.withLock {
+                db.withTransaction {
+                    if (resolved == null) {
+                        libraryDao.deletePlaylist(playlistId)
+                    } else {
+                        applyPlaylist(resolved, dirty = true)
+                        libraryDao.markDirty(playlistId, System.currentTimeMillis())
+                    }
+                    syncDao.deleteConflict(playlistId)
+                }
+                syncDao.conflictsOnce().size
+            }
+        } catch (error: Exception) {
+            emit(error.message ?: "处理冲突失败", error = true)
+            return false
+        }
+        if (remaining > 0) {
+            _state.update {
+                it.copy(
+                    status = SyncStatus.NeedsAttention,
+                    message = "还有 $remaining 个冲突需要处理。",
+                )
+            }
+            return true
+        }
+        return pushResolved()
+    }
+
+    private suspend fun pushResolved(): Boolean = mutex.withLock {
+        val account = syncDao.accountOnce() ?: return@withLock false
+        if (syncDao.conflictsOnce().isNotEmpty()) return@withLock false
+        val provider = providers[account.provider] ?: run {
+            fail("同步后端不可用：${account.provider}")
+            return@withLock false
+        }
+        val token = secretStore.token(account.provider)
+        if (token.isNullOrBlank()) {
+            fail("同步令牌已失效，请在设置中重新连接。")
+            return@withLock false
+        }
+        _state.update {
+            it.copy(
+                status = SyncStatus.Syncing,
+                phase = "正在上传冲突处理结果",
+                message = "",
+                error = "",
+            )
+        }
+        return@withLock try {
+            val remoteFile = provider.read(token, account.remoteId)
+            if (account.remoteRevision.isNotBlank() && remoteFile.revision.isNotBlank() &&
+                remoteFile.revision != account.remoteRevision
+            ) {
+                fail("云端文件在冲突处理期间又发生变化，请重新同步。")
+                emit("云端文件已变化，请重新同步。", error = true)
+                return@withLock false
+            }
+            val local = localSnapshot()
+            val uploaded = upload(provider, token, account, local, remoteFile)
+            saveBase(local, uploaded.revision)
+            saveAccount(
+                account.copy(
+                    lastSyncedAt = System.currentTimeMillis(),
+                    remoteRevision = uploaded.revision,
+                    remoteUrl = uploaded.htmlUrl,
+                )
+            )
+            pruneTombstones()
+            finish("冲突已处理，已同步 ${local.playlists.count { it.deletedAt == null }} 个歌单")
+            emit("冲突已处理并完成同步")
+            true
+        } catch (error: SyncException) {
+            fail(error.message)
+            emit(error.message, error = true)
+            false
+        } catch (error: Exception) {
+            val message = error.message ?: "冲突处理结果上传失败"
+            fail(message)
+            emit(message, error = true)
+            false
+        }
+    }
+
+    suspend fun setAutoSync(enabled: Boolean) {
+        val account = syncDao.accountOnce() ?: return
+        syncDao.putAccount(account.copy(autoSync = enabled, updatedAt = System.currentTimeMillis()))
+        if (enabled) scheduleAutoSync()
+    }
+
+    suspend fun setWifiOnly(enabled: Boolean) {
+        val account = syncDao.accountOnce() ?: return
+        syncDao.putAccount(account.copy(wifiOnly = enabled, updatedAt = System.currentTimeMillis()))
+    }
+
+    suspend fun disconnect() {
+        pendingInitial = null
+        secretStore.clear()
+        syncDao.clearAccounts()
+        syncDao.clearBases()
+        syncDao.clearConflicts()
+        WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        _state.update {
+            it.copy(
+                account = null,
+                providerLabel = "",
+                status = SyncStatus.NoAccount,
+                phase = "",
+                message = "同步已断开，本机歌单保留。",
+                error = "",
+                conflicts = emptyList(),
+                initialMerge = null,
+            )
+        }
+    }
+
+    fun cancelInitial() {
+        val pending = pendingInitial
+        pendingInitial = null
+        if (pending != null) scope.launch {
+            if (syncDao.account(pending.providerId) == null) {
+                secretStore.removeToken(pending.providerId)
+            }
+        }
+        _state.update {
+            it.copy(
+                initialMerge = null,
+                status = if (it.account == null) SyncStatus.NoAccount else SyncStatus.Idle,
+                message = "",
+            )
+        }
+    }
+
+    suspend fun export(uri: Uri): Boolean = try {
+        val snapshot = localSnapshot(includeDeleted = false).copy(
+            deviceId = deviceId,
+            updatedAt = SyncTime.nowIso(),
+        )
+        context.contentResolver.openOutputStream(uri)?.use { output ->
+            output.write(SyncJson.encode(snapshot).toByteArray(Charsets.UTF_8))
+        } ?: error("无法写入所选文件")
+        emit("已导出 ${snapshot.playlists.size} 个歌单")
+        true
+    } catch (error: Exception) {
+        emit(error.message ?: "导出失败", error = true)
+        false
+    }
+
+    suspend fun import(uri: Uri, strategy: SyncStrategy = SyncStrategy.Merge): Boolean = try {
+        val raw = context.contentResolver.openInputStream(uri)?.use { input ->
+            input.readBytes().toString(Charsets.UTF_8)
+        } ?: error("无法读取所选文件")
+        val remote = SyncJson.decode(raw)
+        if (strategy == SyncStrategy.Remote && !ensureBackup()) return false
+        val local = localSnapshot()
+        val playlists = SyncMerge.applyStrategy(local, remote, strategy)
+        val snapshot = SyncSnapshot(deviceId = deviceId, updatedAt = SyncTime.nowIso(), playlists = playlists)
+        if (strategy == SyncStrategy.Remote) {
+            db.withTransaction { libraryDao.clearPlaylists() }
+        }
+        applySnapshot(snapshot, removeAbsent = strategy == SyncStrategy.Remote, dirty = true)
+        emit("已导入 ${snapshot.playlists.count { it.deletedAt == null }} 个歌单")
+        scheduleAutoSync()
+        true
+    } catch (error: SyncException) {
+        emit(error.message, error = true)
+        false
+    } catch (error: Exception) {
+        emit(error.message ?: "导入失败", error = true)
+        false
+    }
+
+    fun onLocalChange() {
+        scheduleAutoSync()
+    }
+
+    fun scheduleAutoSync() {
+        scope.launch {
+            val account = syncDao.accountOnce() ?: return@launch
+            if (!account.autoSync) return@launch
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(
+                    if (account.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+                )
+                .build()
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setInitialDelay(30, TimeUnit.SECONDS)
+                .setConstraints(constraints)
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+        }
+    }
+
+    fun syncIfStaleOnForeground() {
+        scope.launch {
+            val account = syncDao.accountOnce() ?: return@launch
+            if (!account.autoSync || syncDao.conflictsOnce().isNotEmpty()) return@launch
+            val stale = System.currentTimeMillis() - account.lastSyncedAt > 15 * 60 * 1000
+            if (stale) runSync(manual = false, notify = false)
+        }
+    }
+
+    private fun encodeForUpload(snapshot: SyncSnapshot): String {
+        val content = SyncJson.encode(snapshot.copy(deviceId = deviceId, updatedAt = SyncTime.nowIso()))
+        if (content.toByteArray(Charsets.UTF_8).size > MAX_SYNC_BYTES) {
+            throw SyncException(
+                SyncFailureKind.Unknown,
+                "同步文件超过 900 KB，已停止自动上传。请导出本机备份并整理歌单后再同步。",
+            )
+        }
+        return content
+    }
+
+    private suspend fun ensureBackup(): Boolean {
+        val snapshot = localSnapshot(includeDeleted = false)
+        if (snapshot.playlists.isEmpty()) return true
+        return try {
+            withContext(Dispatchers.IO) {
+                val directory = File(context.filesDir, "backups").apply { mkdirs() }
+                val file = File(directory, "mymusic-${System.currentTimeMillis()}.json")
+                file.writeText(SyncJson.encode(snapshot), Charsets.UTF_8)
+                directory.listFiles()
+                    ?.sortedByDescending { it.lastModified() }
+                    ?.drop(10)
+                    ?.forEach { old -> old.delete() }
+            }
+            emit("已在本机创建处理前备份（${snapshot.playlists.size} 个歌单）")
+            true
+        } catch (error: Exception) {
+            fail("无法创建本机备份，已取消本次操作：${error.message ?: "存储不可写"}")
+            emit("无法创建本机备份，操作已取消。", error = true)
+            false
+        }
+    }
+
+    private suspend fun localSnapshot(includeDeleted: Boolean = true): SyncSnapshot = buildSnapshot(
+        playlists = libraryDao.allPlaylistsOnce(),
+        entries = libraryDao.allEntriesOnce(),
+        deviceId = deviceId,
+        includeDeleted = includeDeleted,
+    )
+
+    private suspend fun applySnapshot(
+        snapshot: SyncSnapshot,
+        removeAbsent: Boolean,
+        dirty: Boolean = false,
+    ) {
+        db.withTransaction {
+            val activeIds = snapshot.playlists.map { it.id }.toSet()
+            if (removeAbsent) {
+                libraryDao.playlistsOnce()
+                    .filterNot { it.id in activeIds }
+                    .forEach { libraryDao.deletePlaylist(it.id) }
+            }
+            snapshot.playlists.forEach { playlist ->
+                applyPlaylist(playlist, dirty = dirty)
+            }
+        }
+    }
+
+    private suspend fun applyPlaylist(playlist: SyncPlaylist, dirty: Boolean) {
+        val deletedAt = playlist.deletedAt?.let(SyncTime::toMillis)
+        val createdAt = SyncTime.toMillis(playlist.createdAt).takeIf { it > 0 } ?: System.currentTimeMillis()
+        val updatedAt = SyncTime.toMillis(playlist.updatedAt).takeIf { it > 0 } ?: System.currentTimeMillis()
+        libraryDao.putPlaylist(
+            PlaylistEntity(
+                id = playlist.id,
+                name = playlist.name,
+                createdAt = createdAt,
+                updatedAt = updatedAt,
+                dirty = dirty,
+                deletedAt = deletedAt,
+            )
+        )
+        if (deletedAt != null) {
+            libraryDao.clearEntries(playlist.id)
+        } else {
+            libraryDao.replaceEntries(
+                playlist.id,
+                playlist.tracks.mapIndexed { index, track ->
+                    PlaylistEntryEntity(
+                        playlistId = playlist.id,
+                        position = index,
+                        songKey = track.key,
+                        payload = SyncJson.format.encodeToString(Song.serializer(), track.toSong()),
+                    )
+                },
+            )
+        }
+    }
+
+    private suspend fun upload(
+        provider: PlaylistSyncProvider,
+        token: String,
+        account: SyncAccountEntity,
+        snapshot: SyncSnapshot,
+        remoteFile: RemoteFile,
+    ): RemoteFile {
+        val content = encodeForUpload(snapshot)
+        val uploaded = if (account.remoteId.isBlank()) {
+            provider.create(token, content)
+        } else {
+            provider.update(token, if (remoteFile.id.isBlank()) account.remoteId else remoteFile.id, content)
+        }
+        markClean(snapshot)
+        return uploaded
+    }
+
+    private suspend fun markClean(snapshot: SyncSnapshot) {
+        val uploaded = snapshot.playlists.associateBy { it.id }
+        libraryDao.allPlaylistsOnce().forEach { playlist ->
+            val remote = uploaded[playlist.id] ?: return@forEach
+            if (playlist.dirty && playlist.updatedAt == SyncTime.toMillis(remote.updatedAt)) {
+                libraryDao.markClean(playlist.id, playlist.updatedAt, dirty = false)
+            }
+        }
+    }
+
+    private suspend fun saveAccount(account: SyncAccountEntity) {
+        syncDao.putAccount(account.copy(updatedAt = System.currentTimeMillis()))
+    }
+
+    private suspend fun saveBase(snapshot: SyncSnapshot, revision: String) {
+        val account = syncDao.accountOnce() ?: return
+        syncDao.putBase(
+            SyncBaseEntity(
+                accountId = account.provider,
+                snapshot = SyncJson.encode(snapshot),
+                remoteRevision = revision,
+                updatedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    private suspend fun pruneTombstones() {
+        libraryDao.pruneDeleted(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
+    }
+
+    private fun finish(message: String) {
+        _state.update {
+            it.copy(
+                status = if (it.conflicts.isEmpty()) SyncStatus.Idle else SyncStatus.NeedsAttention,
+                phase = "",
+                message = message,
+                error = "",
+                initialMerge = null,
+            )
+        }
+    }
+
+    private fun fail(message: String) {
+        _state.update {
+            it.copy(
+                status = SyncStatus.Error,
+                phase = "",
+                error = message,
+                message = "",
+            )
+        }
+    }
+
+    private fun emit(message: String, error: Boolean = false) {
+        _events.tryEmit(SyncEvent(message, error))
+    }
+
+    private fun toConflictUi(conflict: SyncConflictEntity): SyncConflictUi {
+        val local = SyncJson.decodePlaylist(conflict.localSnapshot)
+        val remote = SyncJson.decodePlaylist(conflict.remoteSnapshot)
+        return SyncConflictUi(
+            playlistId = conflict.playlistId,
+            name = local?.name ?: remote?.name ?: "未命名歌单",
+            localTracks = local?.tracks?.size ?: 0,
+            remoteTracks = remote?.tracks?.size ?: 0,
+            localUpdatedAt = SyncTime.toMillis(local?.updatedAt).takeIf { it > 0 } ?: conflict.detectedAt,
+            remoteUpdatedAt = SyncTime.toMillis(remote?.updatedAt).takeIf { it > 0 } ?: conflict.detectedAt,
+            localDeleted = local?.deletedAt != null,
+            remoteDeleted = remote?.deletedAt != null,
+        )
+    }
+
+    companion object {
+        const val WORK_NAME = "mymusic-library-sync"
+        const val MAX_SYNC_BYTES = 900 * 1024
+    }
+}

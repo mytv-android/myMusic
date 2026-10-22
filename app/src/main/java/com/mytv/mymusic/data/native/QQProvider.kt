@@ -1399,6 +1399,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             ),
             cookie = joinCookies(cookies),
             userAgent = QQ_LOGIN_USER_AGENT,
+            binary = true,
         )
         showResponse.cookies.forEach { (key, value) ->
             if (value.isNotBlank()) cookies[key] = value
@@ -1416,7 +1417,10 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             session = QRSession(
                 key = qqQuery(keyParams),
                 url = "",
-                imageUrl = "",
+                // ptqrshow 的响应体就是二维码 PNG，界面用 data URI 直接显示
+                imageUrl = showResponse.bytes.takeIf { it.isNotEmpty() }
+                    ?.let { "data:image/png;base64," + android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) }
+                    .orEmpty(),
             ),
         )
     }

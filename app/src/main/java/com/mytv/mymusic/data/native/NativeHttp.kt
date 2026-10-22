@@ -19,6 +19,8 @@ data class NativeResponse(
     val body: String,
     val cookies: Map<String, String>,
     val code: Int,
+    /** 只有 binary 请求才填，例如登录二维码图片。 */
+    val bytes: ByteArray = ByteArray(0),
 )
 
 object NativeHttp {
@@ -55,13 +57,14 @@ object NativeHttp {
         cookie: String = "",
         randomIp: Boolean = false,
         userAgent: String = DEFAULT_USER_AGENT,
+        binary: Boolean = false,
     ): NativeResponse {
         val request = Request.Builder()
             .url(url)
             .get()
             .applyCommonHeaders(headers, cookie, randomIp, userAgent)
             .build()
-        return execute(request)
+        return execute(request, binary)
     }
 
     suspend fun postForm(
@@ -120,7 +123,7 @@ object NativeHttp {
         return this
     }
 
-    private suspend fun execute(request: Request): NativeResponse =
+    private suspend fun execute(request: Request, binary: Boolean = false): NativeResponse =
         suspendCancellableCoroutine { continuation ->
             val call = client.newCall(request)
             continuation.invokeOnCancellation { call.cancel() }
@@ -131,7 +134,8 @@ object NativeHttp {
 
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
-                        val body = runCatching { it.body?.string().orEmpty() }.getOrDefault("")
+                        val bytes = if (binary) runCatching { it.body?.bytes() }.getOrNull() ?: ByteArray(0) else ByteArray(0)
+                        val body = if (binary) "" else runCatching { it.body?.string().orEmpty() }.getOrDefault("")
                         if (!it.isSuccessful) {
                             if (continuation.isActive) {
                                 continuation.resumeWithException(
@@ -150,7 +154,7 @@ object NativeHttp {
                             }
                         }
                         if (continuation.isActive) {
-                            continuation.resume(NativeResponse(body, cookies, it.code))
+                            continuation.resume(NativeResponse(body, cookies, it.code, bytes))
                         }
                     }
                 }

@@ -105,4 +105,3 @@ data class QRCheckResult(val status: String = "", val message: String = "", val 
 
 enum class RepeatMode { Off, All, One }
 enum class SearchKind(val label: String) { Song("单曲"), Playlist("歌单"), Album("专辑"), Link("链接") }
-enum class LibrarySection(val label: String) { Favorites("收藏"), History("最近播放"), Downloads("下载"), Playlists("我的歌单") }

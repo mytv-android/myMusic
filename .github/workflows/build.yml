@@ -55,22 +55,48 @@ jobs:
         env:
           VERSION_CODE: ${{ github.run_number }}
         run: chmod +x ./gradlew && ./gradlew assembleRelease --no-daemon --max-workers=1 -Porg.gradle.jvmargs=-Xmx3g
-      - name: Rename APKs
+      - name: Prepare release assets
         id: apk
         run: |
           metadata=$(find app/build/outputs/apk/release -name output-metadata.json | head -1)
           version=$(jq -r '.elements[0].versionName' "$metadata")
           code=$(jq -r '.elements[0].versionCode' "$metadata")
+          # versionName 固定为 1.0，标签带上 versionCode（运行号），每次构建的发布互不覆盖
+          tag="v${version}.${code}"
           mkdir -p dist
           find app/build/outputs/apk/release -name '*.apk' -exec cp {} dist/ \;
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          apk=$(find dist -name '*.apk' | head -1)
+          apk_name=$(basename "$apk")
+          sha=$(sha256sum "$apk" | awk '{print $1}')
+          size=$(stat -c%s "$apk")
+          published=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          channel=$([ "$GITHUB_REF_NAME" = "main" ] && echo "stable" || echo "dev")
+          note=$(git log -1 --pretty=%s)
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/${apk_name}"
+          jq -n \
+            --arg schema "mymusic.update" \
+            --arg channel "$channel" \
+            --argjson versionCode "$code" \
+            --arg versionName "$version" \
+            --arg tag "$tag" \
+            --arg publishedAt "$published" \
+            --arg url "$url" \
+            --argjson size "$size" \
+            --arg sha "$sha" \
+            --arg note "$note" \
+            '{schema:$schema,channel:$channel,versionCode:$versionCode,versionName:$versionName,tag:$tag,publishedAt:$publishedAt,minSdk:23,apk:{url:$url,size:$size,sha256:$sha},notes:[$note]}' > dist/update.json
+          echo "$sha  $apk_name" > dist/update.apk.sha256
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.apk.outputs.tag }}
-          name: myMusic ${{ steps.apk.outputs.version }}
-          body: Android 6.0+ 通用安装包。versionCode ${{ steps.apk.outputs.code }}。
-          files: dist/*.apk
+          name: myMusic ${{ steps.apk.outputs.version }} (${{ steps.apk.outputs.code }})
+          body: Android 6.0+ 通用安装包。versionCode ${{ steps.apk.outputs.code }}。应用内更新会读取 update.json 并校验 SHA-256 与签名。
+          files: |
+            dist/*.apk
+            dist/update.json
+            dist/update.apk.sha256
           prerelease: ${{ github.ref_name != 'main' }}
           make_latest: ${{ github.ref_name == 'main' && 'true' || 'false' }}

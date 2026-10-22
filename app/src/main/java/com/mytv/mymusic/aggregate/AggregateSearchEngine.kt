@@ -59,7 +59,7 @@ class AggregateSearchEngine(
         val results = ConcurrentHashMap<String, List<Song>>()
         results.putAll(existing)
         val states = ConcurrentHashMap<String, ProviderSearchState>()
-        val moreAvailable = ConcurrentHashMap.newKeySet<String>()
+        val moreAvailable = ConcurrentHashMap<String, Boolean>()
         val semaphore = Semaphore(3)
 
         supervisorScope {
@@ -101,7 +101,7 @@ class AggregateSearchEngine(
                     val timedOut = outcome.isSuccess && pageResult == null
                     val error = outcome.exceptionOrNull()?.message ?: if (timedOut) "请求超时" else ""
                     if (error.isBlank()) health.success(provider.id) else health.failure(provider.id)
-                    if (pageResult?.hasMore == true) moreAvailable += provider.id
+                    if (pageResult?.hasMore == true) moreAvailable[provider.id] = true
                     val status = when {
                         timedOut -> ProviderStatus.Timeout
                         error.isNotBlank() -> ProviderStatus.Error

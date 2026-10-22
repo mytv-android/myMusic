@@ -35,9 +35,10 @@ import com.mytv.mymusic.data.AppSettings
 import com.mytv.mymusic.data.CanonicalSourceEntity
 import com.mytv.mymusic.data.CanonicalTrackEntity
 import com.mytv.mymusic.data.DownloadRecord
-import com.mytv.mymusic.data.LocalPlaylist
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
+import com.mytv.mymusic.data.PlaylistEntity
+import com.mytv.mymusic.data.PlaylistEntryEntity
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.RepeatMode
@@ -46,6 +47,7 @@ import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.TrackOverrideEntity
+import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.playback.PlaybackService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -53,68 +55,59 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.collectLatest
+import coil3.SingletonImageLoader
+import com.mytv.mymusic.ui.theme.Appearance
+import com.mytv.mymusic.ui.theme.BlurMode
+import com.mytv.mymusic.ui.theme.ColorSource
+import com.mytv.mymusic.ui.theme.CoverSeedRepository
+import com.mytv.mymusic.ui.theme.SchemeStyle
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.util.Locale
-
-data class ProviderHome(
-    val provider: ProviderInfo,
-    val recommendations: List<Playlist> = emptyList(),
-    val charts: List<TopList> = emptyList(),
-    val hotSongs: List<Song> = emptyList(),
-    val loading: Boolean = false,
-    val error: String = "",
-)
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 data class MusicUiState(
     val providers: List<ProviderInfo> = emptyList(),
     val providerId: String = "netease",
+    val chartsSource: String = "",
+    val playlistsSource: String = "",
     val theme: String = "system",
+    val appearance: Appearance = Appearance(),
+    val coverSeed: Int = 0,
+    val sleepFade: Boolean = true,
+    val cacheLimitMb: Int = 512,
+    val reduceMotion: Boolean = false,
+    val showBottomNav: Boolean = true,
     val cookies: Map<String, String> = emptyMap(),
-    val home: ProviderHome? = null,
-    val recommendations: List<Playlist> = emptyList(),
-    val categories: List<PlaylistCategory> = emptyList(),
-    val categoriesLoading: Boolean = false,
-    val categoriesError: String = "",
-    val categoryId: String = "",
-    val categoryName: String = "",
-    val categoryOpen: Boolean = false,
-    val categoryPlaylists: List<Playlist> = emptyList(),
-    val charts: List<TopList> = emptyList(),
-    val hotSongs: List<Song> = emptyList(),
-    val songs: List<Song> = emptyList(),
-    val playlists: List<Playlist> = emptyList(),
-    val albums: List<Playlist> = emptyList(),
-    val collectionTitle: String = "",
-    val collectionSongs: List<Song> = emptyList(),
-    val collectionOpen: Boolean = false,
-    val query: String = "",
-    val searchKind: SearchKind = SearchKind.Song,
-    val searchScope: SearchScope = SearchScope.Aggregated,
-    val aggregateGroups: List<CanonicalTrack> = emptyList(),
-    val aggregateCollections: List<CanonicalCollection> = emptyList(),
-    val providerStates: Map<String, ProviderSearchState> = emptyMap(),
-    val collectionProviderStates: Map<String, ProviderSearchState> = emptyMap(),
-    val aggregateStatus: SearchStatus = SearchStatus.Idle,
-    val collectionSearchStatus: SearchStatus = SearchStatus.Idle,
-    val aggregateHasMore: Boolean = false,
     val aggregation: AggregationSettings = AggregationSettings(),
+    val searchHistory: List<String> = emptyList(),
+    val skippedUpdateCode: Long = 0L,
     val loading: Boolean = false,
     val error: String = "",
     val current: Song? = null,
@@ -131,7 +124,7 @@ data class MusicUiState(
     val playerOpen: Boolean = false,
     val login: QRCreateResult? = null,
     val loginStatus: String = "",
-    val page: Int = 1,
+    val loginProviderId: String = "",
     val sourcePickerTrack: CanonicalTrack? = null,
     val sourcePickerQueue: List<CanonicalTrack> = emptyList(),
     val sourcePickerBusy: String = "",
@@ -140,9 +133,9 @@ data class MusicUiState(
     val mergeTrack: CanonicalTrack? = null,
     val playbackNotice: String = "",
     val deepLink: String = "",
-    val collectionSource: String = "",
 )
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as MyMusicApp
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -151,7 +144,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val settingsState = app.settings.state.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
-        AppSettings(provider = "netease", theme = "system", cookies = emptyMap()),
+        AppSettings(),
     )
     private var controller: MediaController? = null
     private var progressJob: Job? = null
@@ -160,25 +153,91 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var aggregateSearchGeneration = 0
     private var collectionSearchJob: Job? = null
     private var collectionSearchGeneration = 0
-    private var homeGeneration = 0
+    private var chartsGeneration = 0
+    private var playlistsGeneration = 0
+    private var categoryGeneration = 0
+    private var collectionGeneration = 0
     private var failoverInProgress = false
+    private var updateDownloadJob: Job? = null
     private var splitOverrideKeys: Set<String> = emptySet()
     private var mergeTargets: Map<String, String> = emptyMap()
     private var aggregateSongs: Map<String, List<Song>> = emptyMap()
     private val pinnedProviders = mutableMapOf<String, String>()
     private val aggregateDao = app.database.aggregate()
+    private val libraryDao = app.database.library()
 
-    val favorites = app.database.dao().songs("favorite").stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val history = app.database.dao().songs("history").stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val localPlaylists = app.database.dao().playlists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val downloads = app.database.dao().downloads().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _charts = MutableStateFlow(ChartsUiState())
+    val chartsState: StateFlow<ChartsUiState> = _charts
+    private val _playlists = MutableStateFlow(PlaylistsUiState())
+    val playlistsState: StateFlow<PlaylistsUiState> = _playlists
+    private val _search = MutableStateFlow(SearchUiState())
+    val searchState: StateFlow<SearchUiState> = _search
+    private val _collection = MutableStateFlow(CollectionUiState())
+    val collectionState: StateFlow<CollectionUiState> = _collection
+    private val _librarySearch = MutableStateFlow(LibrarySearchUiState())
+    val librarySearch: StateFlow<LibrarySearchUiState> = _librarySearch
+    private var librarySearchGeneration = 0
+    private val _events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 12)
+    val events = _events.asSharedFlow()
 
-    val state = combine(base, app.settings.state) { ui, settings ->
+    val syncState = app.sync.state
+    val syncEvents = app.sync.events
+    val updateState = app.update.state
+    val equalizerState = app.equalizer.state
+    val sleepTimer = app.sleepTimer.state
+
+    private val chartCache = mutableMapOf<String, CachedCharts>()
+    private val recommendationCache = mutableMapOf<String, CachedRecommendations>()
+    private val categoryCache = mutableMapOf<String, CachedCategory>()
+
+    val favorites: StateFlow<List<SavedSong>> = app.database.dao().songs("favorite")
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val history: StateFlow<List<SavedSong>> = app.database.dao().songs("history")
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val downloads: StateFlow<List<DownloadRecord>> = app.database.dao().downloads()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val localPlaylists: StateFlow<List<LocalPlaylistSummary>> =
+        combine(libraryDao.playlists(), libraryDao.entryCounts()) { playlists, counts ->
+            val countMap = counts.associate { it.playlistId to it.total }
+            playlists.map { playlist ->
+                LocalPlaylistSummary(
+                    id = playlist.id,
+                    name = playlist.name,
+                    trackCount = countMap[playlist.id] ?: 0,
+                    updatedAt = playlist.updatedAt,
+                    dirty = playlist.dirty,
+                )
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** 自建歌单的封面拼贴：每个歌单取前 4 首有封面的歌。 */
+    val localPlaylistCovers: StateFlow<Map<String, List<String>>> = localPlaylists
+        .map { list ->
+            list.associate { summary ->
+                summary.id to libraryDao.entriesOnce(summary.id).asSequence()
+                    .mapNotNull { entry -> runCatching { json.decodeFromString<Song>(entry.payload).cover }.getOrNull() }
+                    .filter { it.isNotBlank() }
+                    .take(4)
+                    .toList()
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val state: StateFlow<MusicUiState> = combine(base, settingsState) { ui, settings ->
         ui.copy(
             providerId = settings.provider,
+            chartsSource = settings.chartsSource,
+            playlistsSource = settings.playlistsSource,
             theme = settings.theme,
+            appearance = settings.toAppearance(),
+            sleepFade = settings.sleepFade,
+            cacheLimitMb = settings.cacheLimitMb.takeIf { it > 0 } ?: app.defaultCacheLimitMb(),
+            reduceMotion = settings.reduceMotion,
+            showBottomNav = settings.showBottomNav,
             cookies = settings.cookies,
             aggregation = settings.aggregation,
+            searchHistory = settings.searchHistory,
+            skippedUpdateCode = settings.skippedUpdateCode,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MusicUiState())
 
@@ -201,7 +260,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         settings = { settingsState.value.aggregation },
     )
 
+    private val coverSeeds = CoverSeedRepository(application, SingletonImageLoader.get(application))
+
     init {
+        viewModelScope.launch {
+            base.map { it.current?.cover.orEmpty() }.distinctUntilChanged().collectLatest { url ->
+                if (url.isBlank()) return@collectLatest
+                val seed = coverSeeds.seedFor(url) ?: return@collectLatest
+                base.update { it.copy(coverSeed = seed) }
+                app.settings.lastSeed(seed)
+                // 空闲时给队列里接下来几首预取色，切歌时直接命中缓存
+                delay(1500)
+                val queue = base.value.queue
+                val index = queue.indexOfFirst { it.cover == url }
+                queue.drop(index + 1).take(3).forEach { coverSeeds.seedFor(it.cover) }
+            }
+        }
         val token = SessionToken(application, android.content.ComponentName(application, PlaybackService::class.java))
         val future = MediaController.Builder(application, token).buildAsync()
         future.addListener({
@@ -209,9 +283,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             startProgress()
         }, MoreExecutors.directExecutor())
         viewModelScope.launch {
-            runCatching { base.value = base.value.copy(providers = app.repository.providers()) }
-            val providerId = runCatching { app.settings.state.first().provider }.getOrDefault("netease")
-            refreshHome(providerId)
+            runCatching { app.repository.providers() }.onSuccess { providers ->
+                base.value = base.value.copy(providers = providers)
+                val settings = app.settings.state.first()
+                loadCharts(providerId = settings.chartsSource.ifBlank { null }, force = true)
+                loadPlaylists(providerId = settings.playlistsSource.ifBlank { null }, force = true)
+                if (System.currentTimeMillis() - settings.lastUpdateCheck > UPDATE_CHECK_INTERVAL_MS) {
+                    app.update.check(manual = false)
+                }
+            }
+            app.sync.syncIfStaleOnForeground()
         }
         viewModelScope.launch(Dispatchers.IO) {
             val cutoff = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000
@@ -232,191 +313,709 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun selectProvider(id: String) = viewModelScope.launch {
-        app.settings.provider(id)
-        base.value = base.value.copy(
-            page = 1,
-            home = null,
-            categories = emptyList(),
-            categoriesLoading = false,
-            categoriesError = "",
-            categoryId = "",
-            categoryName = "",
-            categoryOpen = false,
-            categoryPlaylists = emptyList(),
-        )
-        refreshHome(id)
+    // ---------- charts ----------
+
+    fun selectChartSource(providerId: String) {
+        if (_charts.value.providerId == providerId && _charts.value.loadedAt > 0) return
+        viewModelScope.launch { app.settings.chartsSource(providerId) }
+        loadCharts(providerId, force = false)
     }
 
-    fun selectTheme(value: String) = viewModelScope.launch { app.settings.theme(value) }
-    fun query(value: String) { base.value = base.value.copy(query = value) }
-    fun searchKind(value: SearchKind) {
-        base.value = base.value.copy(searchKind = value, page = 1)
-        search(force = false)
+    fun refreshCharts() {
+        loadCharts(_charts.value.providerId.ifBlank { null }, force = true)
     }
-    fun setSearchScope(value: SearchScope) {
-        base.value = base.value.copy(searchScope = value)
-        search(force = false)
-    }
-    fun openPlayer(open: Boolean) { base.value = base.value.copy(playerOpen = open) }
-    fun clearError() { base.value = base.value.copy(error = "") }
-    fun clearNotice() { base.value = base.value.copy(playbackNotice = "") }
 
-    fun refreshHome(providerId: String? = null) = launchAction {
-        val generation = ++homeGeneration
+    private fun loadCharts(providerId: String?, force: Boolean) {
         val providers = base.value.providers
-        val id = providerId ?: settingsState.value.provider
-        val provider = providers.find { it.id == id } ?: providers.firstOrNull() ?: return@launchAction
-        base.value = base.value.copy(
-            page = 1,
-            home = ProviderHome(provider = provider, loading = true),
-            categories = emptyList(),
-            categoriesLoading = provider.playlistCategories,
-            categoriesError = "",
-            categoryId = "",
-            categoryName = "",
-            categoryOpen = false,
-            categoryPlaylists = emptyList(),
-        )
-        val cookie = cookieFor(provider.id)
-        val (recommended, charts, hot) = coroutineScope {
-            val recommendedJob = async {
-                if (provider.recommendedPlaylists) {
-                    runCatching { app.repository.recommended(provider.id, cookie) }
-                } else {
-                    Result.success(emptyList())
-                }
-            }
-            val chartsJob = async {
-                if (provider.topLists) {
-                    runCatching { app.repository.topLists(provider.id, cookie) }
-                } else {
-                    Result.success(emptyList())
-                }
-            }
-            val hotJob = async {
-                if (provider.hotSongs) {
-                    runCatching { app.repository.hotSongs(provider.id, cookie, 12) }
-                } else {
-                    Result.success(emptyList())
-                }
-            }
-            Triple(recommendedJob.await(), chartsJob.await(), hotJob.await())
-        }
-        if (generation != homeGeneration) return@launchAction
-        val error = listOfNotNull(recommended.exceptionOrNull(), charts.exceptionOrNull(), hot.exceptionOrNull())
-            .firstOrNull()?.message.orEmpty()
-        base.update {
-            it.copy(
-                home = ProviderHome(
-                    provider = provider,
-                    recommendations = recommended.getOrDefault(emptyList()),
-                    charts = charts.getOrDefault(emptyList()),
-                    hotSongs = hot.getOrDefault(emptyList()),
-                    error = error,
-                ),
+        if (providers.isEmpty()) return
+        val candidates = providers.filter { it.topLists || it.hotSongs }
+        val preferred = providerId ?: settingsState.value.chartsSource.takeIf { it.isNotBlank() }
+        val target = preferred?.let { id -> candidates.find { it.id == id } ?: providers.find { it.id == id } }
+            ?: candidates.find { it.id == settingsState.value.provider }
+            ?: candidates.firstOrNull()
+            ?: providers.first()
+        val generation = ++chartsGeneration
+        val cached = chartCache[target.id]
+        if (!force && cached != null && System.currentTimeMillis() - cached.at < BROWSE_CACHE_MS) {
+            _charts.value = ChartsUiState(
+                providerId = target.id,
+                providerName = target.name,
+                supported = target.topLists,
+                charts = cached.charts,
+                featuredSongs = cached.featuredSongs,
+                hotSongs = cached.hotSongs,
+                loading = false,
+                error = cached.error,
+                loadedAt = cached.at,
             )
-        }
-        loadProviderDetails(provider.id, generation)
-    }
-
-    private suspend fun loadProviderDetails(providerId: String? = null, generation: Int = homeGeneration) {
-        val id = providerId ?: settingsState.value.provider
-        val provider = base.value.providers.find { it.id == id } ?: return
-        if (!provider.playlistCategories) {
-            if (generation == homeGeneration) {
-                base.value = base.value.copy(categories = emptyList(), categoriesLoading = false, categoriesError = "")
-            }
             return
         }
-        val result = runCatching { app.repository.categories(id, cookieFor(id)) }
-        if (generation != homeGeneration) return
-        base.value = base.value.copy(
-            categories = result.getOrDefault(emptyList()),
-            categoriesLoading = false,
-            categoriesError = result.exceptionOrNull()?.message.orEmpty(),
+        _charts.value = ChartsUiState(
+            providerId = target.id,
+            providerName = target.name,
+            supported = target.topLists,
+            charts = if (force) emptyList() else _charts.value.charts.takeIf { _charts.value.providerId == target.id }.orEmpty(),
+            featuredSongs = if (force) emptyList() else _charts.value.featuredSongs,
+            hotSongs = if (force) emptyList() else _charts.value.hotSongs.takeIf { _charts.value.providerId == target.id }.orEmpty(),
+            loading = target.topLists || target.hotSongs,
+            error = "",
         )
+        viewModelScope.launch {
+            val cookie = cookieFor(target.id)
+            val chartsResult = if (target.topLists) runCatching { app.repository.topLists(target.id, cookie) }
+            else Result.success(emptyList())
+            val hotResult = if (target.hotSongs) runCatching { app.repository.hotSongs(target.id, cookie, 12) }
+            else Result.success(emptyList())
+            val charts = chartsResult.getOrDefault(emptyList())
+            val featured = charts.firstOrNull()
+            val featuredSongs = if (featured != null && target.topListSongs) {
+                runCatching { app.repository.topListSongs(target.id, cookie, featured.id).take(3) }
+                    .getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+            if (generation != chartsGeneration) return@launch
+            val error = listOfNotNull(chartsResult.exceptionOrNull(), hotResult.exceptionOrNull())
+                .firstOrNull()?.message.orEmpty()
+            val hot = hotResult.getOrDefault(emptyList())
+            chartCache[target.id] = CachedCharts(
+                at = System.currentTimeMillis(),
+                charts = charts,
+                featuredSongs = featuredSongs,
+                hotSongs = hot,
+                error = error,
+            )
+            _charts.value = ChartsUiState(
+                providerId = target.id,
+                providerName = target.name,
+                supported = target.topLists,
+                charts = charts,
+                featuredSongs = featuredSongs,
+                hotSongs = hot,
+                loading = false,
+                error = error,
+                loadedAt = System.currentTimeMillis(),
+            )
+        }
     }
 
-    fun loadCategory(categoryId: String, page: Int = 1) = launchAction {
-        val generation = homeGeneration
-        val providerId = base.value.home?.provider?.id ?: settingsState.value.provider
-        val categoryName = base.value.categories.find { it.id == categoryId }?.name.orEmpty()
-        val lists = app.repository.categoryPlaylists(providerId, cookieFor(providerId), categoryId, page.coerceAtLeast(1), 30)
-        if (generation != homeGeneration) return@launchAction
-        base.value = base.value.copy(
-            categoryId = categoryId,
-            categoryName = categoryName,
-            categoryOpen = true,
-            categoryPlaylists = lists,
-            page = page.coerceAtLeast(1),
-        )
+    // ---------- playlists ----------
+
+    fun selectPlaylistSource(providerId: String) {
+        if (_playlists.value.providerId == providerId) return
+        viewModelScope.launch { app.settings.playlistsSource(providerId) }
+        loadPlaylists(providerId, force = false)
+    }
+
+    fun refreshPlaylists() {
+        loadPlaylists(_playlists.value.providerId.ifBlank { null }, force = true)
+    }
+
+    fun setPlaylistMode(mode: PlaylistMode) {
+        val current = _playlists.value
+        if (mode == PlaylistMode.Category && !current.canCategorize) return
+        _playlists.value = current.copy(mode = mode)
+        if (mode == PlaylistMode.Category && current.categoryPlaylists.isEmpty() && !current.categoryLoading) {
+            loadCategory(current.selectedCategoryId, page = 1)
+        }
+    }
+
+    fun setCategoryGroup(group: String) {
+        _playlists.update { it.copy(categoryGroup = group) }
+    }
+
+    fun selectCategory(category: PlaylistCategory) {
+        _playlists.update {
+            it.copy(
+                selectedCategoryId = category.id,
+                selectedCategoryName = category.name,
+                categoryGroup = category.group.ifBlank { it.categoryGroup },
+                categoryPlaylists = if (category.id == it.selectedCategoryId) it.categoryPlaylists else emptyList(),
+            )
+        }
+        loadCategory(category.id, page = 1)
     }
 
     fun clearCategory() {
-        base.value = base.value.copy(categoryId = "", categoryName = "", categoryOpen = false, categoryPlaylists = emptyList(), page = 1)
+        _playlists.update {
+            it.copy(
+                selectedCategoryId = "",
+                selectedCategoryName = "",
+                categoryPlaylists = emptyList(),
+                categoryPage = 1,
+                categoryOpen = false,
+                categoryError = "",
+            )
+        }
+        loadCategory("", page = 1)
     }
 
-    fun search(page: Int = 1, force: Boolean = true) {
-        val value = base.value.query.trim()
-        if (value.isBlank()) return
-        val kind = base.value.searchKind
-        if (base.value.searchScope == SearchScope.Aggregated) {
-            when (kind) {
-                SearchKind.Song -> {
-                    searchAggregated(value, force, page)
-                    return
+    fun categoryPage(page: Int) {
+        val current = _playlists.value
+        if (page < 1 || page == current.categoryPage) return
+        loadCategory(current.selectedCategoryId, page)
+    }
+
+    private fun loadPlaylists(providerId: String?, force: Boolean) {
+        val providers = base.value.providers
+        if (providers.isEmpty()) return
+        val candidates = providers.filter { it.recommendedPlaylists || it.playlistCategories }
+        val preferred = providerId ?: settingsState.value.playlistsSource.takeIf { it.isNotBlank() }
+        val target = preferred?.let { id -> candidates.find { it.id == id } ?: providers.find { it.id == id } }
+            ?: candidates.find { it.id == settingsState.value.provider }
+            ?: candidates.firstOrNull()
+            ?: providers.first()
+        val generation = ++playlistsGeneration
+        _playlists.value = PlaylistsUiState(
+            providerId = target.id,
+            providerName = target.name,
+            canRecommend = target.recommendedPlaylists,
+            canCategorize = target.playlistCategories,
+            mode = _playlists.value.mode.takeIf { _playlists.value.providerId == target.id } ?: PlaylistMode.Recommend,
+            recommendationsLoading = target.recommendedPlaylists,
+            categoriesLoading = target.playlistCategories,
+        )
+        viewModelScope.launch {
+            val cookie = cookieFor(target.id)
+            val recommendationCached = recommendationCache[target.id]
+            val useRecommendationCache = !force && recommendationCached != null &&
+                System.currentTimeMillis() - recommendationCached.at < BROWSE_CACHE_MS
+            val recommendationsResult = if (target.recommendedPlaylists) {
+                if (useRecommendationCache) Result.success(recommendationCached!!.items)
+                else runCatching { app.repository.recommended(target.id, cookie) }
+            } else {
+                Result.success(emptyList())
+            }
+            if (generation != playlistsGeneration) return@launch
+            if (target.recommendedPlaylists && !useRecommendationCache) {
+                recommendationsResult.getOrNull()?.let {
+                    recommendationCache[target.id] = CachedRecommendations(System.currentTimeMillis(), it)
                 }
-                SearchKind.Album, SearchKind.Playlist -> {
-                    searchCollections(kind, value)
-                    return
-                }
-                SearchKind.Link -> Unit
+            }
+            _playlists.update {
+                it.copy(
+                    recommendations = recommendationsResult.getOrDefault(emptyList()),
+                    recommendationsLoading = false,
+                    recommendationsError = recommendationsResult.exceptionOrNull()?.message.orEmpty(),
+                )
+            }
+            val categoriesResult = if (target.playlistCategories) {
+                runCatching { app.repository.categories(target.id, cookie) }
+            } else {
+                Result.success(emptyList())
+            }
+            if (generation != playlistsGeneration) return@launch
+            _playlists.update {
+                it.copy(
+                    categories = categoriesResult.getOrDefault(emptyList()),
+                    categoriesLoading = false,
+                    categoriesError = categoriesResult.exceptionOrNull()?.message.orEmpty(),
+                )
+            }
+            if (_playlists.value.mode == PlaylistMode.Category &&
+                _playlists.value.categoryPlaylists.isEmpty() &&
+                target.playlistCategories
+            ) {
+                loadCategory(_playlists.value.selectedCategoryId, page = 1)
             }
         }
-        launchAction {
-            val providerId = settingsState.value.provider
-            when (kind) {
-                SearchKind.Song -> base.value = base.value.copy(songs = app.repository.searchSongs(providerId, cookieFor(providerId), value))
-                SearchKind.Playlist -> base.value = base.value.copy(playlists = app.repository.searchPlaylists(providerId, cookieFor(providerId), value))
-                SearchKind.Album -> base.value = base.value.copy(albums = app.repository.searchAlbums(providerId, cookieFor(providerId), value))
-                SearchKind.Link -> openLink(value)
-            }
-            base.value = base.value.copy(page = page)
+    }
+
+    private fun loadCategory(categoryId: String, page: Int) {
+        val current = _playlists.value
+        val providerId = current.providerId.ifBlank { settingsState.value.provider }
+        val safePage = page.coerceAtLeast(1)
+        val generation = ++categoryGeneration
+        val key = "$providerId|$categoryId|$safePage"
+        _playlists.update {
+            it.copy(
+                categoryOpen = true,
+                selectedCategoryId = categoryId,
+                categoryPage = safePage,
+                categoryLoading = true,
+                categoryError = "",
+            )
         }
+        viewModelScope.launch {
+            val cached = categoryCache[key]
+            val result = if (cached != null && System.currentTimeMillis() - cached.at < BROWSE_CACHE_MS) {
+                Result.success(cached.items)
+            } else {
+                runCatching {
+                    app.repository.categoryPlaylists(providerId, cookieFor(providerId), categoryId, safePage, 30)
+                }
+            }
+            if (generation != categoryGeneration) return@launch
+            if (result.isSuccess && categoryCache[key] == null) {
+                categoryCache[key] = CachedCategory(System.currentTimeMillis(), result.getOrDefault(emptyList()))
+            }
+            result.onFailure { error ->
+                if (generation == categoryGeneration) {
+                    _playlists.update {
+                        it.copy(
+                            categoryLoading = false,
+                            categoryError = error.message ?: "分类加载失败",
+                        )
+                    }
+                }
+            }.onSuccess { items ->
+                _playlists.update {
+                    it.copy(
+                        categoryPlaylists = items,
+                        categoryLoading = false,
+                        categoryError = "",
+                    )
+                }
+            }
+        }
+    }
+
+    // ---------- collection detail ----------
+
+    fun openChart(chart: TopList) {
+        val source = chart.source.ifBlank { _charts.value.providerId.ifBlank { settingsState.value.provider } }
+        val subtitle = listOf(
+            chart.updateFrequency.ifBlank { chart.description },
+            "${chart.trackCount} 首".takeIf { chart.trackCount > 0 },
+        ).filterNotNull().filter { it.isNotBlank() }.joinToString(" / ")
+        _collection.value = CollectionUiState(
+            kind = CollectionKind.Chart,
+            id = chart.id,
+            title = chart.name,
+            subtitle = subtitle,
+            cover = chart.cover,
+            source = source,
+            sourceName = providerName(source),
+            loading = true,
+        )
+        _events.tryEmit(UiEvent.OpenCollection(chart.name))
+        val generation = ++collectionGeneration
+        viewModelScope.launch {
+            val result = runCatching { app.repository.topListSongs(source, cookieFor(source), chart.id) }
+            if (generation != collectionGeneration) return@launch
+            _collection.update {
+                it.copy(
+                    songs = result.getOrDefault(emptyList()),
+                    loading = false,
+                    error = result.exceptionOrNull()?.message.orEmpty(),
+                )
+            }
+        }
+    }
+
+    fun openPlaylist(playlist: Playlist, album: Boolean) {
+        val source = playlist.source.ifBlank { settingsState.value.provider }
+        val subtitle = listOf(
+            playlist.creator.ifBlank { if (album) "专辑" else "歌单" },
+            "${playlist.trackCount} 首".takeIf { playlist.trackCount > 0 },
+        ).filterNotNull().joinToString(" / ")
+        _collection.value = CollectionUiState(
+            kind = if (album) CollectionKind.Album else CollectionKind.Playlist,
+            id = playlist.id,
+            title = playlist.name,
+            subtitle = subtitle,
+            cover = playlist.cover,
+            source = source,
+            sourceName = providerName(source),
+            loading = true,
+        )
+        _events.tryEmit(UiEvent.OpenCollection(playlist.name))
+        val generation = ++collectionGeneration
+        viewModelScope.launch {
+            val result = if (album) {
+                runCatching { app.repository.albumSongs(source, cookieFor(source), playlist.id) }
+            } else {
+                runCatching { app.repository.playlistSongs(source, cookieFor(source), playlist.id) }
+            }
+            if (generation != collectionGeneration) return@launch
+            _collection.update {
+                it.copy(
+                    songs = result.getOrDefault(emptyList()),
+                    loading = false,
+                    error = result.exceptionOrNull()?.message.orEmpty(),
+                )
+            }
+        }
+    }
+
+    fun retryCollection() {
+        val current = _collection.value
+        if (current.title.isBlank()) return
+        val generation = ++collectionGeneration
+        _collection.update { it.copy(loading = true, error = "") }
+        viewModelScope.launch {
+            val result = runCatching {
+                when (current.kind) {
+                    CollectionKind.Chart -> app.repository.topListSongs(current.source, cookieFor(current.source), current.id)
+                    CollectionKind.Album -> app.repository.albumSongs(current.source, cookieFor(current.source), current.id)
+                    CollectionKind.Playlist -> app.repository.playlistSongs(current.source, cookieFor(current.source), current.id)
+                }
+            }
+            if (generation != collectionGeneration) return@launch
+            _collection.update {
+                it.copy(
+                    songs = result.getOrDefault(emptyList()),
+                    loading = false,
+                    error = result.exceptionOrNull()?.message.orEmpty(),
+                )
+            }
+        }
+    }
+
+    fun playCollection() {
+        val songs = _collection.value.songs
+        if (songs.isNotEmpty()) play(songs.first(), songs)
+    }
+
+    fun saveCollectionToLibrary() {
+        val collection = _collection.value
+        if (collection.songs.isEmpty()) {
+            message("当前歌单还没有加载完成")
+            return
+        }
+        addSongsToLibrary(collection.title, collection.songs)
+    }
+
+    fun closeCollection() {
+        _collection.value = CollectionUiState()
+    }
+
+    // ---------- discover: 追加分页、直接播放榜单 / 歌单、加入队列、封面取色 ----------
+
+    private val _categoryEndKey = MutableStateFlow("")
+
+    /** 当前分类已经没有下一页。键里带上列表长度，重新进入同一分类时自动失效。 */
+    val categoryEnd: StateFlow<Boolean> = combine(_playlists, _categoryEndKey) { playlists, key ->
+        key.isNotEmpty() && key == categoryEndKey(playlists, playlists.categoryPlaylists.size)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    private fun categoryEndKey(playlists: PlaylistsUiState, size: Int) =
+        "${playlists.providerId}|${playlists.selectedCategoryId}|$size"
+
+    /** 手机和平板滚到底时把下一页接在后面；电视仍用 categoryPage() 整页翻。失败时页码不前进，再调一次就是重试。 */
+    fun loadMoreCategory() {
+        val current = _playlists.value
+        if (current.categoryLoading) return
+        if (current.categoryPlaylists.isEmpty()) {
+            loadCategory(current.selectedCategoryId, page = 1)
+            return
+        }
+        if (_categoryEndKey.value == categoryEndKey(current, current.categoryPlaylists.size)) return
+        val providerId = current.providerId.ifBlank { settingsState.value.provider }
+        val categoryId = current.selectedCategoryId
+        val page = current.categoryPage + 1
+        val generation = ++categoryGeneration
+        _playlists.update { it.copy(categoryLoading = true, categoryError = "") }
+        viewModelScope.launch {
+            val key = "$providerId|$categoryId|$page"
+            val cached = categoryCache[key]
+            val result = if (cached != null && System.currentTimeMillis() - cached.at < BROWSE_CACHE_MS) {
+                Result.success(cached.items)
+            } else {
+                runCatching { app.repository.categoryPlaylists(providerId, cookieFor(providerId), categoryId, page, 30) }
+            }
+            if (generation != categoryGeneration) return@launch
+            val latest = _playlists.value
+            // 换平台、刷新会整体替换状态而不经过 categoryGeneration，旧分类的下一页不能接到新列表后面
+            if (latest.categoryPlaylists !== current.categoryPlaylists || latest.selectedCategoryId != categoryId) {
+                _playlists.update { it.copy(categoryLoading = false) }
+                return@launch
+            }
+            result.onFailure { error ->
+                _playlists.value = latest.copy(categoryLoading = false, categoryError = error.message ?: "分类加载失败")
+            }.onSuccess { items ->
+                categoryCache[key] = CachedCategory(System.currentTimeMillis(), items)
+                val merged = (latest.categoryPlaylists + items).distinctBy { "${it.source}:${it.id}" }
+                if (merged.size == latest.categoryPlaylists.size) {
+                    _categoryEndKey.value = categoryEndKey(latest, merged.size)
+                }
+                _playlists.value = latest.copy(
+                    categoryPlaylists = merged,
+                    categoryPage = if (merged.size > latest.categoryPlaylists.size) page else latest.categoryPage,
+                    categoryLoading = false,
+                    categoryError = "",
+                )
+            }
+        }
+    }
+
+    /** 重新读取当前页（电视翻页失败后的重试；categoryPage() 遇到同一页会直接返回）。 */
+    fun retryCategory() {
+        val current = _playlists.value
+        loadCategory(current.selectedCategoryId, current.categoryPage)
+    }
+
+    /** 直接播放的读取任务：连点时只保留最后一次，免得先点的晚返回反而把后点的顶掉。 */
+    private var directPlayJob: Job? = null
+
+    /** 不进详情页直接播放整个榜单（轮播、电视 Hero 上的播放键）。 */
+    fun playChart(chart: TopList) {
+        val source = chart.source.ifBlank { _charts.value.providerId.ifBlank { settingsState.value.provider } }
+        directPlayJob?.cancel()
+        directPlayJob = viewModelScope.launch {
+            val songs = runCatching { app.repository.topListSongs(source, cookieFor(source), chart.id) }
+                .getOrElse {
+                    if (it is CancellationException) throw it
+                    message(it.message ?: "榜单读取失败", error = true)
+                    return@launch
+                }
+            if (songs.isEmpty()) message("这个榜单暂时没有歌曲", error = true) else play(songs.first(), songs)
+        }
+    }
+
+    /** 不进详情页直接播放歌单或专辑。 */
+    fun playPlaylist(playlist: Playlist, album: Boolean = false) {
+        val source = playlist.source.ifBlank { settingsState.value.provider }
+        directPlayJob?.cancel()
+        directPlayJob = viewModelScope.launch {
+            val songs = runCatching {
+                if (album) app.repository.albumSongs(source, cookieFor(source), playlist.id)
+                else app.repository.playlistSongs(source, cookieFor(source), playlist.id)
+            }.getOrElse {
+                if (it is CancellationException) throw it
+                message(it.message ?: "歌单读取失败", error = true)
+                return@launch
+            }
+            if (songs.isEmpty()) message("这个歌单暂时没有歌曲", error = true) else play(songs.first(), songs)
+        }
+    }
+
+    /** 把详情页的歌接到播放队列末尾；队列为空时直接播放。已在队列里的不重复添加。 */
+    fun enqueueCollection() {
+        val songs = _collection.value.songs
+        if (songs.isEmpty()) {
+            message("当前歌单还没有加载完成")
+            return
+        }
+        val player = controller
+        if (player == null || base.value.queue.isEmpty()) {
+            play(songs.first(), songs)
+            return
+        }
+        val known = base.value.canonicalQueue.map { it.id }.toSet()
+        val tracks = songs.map { canonicalForSong(it) }.distinctBy { it.id }.filter { it.id !in known }
+        if (tracks.isEmpty()) {
+            message("这些歌已经在播放队列里")
+            return
+        }
+        val queued = tracks.map { preferredSong(it) }
+        player.addMediaItems(queued.map(::mediaItem))
+        base.value = base.value.copy(
+            queue = base.value.queue + queued,
+            canonicalQueue = base.value.canonicalQueue + tracks,
+        )
+        message("已加入播放队列：${tracks.size} 首")
+    }
+
+    /** 封面种子色（详情页头部渐变、电视 Hero 换色），与播放页共用缓存。 */
+    suspend fun coverSeed(url: String): Int? = coverSeeds.seedFor(url)
+
+    // ---------- search ----------
+
+    fun setSearchQuery(value: String) {
+        _search.update { it.copy(query = value) }
+    }
+
+    fun submitSearch(value: String = _search.value.query) {
+        val text = value.trim()
+        if (text.isBlank()) return
+        _search.update {
+            it.copy(
+                query = text,
+                submittedQuery = text,
+                page = 1,
+                aggregateGroups = emptyList(),
+                aggregateCollections = emptyList(),
+                providerStates = emptyMap(),
+                collectionProviderStates = emptyMap(),
+                aggregateStatus = SearchStatus.Idle,
+                collectionStatus = SearchStatus.Idle,
+                error = "",
+                hasMore = false,
+            )
+        }
+        viewModelScope.launch { app.settings.addSearchHistory(text) }
+        if (isLinkQuery(text)) {
+            openLink(text)
+            return
+        }
+        search(page = 1, force = true)
+    }
+
+    fun setSearchKind(kind: SearchKind) {
+        if (kind == SearchKind.Link) return
+        _search.update { it.copy(kind = kind, page = 1) }
+        if (_search.value.submittedQuery.isNotBlank() && !isLinkQuery(_search.value.submittedQuery)) {
+            search(page = 1, force = true)
+        }
+    }
+
+    fun clearSearch() {
+        aggregateSearchJob?.cancel()
+        collectionSearchJob?.cancel()
+        _search.value = SearchUiState()
+    }
+
+    fun removeSearchHistory(query: String) {
+        viewModelScope.launch { app.settings.removeSearchHistory(query) }
+    }
+
+    fun clearSearchHistory() {
+        viewModelScope.launch { app.settings.clearSearchHistory() }
     }
 
     fun searchMore() {
-        val query = base.value.query.trim()
-        if (query.isBlank() || !base.value.aggregateHasMore || base.value.loading) return
-        search(base.value.page + 1, force = true)
+        val current = _search.value
+        if (current.submittedQuery.isBlank() || !current.hasMore || current.loading) return
+        search(page = current.page + 1, force = true)
     }
 
-    private fun searchAggregated(query: String, force: Boolean = true, page: Int = 1) {
+    fun isLinkQuery(query: String): Boolean = LINK_PATTERN.containsMatchIn(query.trim())
+
+    /** 撤销清除 / 删除搜索记录：按原顺序写回；撤销前新搜的词排在最前。 */
+    fun restoreSearchHistory(items: List<String>) {
+        if (items.isEmpty()) return
+        viewModelScope.launch {
+            val added = settingsState.value.searchHistory.filterNot { it in items }
+            val merged = (added + items).distinct().take(20)
+            app.settings.clearSearchHistory()
+            merged.asReversed().forEach { app.settings.addSearchHistory(it) }
+        }
+    }
+
+    /**
+     * 只重试本次失败、超时或被跳过的平台。已返回的平台结果保留，
+     * 分组和排序按全部启用平台重新计算（引擎只拿到失败平台时算不出正确的覆盖率和平台名）。
+     */
+    fun retryFailedSearch() {
+        val current = _search.value
+        val query = current.submittedQuery.trim()
+        if (query.isBlank() || current.loading) return
+        if (current.kind != SearchKind.Song) {
+            search(page = 1, force = true)
+            return
+        }
+        val failedIds = current.providerStates.values.filter {
+            it.status == ProviderStatus.Timeout || it.status == ProviderStatus.Error || it.status == ProviderStatus.Skipped
+        }.map { it.providerId }.toSet()
+        val all = enabledProviders()
+        val retry = all.filter { it.id in failedIds }
+        if (retry.isEmpty()) {
+            search(page = 1, force = true)
+            return
+        }
+        aggregateSearchJob?.cancel()
+        val generation = ++aggregateSearchGeneration
+        _search.update { state ->
+            state.copy(
+                loading = true,
+                error = "",
+                aggregateStatus = SearchStatus.Partial,
+                providerStates = state.providerStates +
+                    retry.associate { it.id to ProviderSearchState(it.id, it.name, ProviderStatus.Loading) },
+            )
+        }
+        aggregateSearchJob = viewModelScope.launch {
+            val names = all.associate { it.id to it.name }
+            val priority = settingsState.value.aggregation.priorityFor(all.map { it.id })
+            val preferred = priority.firstOrNull() ?: all.first().id
+            fun regroup(): List<CanonicalTrack> {
+                val cookies = settingsState.value.cookies
+                val groups = TrackMatcher.group(
+                    aggregateSongs, names, cookies, settingsState.value.aggregation.threshold(), priority,
+                    splitOverrideKeys, mergeTargets,
+                )
+                return TrackMatcher.rank(groups, all.size, priority, preferred, cookies)
+            }
+            try {
+                searchEngine.search(query, retry, force = true, page = 1).collect { update ->
+                    if (generation != aggregateSearchGeneration || update !is SearchUpdate.ProviderArrived) return@collect
+                    val status = when {
+                        update.timedOut -> ProviderStatus.Timeout
+                        update.error != null -> ProviderStatus.Error
+                        else -> ProviderStatus.Success
+                    }
+                    val merged = (aggregateSongs[update.providerId].orEmpty() + update.songs).distinctBy { it.key }
+                    aggregateSongs = aggregateSongs + (update.providerId to merged)
+                    val providerState = ProviderSearchState(
+                        providerId = update.providerId,
+                        providerName = update.providerName,
+                        status = status,
+                        count = merged.size,
+                        elapsedMs = update.elapsedMs,
+                        error = update.error.orEmpty(),
+                    )
+                    val groups = regroup()
+                    _search.update {
+                        it.copy(providerStates = it.providerStates + (update.providerId to providerState), aggregateGroups = groups)
+                    }
+                }
+                if (generation == aggregateSearchGeneration) {
+                    val groups = regroup()
+                    _search.update {
+                        val allFailed = it.providerStates.values.isNotEmpty() && it.providerStates.values.all { state ->
+                            state.status == ProviderStatus.Timeout || state.status == ProviderStatus.Error || state.status == ProviderStatus.Skipped
+                        }
+                        it.copy(
+                            aggregateGroups = groups,
+                            aggregateStatus = when {
+                                groups.isNotEmpty() -> SearchStatus.Complete
+                                allFailed -> SearchStatus.Failed
+                                else -> SearchStatus.Empty
+                            },
+                        )
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (generation == aggregateSearchGeneration) {
+                    _search.update { it.copy(error = error.message ?: "重试失败") }
+                }
+            } finally {
+                if (generation == aggregateSearchGeneration) {
+                    _search.update { it.copy(loading = false) }
+                }
+            }
+        }
+    }
+
+    private fun search(page: Int, force: Boolean) {
+        val current = _search.value
+        val query = current.submittedQuery.trim()
+        if (query.isBlank()) return
+        when (current.kind) {
+            SearchKind.Song -> searchAggregated(query, force, page)
+            SearchKind.Album, SearchKind.Playlist -> searchCollections(current.kind, query)
+            SearchKind.Link -> openLink(query)
+        }
+    }
+
+    private fun searchAggregated(query: String, force: Boolean, page: Int) {
         aggregateSearchJob?.cancel()
         val generation = ++aggregateSearchGeneration
         if (page == 1) {
             aggregateSongs = emptyMap()
-            base.value = base.value.copy(
-                loading = true,
-                error = "",
-                aggregateStatus = SearchStatus.Loading,
-                aggregateGroups = emptyList(),
-                providerStates = emptyMap(),
-                aggregateHasMore = false,
-                page = 1,
-            )
+            _search.update {
+                it.copy(
+                    loading = true,
+                    error = "",
+                    aggregateStatus = SearchStatus.Loading,
+                    aggregateGroups = emptyList(),
+                    providerStates = emptyMap(),
+                    hasMore = false,
+                    page = 1,
+                )
+            }
         } else {
-            base.value = base.value.copy(
-                loading = true,
-                error = "",
-                page = page,
-            )
+            _search.update { it.copy(loading = true, error = "", page = page) }
         }
         aggregateSearchJob = viewModelScope.launch {
             val providers = enabledProviders()
             if (providers.isEmpty()) {
-                fail("没有启用可搜索的平台")
+                _search.update {
+                    it.copy(loading = false, error = "没有启用可搜索的平台", aggregateStatus = SearchStatus.Failed)
+                }
                 return@launch
             }
             try {
@@ -439,46 +1038,62 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                 elapsedMs = update.elapsedMs,
                                 error = update.error.orEmpty(),
                             )
-                            base.value = base.value.copy(
-                                providerStates = base.value.providerStates + (update.providerId to providerState),
-                                aggregateStatus = SearchStatus.Partial,
-                            )
+                            _search.update {
+                                it.copy(
+                                    providerStates = it.providerStates + (update.providerId to providerState),
+                                    aggregateStatus = SearchStatus.Partial,
+                                )
+                            }
                         }
-                        is SearchUpdate.Groups -> base.value = base.value.copy(aggregateGroups = update.groups)
+                        is SearchUpdate.Groups -> _search.update { it.copy(aggregateGroups = update.groups) }
                         is SearchUpdate.FromCache -> {
                             aggregateSongs = update.songs
-                            base.value = base.value.copy(
-                                aggregateGroups = update.groups,
-                                providerStates = update.states,
-                                aggregateStatus = SearchStatus.Complete,
-                                aggregateHasMore = update.hasMore,
-                            )
+                            _search.update {
+                                it.copy(
+                                    aggregateGroups = update.groups,
+                                    providerStates = update.states,
+                                    aggregateStatus = SearchStatus.Complete,
+                                    hasMore = update.hasMore,
+                                )
+                            }
                         }
                         is SearchUpdate.Completed -> {
-                            val states = base.value.providerStates.values
+                            val states = _search.value.providerStates.values
                             val allFailed = states.isNotEmpty() && states.all {
-                                it.status == ProviderStatus.Timeout || it.status == ProviderStatus.Error || it.status == ProviderStatus.Skipped
+                                it.status == ProviderStatus.Timeout ||
+                                    it.status == ProviderStatus.Error ||
+                                    it.status == ProviderStatus.Skipped
                             }
-                            base.value = base.value.copy(
-                                aggregateGroups = update.groups,
-                                aggregateStatus = when {
-                                    update.groups.isNotEmpty() -> SearchStatus.Complete
-                                    allFailed -> SearchStatus.Failed
-                                    else -> SearchStatus.Empty
-                                },
-                                aggregateHasMore = update.hasMore,
-                                loading = false,
-                            )
+                            _search.update {
+                                it.copy(
+                                    aggregateGroups = update.groups,
+                                    aggregateStatus = when {
+                                        update.groups.isNotEmpty() -> SearchStatus.Complete
+                                        allFailed -> SearchStatus.Failed
+                                        else -> SearchStatus.Empty
+                                    },
+                                    hasMore = update.hasMore,
+                                    loading = false,
+                                )
+                            }
                         }
                     }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                if (generation == aggregateSearchGeneration) fail(error.message ?: "聚合搜索失败")
+                if (generation == aggregateSearchGeneration) {
+                    _search.update {
+                        it.copy(
+                            loading = false,
+                            error = error.message ?: "聚合搜索失败",
+                            aggregateStatus = SearchStatus.Failed,
+                        )
+                    }
+                }
             } finally {
                 if (generation == aggregateSearchGeneration) {
-                    base.value = base.value.copy(loading = false)
+                    _search.update { it.copy(loading = false) }
                 }
             }
         }
@@ -487,20 +1102,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun searchCollections(kind: SearchKind, query: String) {
         collectionSearchJob?.cancel()
         val generation = ++collectionSearchGeneration
-        base.value = base.value.copy(
-            loading = true,
-            error = "",
-            aggregateCollections = emptyList(),
-            collectionProviderStates = emptyMap(),
-            collectionSearchStatus = SearchStatus.Loading,
-            page = 1,
-        )
+        _search.update {
+            it.copy(
+                loading = true,
+                error = "",
+                aggregateCollections = emptyList(),
+                collectionProviderStates = emptyMap(),
+                collectionStatus = SearchStatus.Loading,
+                page = 1,
+            )
+        }
         collectionSearchJob = viewModelScope.launch {
             val providers = enabledProviders().filter {
                 if (kind == SearchKind.Album) it.searchAlbum else it.searchPlaylist
             }
             if (providers.isEmpty()) {
-                fail("没有启用支持${kind.label}搜索的平台")
+                _search.update {
+                    it.copy(loading = false, error = "没有启用支持${kind.label}搜索的平台", collectionStatus = SearchStatus.Failed)
+                }
                 return@launch
             }
             val names = providers.associate { it.id to it.name }
@@ -543,11 +1162,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             states[provider.id] = providerState
                             results[provider.id] = lists
                             if (generation == collectionSearchGeneration) {
-                                base.value = base.value.copy(
-                                    aggregateCollections = CollectionMatcher.group(results, names, kind, priority),
-                                    collectionProviderStates = base.value.collectionProviderStates + (provider.id to providerState),
-                                    collectionSearchStatus = SearchStatus.Partial,
-                                )
+                                _search.update {
+                                    it.copy(
+                                        aggregateCollections = CollectionMatcher.group(results, names, kind, priority),
+                                        collectionProviderStates = it.collectionProviderStates + (provider.id to providerState),
+                                        collectionStatus = SearchStatus.Partial,
+                                    )
+                                }
                             }
                         }
                     }
@@ -555,25 +1176,37 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (generation == collectionSearchGeneration) {
                     val grouped = CollectionMatcher.group(results, names, kind, priority)
                     val allFailed = states.isNotEmpty() && states.values.all {
-                        it.status == ProviderStatus.Timeout || it.status == ProviderStatus.Error || it.status == ProviderStatus.Skipped
+                        it.status == ProviderStatus.Timeout ||
+                            it.status == ProviderStatus.Error ||
+                            it.status == ProviderStatus.Skipped
                     }
-                    base.value = base.value.copy(
-                        aggregateCollections = grouped,
-                        collectionSearchStatus = when {
-                            grouped.isNotEmpty() -> SearchStatus.Complete
-                            allFailed -> SearchStatus.Failed
-                            else -> SearchStatus.Empty
-                        },
-                        loading = false,
-                    )
+                    _search.update {
+                        it.copy(
+                            aggregateCollections = grouped,
+                            collectionStatus = when {
+                                grouped.isNotEmpty() -> SearchStatus.Complete
+                                allFailed -> SearchStatus.Failed
+                                else -> SearchStatus.Empty
+                            },
+                            loading = false,
+                        )
+                    }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                if (generation == collectionSearchGeneration) fail(error.message ?: "聚合搜索失败")
+                if (generation == collectionSearchGeneration) {
+                    _search.update {
+                        it.copy(
+                            loading = false,
+                            error = error.message ?: "聚合搜索失败",
+                            collectionStatus = SearchStatus.Failed,
+                        )
+                    }
+                }
             } finally {
                 if (generation == collectionSearchGeneration) {
-                    base.value = base.value.copy(loading = false)
+                    _search.update { it.copy(loading = false) }
                 }
             }
         }
@@ -583,58 +1216,274 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val all = base.value.providers.filter { it.search }
         if (all.isEmpty()) return emptyList()
         val ids = settingsState.value.aggregation.enabledOrDefault(all.map { it.id })
-        return all.filter { it.id in ids }.ifEmpty { all.take(5) }
+        return all.filter { it.id in ids }
     }
 
-    fun openPlaylist(item: Playlist, album: Boolean) = launchAction {
-        val source = item.source.ifBlank { settingsState.value.provider }
-        base.value = base.value.copy(
-            collectionTitle = item.name,
-            collectionSongs = emptyList(),
-            collectionSource = source,
-            collectionOpen = true,
-        )
-        val songs = if (album) app.repository.albumSongs(source, cookieFor(source), item.id)
-        else app.repository.playlistSongs(source, cookieFor(source), item.id)
-        base.value = base.value.copy(collectionSongs = songs)
-    }
-
-    fun openChart(item: TopList) = launchAction {
-        val source = item.source.ifBlank { settingsState.value.provider }
-        base.value = base.value.copy(
-            collectionTitle = item.name,
-            collectionSongs = emptyList(),
-            collectionSource = source,
-            collectionOpen = true,
-        )
-        base.value = base.value.copy(
-            collectionSongs = app.repository.topListSongs(source, cookieFor(source), item.id),
-        )
-    }
-
-    fun closeCollection() {
-        base.value = base.value.copy(collectionOpen = false)
-    }
-
-    fun openLink(link: String) = launchAction {
-        val id = settingsState.value.provider
-        val result = runCatching { app.repository.parsePlaylist(id, cookieFor(id), link) }.getOrNull()
-            ?: runCatching { app.repository.parseAlbum(id, cookieFor(id), link) }.getOrNull()
-        if (result != null) {
-            val source = result.item.source.ifBlank { id }
-            base.value = base.value.copy(
-                collectionTitle = result.item.name,
-                collectionSongs = result.songs,
-                collectionSource = source,
-                collectionOpen = true,
-            )
-        } else {
-            val song = app.repository.parseSong(id, cookieFor(id), link)
-            play(song, listOf(song))
+    fun openLink(link: String) {
+        val value = link.trim()
+        if (value.isBlank()) return
+        viewModelScope.launch {
+            base.value = base.value.copy(loading = true, error = "")
+            val providerId = settingsState.value.provider
+            val playlist = runCatching { app.repository.parsePlaylist(providerId, cookieFor(providerId), value) }.getOrNull()
+            val album = if (playlist == null) {
+                runCatching { app.repository.parseAlbum(providerId, cookieFor(providerId), value) }.getOrNull()
+            } else {
+                null
+            }
+            val result = playlist ?: album
+            if (result != null) {
+                val kind = if (playlist != null) CollectionKind.Playlist else CollectionKind.Album
+                val source = result.item.source.ifBlank { providerId }
+                _collection.value = CollectionUiState(
+                    kind = kind,
+                    id = result.item.id,
+                    title = result.item.name,
+                    subtitle = listOf(result.item.creator, "${result.songs.size} 首").filter { it.isNotBlank() }.joinToString(" / "),
+                    cover = result.item.cover,
+                    source = source,
+                    sourceName = providerName(source),
+                    songs = result.songs,
+                )
+                _events.tryEmit(UiEvent.OpenCollection(result.item.name))
+            } else {
+                val song = runCatching { app.repository.parseSong(providerId, cookieFor(providerId), value) }.getOrNull()
+                if (song != null) {
+                    play(song, listOf(song))
+                } else {
+                    base.value = base.value.copy(error = "没有识别到这个链接")
+                }
+            }
+            base.value = base.value.copy(loading = false)
         }
     }
 
-    fun play(song: Song, queue: List<Song> = base.value.collectionSongs.ifEmpty { base.value.songs.ifEmpty { base.value.hotSongs } }) {
+    // ---------- library ----------
+
+    fun localPlaylistDetail(id: String): Flow<LocalPlaylistDetail?> =
+        combine(libraryDao.playlist(id), libraryDao.entries(id)) { playlist, entries ->
+            playlist?.let {
+                val decoded = entries.mapNotNull { entry ->
+                    runCatching { json.decodeFromString<Song>(entry.payload) }.getOrNull()
+                        ?.let { song -> entry.position to song }
+                }
+                LocalPlaylistDetail(
+                    playlist = it,
+                    entries = entries,
+                    songs = decoded.map { (_, song) -> song },
+                    songByPosition = decoded.toMap(),
+                )
+            }
+        }
+
+    fun createPlaylist(name: String) {
+        val value = name.trim()
+        if (value.isBlank()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val id = UUID.randomUUID().toString()
+            libraryDao.putPlaylist(
+                PlaylistEntity(id = id, name = value, createdAt = now, updatedAt = now, dirty = true)
+            )
+            app.sync.onLocalChange()
+            message("已创建歌单「$value」")
+        }
+    }
+
+    fun renamePlaylist(id: String, name: String) {
+        val value = name.trim()
+        if (value.isBlank()) return
+        viewModelScope.launch {
+            libraryDao.renamePlaylist(id, value, System.currentTimeMillis())
+            app.sync.onLocalChange()
+        }
+    }
+
+    fun deletePlaylist(id: String) {
+        viewModelScope.launch {
+            libraryDao.softDelete(id, System.currentTimeMillis())
+            app.sync.onLocalChange()
+            message("已删除歌单，可从云端恢复前先在本机保留墓碑")
+        }
+    }
+
+    // 歌单增删移的位置都是读出再写回，快速连点或撤销时要串行，否则会按过期的位置改错歌
+    private val playlistMutex = Mutex()
+
+    private fun launchPlaylistEdit(block: suspend CoroutineScope.() -> Unit) =
+        viewModelScope.launch { playlistMutex.withLock { block() } }
+
+    fun addSongToPlaylist(playlistId: String, song: Song) {
+        launchPlaylistEdit {
+            val playlist = libraryDao.playlistOnce(playlistId) ?: return@launchPlaylistEdit
+            if (playlist.deletedAt != null) return@launchPlaylistEdit
+            val entries = libraryDao.entriesOnce(playlistId)
+            if (entries.any { it.songKey == song.key }) {
+                message("这首歌已经在「${playlist.name}」里")
+                return@launchPlaylistEdit
+            }
+            val now = System.currentTimeMillis()
+            libraryDao.replaceEntries(
+                playlistId,
+                entries + PlaylistEntryEntity(
+                    playlistId = playlistId,
+                    position = entries.size,
+                    songKey = song.key,
+                    payload = json.encodeToString(song),
+                ),
+            )
+            libraryDao.markDirty(playlistId, now)
+            app.sync.onLocalChange()
+            message("已加入「${playlist.name}」")
+        }
+    }
+
+    fun removePlaylistEntry(playlistId: String, position: Int) {
+        launchPlaylistEdit {
+            val entries = libraryDao.entriesOnce(playlistId).filterNot { it.position == position }
+            libraryDao.replaceEntries(playlistId, entries.withIndex().map { (index, entry) -> entry.copy(position = index) })
+            libraryDao.markDirty(playlistId, System.currentTimeMillis())
+            app.sync.onLocalChange()
+        }
+    }
+
+    fun movePlaylistEntry(playlistId: String, position: Int, delta: Int) {
+        launchPlaylistEdit {
+            val entries = libraryDao.entriesOnce(playlistId).toMutableList()
+            val index = entries.indexOfFirst { it.position == position }
+            if (index < 0) return@launchPlaylistEdit
+            val target = (index + delta).coerceIn(0, entries.lastIndex)
+            if (target == index) return@launchPlaylistEdit
+            val item = entries.removeAt(index)
+            entries.add(target, item)
+            libraryDao.replaceEntries(playlistId, entries.withIndex().map { (i, entry) -> entry.copy(position = i) })
+            libraryDao.markDirty(playlistId, System.currentTimeMillis())
+            app.sync.onLocalChange()
+        }
+    }
+
+    fun searchLibrarySongs(query: String) {
+        val value = query.trim()
+        if (value.isBlank()) {
+            _librarySearch.value = LibrarySearchUiState()
+            return
+        }
+        val generation = ++librarySearchGeneration
+        _librarySearch.value = LibrarySearchUiState(query = value, loading = true)
+        viewModelScope.launch {
+            val providerId = settingsState.value.provider
+            val result = runCatching { app.repository.searchSongs(providerId, cookieFor(providerId), value) }
+            if (generation != librarySearchGeneration) return@launch
+            _librarySearch.value = LibrarySearchUiState(
+                query = value,
+                results = result.getOrDefault(emptyList()),
+                loading = false,
+                error = result.exceptionOrNull()?.message.orEmpty(),
+            )
+        }
+    }
+
+    fun clearLibrarySearch() {
+        librarySearchGeneration++
+        _librarySearch.value = LibrarySearchUiState()
+    }
+
+    /** 撤销“移出歌单”：把原条目插回原位置。 */
+    fun insertPlaylistEntry(playlistId: String, position: Int, songKey: String, payload: String) {
+        launchPlaylistEdit {
+            val entries = libraryDao.entriesOnce(playlistId).toMutableList()
+            if (entries.any { it.songKey == songKey }) return@launchPlaylistEdit
+            val index = position.coerceIn(0, entries.size)
+            entries.add(index, PlaylistEntryEntity(playlistId, index, songKey, payload))
+            libraryDao.replaceEntries(playlistId, entries.withIndex().map { (i, entry) -> entry.copy(position = i) })
+            libraryDao.markDirty(playlistId, System.currentTimeMillis())
+            app.sync.onLocalChange()
+        }
+    }
+
+    fun clearPlayHistory() = viewModelScope.launch {
+        history.value.forEach { app.database.dao().remove("history", it.key) }
+    }
+
+    /** 撤销取消收藏 / 清除记录：按原时间写回。 */
+    fun restoreSavedSongs(songs: List<SavedSong>) = viewModelScope.launch {
+        songs.forEach { app.database.dao().save(it) }
+    }
+
+    fun addSongsToLibrary(name: String, songs: List<Song>) {
+        if (songs.isEmpty()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val id = UUID.randomUUID().toString()
+            libraryDao.putPlaylist(
+                PlaylistEntity(id = id, name = name.trim().ifBlank { "未命名歌单" }, createdAt = now, updatedAt = now, dirty = true)
+            )
+            libraryDao.replaceEntries(
+                id,
+                songs.mapIndexed { index, song ->
+                    PlaylistEntryEntity(id, index, song.key, json.encodeToString(song))
+                },
+            )
+            app.sync.onLocalChange()
+            message("已保存为「${name.trim().ifBlank { "未命名歌单" }}」")
+        }
+    }
+
+    fun toggleFavorite(song: Song) = viewModelScope.launch {
+        if (favorites.value.any { it.key == song.key }) app.database.dao().remove("favorite", song.key)
+        else remember("favorite", song)
+    }
+
+    fun download(song: Song) = viewModelScope.launch {
+        val url = song.url.ifBlank { runCatching { app.repository.downloadUrl(song, cookieFor(song.source)) }.getOrDefault("") }
+        if (url.isBlank()) {
+            message("没有可下载的地址", error = true)
+            return@launch
+        }
+        val appContext = getApplication<Application>()
+        val directory = appContext.getExternalFilesDir("music") ?: appContext.filesDir
+        val safeName = "${song.name}-${song.artist}[${song.source}].${song.ext.ifBlank { "mp3" }}"
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val file = File(directory, safeName)
+        app.database.dao().saveDownload(
+            DownloadRecord(song.key, json.encodeToString(song), file.absolutePath, "下载中", System.currentTimeMillis())
+        )
+        runCatching {
+            withContext(Dispatchers.IO) {
+                http.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                    if (!response.isSuccessful) error(response.message)
+                    file.outputStream().use { output -> response.body.byteStream().copyTo(output) }
+                }
+            }
+            app.database.dao().saveDownload(
+                DownloadRecord(song.key, json.encodeToString(song), file.absolutePath, "已完成", System.currentTimeMillis())
+            )
+            message("已下载「${song.title}」")
+        }.onFailure {
+            file.delete()
+            app.database.dao().deleteDownload(song.key)
+            message(it.message ?: "下载失败", error = true)
+        }
+    }
+
+    fun deleteDownload(record: DownloadRecord) = viewModelScope.launch {
+        File(record.path).delete()
+        app.database.dao().deleteDownload(record.key)
+    }
+
+    fun playDownloaded(record: DownloadRecord) {
+        val song = record.song(json)
+        val file = File(record.path)
+        if (!file.exists()) {
+            message("本地文件已不存在", error = true)
+            return
+        }
+        play(song.copy(url = Uri.fromFile(file).toString()), listOf(song))
+    }
+
+    // ---------- playback ----------
+
+    fun play(song: Song, queue: List<Song> = listOf(song)) {
         val selected = canonicalForSong(song)
         val tracks = queue.map { canonicalForSong(it) }.ifEmpty { listOf(selected) }
         val ordered = listOf(selected) + tracks.filter { it.id != selected.id }
@@ -694,7 +1543,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 current = resolvedSong,
                 currentTrack = playableTrack,
                 currentSource = source,
-                playerOpen = true,
+                playerOpen = autoOpenPlayer || base.value.playerOpen,
                 playbackNotice = fallbackNotice,
                 error = "",
                 deepLink = "",
@@ -705,7 +1554,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun openSource(track: CanonicalTrack, queue: List<CanonicalTrack> = base.value.aggregateGroups) {
+    fun openSource(track: CanonicalTrack, queue: List<CanonicalTrack> = _search.value.aggregateGroups) {
         val ordered = queue.ifEmpty { listOf(track) }.let { list ->
             if (list.any { it.id == track.id }) list else listOf(track) + list
         }
@@ -718,10 +1567,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun openSourceForSong(song: Song) {
+    fun openSourceForSong(song: Song, queue: List<Song>) {
         val track = canonicalForSong(song)
-        val queue = base.value.collectionSongs.map { canonicalForSong(it) }.ifEmpty { listOf(track) }
-        openSource(track, queue)
+        val tracks = queue.map { canonicalForSong(it) }.ifEmpty { listOf(track) }
+        openSource(track, tracks)
     }
 
     fun closeSource() {
@@ -764,7 +1613,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     matchMethod = result.method,
                 )
             }
-
             val updated = if (existing != null) track else TrackMatcher.withSource(track, source)
             if (remember) {
                 app.settings.saveAggregation(
@@ -779,7 +1627,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 sourcePickerTrack = null,
                 sourcePickerQueue = emptyList(),
                 sourcePickerBusy = "",
-                aggregateGroups = base.value.aggregateGroups.map { if (it.id == updated.id) updated else it },
             )
             playTrack(updated, queue.map { if (it.id == updated.id) updated else it }, providerId)
         }
@@ -795,19 +1642,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         pinnedProviders[single.id] = source.providerId
         base.value = base.value.copy(sourcePickerTrack = null, sourcePickerQueue = emptyList(), sourcePickerError = "")
         playTrack(single, listOf(single), source.providerId)
-    }
-
-    fun clearMatchCache() {
-        searchEngine.clearCache()
-        resolver.clearCache()
-        viewModelScope.launch(Dispatchers.IO) { runCatching { aggregateDao.clearMatches() } }
-    }
-
-    fun clearMediaCache() = viewModelScope.launch(Dispatchers.IO) {
-        runCatching {
-            app.mediaCache.keys.toList().forEach { app.mediaCache.removeResource(it) }
-        }
-        base.value = base.value.copy(playbackNotice = "已清除播放缓存")
     }
 
     fun splitSource(track: CanonicalTrack, source: TrackSource) {
@@ -841,15 +1675,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 separatedRaw
             }
-            val groups = base.value.aggregateGroups.flatMap { group ->
+            val groups = _search.value.aggregateGroups.flatMap { group ->
                 when {
                     group.id != track.id -> listOf(group)
                     remaining.sources.isEmpty() -> listOf(separated)
                     else -> listOf(remaining, separated)
                 }
             }.distinctBy { it.id }
+            _search.update { it.copy(aggregateGroups = groups) }
             base.value = base.value.copy(
-                aggregateGroups = groups,
                 sourcePickerTrack = remaining.sources.takeIf { it.isNotEmpty() }?.let { remaining },
                 sourcePickerInfo = if (remaining.sources.isEmpty()) "" else "已拆分，当前分组还剩 ${remaining.sources.size} 个来源",
                 sourcePickerError = "",
@@ -891,11 +1725,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             searchEngine.clearCache()
             val merged = source.sources.fold(target) { acc, item -> TrackMatcher.withSource(acc, item) }
                 .copy(alternatives = (target.alternatives + source.alternatives).distinctBy { it.song.key })
-            val groups = base.value.aggregateGroups
+            val groups = _search.value.aggregateGroups
                 .filterNot { it.id == source.id }
                 .map { if (it.id == target.id) merged else it }
+            _search.update { it.copy(aggregateGroups = groups) }
             base.value = base.value.copy(
-                aggregateGroups = groups,
                 mergeTrack = null,
                 sourcePickerTrack = when (base.value.sourcePickerTrack?.id) {
                     source.id, target.id -> merged
@@ -925,8 +1759,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val updated = TrackMatcher.withSource(track, source).copy(
                 alternatives = track.alternatives.filterNot { it.song.key == source.song.key },
             )
+            _search.update { state ->
+                state.copy(aggregateGroups = state.aggregateGroups.map { if (it.id == track.id) updated else it })
+            }
             base.value = base.value.copy(
-                aggregateGroups = base.value.aggregateGroups.map { if (it.id == track.id) updated else it },
                 sourcePickerTrack = if (base.value.sourcePickerTrack?.id == track.id) updated else base.value.sourcePickerTrack,
                 sourcePickerInfo = "已合并到当前曲目",
                 sourcePickerError = "",
@@ -939,11 +1775,26 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         mergeTargets = emptyMap()
         searchEngine.clearCache()
         viewModelScope.launch(Dispatchers.IO) { runCatching { aggregateDao.clearOverrides() } }
+        message("已恢复自动匹配")
     }
 
-    fun toggleFavorite(song: Song) = viewModelScope.launch {
-        if (favorites.value.any { it.key == song.key }) app.database.dao().remove("favorite", song.key)
-        else remember("favorite", song)
+    /** ≥1200dp 平板右侧常驻播放窗格，开始播放时不必再弹出全屏播放页。 */
+    private var autoOpenPlayer = true
+
+    fun setAutoOpenPlayer(enabled: Boolean) {
+        autoOpenPlayer = enabled
+    }
+
+    fun openPlayer(open: Boolean) {
+        base.value = base.value.copy(playerOpen = open)
+    }
+
+    fun clearError() {
+        base.value = base.value.copy(error = "")
+    }
+
+    fun clearNotice() {
+        base.value = base.value.copy(playbackNotice = "", deepLink = "")
     }
 
     fun transport(action: String) {
@@ -961,7 +1812,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun seek(position: Long) { controller?.seekTo(position) }
+    fun seek(position: Long) {
+        controller?.seekTo(position)
+    }
+
+    fun playQueueIndex(index: Int) {
+        val player = controller ?: return
+        if (index !in base.value.queue.indices) return
+        player.seekTo(index, 0)
+        player.play()
+    }
+
+    fun clearQueue() {
+        controller?.clearMediaItems()
+        controller?.stop()
+        base.value = base.value.copy(current = null, currentTrack = null, currentSource = null, queue = emptyList(), canonicalQueue = emptyList(), playerOpen = false)
+    }
 
     fun openDeepLink() {
         val link = base.value.deepLink
@@ -971,121 +1837,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             getApplication<Application>().startActivity(intent)
         }
         base.value = base.value.copy(deepLink = "")
-    }
-
-    fun download(song: Song) = viewModelScope.launch {
-        val url = song.url.ifBlank { runCatching { app.repository.downloadUrl(song, cookieFor(song.source)) }.getOrDefault("") }
-        if (url.isBlank()) {
-            fail("没有可下载的地址")
-            return@launch
-        }
-        val appContext = getApplication<Application>()
-        val directory = appContext.getExternalFilesDir("music") ?: appContext.filesDir
-        val safeName = "${song.name}-${song.artist}[${song.source}].${song.ext.ifBlank { "mp3" }}"
-            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
-        val file = File(directory, safeName)
-        app.database.dao().saveDownload(DownloadRecord(song.key, json.encodeToString(song), file.absolutePath, "下载中", System.currentTimeMillis()))
-        withContext(Dispatchers.IO) {
-            http.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                if (!response.isSuccessful) error(response.message)
-                file.outputStream().use { output -> response.body.byteStream().copyTo(output) }
-            }
-        }
-        app.database.dao().saveDownload(DownloadRecord(song.key, json.encodeToString(song), file.absolutePath, "已完成", System.currentTimeMillis()))
-    }
-
-    fun deleteDownload(record: DownloadRecord) = viewModelScope.launch { File(record.path).delete(); app.database.dao().deleteDownload(record.key) }
-    fun createPlaylist(name: String) = viewModelScope.launch { if (name.isNotBlank()) app.database.dao().insertPlaylist(LocalPlaylist(name = name.trim(), songs = "[]")) }
-    fun addToPlaylist(id: Long, song: Song) = viewModelScope.launch {
-        val playlist = localPlaylists.value.find { it.id == id } ?: return@launch
-        val songs = json.decodeFromString<List<Song>>(playlist.songs).toMutableList()
-        if (songs.none { it.key == song.key }) songs += song
-        app.database.dao().updatePlaylist(id, json.encodeToString(songs))
-    }
-    fun deletePlaylist(id: Long) = viewModelScope.launch { app.database.dao().deletePlaylist(id) }
-    fun openLocalPlaylist(playlist: LocalPlaylist) {
-        base.value = base.value.copy(
-            collectionTitle = playlist.name,
-            collectionSongs = json.decodeFromString(playlist.songs),
-            collectionSource = "local",
-            collectionOpen = true,
-        )
-    }
-
-    fun toggleAggregateProvider(id: String) = viewModelScope.launch {
-        val current = settingsState.value.aggregation
-        val enabled = current.enabledProviders.toMutableList()
-        if (id in enabled) enabled.remove(id) else enabled.add(id)
-        searchEngine.clearCache()
-        app.settings.saveAggregation(current.copy(enabledProviders = enabled))
-    }
-
-    fun setPlaybackMode(mode: PlaybackMode) = viewModelScope.launch {
-        app.settings.saveAggregation(settingsState.value.aggregation.copy(playbackMode = mode))
-    }
-
-    fun setPinnedProvider(id: String?) = viewModelScope.launch {
-        app.settings.saveAggregation(
-            settingsState.value.aggregation.copy(
-                pinnedProvider = id,
-                playbackMode = if (id == null) PlaybackMode.Auto else PlaybackMode.Pinned,
-            )
-        )
-    }
-
-    fun setAllowPreview(value: Boolean) = viewModelScope.launch {
-        searchEngine.clearCache()
-        app.settings.saveAggregation(settingsState.value.aggregation.copy(allowPreview = value))
-    }
-
-    fun setMatchStrictness(value: MatchStrictness) = viewModelScope.launch {
-        searchEngine.clearCache()
-        app.settings.saveAggregation(settingsState.value.aggregation.copy(matchStrictness = value))
-    }
-
-    fun moveProviderPriority(id: String, delta: Int) = viewModelScope.launch {
-        val available = base.value.providers.filter { it.search }.map { it.id }
-        val current = settingsState.value.aggregation
-        val list = current.priorityFor(available).toMutableList()
-        val index = list.indexOf(id)
-        if (index < 0) return@launch
-        val target = (index + delta).coerceIn(0, list.lastIndex)
-        if (target == index) return@launch
-        val item = list.removeAt(index)
-        list.add(target, item)
-        searchEngine.clearCache()
-        app.settings.saveAggregation(current.copy(providerPriority = list))
-    }
-
-    fun startLogin(type: String = "qq") {
-        loginJob?.cancel()
-        loginJob = viewModelScope.launch {
-            val created = app.repository.createLogin(settingsState.value.provider, type)
-            base.value = base.value.copy(login = created, loginStatus = "等待扫码")
-            repeat(40) {
-                delay(3000)
-                val result = app.repository.checkLogin(created.sessionId, created.session.key)
-                base.value = base.value.copy(loginStatus = result.message.ifBlank { result.status })
-                if (result.status == "success" && result.cookie.isNotBlank()) {
-                    app.settings.cookie(settingsState.value.provider, result.cookie)
-                    base.value = base.value.copy(login = null)
-                    return@launch
-                }
-                if (result.status == "expired" || result.status == "failed") return@launch
-            }
-        }
-    }
-
-    fun saveCookie(cookie: String) = viewModelScope.launch {
-        resolver.clearCache()
-        searchEngine.clearCache()
-        app.settings.cookie(settingsState.value.provider, cookie)
-        base.value = base.value.copy(login = null)
-    }
-    fun logout() = viewModelScope.launch {
-        resolver.clearCache()
-        searchEngine.clearCache()
-        app.settings.cookie(settingsState.value.provider, "")
     }
 
     private fun loadLyrics(song: Song) = viewModelScope.launch {
@@ -1195,7 +1946,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         return aggregation.priorityFor(enabled).filterNot { it in exclude }
     }
 
-    private fun providerName(id: String): String = base.value.providers.find { it.id == id }?.name ?: id
+    private fun providerName(id: String): String =
+        base.value.providers.find { it.id == id }?.name ?: when (id) {
+            "netease" -> "网易云音乐"
+            "qq" -> "QQ 音乐"
+            "kugou" -> "酷狗音乐"
+            "kuwo" -> "酷我音乐"
+            "migu" -> "咪咕音乐"
+            "apple" -> "Apple Music"
+            "soda" -> "汽水音乐"
+            "bilibili" -> "Bilibili"
+            "local" -> "本地"
+            else -> id
+        }
 
     private fun rememberCanonical(track: CanonicalTrack) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -1232,15 +1995,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun launchAction(block: suspend () -> Unit) = viewModelScope.launch {
-        base.value = base.value.copy(loading = true, error = "")
-        runCatching { block() }.onFailure { fail(it.message ?: "请求失败") }
-        base.value = base.value.copy(loading = false)
-    }
+    private fun cookieFor(providerId: String) =
+        settingsState.value.cookies[providerId.ifBlank { settingsState.value.provider }].orEmpty()
 
-    private fun fail(message: String) { base.value = base.value.copy(error = message, loading = false) }
-    private fun cookieFor(providerId: String) = settingsState.value.cookies[providerId.ifBlank { settingsState.value.provider }].orEmpty()
-    private suspend fun remember(bucket: String, song: Song) = app.database.dao().save(SavedSong(song.key, bucket, json.encodeToString(song), System.currentTimeMillis()))
+    private suspend fun remember(bucket: String, song: Song) =
+        app.database.dao().save(SavedSong(song.key, bucket, json.encodeToString(song), System.currentTimeMillis()))
 
     private fun mediaItem(song: Song) = MediaItem.Builder().setMediaId(song.key).setUri(song.url).setMediaMetadata(
         MediaMetadata.Builder()
@@ -1406,6 +2165,319 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ---------- settings ----------
+
+    fun selectProvider(id: String) = viewModelScope.launch {
+        app.settings.provider(id)
+    }
+
+    fun selectTheme(value: String) = viewModelScope.launch { app.settings.theme(value) }
+    fun setColorSource(value: ColorSource) = viewModelScope.launch { app.settings.colorSource(value.name) }
+    fun setCustomSeed(value: Int) = viewModelScope.launch {
+        app.settings.customSeed(value)
+        app.settings.colorSource(ColorSource.Custom.name)
+    }
+    fun setBrowseStyle(value: SchemeStyle) = viewModelScope.launch { app.settings.browseStyle(value.name) }
+    fun setPlayerStyle(value: SchemeStyle) = viewModelScope.launch { app.settings.playerStyle(value.name) }
+    fun setContrast(value: Float) = viewModelScope.launch { app.settings.contrast(value) }
+    fun setAmoled(value: Boolean) = viewModelScope.launch { app.settings.amoled(value) }
+    fun setBlurMode(value: BlurMode) = viewModelScope.launch { app.settings.blurMode(value.name) }
+
+    // ---------- sleep timer ----------
+
+    fun startSleepTimer(minutes: Int) = app.sleepTimer.start(minutes, settingsState.value.sleepFade)
+    fun sleepAfterCurrent() = app.sleepTimer.stopAfterCurrent()
+    fun cancelSleepTimer() = app.sleepTimer.cancel()
+    fun setSleepFade(value: Boolean) = viewModelScope.launch { app.settings.sleepFade(value) }
+    fun setReduceMotion(value: Boolean) = viewModelScope.launch { app.settings.reduceMotion(value) }
+    fun setShowBottomNav(value: Boolean) = viewModelScope.launch { app.settings.showBottomNav(value) }
+
+    fun toggleAggregateProvider(id: String) = viewModelScope.launch {
+        val current = settingsState.value.aggregation
+        val enabled = current.enabledProviders.toMutableList()
+        if (id in enabled) enabled.remove(id) else enabled.add(id)
+        searchEngine.clearCache()
+        app.settings.saveAggregation(current.copy(enabledProviders = enabled))
+    }
+
+    fun setPlaybackMode(mode: PlaybackMode) = viewModelScope.launch {
+        app.settings.saveAggregation(settingsState.value.aggregation.copy(playbackMode = mode))
+    }
+
+    fun setPinnedProvider(id: String?) = viewModelScope.launch {
+        app.settings.saveAggregation(
+            settingsState.value.aggregation.copy(
+                pinnedProvider = id,
+                playbackMode = if (id == null) PlaybackMode.Auto else PlaybackMode.Pinned,
+            )
+        )
+    }
+
+    fun setAllowPreview(value: Boolean) = viewModelScope.launch {
+        searchEngine.clearCache()
+        app.settings.saveAggregation(settingsState.value.aggregation.copy(allowPreview = value))
+    }
+
+    fun setMatchStrictness(value: MatchStrictness) = viewModelScope.launch {
+        searchEngine.clearCache()
+        app.settings.saveAggregation(settingsState.value.aggregation.copy(matchStrictness = value))
+    }
+
+    fun moveProviderPriority(id: String, delta: Int) = viewModelScope.launch {
+        val available = base.value.providers.filter { it.search }.map { it.id }
+        val current = settingsState.value.aggregation
+        val list = current.priorityFor(available).toMutableList()
+        val index = list.indexOf(id)
+        if (index < 0) return@launch
+        val target = (index + delta).coerceIn(0, list.lastIndex)
+        if (target == index) return@launch
+        val item = list.removeAt(index)
+        list.add(target, item)
+        searchEngine.clearCache()
+        app.settings.saveAggregation(current.copy(providerPriority = list))
+    }
+
+    fun clearMatchCache() {
+        searchEngine.clearCache()
+        resolver.clearCache()
+        viewModelScope.launch(Dispatchers.IO) { runCatching { aggregateDao.clearMatches() } }
+        message("已清除匹配缓存")
+    }
+
+    fun clearMediaCache() = viewModelScope.launch(Dispatchers.IO) {
+        runCatching { app.mediaCache.keys.toList().forEach { app.mediaCache.removeResource(it) } }
+        message("已清除播放缓存")
+    }
+
+    fun mediaCacheSize(): Long = runCatching { app.mediaCache.cacheSpace }.getOrDefault(0L)
+
+    fun setCacheLimit(mb: Int) = viewModelScope.launch { app.settings.cacheLimitMb(mb) }
+
+    fun startLogin(providerId: String = settingsState.value.provider, type: String = "qq") {
+        loginJob?.cancel()
+        loginJob = viewModelScope.launch {
+            val created = app.repository.createLogin(providerId, type)
+            base.value = base.value.copy(login = created, loginStatus = "等待扫码", loginProviderId = providerId)
+            repeat(40) {
+                delay(3000)
+                val result = app.repository.checkLogin(created.sessionId, created.session.key)
+                base.value = base.value.copy(loginStatus = result.message.ifBlank { result.status })
+                if (result.status == "success" && result.cookie.isNotBlank()) {
+                    app.settings.cookie(providerId, result.cookie)
+                    base.value = base.value.copy(login = null, loginProviderId = "")
+                    return@launch
+                }
+                if (result.status == "expired" || result.status == "failed") return@launch
+            }
+        }
+    }
+
+    fun saveCookie(providerId: String = settingsState.value.provider, cookie: String) = viewModelScope.launch {
+        resolver.clearCache()
+        searchEngine.clearCache()
+        app.settings.cookie(providerId, cookie)
+        base.value = base.value.copy(login = null, loginProviderId = "")
+        message("Cookie 已保存")
+    }
+
+    fun logout(providerId: String = settingsState.value.provider) = viewModelScope.launch {
+        resolver.clearCache()
+        searchEngine.clearCache()
+        app.settings.cookie(providerId, "")
+        message("已退出平台账号")
+    }
+
+    /**
+     * 设置页的扫码登录：状态写成中文短句（界面按“失败 / 已过期”判断能否刷新），
+     * 获取二维码或轮询出错时不让异常冒出协程。
+     */
+    fun startQrLogin(providerId: String, type: String) {
+        loginJob?.cancel()
+        base.value = base.value.copy(login = null, loginStatus = "", loginProviderId = providerId)
+        loginJob = viewModelScope.launch {
+            val created = try {
+                app.repository.createLogin(providerId, type)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                base.value = base.value.copy(login = null, loginStatus = "二维码获取失败：${error.message ?: "网络错误"}")
+                return@launch
+            }
+            base.value = base.value.copy(login = created, loginStatus = "等待扫码", loginProviderId = providerId)
+            repeat(40) {
+                delay(3000)
+                val result = try {
+                    app.repository.checkLogin(created.sessionId, created.session.key)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (transient: Exception) {
+                    // 单次轮询失败多半是网络抖动，继续等下一轮
+                    return@repeat
+                }
+                when (result.status) {
+                    "success" -> if (result.cookie.isNotBlank()) {
+                        resolver.clearCache()
+                        searchEngine.clearCache()
+                        app.settings.cookie(providerId, result.cookie)
+                        base.value = base.value.copy(login = null, loginStatus = "", loginProviderId = "")
+                        message("登录成功")
+                        return@launch
+                    }
+                    "scanned" -> base.value = base.value.copy(loginStatus = "已扫码，请在手机上确认")
+                    "expired" -> {
+                        base.value = base.value.copy(loginStatus = "二维码已过期")
+                        return@launch
+                    }
+                    "failed" -> {
+                        base.value = base.value.copy(loginStatus = "登录失败：${result.message.ifBlank { "平台拒绝了这次登录" }}")
+                        return@launch
+                    }
+                    else -> base.value = base.value.copy(loginStatus = "等待扫码")
+                }
+            }
+            base.value = base.value.copy(loginStatus = "二维码已过期")
+        }
+    }
+
+    fun cancelLogin() {
+        loginJob?.cancel()
+        base.value = base.value.copy(login = null, loginStatus = "", loginProviderId = "")
+    }
+
+    // ---------- sync ----------
+
+    fun syncNow() {
+        app.sync.requestSync(manual = true)
+    }
+
+    fun connectSync(providerId: String, token: String, remote: String) {
+        viewModelScope.launch { app.sync.connect(providerId, token.trim(), remote.trim()) }
+    }
+
+    fun resolveInitialSync(strategy: SyncStrategy) {
+        viewModelScope.launch { app.sync.resolveInitial(strategy) }
+    }
+
+    fun cancelInitialSync() = app.sync.cancelInitial()
+
+    fun resolveSyncConflict(playlistId: String, strategy: SyncStrategy) {
+        viewModelScope.launch { app.sync.resolveConflict(playlistId, strategy) }
+    }
+
+    fun setSyncAutoSync(enabled: Boolean) {
+        viewModelScope.launch { app.sync.setAutoSync(enabled) }
+    }
+
+    fun setSyncWifiOnly(enabled: Boolean) {
+        viewModelScope.launch { app.sync.setWifiOnly(enabled) }
+    }
+
+    fun disconnectSync() {
+        viewModelScope.launch { app.sync.disconnect() }
+    }
+
+    fun exportLibrary(uri: Uri) {
+        viewModelScope.launch { app.sync.export(uri) }
+    }
+
+    fun importLibrary(uri: Uri, strategy: SyncStrategy = SyncStrategy.Merge) {
+        viewModelScope.launch { app.sync.import(uri, strategy) }
+    }
+
+    fun syncProviderLabel(id: String): String = when (id) {
+        "gist" -> "GitHub Gist"
+        "gitee" -> "Gitee 代码片段"
+        else -> id
+    }
+
+    // ---------- update ----------
+
+    fun checkForUpdates() {
+        viewModelScope.launch { app.update.check(manual = true) }
+    }
+
+    suspend fun checkForUpdatesNow(): com.mytv.mymusic.data.update.UpdateUiState {
+        app.update.check(manual = true)
+        return app.update.state.value
+    }
+
+    fun downloadUpdate() {
+        updateDownloadJob?.cancel()
+        updateDownloadJob = viewModelScope.launch { app.update.download() }
+    }
+
+    fun cancelUpdateDownload() {
+        updateDownloadJob?.cancel()
+        updateDownloadJob = null
+        app.update.cancelDownload()
+    }
+
+    fun installUpdate() {
+        val file = updateState.value.file ?: return
+        when (app.update.install(file)) {
+            com.mytv.mymusic.data.update.InstallResult.Launched -> Unit
+            com.mytv.mymusic.data.update.InstallResult.NeedsPermission -> app.update.openInstallPermissionSettings()
+            com.mytv.mymusic.data.update.InstallResult.Failed -> Unit
+        }
+    }
+
+    fun openInstallPermission() = app.update.openInstallPermissionSettings()
+
+    fun openReleasePage() = app.update.openReleasePage()
+
+    fun skipUpdate() {
+        val info = updateState.value.info ?: return
+        viewModelScope.launch {
+            app.settings.skippedUpdateCode(info.versionCode)
+            app.update.skipCurrent()
+            app.update.clearError()
+        }
+    }
+
+    fun clearUpdateError() = app.update.clearError()
+
+    // ---------- equalizer ----------
+
+    fun setEqualizerEnabled(enabled: Boolean) = app.equalizer.setEnabled(enabled)
+    fun selectEqualizerPreset(id: String) = app.equalizer.selectPreset(id)
+    fun setEqualizerBand(index: Int, db: Float) = app.equalizer.setBandLevel(index, db)
+    fun resetEqualizer() = app.equalizer.resetFlat()
+    fun saveEqualizerCustom() = app.equalizer.saveAsCustom()
+
+    // ---------- misc ----------
+
+    fun retryCharts() = refreshCharts()
+    fun retryPlaylists() = refreshPlaylists()
+
+    fun onAppForeground() {
+        app.sync.syncIfStaleOnForeground()
+    }
+
+    fun diagnostics(): String {
+        val context = getApplication<Application>()
+        val info = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
+        val code = when {
+            info == null -> ""
+            android.os.Build.VERSION.SDK_INT >= 28 -> info.longVersionCode.toString()
+            else -> info.versionCode.toString()
+        }
+        val enabled = enabledProviders().joinToString("、") { it.name }
+        return buildString {
+            appendLine("myMusic 诊断信息")
+            appendLine("版本：${info?.versionName.orEmpty()} ($code)")
+            appendLine("设备：${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+            appendLine("Android：${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
+            appendLine("启用平台：$enabled")
+            appendLine("同步：${syncState.value.message.ifBlank { syncState.value.error.ifBlank { syncState.value.status.name } }}")
+            appendLine("更新：${updateState.value.error.ifBlank { updateState.value.message.ifBlank { updateState.value.phase.name } }}")
+            append("本信息不包含 Cookie、令牌或播放地址。")
+        }
+    }
+
+    private fun message(text: String, error: Boolean = false) {
+        if (error) base.value = base.value.copy(error = text) else _events.tryEmit(UiEvent.Message(text))
+    }
+
     override fun onCleared() {
         progressJob?.cancel()
         aggregateSearchJob?.cancel()
@@ -1413,9 +2485,39 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         controller?.release()
         super.onCleared()
     }
+
+    private data class CachedCharts(
+        val at: Long,
+        val charts: List<TopList>,
+        val featuredSongs: List<Song>,
+        val hotSongs: List<Song>,
+        val error: String,
+    )
+
+    private data class CachedRecommendations(val at: Long, val items: List<Playlist>)
+    private data class CachedCategory(val at: Long, val items: List<Playlist>)
+
+    private companion object {
+        const val BROWSE_CACHE_MS = 10L * 60 * 1000
+        const val UPDATE_CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
+        val LINK_PATTERN = Regex("""https?://\S+""", RegexOption.IGNORE_CASE)
+    }
 }
 
 private const val AUTO_MATCH_TIMEOUT_MS = 8_000L
 
 fun SavedSong.song(json: Json = Json { ignoreUnknownKeys = true }) = json.decodeFromString<Song>(payload)
 fun DownloadRecord.song(json: Json = Json { ignoreUnknownKeys = true }) = json.decodeFromString<Song>(payload)
+
+private fun AppSettings.toAppearance() = Appearance(
+    theme = theme,
+    colorSource = ColorSource.entries.find { it.name == colorSource } ?: ColorSource.Cover,
+    customSeed = customSeed,
+    browseStyle = SchemeStyle.entries.find { it.name == browseStyle } ?: SchemeStyle.TonalSpot,
+    playerStyle = SchemeStyle.entries.find { it.name == playerStyle } ?: SchemeStyle.Vibrant,
+    contrast = contrast,
+    amoled = amoled,
+    blur = BlurMode.entries.find { it.name == blurMode } ?: BlurMode.Auto,
+    reduceMotion = reduceMotion,
+    lastSeed = lastSeed,
+)
