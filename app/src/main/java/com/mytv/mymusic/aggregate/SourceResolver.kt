@@ -1,12 +1,15 @@
 package com.mytv.mymusic.aggregate
 
 import com.mytv.mymusic.data.MusicRepository
+import kotlinx.coroutines.CancellationException
+import java.io.File
 import java.util.LinkedHashMap
 
 class SourceResolver(
     private val repository: MusicRepository,
     private val cookies: () -> Map<String, String>,
     private val settings: () -> AggregationSettings,
+    private val workDir: () -> File,
 ) {
     private data class CachedUrl(val url: String, val preview: Boolean, val at: Long)
 
@@ -112,11 +115,20 @@ class SourceResolver(
                 continue
             }
 
-            val url = source.song.url.takeIf { it.isNotBlank() }
-                ?: runCatching { repository.downloadUrl(source.song, cookie) }.getOrElse { "" }
+            var failure: Throwable? = null
+            val url = runCatching {
+                repository.playableUrl(source.song, cookie, workDir())
+            }.onFailure {
+                if (it is CancellationException) throw it
+                failure = it
+            }.getOrDefault("")
             if (url.isBlank()) {
                 synchronized(lock) { negativeCache[source.song.key] = System.currentTimeMillis() }
-                attempts += Attempt(source, "没有返回播放地址")
+                val reason = failure?.message
+                    ?.takeIf { source.providerId == "soda" && it.contains("签名器") }
+                    ?.substringBefore("\n")
+                    ?: "没有返回播放地址"
+                attempts += Attempt(source, reason)
                 continue
             }
             val preview = source.isPreview || isPreviewSource(source.providerId, source.song)

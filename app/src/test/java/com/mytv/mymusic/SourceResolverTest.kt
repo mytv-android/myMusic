@@ -19,6 +19,7 @@ class SourceResolverTest {
         repository = MusicRepository(),
         cookies = { emptyMap() },
         settings = { AggregationSettings() },
+        workDir = { java.io.File(".") },
     )
 
     private fun song(id: String, provider: String, vip: Boolean = false, url: String = "") = Song(

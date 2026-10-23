@@ -3,6 +3,7 @@ package com.mytv.mymusic.data
 import com.mytv.mymusic.data.native.NativeProvider
 import com.mytv.mymusic.data.native.NativeProviders
 import com.mytv.mymusic.data.native.SongSearchPage
+import java.io.File
 
 class MusicRepository {
     suspend fun providers(): List<ProviderInfo> = NativeProviders.infos()
@@ -24,8 +25,8 @@ class MusicRepository {
     suspend fun parseSong(provider: String, cookie: String, link: String): Song =
         requireProvider(provider).parseSong(cookie, link)
 
-    suspend fun downloadUrl(song: Song, cookie: String): String =
-        requireProvider(song.source).downloadUrl(cookie, song)
+    suspend fun playableUrl(song: Song, cookie: String, workDir: File): String =
+        requireProvider(song.source).playableUrl(cookie, song, workDir)
 
     suspend fun lyrics(song: Song, cookie: String): String =
         requireProvider(song.source).lyrics(cookie, song)

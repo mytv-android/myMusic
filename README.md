@@ -2,7 +2,7 @@
 
 myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机、平板和电视。界面使用 Jetpack Compose 与 Material 3；触摸、鼠标、键盘和遥控器使用同一套焦点与播放操作。
 
-音乐平台能力来自 [music-lib](https://github.com/guohuiyuan/music-lib)，当前纳入版本为 `7cc4467b4e300547edd5d3d5bf0eff1c21ffc2ec`。平台层已移植为 Kotlin 原生实现（`app/src/main/java/com/mytv/mymusic/data/native`），直接使用 OkHttp 与原生加密工具，不需要 GoMobile、AAR 或额外的后端服务。Go 源码保留在 `third_party/music-lib`，作为原生移植的参考与 AGPL-3.0 来源说明。
+音乐平台能力来自 [music-lib](https://github.com/guohuiyuan/music-lib)，当前纳入版本为 `7cc4467b4e300547edd5d3d5bf0eff1c21ffc2ec`。平台层已移植为 Kotlin 原生实现（`app/src/main/java/com/mytv/mymusic/data/native`），直接使用 OkHttp 与原生加密工具，不需要 GoMobile、AAR 或额外的后端服务；只有汽水音乐的会员整曲需要用户自备可选的签名器（见下文）。Go 源码保留在 `third_party/music-lib`，作为原生移植的参考与 AGPL-3.0 来源说明。
 
 ## 界面结构
 
@@ -39,7 +39,22 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 
 支持网易云音乐、QQ 音乐、酷狗音乐、酷我音乐、咪咕音乐、千千音乐、汽水音乐、5sing、Jamendo、JOOX、Bilibili 和 Apple Music。每个平台在榜单、歌单和设置中按上游实际能力显示搜索、歌单、专辑、排行榜、分类、歌词、下载和登录。
 
-汽水音乐的会员整曲依赖官方客户端签名器，Android 上不可用。Apple Music 只提供上游返回的试听预览。上游未实现的歌词、排行榜或登录不会显示为可用操作。
+汽水音乐的会员整曲依赖官方客户端逐请求生成的应用级签名（`x-helios` / `x-medusa`），本项目按 [SodaM](https://github.com/sodahub-org/sodam) / [libresoda](https://github.com/sodahub-org/libresoda) 的签名服务协议接入外部签名器：在设置里填写签名器地址和 Token 后，会员账号可以播放整曲与无损音质；未配置时只使用公开接口提供的试听片段。Apple Music 只提供上游返回的试听预览。上游未实现的歌词、排行榜或登录不会显示为可用操作。
+
+### 汽水音乐播放（签名器）
+
+汽水的播放流分三层：分享页 / SEO、Web / H5、以及 App 端 `POST /luna/pc/track_v2`。前两层对会员曲目只返回 30～60 秒试听；App 端要求每个请求都带 `x-helios` / `x-medusa`，这两个头只能由官方客户端的原生组件生成，纯软件算不出来。因此本项目把「签名」交给一个可选的外部服务，取流和加密流解密留在客户端：
+
+- 汽水账号仍需登录：在 `设置 › 平台账号 › 汽水音乐` 粘贴官方客户端的 Cookie。电视端按既有约定不提供文本输入，汽水会员播放目前主要在手机或平板上使用。
+- 在 `设置 › 平台账号 › 汽水播放签名器` 填写签名服务的 `POST /sign` 地址（例如 `http://192.168.1.10:8899/sign`）和可选的 Bearer Token。
+- 签名服务可运行 [libmssdk](https://github.com/sodahub-org/libmssdk)（官方客户端 `bdms.node` 的 HTTP 包装）或 SodaM/libresoda 的签名宿主。它需要一台能加载官方原生组件的电脑（Windows / macOS / Linux + Wine），手机或电视通过局域网访问；签名器会看到即将发出的完整请求头（含 Cookie），只应指向自己信任的实例，跨公网使用 SSH 隧道或反向代理，并始终设置 Token。
+- 协议与 sodam 一致：请求 `{url, method, body, headers, ts_ms}`，响应 `{ok, headers: {x-helios, x-medusa}, ms_token, a_bogus}`；客户端通过签名器的 `GET /config` 对齐 `device_id` / `iid` / `fp`，并用 body 的 MD5（大写）生成 `X-SS-STUB`。
+- App 端点返回的加密流（`play_auth` / spade）会在本机用 AES-CTR 按 MP4 CENC 逐样本解密，解密后的明文缓存到应用缓存目录（最多 24 首，按最近使用淘汰），再交给 ExoPlayer 播放；下载按钮保存的同样是解密后的文件。
+- 没有签名器时行为保持不变：免费曲目照常播放，会员曲目只返回公开试听流。
+
+签名器与相关参考实现不随本应用分发，也不包含任何官方二进制。请只用于播放自己账号有权播放的内容，不要做公共代理或分发凭据。
+
+**来源与许可**：签名服务协议、取流链路和加密流解密逻辑参考 [SodaM](https://github.com/sodahub-org/sodam)（AGPL-3.0）与 [libresoda](https://github.com/sodahub-org/libresoda)（AGPL-3.0），签名服务契约参考 [libmssdk](https://github.com/sodahub-org/libmssdk)（MIT，不包含官方 `bdms.node`）。本项目的 Kotlin 实现是对应的衍生作品，同样以 AGPL-3.0 分发；第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 跨平台聚合与同步歌词
 

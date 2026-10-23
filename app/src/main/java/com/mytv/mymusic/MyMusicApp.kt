@@ -6,6 +6,7 @@ import androidx.media3.datasource.cache.SimpleCache
 import com.mytv.mymusic.data.AppDatabase
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.SettingsStore
+import com.mytv.mymusic.data.native.SodaProvider
 import com.mytv.mymusic.data.sync.SecretStore
 import com.mytv.mymusic.data.sync.SyncCoordinator
 import com.mytv.mymusic.data.update.UpdateRepository
@@ -47,6 +48,10 @@ class MyMusicApp : Application() {
             settings.state.map { it.cacheLimitMb }.distinctUntilChanged().collect { mb ->
                 cacheEvictor.updateMaxBytes((if (mb > 0) mb else defaultCacheLimitMb()) * MB)
             }
+        }
+        appScope.launch(Dispatchers.IO) {
+            settings.state.map { it.sodaSignerUrl to it.sodaSignerToken }.distinctUntilChanged()
+                .collect { (url, token) -> SodaProvider.configureSigner(url, token) }
         }
         secretStore = SecretStore(this)
         equalizer = EqualizerController(this, settings)

@@ -47,6 +47,7 @@ import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.TrackOverrideEntity
+import com.mytv.mymusic.data.native.SodaProvider
 import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.playback.PlaybackService
 import kotlinx.coroutines.CancellationException
@@ -105,6 +106,8 @@ data class MusicUiState(
     val reduceMotion: Boolean = false,
     val showBottomNav: Boolean = true,
     val cookies: Map<String, String> = emptyMap(),
+    val sodaSignerUrl: String = "",
+    val sodaSignerToken: String = "",
     val aggregation: AggregationSettings = AggregationSettings(),
     val searchHistory: List<String> = emptyList(),
     val skippedUpdateCode: Long = 0L,
@@ -235,6 +238,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             reduceMotion = settings.reduceMotion,
             showBottomNav = settings.showBottomNav,
             cookies = settings.cookies,
+            sodaSignerUrl = settings.sodaSignerUrl,
+            sodaSignerToken = settings.sodaSignerToken,
             aggregation = settings.aggregation,
             searchHistory = settings.searchHistory,
             skippedUpdateCode = settings.skippedUpdateCode,
@@ -252,6 +257,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         repository = app.repository,
         cookies = { settingsState.value.cookies },
         settings = { settingsState.value.aggregation },
+        workDir = { app.cacheDir },
     )
     private val matchJob = MatchJob(
         repository = app.repository,
@@ -1435,14 +1441,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun download(song: Song) = viewModelScope.launch {
-        val url = song.url.ifBlank { runCatching { app.repository.downloadUrl(song, cookieFor(song.source)) }.getOrDefault("") }
+        val appContext = getApplication<Application>()
+        var failure: Throwable? = null
+        val url = runCatching {
+            app.repository.playableUrl(song, cookieFor(song.source), appContext.cacheDir)
+        }.onFailure {
+            if (it is CancellationException) throw it
+            failure = it
+        }.getOrDefault("")
         if (url.isBlank()) {
-            message("没有可下载的地址", error = true)
+            message(failure?.message?.takeIf { it.isNotBlank() } ?: "没有可下载的地址", error = true)
             return@launch
         }
-        val appContext = getApplication<Application>()
         val directory = appContext.getExternalFilesDir("music") ?: appContext.filesDir
-        val safeName = "${song.name}-${song.artist}[${song.source}].${song.ext.ifBlank { "mp3" }}"
+        val extension = if (url.startsWith("file:")) {
+            Uri.parse(url).path?.let { File(it).extension }.orEmpty().ifBlank { song.ext.ifBlank { "mp3" } }
+        } else {
+            song.ext.ifBlank { "mp3" }
+        }
+        val safeName = "${song.name}-${song.artist}[${song.source}].$extension"
             .replace(Regex("[\\\\/:*?\"<>|]"), "_")
         val file = File(directory, safeName)
         app.database.dao().saveDownload(
@@ -1450,9 +1467,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
         runCatching {
             withContext(Dispatchers.IO) {
-                http.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                    if (!response.isSuccessful) error(response.message)
-                    file.outputStream().use { output -> response.body.byteStream().copyTo(output) }
+                if (url.startsWith("file:")) {
+                    val cached = File(Uri.parse(url).path.orEmpty())
+                    if (!cached.isFile) error("本地缓存文件不存在")
+                    cached.copyTo(file, overwrite = true)
+                } else {
+                    http.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                        if (!response.isSuccessful) error(response.message)
+                        file.outputStream().use { output -> response.body.byteStream().copyTo(output) }
+                    }
                 }
             }
             app.database.dao().saveDownload(
@@ -1854,7 +1877,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         val policy = resolver.buildPolicy(track, null)
         val source = resolver.orderCandidates(track, null, emptySet(), policy).firstOrNull()
-        return source?.song ?: track.sources.first().song
+        val song = source?.song ?: track.sources.first().song
+        // 汽水的 URL 可能只是试听或加密流，切歌时交回解析器走签名/解密
+        return if (song.source == "soda") song.copy(url = "") else song
     }
 
     private fun localFileFor(track: CanonicalTrack): Pair<TrackSource, File>? {
@@ -1876,6 +1901,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val reasons = attempts.map { it.reason }
         val tried = attempts.map { it.source.providerName }.distinct()
         return when {
+            reasons.any { it.contains("签名器") } -> reasons.first { it.contains("签名器") }
             reasons.any { it.contains("登录") || it.contains("会员") } -> "这首歌需要登录或会员后才能播放"
             reasons.any { it.contains("试听") } -> "只有试听片段可用，请在设置中允许试听"
             track.sources.any { it.song.isVip } -> "这首歌需要会员或登录后才能播放"
@@ -2246,10 +2272,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearMediaCache() = viewModelScope.launch(Dispatchers.IO) {
         runCatching { app.mediaCache.keys.toList().forEach { app.mediaCache.removeResource(it) } }
+        runCatching { File(app.cacheDir, SodaProvider.SODA_CACHE_DIR).deleteRecursively() }
         message("已清除播放缓存")
     }
 
-    fun mediaCacheSize(): Long = runCatching { app.mediaCache.cacheSpace }.getOrDefault(0L)
+    fun mediaCacheSize(): Long = runCatching {
+        val sodaCache = File(app.cacheDir, SodaProvider.SODA_CACHE_DIR)
+            .listFiles()?.sumOf { it.length() } ?: 0L
+        app.mediaCache.cacheSpace + sodaCache
+    }.getOrDefault(0L)
 
     fun setCacheLimit(mb: Int) = viewModelScope.launch { app.settings.cacheLimitMb(mb) }
 
@@ -2278,6 +2309,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         app.settings.cookie(providerId, cookie)
         base.value = base.value.copy(login = null, loginProviderId = "")
         message("Cookie 已保存")
+    }
+
+    fun saveSodaSigner(url: String, token: String) = viewModelScope.launch {
+        resolver.clearCache()
+        app.settings.sodaSigner(url, token)
+        SodaProvider.configureSigner(url, token)
+        message(if (url.isBlank()) "已关闭汽水签名器" else "汽水签名器已保存")
     }
 
     fun logout(providerId: String = settingsState.value.provider) = viewModelScope.launch {

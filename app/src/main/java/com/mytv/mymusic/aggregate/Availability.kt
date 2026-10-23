@@ -1,9 +1,11 @@
 package com.mytv.mymusic.aggregate
 
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.native.SodaProvider
 
 fun isPreviewSource(providerId: String, song: Song): Boolean =
-    providerId == "apple" || (providerId == "soda" && song.isVip)
+    providerId == "apple" ||
+        (providerId == "soda" && song.isVip && !SodaProvider.isSignerConfigured())
 
 fun availabilityOf(source: TrackSource, cookie: String): Availability {
     val song = source.song

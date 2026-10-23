@@ -8,6 +8,7 @@ import com.mytv.mymusic.data.QRCheckResult
 import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
+import java.io.File
 
 data class SongSearchPage(
     val songs: List<Song>,
@@ -30,6 +31,13 @@ interface NativeProvider {
 
     suspend fun downloadUrl(cookie: String, song: Song): String =
         throw UnsupportedOperationException("${info.name} 暂不支持播放地址解析")
+
+    /**
+     * 交给播放器的地址。默认沿用 downloadUrl；需要下载后解密的平台（汽水加密流）
+     * 会先把明文写到 [workDir] 并返回本地文件 URI。
+     */
+    suspend fun playableUrl(cookie: String, song: Song, workDir: File): String =
+        song.url.ifBlank { downloadUrl(cookie, song) }
 
     suspend fun lyrics(cookie: String, song: Song): String =
         throw UnsupportedOperationException("${info.name} 暂不支持歌词")

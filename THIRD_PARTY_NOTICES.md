@@ -9,6 +9,18 @@
 
 The vendored Go source is retained as the reference for the Kotlin native port in `app/src/main/java/com/mytv/mymusic/data/native`. The Kotlin port is a derivative work distributed under AGPL-3.0. Modifications must retain this notice and the AGPL-3.0 terms.
 
+## SodaM / libresoda
+
+- Upstream: https://github.com/sodahub-org/sodam and https://github.com/sodahub-org/libresoda
+- License: GNU Affero General Public License v3.0
+- Usage: reference for the Soda Music signer service protocol (`POST /sign`, `GET /config`, `x-helios` / `x-medusa`, `X-SS-STUB`), the signed `POST /luna/pc/track_v2` stream flow, and the local spade / CENC AES-CTR decryption. The Kotlin implementations in `data/native/SodaProvider.kt` and `data/native/SodaDecrypt.kt` are derivative works distributed under AGPL-3.0.
+
+## libmssdk (protocol only)
+
+- Upstream: https://github.com/sodahub-org/libmssdk
+- License: MIT License (the repository's own source); the official `bdms.node` / `metasecml.dll` binaries are proprietary and are not included or redistributed by myMusic.
+- Usage: reference for the signer service HTTP contract and device identity (`/sign`, `/config`). No libmssdk code or binary is bundled.
+
 ## MaterialKolor
 
 - Upstream: https://github.com/jordond/MaterialKolor
@@ -28,7 +40,7 @@ The vendored Go source is retained as the reference for the Kotlin native port i
 - Upstream: https://github.com/googlefonts/roboto-flex (via https://github.com/google/fonts/tree/main/ofl/robotoflex)
 - License: SIL Open Font License, Version 1.1
 - Location: `app/src/main/res/font/roboto_flex.ttf`
-- Modifications: subset to Latin, Latin-1, general punctuation and currency symbols; all variation axes except `wght` are pinned to their defaults (fontTools `subset` + `varLib.instancer`).
+- Modifications: subset to Latin, Latin-1, general punctuation and currency symbols; all variation axes except `wght` are pinned to their defaults (fontTools `subset` + `varLib.instancer`). The Android TV launcher banner (`res/drawable/tv_banner.xml`) embeds `myMusic` glyph outlines converted to vector paths from the same subset.
 
 ```
 Copyright 2017 The Roboto Flex Project Authors (https://github.com/TypeNetwork/Roboto-Flex)

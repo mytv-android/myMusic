@@ -751,6 +751,7 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
     val tv = LocalAppWindow.current.isTv
     var cookieFor by remember { mutableStateOf<ProviderInfo?>(null) }
     var qrFor by remember { mutableStateOf<ProviderInfo?>(null) }
+    var signerOpen by remember { mutableStateOf(false) }
     val providers = state.providers
     val loggedCount = providers.count { !state.cookies[it.id].isNullOrBlank() }
     SettingsPage(
@@ -782,6 +783,25 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                 )
             }
         }
+        if (providers.any { it.id == "soda" }) {
+            item(key = "soda_signer") {
+                Column(Modifier.padding(top = 12.dp)) {
+                    SectionLabel("汽水播放")
+                    ListRow(
+                        title = "汽水播放签名器",
+                        index = 0,
+                        count = 1,
+                        onClick = { signerOpen = true },
+                        icon = Icons.Filled.Shield,
+                        summary = if (state.sodaSignerUrl.isBlank()) {
+                            "未配置 · 会员整曲只会返回试听片段"
+                        } else {
+                            "已配置 · ${signerLabel(state.sodaSignerUrl)}"
+                        },
+                    )
+                }
+            }
+        }
         item(key = "note") {
             Box(Modifier.padding(top = 16.dp)) {
                 InfoNote(
@@ -790,6 +810,17 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                 )
             }
         }
+    }
+    if (signerOpen) {
+        SodaSignerDialog(
+            initialUrl = state.sodaSignerUrl,
+            initialToken = state.sodaSignerToken,
+            onSave = { url, token ->
+                actions.saveSodaSigner(url, token)
+                signerOpen = false
+            },
+            onDismiss = { signerOpen = false },
+        )
     }
     qrFor?.let { provider ->
         QrLoginPanel(
@@ -1049,6 +1080,66 @@ private fun CookieDialog(provider: ProviderInfo, initial: String, onSave: (Strin
     )
 }
 
+private fun signerLabel(url: String): String {
+    val parsed = runCatching { java.net.URI(url.trim()) }.getOrNull() ?: return url
+    val host = parsed.host ?: return url
+    return if (parsed.port > 0) "$host:${parsed.port}" else host
+}
+
+/**
+ * 汽水签名器：协议与 sodam / libresoda / libmssdk 的 POST /sign 一致，
+ * 签名器需要看到即将发出的 URL、body 和全部请求头。
+ */
+@Composable
+private fun SodaSignerDialog(
+    initialUrl: String,
+    initialToken: String,
+    onSave: (String, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var url by remember { mutableStateOf(initialUrl) }
+    var token by remember { mutableStateOf(initialToken) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("汽水播放签名器") },
+        text = {
+            Column {
+                Text(
+                    "会员整曲要逐请求的 x-helios / x-medusa 签名，只能由官方客户端组件生成。" +
+                        "在一台电脑（Windows / macOS / Linux）上运行 sodam / libmssdk 的签名服务，" +
+                        "手机或电视通过局域网访问，把 POST /sign 地址填在这里。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    label = { Text("签名服务地址") },
+                    placeholder = { Text("http://192.168.1.10:8899/sign") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    label = { Text("Token（可选）") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                )
+                Text(
+                    "签名器会看到这次请求的完整请求头（含 Cookie），只填写自己信任的实例。留空保存表示关闭。",
+                    Modifier.padding(top = 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(url, token) }) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
 // ======================= 存储 =======================
 
 /** 存储：总占用大字 + 分段占用条 + 分项清除。清除缓存不影响歌单、收藏和下载，不需要二次确认。 */
@@ -1232,7 +1323,7 @@ fun PrivacyScreen(onBack: () -> Unit, embedded: Boolean = false) {
     val blocks = listOf(
         "留在本机" to "Cookie、令牌、收藏、最近播放、下载文件、播放进度和匹配缓存都只保存在设备上。Cookie 与同步令牌使用 Android Keystore 加密。",
         "写入你选择的云端" to "启用同步后，只把自建歌单和歌曲元数据写入你的 GitHub Gist 或 Gitee 代码片段。同步文件不包含 Cookie、令牌、播放地址和下载文件。",
-        "网络请求" to "应用直接请求音乐平台上游接口、更新清单和同步服务，没有 myMusic 自建中转服务器。第三方仍会看到其服务所需的常规请求信息。扫码登录的二维码在本机生成。",
+        "网络请求" to "应用直接请求音乐平台上游接口、更新清单和同步服务，没有 myMusic 自建中转服务器。配置汽水签名器后，取流请求会额外发给你填写的签名服务。第三方仍会看到其服务所需的常规请求信息。扫码登录的二维码在本机生成。",
         "诊断信息" to "复制诊断只包含版本、设备型号、Android 版本、启用平台和最近错误；不包含 Cookie、令牌或完整播放 URL。",
     )
     SettingsPage(SettingsSection.Privacy, embedded, onBack) {
