@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Merge
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -316,6 +317,7 @@ private fun TouchSearch(ctx: SearchCtx, showHome: Boolean, editing: Boolean, onE
                 value = search.query,
                 onValueChange = ctx.actions::setSearchQuery,
                 onSubmit = { ctx.submit(search.query) },
+                onVoiceResult = { text -> ctx.submit(text) },
                 onClear = if (search.query.isNotEmpty() || search.hasQuery) {
                     {
                         ctx.actions.clearSearch()
@@ -369,10 +371,12 @@ private fun SearchField(
     onBack: (() -> Unit)?,
     focusRequester: FocusRequester,
     onFocused: () -> Unit,
+    onVoiceResult: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val tv = LocalAppWindow.current.isTv
     var focused by remember { mutableStateOf(false) }
+    val voice = rememberVoiceSearchWithFeedback { text -> onVoiceResult?.invoke(text) }
     val shape = RoundedCornerShape(28.dp)
     Row(
         modifier
@@ -421,6 +425,11 @@ private fun SearchField(
                 }
             },
         )
+        if (onVoiceResult != null && voice.available) {
+            IconButton(onClick = voice.start, modifier = Modifier.tvFocusRing(CircleShape)) {
+                Icon(Icons.Filled.Mic, "语音搜索", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         if (onClear != null) {
             IconButton(onClick = onClear, modifier = Modifier.tvFocusRing(CircleShape)) {
                 Icon(Icons.Filled.Close, "清除搜索", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1677,6 +1686,7 @@ private fun TvSearchHome(ctx: SearchCtx) {
                 value = query,
                 onValueChange = ctx.actions::setSearchQuery,
                 onSubmit = { ctx.submit(query) },
+                onVoiceResult = { text -> ctx.submit(text) },
                 onClear = null,
                 onBack = null,
                 focusRequester = fieldFocus,
@@ -1688,6 +1698,7 @@ private fun TvSearchHome(ctx: SearchCtx) {
                 query = query,
                 onQueryChange = ctx.actions::setSearchQuery,
                 onSubmit = { ctx.submit(query) },
+                onVoiceResult = { text -> ctx.submit(text) },
                 firstKey = firstKey,
             )
         }
@@ -1712,8 +1723,15 @@ private fun TvSearchHome(ctx: SearchCtx) {
 }
 
 @Composable
-private fun TvKeyboard(query: String, onQueryChange: (String) -> Unit, onSubmit: () -> Unit, firstKey: FocusRequester) {
+private fun TvKeyboard(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onVoiceResult: ((String) -> Unit)?,
+    firstKey: FocusRequester,
+) {
     val keys = "abcdefghijklmnopqrstuvwxyz0123456789".toList()
+    val voice = rememberVoiceSearchWithFeedback { text -> onVoiceResult?.invoke(text) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         keys.chunked(6).forEachIndexed { row, chars ->
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1733,6 +1751,9 @@ private fun TvKeyboard(query: String, onQueryChange: (String) -> Unit, onSubmit:
                 onQueryChange(query.dropLast(1))
             }
             TvKey(icon = Icons.Filled.Close, description = "清空", modifier = Modifier.weight(1f)) { onQueryChange("") }
+            if (onVoiceResult != null && voice.available) {
+                TvKey(icon = Icons.Filled.Mic, description = "语音搜索", modifier = Modifier.weight(1f)) { voice.start() }
+            }
         }
         Button(
             onClick = onSubmit,
