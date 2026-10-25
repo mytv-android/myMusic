@@ -2,22 +2,28 @@ package com.mytv.mymusic.ui.settings
 
 import android.content.ClipData
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Verified
@@ -39,10 +45,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
@@ -54,6 +62,7 @@ import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.components.IconTone
 import com.mytv.mymusic.ui.components.ListRow
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
+import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.SegmentedGroup
 import com.mytv.mymusic.ui.components.tvFocusRing
 import kotlinx.coroutines.launch
@@ -62,10 +71,11 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private const val PROJECT_URL = "https://github.com/mytv-android/myMusic"
+private const val TELEGRAM_URL = "https://t.me/mytv_android_channel"
 
 /**
  * 关于与更新：应用信息、新版本卡片（下载进度、校验、安装都在卡片里完成）、
- * 检查更新 / 隐私 / 许可 / 项目主页 / 复制诊断。
+ * 检查更新 / 隐私 / 许可 / 项目主页 / 群 / 复制诊断。
  */
 @Composable
 fun AboutScreen(
@@ -135,7 +145,7 @@ fun AboutScreen(
                 ListRow(
                     title = "检查更新",
                     index = 0,
-                    count = 5,
+                    count = 6,
                     onClick = {
                         if (info != null) revealSkipped = true else check()
                     },
@@ -151,7 +161,7 @@ fun AboutScreen(
                 ListRow(
                     title = "隐私说明",
                     index = 1,
-                    count = 5,
+                    count = 6,
                     onClick = onPrivacy,
                     icon = Icons.Filled.PrivacyTip,
                     summary = "哪些数据留在本机，哪些会离开",
@@ -159,7 +169,7 @@ fun AboutScreen(
                 ListRow(
                     title = "开源许可",
                     index = 2,
-                    count = 5,
+                    count = 6,
                     onClick = onLicenses,
                     icon = Icons.Filled.Code,
                     summary = "AGPL-3.0 · music-lib 与第三方依赖",
@@ -167,16 +177,25 @@ fun AboutScreen(
                 ListRow(
                     title = "项目主页",
                     index = 3,
-                    count = 5,
+                    count = 6,
                     onClick = { openUri(PROJECT_URL) },
                     icon = Icons.AutoMirrored.Filled.OpenInNew,
                     summary = "github.com/mytv-android/myMusic",
                     showChevron = false,
                 )
                 ListRow(
-                    title = "复制诊断信息",
+                    title = "Telegram 群组",
                     index = 4,
-                    count = 5,
+                    count = 6,
+                    onClick = { openUri(TELEGRAM_URL) },
+                    icon = Icons.Filled.Group,
+                    summary = "t.me/mytv_android_channel",
+                    showChevron = false,
+                )
+                ListRow(
+                    title = "复制诊断信息",
+                    index = 5,
+                    count = 6,
                     onClick = {
                         scope.launch {
                             clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("myMusic 诊断信息", actions.diagnostics())))
@@ -190,6 +209,7 @@ fun AboutScreen(
                 )
             }
         }
+        item(key = "links") { LinksCard(openUri) }
         item(key = "note") {
             Box(Modifier.padding(top = 16.dp)) {
                 InfoNote("Cookie、播放记录和下载文件只保存在本机。同步仅使用你选择的 Gist / Gitee 账号，写入自建歌单数据；应用没有集中式服务器。")
@@ -204,6 +224,93 @@ fun AboutScreen(
                 textAlign = TextAlign.Center,
             )
         }
+    }
+}
+
+/**
+ * 主页与群二维码：本机用同一套编码器生成，不依赖外部图片服务。
+ * 手机上点一下直接打开链接；电视上常常没有浏览器，这时用手机扫码。
+ */
+@Composable
+private fun LinksCard(openUri: (String) -> Unit) {
+    val window = LocalAppWindow.current
+    // 上限按设备给，实际尺寸跟着格子宽度收，窄屏上也不会顶出格外
+    val qrSize = when {
+        window.isTv -> 240.dp
+        window.isPhone -> 150.dp
+        else -> 200.dp
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(20.dp),
+    ) {
+        Text("扫码访问", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(
+            "点按打开链接，或用手机扫二维码。",
+            Modifier.padding(top = 4.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // 两个格子按二维码上限收窄，宽屏上不会各自摊成一片空白
+        Box(Modifier.fillMaxWidth().padding(top = 16.dp), contentAlignment = Alignment.Center) {
+            Row(
+                Modifier.widthIn(max = qrSize * 2 + 32.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                LinkQrCell("项目主页", "github.com/mytv-android/myMusic", PROJECT_URL, qrSize, Modifier.weight(1f), openUri)
+                LinkQrCell("Telegram 群组", "t.me/mytv_android_channel", TELEGRAM_URL, qrSize, Modifier.weight(1f), openUri)
+            }
+        }
+    }
+}
+
+/** 单个二维码格子：浅底深码，扫码器才认，所以不跟随主题配色。 */
+@Composable
+private fun LinkQrCell(
+    title: String,
+    host: String,
+    url: String,
+    qrSize: Dp,
+    modifier: Modifier = Modifier,
+    openUri: (String) -> Unit,
+) {
+    val shape = RoundedCornerShape(20.dp)
+    Column(
+        modifier
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .tvFocusRing(shape, scale = 1.02f)
+            .clickable { openUri(url) }
+            .padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .sizeIn(maxWidth = qrSize, maxHeight = qrSize)
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.White)
+                .padding(10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            QrCodeImage(url, Modifier.fillMaxSize(), description = "$title 二维码")
+        }
+        Text(
+            title,
+            Modifier.padding(top = 12.dp),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            host,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

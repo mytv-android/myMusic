@@ -4,6 +4,13 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 
 音乐平台能力来自 [music-lib](https://github.com/guohuiyuan/music-lib)，当前纳入版本为 `7cc4467b4e300547edd5d3d5bf0eff1c21ffc2ec`。平台层已移植为 Kotlin 原生实现（`app/src/main/java/com/mytv/mymusic/data/native`），直接使用 OkHttp 与原生加密工具，不需要 GoMobile、AAR 或额外的后端服务；只有汽水音乐的会员整曲需要用户自备可选的签名器（见下文）。Go 源码保留在 `third_party/music-lib`，作为原生移植的参考与 AGPL-3.0 来源说明。
 
+## 项目与社区
+
+- 项目主页：https://github.com/mytv-android/myMusic
+- Telegram 群组：https://t.me/mytv_android_channel
+
+两个入口在应用的 `设置 › 关于与更新` 里同样提供：手机上点按打开，电视上用手机扫页面上的二维码（二维码由本机编码器生成，不经过第三方图片服务）。
+
 ## 界面结构
 
 界面使用 Material 3 Expressive（`material3 1.5.0-alpha25`，最后一个支持 minSdk 23 的版本），配色由 [MaterialKolor](https://github.com/jordond/MaterialKolor) 从当前歌曲封面实时生成，模糊效果来自 [Haze](https://github.com/chrisbanes/haze)。

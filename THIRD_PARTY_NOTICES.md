@@ -35,6 +35,13 @@ The vendored Go source is retained as the reference for the Kotlin native port i
 - License: Apache License 2.0
 - Usage: blur behind the mini player, navigation bar and bottom player bar.
 
+## Nayuki QR Code generator
+
+- Upstream: https://github.com/nayuki/QR-Code-generator
+- License: MIT License
+- Location: `app/src/main/java/com/mytv/mymusic/ui/settings/QrCode.kt` (`QrEncoder`, `QrCodeImage`)
+- Usage: reference implementation for the local QR encoder (byte mode, error-correction level M, versions 1–40, Reed–Solomon ECC, mask selection). The Kotlin port is a derivative work distributed under AGPL-3.0. It renders the login QR codes and the project / Telegram QR codes on the About screen, so no QR image has to be fetched from a third-party service.
+
 ## Roboto Flex
 
 - Upstream: https://github.com/googlefonts/roboto-flex (via https://github.com/google/fonts/tree/main/ofl/robotoflex)
