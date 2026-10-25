@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -48,22 +49,21 @@ import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
 import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.components.SwitchRow
+import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatTime
 import kotlinx.coroutines.delay
 import java.util.Locale
 
-/** 剩余时间，每秒刷新。 */
+/** 剩余时间，每秒刷新。返回 State，让调用方只在真正显示倒计时的位置读值。 */
 @Composable
-fun rememberSleepRemaining(sleep: SleepTimerState): Long {
-    val remaining by produceState(sleep.remainingMs(), sleep) {
+fun rememberSleepRemaining(sleep: SleepTimerState): androidx.compose.runtime.State<Long> =
+    produceState(sleep.remainingMs(), sleep) {
         while (sleep.active && !sleep.endOfTrack) {
             value = sleep.remainingMs()
             delay(1000)
         }
     }
-    return remaining
-}
 
 fun sleepLabel(sleep: SleepTimerState): String = when {
     !sleep.active -> ""
@@ -83,6 +83,7 @@ fun formatClock(ms: Long): String {
 @Composable
 fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit) {
     val currentIndex = state.queue.indexOfFirst { it.key == state.current?.key }
+    val queueKeys = remember(state.queue) { distinctKeys(state.queue) { it.key } }
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (currentIndex - 1).coerceAtLeast(0))
     AdaptiveSheet(
         onDismiss = onDismiss,
@@ -131,7 +132,11 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            itemsIndexed(state.queue, key = { index, song -> "${song.key}:$index" }) { index, song ->
+            itemsIndexed(
+                state.queue,
+                key = { index, _ -> queueKeys[index] },
+                contentType = { _, _ -> "queue" },
+            ) { index, song ->
                 val playing = index == currentIndex
                 SongRow(
                     title = song.title,
@@ -165,13 +170,16 @@ fun SleepTimerSheet(state: MusicUiState, sleep: SleepTimerState, actions: MusicA
     var minutes by rememberSaveable { mutableIntStateOf(30) }
     var afterCurrent by rememberSaveable { mutableIntStateOf(if (sleep.endOfTrack) 1 else 0) }
     val remaining = rememberSleepRemaining(sleep)
+    // 倒计时每秒变一次：交给标题的 provider，只有标题文字重组
+    val active = sleep.active
     AdaptiveSheet(
         onDismiss = onDismiss,
         title = "定时关闭",
-        subtitle = if (sleep.active) {
-            if (sleep.endOfTrack) "当前歌曲播完后暂停" else "还剩 ${formatClock(remaining)}，到点前 30 秒音量逐渐变小"
+        subtitle = if (active) "" else "到点前 30 秒音量逐渐变小，然后暂停",
+        subtitleProvider = if (active) {
+            { if (sleep.endOfTrack) "当前歌曲播完后暂停" else "还剩 ${formatClock(remaining.value)}，到点前 30 秒音量逐渐变小" }
         } else {
-            "到点前 30 秒音量逐渐变小，然后暂停"
+            null
         },
     ) {
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

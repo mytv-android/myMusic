@@ -52,6 +52,17 @@ val SegmentGap = 2.dp
 private val Outer = 16.dp
 private val Inner = 4.dp
 
+/** 列表 key：id 可能重复时后出现的加序号，否则 Lazy 列表会因重复 key 崩溃；不要拿位置当 key。 */
+internal fun <T> distinctKeys(items: List<T>, id: (T) -> String): List<String> {
+    val seen = HashMap<String, Int>()
+    return items.map { item ->
+        val base = id(item)
+        val count = (seen[base] ?: 0) + 1
+        seen[base] = count
+        if (count == 1) base else "$base#$count"
+    }
+}
+
 fun segmentShape(index: Int, count: Int): Shape = when {
     count <= 1 -> RoundedCornerShape(Outer)
     index == 0 -> RoundedCornerShape(Outer, Outer, Inner, Inner)

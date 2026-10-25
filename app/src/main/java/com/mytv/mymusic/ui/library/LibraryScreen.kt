@@ -84,6 +84,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -133,8 +134,10 @@ import com.mytv.mymusic.ui.formatBytes
 import com.mytv.mymusic.ui.relativeTime
 import com.mytv.mymusic.ui.song
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -297,7 +300,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playlistItems(
         }
         return
     }
-    itemsIndexed(playlists, key = { _, it -> "pl:${it.id}" }) { index, playlist ->
+    itemsIndexed(
+        playlists,
+        key = { _, it -> "pl:${it.id}" },
+        contentType = { _, _ -> "playlist" },
+    ) { index, playlist ->
         ListRow(
             title = playlist.name,
             index = index,
@@ -469,7 +476,7 @@ private fun TvLibrary(
                     item(key = "new") {
                         TvNewCard(onClick = { newOpen = true })
                     }
-                    items(playlists, key = { it.id }) { playlist ->
+                    items(playlists, key = { it.id }, contentType = { "playlist" }) { playlist ->
                         TvCard(
                             title = playlist.name,
                             onClick = { nav.openPlaylist(playlist.id) },
@@ -481,9 +488,11 @@ private fun TvLibrary(
             }
             if (history.isNotEmpty()) {
                 item(key = "recent") {
-                    val songs = remember(history) { history.take(24).map { it.song() } }
+                    val songs by produceState(initialValue = emptyList<com.mytv.mymusic.data.Song>(), history) {
+                        value = withContext(Dispatchers.IO) { history.take(24).map { it.song() } }
+                    }
                     TvRow("最近播放") {
-                        items(songs, key = { "recent:${it.key}" }) { song ->
+                        items(songs, key = { "recent:${it.key}" }, contentType = { "song" }) { song ->
                             TvCard(
                                 title = song.title,
                                 subtitle = song.artist,
@@ -655,18 +664,27 @@ internal fun rememberLibraryStats(
     favorites: List<SavedSong>,
     history: List<SavedSong>,
     downloads: List<DownloadRecord>,
-): LibraryStats = remember(favorites, history, downloads) {
-    val today = startOfToday()
-    val done = downloads.filter { it.state == DOWNLOAD_DONE }
-    LibraryStats(
-        favorites = favorites.size,
-        favoriteLatest = favorites.maxOfOrNull { it.updatedAt } ?: 0L,
-        historyToday = history.count { it.updatedAt >= today },
-        historyTotal = history.size,
-        downloadsDone = done.size,
-        downloadsActive = downloads.size - done.size,
-        downloadBytes = done.sumOf { record -> runCatching { File(record.path).length() }.getOrDefault(0L) },
-    )
+): LibraryStats {
+    // 文件大小要走磁盘；放在组合里同步做会让下载进度每次更新都卡主线程
+    val downloadBytes by produceState(initialValue = 0L, downloads) {
+        value = withContext(Dispatchers.IO) {
+            downloads.filter { it.state == DOWNLOAD_DONE }
+                .sumOf { record -> runCatching { File(record.path).length() }.getOrDefault(0L) }
+        }
+    }
+    return remember(favorites, history, downloads, downloadBytes) {
+        val today = startOfToday()
+        val done = downloads.filter { it.state == DOWNLOAD_DONE }
+        LibraryStats(
+            favorites = favorites.size,
+            favoriteLatest = favorites.maxOfOrNull { it.updatedAt } ?: 0L,
+            historyToday = history.count { it.updatedAt >= today },
+            historyTotal = history.size,
+            downloadsDone = done.size,
+            downloadsActive = downloads.size - done.size,
+            downloadBytes = downloadBytes,
+        )
+    }
 }
 
 @Composable
@@ -1155,15 +1173,17 @@ internal fun startOfToday(): Long = Calendar.getInstance().apply {
     set(Calendar.MILLISECOND, 0)
 }.timeInMillis
 
+private val DayLabelFormat = SimpleDateFormat("M 月 d 日", Locale.getDefault())
+private val TimeLabelFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+
 internal fun dayLabel(millis: Long): String {
     val today = startOfToday()
     val day = 24L * 60 * 60 * 1000
     return when {
         millis >= today -> "今天"
         millis >= today - day -> "昨天"
-        else -> SimpleDateFormat("M 月 d 日", Locale.getDefault()).format(Date(millis))
+        else -> DayLabelFormat.format(Date(millis))
     }
 }
 
-internal fun timeLabel(millis: Long): String =
-    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(millis))
+internal fun timeLabel(millis: Long): String = TimeLabelFormat.format(Date(millis))

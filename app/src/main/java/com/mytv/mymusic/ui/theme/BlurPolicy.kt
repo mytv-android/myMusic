@@ -29,14 +29,14 @@ val LocalBlurPolicy = staticCompositionLocalOf { BlurPolicy(enabled = false) }
 val LocalHazeState = staticCompositionLocalOf<HazeState?> { null }
 
 @Composable
-fun rememberBlurPolicy(mode: BlurMode): BlurPolicy {
+fun rememberBlurPolicy(mode: BlurMode, tv: Boolean): BlurPolicy {
     val context = LocalContext.current
-    return remember(mode, context) {
+    return remember(mode, tv, context) {
         BlurPolicy(
             enabled = when (mode) {
                 BlurMode.On -> true
                 BlurMode.Off -> false
-                BlurMode.Auto -> Build.VERSION.SDK_INT >= 31 && !context.isTelevision() && !context.isLowRam()
+                BlurMode.Auto -> Build.VERSION.SDK_INT >= 31 && !tv && !context.isLowRam()
             },
         )
     }

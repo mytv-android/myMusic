@@ -48,6 +48,7 @@ class SettingsStore(private val context: Context) {
     private val chartsSourceKey = stringPreferencesKey("charts_source")
     private val playlistsSourceKey = stringPreferencesKey("playlists_source")
     private val themeKey = stringPreferencesKey("theme")
+    private val layoutModeKey = stringPreferencesKey("layout_mode")
     private val cookiesKey = stringPreferencesKey("cookies")
     private val sodaSignerUrlKey = stringPreferencesKey("soda_signer_url")
     private val sodaSignerTokenKey = stringPreferencesKey("soda_signer_token")
@@ -80,6 +81,7 @@ class SettingsStore(private val context: Context) {
             chartsSource = values[chartsSourceKey] ?: "",
             playlistsSource = values[playlistsSourceKey] ?: "",
             theme = values[themeKey] ?: "system",
+            layoutMode = values[layoutModeKey] ?: "Auto",
             cookies = runCatching { json.decodeFromString<Map<String, String>>(values[cookiesKey] ?: "{}") }
                 .getOrDefault(emptyMap()),
             sodaSignerUrl = values[sodaSignerUrlKey] ?: "",
@@ -121,6 +123,7 @@ class SettingsStore(private val context: Context) {
     suspend fun chartsSource(value: String) = context.dataStore.edit { it[chartsSourceKey] = value }
     suspend fun playlistsSource(value: String) = context.dataStore.edit { it[playlistsSourceKey] = value }
     suspend fun theme(value: String) = context.dataStore.edit { it[themeKey] = value }
+    suspend fun layoutMode(value: String) = context.dataStore.edit { it[layoutModeKey] = value }
     suspend fun dynamicColor(value: Boolean) = context.dataStore.edit { it[dynamicColorKey] = value }
     suspend fun reduceMotion(value: Boolean) = context.dataStore.edit { it[reduceMotionKey] = value }
     suspend fun showBottomNav(value: Boolean) = context.dataStore.edit { it[showBottomNavKey] = value }
@@ -187,6 +190,8 @@ data class AppSettings(
     val chartsSource: String = "",
     val playlistsSource: String = "",
     val theme: String = "system",
+    /** 界面布局：Auto / Phone / Tablet / Tv。 */
+    val layoutMode: String = "Auto",
     val cookies: Map<String, String> = emptyMap(),
     /** 汽水签名器（sodam / libmssdk 的 /sign 协议），留空表示只用公开试听流。 */
     val sodaSignerUrl: String = "",

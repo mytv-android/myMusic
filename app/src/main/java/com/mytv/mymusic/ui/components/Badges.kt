@@ -27,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -110,14 +112,18 @@ fun SourceChip(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val corner by animateDpAsState(if (pressed) 16.dp else 12.dp, MaterialTheme.motionScheme.fastSpatialSpec(), label = "srcCorner")
+    val corner = animateDpAsState(if (pressed) 16.dp else 12.dp, MaterialTheme.motionScheme.fastSpatialSpec(), label = "srcCorner")
     Surface(
         onClick = onClick,
         modifier = modifier
             .height(36.dp)
-            .tvFocusRing(RoundedCornerShape(corner))
+            .graphicsLayer {
+                shape = RoundedCornerShape(corner.value)
+                clip = true
+            }
+            .tvFocusRing(RoundedCornerShape(12.dp))
             .semantics { contentDescription = "音源：$providerName $detail，$mode。点按切换音源" },
-        shape = RoundedCornerShape(corner),
+        shape = RectangleShape,
         color = container,
         contentColor = content,
         interactionSource = interaction,

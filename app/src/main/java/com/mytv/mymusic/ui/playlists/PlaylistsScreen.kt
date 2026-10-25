@@ -163,6 +163,12 @@ private fun PhonePlaylists(
                 maxWidth < 1000.dp -> 4
                 else -> 5
             }
+            val recommendRows = remember(playlists.recommendations, columns) {
+                playlists.recommendations.drop(1).chunked(columns)
+            }
+            val categoryRows = remember(playlists.categoryPlaylists, columns) {
+                playlists.categoryPlaylists.chunked(columns)
+            }
             LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = padding) {
                 item(key = "sources") { ProviderChips(sources, playlists.providerId, actions::selectPlaylistSource) }
                 if (!window.isTablet && playlists.canCategorize) {
@@ -175,9 +181,9 @@ private fun PhonePlaylists(
                     }
                 }
                 if (categoryMode) {
-                    categoryContent(playlists, actions, columns, gutter, categoryEnd)
+                    categoryContent(playlists, actions, columns, gutter, categoryEnd, categoryRows)
                 } else {
-                    recommendContent(playlists, sources, actions, columns, gutter, featureHeight = if (window.isTablet) 220.dp else 176.dp)
+                    recommendContent(playlists, sources, actions, columns, gutter, recommendRows, featureHeight = if (window.isTablet) 220.dp else 176.dp)
                 }
             }
         }
@@ -212,6 +218,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.recommendContent(
     actions: MusicActions,
     columns: Int,
     gutter: Dp,
+    restRows: List<List<Playlist>>,
     featureHeight: Dp,
 ) {
     val other = sources.firstOrNull { it.id != playlists.providerId }
@@ -267,7 +274,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.recommendContent(
             val rest = items.drop(1)
             if (rest.isNotEmpty()) {
                 item(key = "restLabel") { SectionLabel("为你推荐", Modifier.padding(horizontal = gutter)) }
-                items(rest.chunked(columns)) { row ->
+                items(
+                    restRows,
+                    key = { row -> "rest:${row.first().id}" },
+                    contentType = { "playlistRow" },
+                ) { row ->
                     PlaylistGridRow(row, columns, actions, Modifier.padding(horizontal = gutter).padding(bottom = 16.dp))
                 }
             }
@@ -289,6 +300,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.categoryContent(
     columns: Int,
     gutter: Dp,
     end: Boolean,
+    rows: List<List<Playlist>>,
 ) {
     if (playlists.categories.isEmpty() && playlists.categoriesLoading) {
         item(key = "chipSkeleton") {
@@ -311,7 +323,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.categoryContent(
                 contentPadding = PaddingValues(horizontal = gutter, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(groups, key = { it }) { group ->
+                items(groups, key = { it }, contentType = { "group" }) { group ->
                     MusicChip(group, playlists.categoryGroup == group) { actions.setCategoryGroup(group) }
                 }
             }
@@ -348,7 +360,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.categoryContent(
             )
         }
         else -> {
-            items(list.chunked(columns)) { row ->
+            items(
+                rows,
+                key = { row -> "category:${row.first().id}" },
+                contentType = { "playlistRow" },
+            ) { row ->
                 PlaylistGridRow(row, columns, actions, Modifier.padding(horizontal = gutter).padding(bottom = 16.dp))
             }
             item(key = "footer") {
@@ -540,7 +556,7 @@ private fun TvRecommendations(playlists: PlaylistsUiState, sources: List<Provide
         }
         else -> {
             val lead = items.first()
-            val rows = items.drop(1).chunked(10)
+            val rows = remember(items) { items.drop(1).chunked(10) }
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 12.dp, bottom = 48.dp)) {
                 item(key = "lead") {
                     FeaturePlaylist(
@@ -551,7 +567,11 @@ private fun TvRecommendations(playlists: PlaylistsUiState, sources: List<Provide
                         focus = if (rows.isEmpty()) firstFocus else null,
                     )
                 }
-                itemsIndexed(rows, key = { index, _ -> "row$index" }) { rowIndex, row ->
+                itemsIndexed(
+                    rows,
+                    key = { _, row -> "row:${row.first().id}" },
+                    contentType = { _, _ -> "playlistRow" },
+                ) { rowIndex, row ->
                     Column(Modifier.padding(top = 16.dp)) {
                         Text(
                             if (rowIndex == 0) "为你推荐" else "更多推荐",
@@ -563,7 +583,11 @@ private fun TvRecommendations(playlists: PlaylistsUiState, sources: List<Provide
                             contentPadding = PaddingValues(horizontal = gutter, vertical = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(20.dp),
                         ) {
-                            itemsIndexed(row) { index, playlist ->
+                            itemsIndexed(
+                                row,
+                                key = { _, playlist -> playlist.id },
+                                contentType = { _, _ -> "playlist" },
+                            ) { index, playlist ->
                                 PlaylistCard(
                                     playlist,
                                     actions,
@@ -607,7 +631,11 @@ private fun TvCategories(playlists: PlaylistsUiState, actions: MusicActions) {
             if (playlists.categoriesError.isNotBlank()) {
                 item(key = "error") { ErrorBlock("分类列表没有加载出来", actions::refreshPlaylists) }
             }
-            itemsIndexed(entries, key = { index, entry -> "${entry.key}#$index" }) { index, entry ->
+            itemsIndexed(
+                entries,
+                key = { _, entry -> entry.key },
+                contentType = { _, _ -> "categoryEntry" },
+            ) { index, entry ->
                 val focusModifier = if (index == selectedIndex) Modifier.focusRequester(selectedFocus) else Modifier
                 when (entry) {
                     is CategoryEntry.All -> ListRow(
@@ -665,7 +693,11 @@ private fun androidx.compose.foundation.layout.RowScope.TvCategoryGrid(playlists
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
-                    itemsIndexed(list) { _, playlist ->
+                    itemsIndexed(
+                        list,
+                        key = { _, playlist -> playlist.id },
+                        contentType = { _, _ -> "playlist" },
+                    ) { _, playlist ->
                         PlaylistCard(playlist, actions)
                     }
                     if (playlists.categoryError.isNotBlank()) {

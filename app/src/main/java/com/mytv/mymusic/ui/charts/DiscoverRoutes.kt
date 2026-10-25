@@ -2,13 +2,16 @@ package com.mytv.mymusic.ui.charts
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
+import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.AppNav
 import com.mytv.mymusic.ui.CollectionScreen
 import com.mytv.mymusic.ui.playlists.PlaylistsScreen
 import com.mytv.mymusic.ui.song
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** 发现：榜单、歌单，以及两者共用的榜单 / 歌单 / 专辑详情页。 */
 fun NavGraphBuilder.discoverRoutes(app: AppNav) {
@@ -19,8 +22,12 @@ fun NavGraphBuilder.discoverRoutes(app: AppNav) {
         val localPlaylists by app.model.localPlaylists.collectAsState()
         val playlists by app.model.playlistsState.collectAsState()
         val history by app.model.history.collectAsState()
-        // 电视的“最近播放”行只取前 20 条
-        val recent = remember(history) { history.take(20).mapNotNull { runCatching { it.song() }.getOrNull() } }
+        // 电视的“最近播放”行只取前 20 条；payload 解码放后台线程
+        val recent by produceState(initialValue = emptyList<Song>(), history) {
+            value = withContext(Dispatchers.IO) {
+                history.take(20).mapNotNull { runCatching { it.song() }.getOrNull() }
+            }
+        }
         ChartsScreen(
             state = state,
             charts = charts,

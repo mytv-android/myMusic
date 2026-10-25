@@ -1,55 +1,99 @@
 package com.mytv.mymusic.ui.components
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.border
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusEventModifierNode
+import androidx.compose.ui.focus.FocusState
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 /**
- * 遥控器焦点：放大 4% 并画一圈 3dp 主色描边。只在电视上生效，放大用 graphicsLayer，不触发重新布局。
- * 手机和平板上的硬件键盘焦点仍由组件自带的 focus indication 处理。
+ * 遥控器焦点：放大 4% 并画一圈 3dp 主色描边。只在电视上生效，放大用 draw 阶段的变换，不触发组合和布局。
+ * 用 Modifier.Node 而不是 composed/内联动画：节点可复用，缩放值只在绘制时读取。
  */
 @Composable
 fun Modifier.tvFocusRing(shape: Shape = RoundedCornerShape(16.dp), scale: Float = 1.04f): Modifier {
     if (!LocalAppWindow.current.isTv) return this
-    var focused by remember { mutableStateOf(false) }
-    val animated by animateFloatAsState(if (focused) scale else 1f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "tvScale")
-    val ring = MaterialTheme.colorScheme.primary
-    return this
-        .onFocusChanged { focused = it.isFocused || it.hasFocus }
-        .graphicsLayer {
-            scaleX = animated
-            scaleY = animated
-        }
-        .then(if (focused) Modifier.border(3.dp, ring, shape) else Modifier)
+    return this then TvFocusElement(
+        shape = shape,
+        scale = scale,
+        ring = MaterialTheme.colorScheme.primary,
+        spec = MaterialTheme.motionScheme.fastSpatialSpec(),
+        onFocused = null,
+    )
 }
 
 /** 电视卡片焦点：放大更明显（8%），用于海报和横向卡片行。 */
 @Composable
 fun Modifier.tvCardFocus(shape: Shape = RoundedCornerShape(20.dp), onFocused: () -> Unit = {}): Modifier {
     if (!LocalAppWindow.current.isTv) return this
-    var focused by remember { mutableStateOf(false) }
-    val animated by animateFloatAsState(if (focused) 1.08f else 1f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "tvCard")
-    val ring = MaterialTheme.colorScheme.primary
-    return this
-        .onFocusChanged {
-            val now = it.isFocused || it.hasFocus
-            if (now && !focused) onFocused()
-            focused = now
+    return this then TvFocusElement(
+        shape = shape,
+        scale = 1.08f,
+        ring = MaterialTheme.colorScheme.primary,
+        spec = MaterialTheme.motionScheme.fastSpatialSpec(),
+        onFocused = onFocused,
+    )
+}
+
+private data class TvFocusElement(
+    val shape: Shape,
+    val scale: Float,
+    val ring: Color,
+    val spec: AnimationSpec<Float>,
+    val onFocused: (() -> Unit)?,
+) : ModifierNodeElement<TvFocusNode>() {
+    override fun create() = TvFocusNode(shape, scale, ring, spec, onFocused)
+
+    override fun update(node: TvFocusNode) {
+        node.shape = shape
+        node.targetScale = scale
+        node.ring = ring
+        node.spec = spec
+        node.onFocused = onFocused
+    }
+}
+
+private class TvFocusNode(
+    var shape: Shape,
+    var targetScale: Float,
+    var ring: Color,
+    var spec: AnimationSpec<Float>,
+    var onFocused: (() -> Unit)?,
+) : Modifier.Node(), FocusEventModifierNode, DrawModifierNode {
+    private val animated = Animatable(1f)
+    private var focused = false
+
+    override fun onFocusEvent(focusState: FocusState) {
+        val now = focusState.isFocused || focusState.hasFocus
+        if (now == focused) return
+        focused = now
+        if (now) onFocused?.invoke()
+        coroutineScope.launch { animated.animateTo(if (now) targetScale else 1f, spec) }
+        invalidateDraw()
+    }
+
+    override fun ContentDrawScope.draw() {
+        val current = animated.value
+        scale(current, current) {
+            this@draw.drawContent()
+            if (focused) {
+                val outline = shape.createOutline(size, layoutDirection, this)
+                drawOutline(outline, ring, style = Stroke(width = 3.dp.toPx()))
+            }
         }
-        .graphicsLayer {
-            scaleX = animated
-            scaleY = animated
-        }
-        .then(if (focused) Modifier.border(3.dp, ring, shape) else Modifier)
+    }
 }

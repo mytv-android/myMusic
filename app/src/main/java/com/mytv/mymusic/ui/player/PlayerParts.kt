@@ -52,7 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -74,6 +74,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.mytv.mymusic.ui.LyricLine
 import com.mytv.mymusic.ui.ParsedLyrics
+import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -149,12 +150,22 @@ fun AmbientBackdrop(cover: String, playing: Boolean, modifier: Modifier = Modifi
     val scheme = MaterialTheme.colorScheme
     val request = remember(cover) { ImageRequest.Builder(context).data(cover).size(24).build() }
     val spin = !reduceMotion && playing
+    // 只持有 State，在绘制阶段读 value；否则整个背景每帧重组
     val angle = if (spin) {
         val transition = rememberInfiniteTransition(label = "ambient")
-        val value by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(38_000, easing = LinearEasing)), label = "spin")
-        value
+        transition.animateFloat(0f, 360f, infiniteRepeatable(tween(38_000, easing = LinearEasing)), label = "spin")
     } else {
-        0f
+        null
+    }
+    val glow = remember(scheme.primaryContainer) {
+        Brush.radialGradient(listOf(scheme.primaryContainer.copy(alpha = 0.55f), Color.Transparent), radius = 1400f)
+    }
+    val shade = remember(scheme.surface) {
+        Brush.verticalGradient(
+            0f to Color.Transparent,
+            0.35f to Color.Transparent,
+            1f to scheme.surface.copy(alpha = 0.72f),
+        )
     }
     Box(modifier.fillMaxSize().background(scheme.surface)) {
         if (cover.isNotBlank()) {
@@ -165,7 +176,7 @@ fun AmbientBackdrop(cover: String, playing: Boolean, modifier: Modifier = Modifi
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        rotationZ = angle
+                        rotationZ = angle?.value ?: 0f
                         scaleX = 2.4f
                         scaleY = 2.4f
                         alpha = 0.78f
@@ -176,14 +187,8 @@ fun AmbientBackdrop(cover: String, playing: Boolean, modifier: Modifier = Modifi
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Brush.radialGradient(listOf(scheme.primaryContainer.copy(alpha = 0.55f), Color.Transparent), radius = 1400f))
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.35f to Color.Transparent,
-                        1f to scheme.surface.copy(alpha = 0.72f),
-                    ),
-                ),
+                .background(glow)
+                .background(shade),
         )
     }
 }
@@ -191,14 +196,16 @@ fun AmbientBackdrop(cover: String, playing: Boolean, modifier: Modifier = Modifi
 /** 封面边缘渐隐：竖向（手机，向下淡出）或横向（平板 / 电视，向右淡出）。 */
 fun Modifier.fadeEdge(horizontal: Boolean): Modifier = this
     .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
-    .drawWithContent {
-        drawContent()
+    .drawWithCache {
         val brush = if (horizontal) {
             Brush.horizontalGradient(0f to Color.Black, 0.6f to Color.Black, 0.98f to Color.Transparent)
         } else {
             Brush.verticalGradient(0f to Color.Black, 0.5f to Color.Black, 0.97f to Color.Transparent)
         }
-        drawRect(brush, blendMode = BlendMode.DstIn)
+        onDrawWithContent {
+            drawContent()
+            drawRect(brush, blendMode = BlendMode.DstIn)
+        }
     }
 
 /**
@@ -223,13 +230,12 @@ fun PlayerArt(
     val currentDoubleTap by rememberUpdatedState(onDoubleTap)
     val breathe = if (playing && !reduceMotion) {
         val transition = rememberInfiniteTransition(label = "breathe")
-        val value by transition.animateFloat(1f, 1.035f, infiniteRepeatable(tween(7_000), RepeatMode.Reverse), label = "breatheScale")
-        value
+        transition.animateFloat(1f, 1.035f, infiniteRepeatable(tween(7_000), RepeatMode.Reverse), label = "breatheScale")
     } else {
-        1f
+        null
     }
-    val pausedScale by animateFloatAsState(if (playing) 1f else 0.965f, MaterialTheme.motionScheme.slowSpatialSpec(), label = "pausedScale")
-    val dim by animateFloatAsState(if (playing) 0f else 0.3f, MaterialTheme.motionScheme.slowEffectsSpec(), label = "dim")
+    val pausedScale = animateFloatAsState(if (playing) 1f else 0.965f, MaterialTheme.motionScheme.slowSpatialSpec(), label = "pausedScale")
+    val dim = animateFloatAsState(if (playing) 0f else 0.3f, MaterialTheme.motionScheme.slowEffectsSpec(), label = "dim")
     Box(
         modifier
             .fadeEdge(horizontalFade)
@@ -266,14 +272,14 @@ fun PlayerArt(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val scale = breathe * pausedScale
+                    val scale = (breathe?.value ?: 1f) * pausedScale.value
                     scaleX = scale
                     scaleY = scale
                     translationX = drag.value
                     alpha = 1f - (abs(drag.value) / (threshold * 4)).coerceIn(0f, 0.5f)
                 },
         )
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)))
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = dim.value }.background(Color.Black))
     }
 }
 
@@ -325,6 +331,7 @@ fun LyricsList(
         return
     }
     val lines: List<LyricLine> = if (lyrics.synced) lyrics.lines else lyrics.raw.lines().filter { it.isNotBlank() }.map { LyricLine(-1, it) }
+    val lyricKeys = remember(lines) { distinctKeys(lines) { it.timeMs.toString() } }
     val list = rememberLazyListState()
     val dragged by list.interactionSource.collectIsDraggedAsState()
     var manualAt by remember { mutableLongStateOf(0L) }
@@ -342,10 +349,14 @@ fun LyricsList(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = pad, bottom = pad * 2),
         ) {
-            itemsIndexed(lines) { index, line ->
+            itemsIndexed(
+                lines,
+                key = { index, _ -> lyricKeys[index] },
+                contentType = { _, _ -> "lyric" },
+            ) { index, line ->
                 val current = index == active
                 val near = abs(index - active) == 1
-                val weight by animateFloatAsState(if (current) 1f else if (near) 0.6f else 0.38f, label = "lyricAlpha")
+                val weight = animateFloatAsState(if (current) 1f else if (near) 0.6f else 0.38f, label = "lyricAlpha")
                 Text(
                     line.text,
                     modifier = Modifier
@@ -353,7 +364,7 @@ fun LyricsList(
                         .clip(RoundedCornerShape(12.dp))
                         .then(if (lyrics.synced && line.timeMs >= 0) Modifier.clickable(onClickLabel = "从这一句播放") { onSeek(line.timeMs) } else Modifier)
                         .padding(horizontal = 8.dp, vertical = if (large) 10.dp else 8.dp)
-                        .graphicsLayer { alpha = weight },
+                        .graphicsLayer { alpha = weight.value },
                     style = when {
                         large && current -> MaterialTheme.typography.displaySmall
                         large -> MaterialTheme.typography.headlineMedium

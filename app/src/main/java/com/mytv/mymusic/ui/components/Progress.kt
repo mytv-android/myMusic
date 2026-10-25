@@ -28,6 +28,7 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -62,7 +64,7 @@ import com.mytv.mymusic.ui.theme.LocalAppearance
  */
 @Composable
 fun WavySeekBar(
-    position: Long,
+    position: State<Long>,
     duration: Long,
     playing: Boolean,
     onSeek: (Long) -> Unit,
@@ -75,10 +77,10 @@ fun WavySeekBar(
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
     val seek by rememberUpdatedState(onSeek)
-    val fraction = if (dragging) dragFraction else if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+    val fraction = if (dragging) dragFraction else if (duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f
     val wave = playing && !dragging && !reduceMotion
     // 读屏按 10 秒取整：焦点停在进度条上时，每次数值变化都会被播报，按毫秒更新会一直打断
-    val spokenPosition = if (dragging) (dragFraction * duration).toLong() else position / 10_000 * 10_000
+    val spokenPosition = if (dragging) (dragFraction * duration).toLong() else position.value / 10_000 * 10_000
     Column(modifier) {
         Box(
             Modifier
@@ -96,8 +98,8 @@ fun WavySeekBar(
                 .onKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown || duration <= 0) return@onKeyEvent false
                     when (event.key) {
-                        Key.DirectionLeft -> { onSeek((position - 10_000).coerceAtLeast(0)); true }
-                        Key.DirectionRight -> { onSeek((position + 10_000).coerceAtMost(duration)); true }
+                        Key.DirectionLeft -> { onSeek((position.value - 10_000).coerceAtLeast(0)); true }
+                        Key.DirectionRight -> { onSeek((position.value + 10_000).coerceAtMost(duration)); true }
                         else -> false
                     }
                 }
@@ -136,7 +138,7 @@ fun WavySeekBar(
         }
         if (showTimes) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                val shown = if (dragging) (dragFraction * duration).toLong() else position
+                val shown = if (dragging) (dragFraction * duration).toLong() else position.value
                 Text(formatTime(shown), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(formatTime(duration), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -184,23 +186,26 @@ fun Skeleton(modifier: Modifier = Modifier, shape: androidx.compose.ui.graphics.
     val reduceMotion = LocalAppearance.current.reduceMotion
     val base = MaterialTheme.colorScheme.surfaceContainerHigh
     val shine = MaterialTheme.colorScheme.surfaceContainerHighest
-    val offset = if (reduceMotion) 0f else {
+    // 动画值不在这里读：读在绘制阶段，流光每帧只失效绘制，不触发重组
+    val offset = if (reduceMotion) null else {
         val transition = rememberInfiniteTransition(label = "skeleton")
-        val value by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Restart), label = "shimmer")
-        value
+        transition.animateFloat(0f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Restart), label = "shimmer")
     }
     Box(
         modifier
             .clip(shape)
-            .background(
-                Brush.linearGradient(
-                    0f to base,
-                    (offset - 0.2f).coerceIn(0f, 1f) to base,
-                    offset to shine,
-                    (offset + 0.2f).coerceIn(0f, 1f) to base,
-                    1f to base,
-                ),
-            ),
+            .drawBehind {
+                val o = offset?.value ?: 0f
+                drawRect(
+                    Brush.linearGradient(
+                        0f to base,
+                        (o - 0.2f).coerceIn(0f, 1f) to base,
+                        o to shine,
+                        (o + 0.2f).coerceIn(0f, 1f) to base,
+                        1f to base,
+                    ),
+                )
+            },
     )
 }
 

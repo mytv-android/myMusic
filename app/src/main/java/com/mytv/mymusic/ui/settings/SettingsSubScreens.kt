@@ -70,14 +70,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -131,8 +137,11 @@ import com.mytv.mymusic.ui.theme.BlurMode
 import com.mytv.mymusic.ui.theme.BrandSeed
 import com.mytv.mymusic.ui.theme.ColorSource
 import com.mytv.mymusic.ui.theme.CustomSeedSwatches
+import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import com.mytv.mymusic.ui.theme.SchemeStyle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 // ======================= 外观 =======================
@@ -157,6 +166,13 @@ fun AppearanceSettingsScreen(state: MusicUiState, actions: MusicActions, onBack:
     val groupWidth = Modifier.widthIn(max = 480.dp).fillMaxWidth()
     SettingsPage(SettingsSection.Appearance, embedded, onBack) {
         item(key = "preview") { AppearancePreview(state, actions) }
+        item(key = "layoutHead") { SectionLabel("布局模式") }
+        item(key = "layout") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LayoutModeChips(appearance.layout) { actions.setLayoutMode(it) }
+                SettingsNote(layoutModeHint(appearance.layout))
+            }
+        }
         // 电视固定深色，不提供浅色主题
         if (!tv) item(key = "themeHead") { SectionLabel("主题") }
         if (!tv) item(key = "theme") {
@@ -233,6 +249,23 @@ fun AppearanceSettingsScreen(state: MusicUiState, actions: MusicActions, onBack:
                 if (tv) "电视在“自动”下不做实时模糊，迷你播放器和导航栏改用不透明底色，滑动更流畅。"
                 else "自动：Android 12 以上且内存充足时，迷你播放器和导航栏用磨砂底；关闭后改用不透明底色。",
             )
+        }
+    }
+}
+
+private fun layoutModeHint(mode: LayoutMode): String = when (mode) {
+    LayoutMode.Auto -> "跟随设备：按窗口宽度和电视识别切换，屏幕方向保持系统默认。"
+    LayoutMode.Phone -> "固定竖屏，使用底部导航和迷你播放器。"
+    LayoutMode.Tablet -> "固定横屏，使用侧边导航；窗口够宽时内容分成两栏，并显示底部播放条或常驻播放窗格。"
+    LayoutMode.Tv -> "固定横屏，使用遥控器焦点导航和大留白，配色固定深色。"
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LayoutModeChips(selected: LayoutMode, onSelect: (LayoutMode) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LayoutMode.entries.forEach { mode ->
+            MusicChip(mode.label, mode == selected, description = "布局模式：${mode.label}") { onSelect(mode) }
         }
     }
 }
@@ -324,18 +357,30 @@ private fun ColorSourceCard(
 ) {
     val scheme = MaterialTheme.colorScheme
     val reduceMotion = LocalAppearance.current.reduceMotion
-    val corner by animateDpAsState(
+    val corner = animateDpAsState(
         if (selected) 24.dp else 20.dp,
         if (reduceMotion) snap() else MaterialTheme.motionScheme.fastSpatialSpec(),
         label = "sourceCorner",
     )
-    val shape = RoundedCornerShape(corner)
+    val ringShape = RoundedCornerShape(24.dp)
     Column(
         modifier
-            .tvFocusRing(shape)
-            .clip(shape)
+            .tvFocusRing(ringShape)
+            .graphicsLayer {
+                shape = RoundedCornerShape(corner.value)
+                clip = true
+            }
             .background(if (selected) scheme.surfaceContainerHigh else scheme.surfaceContainer)
-            .then(if (selected) Modifier.border(2.dp, scheme.primary, shape) else Modifier)
+            .drawWithContent {
+                drawContent()
+                if (selected) {
+                    drawOutline(
+                        RoundedCornerShape(corner.value).createOutline(size, layoutDirection, this),
+                        scheme.primary,
+                        style = Stroke(width = 2.dp.toPx()),
+                    )
+                }
+            }
             .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
             .alpha(if (enabled) 1f else 0.48f)
             .padding(10.dp),
@@ -666,7 +711,11 @@ fun SearchBrowseSettingsScreen(state: MusicUiState, actions: MusicActions, onBac
         if (searchable.isEmpty()) {
             item(key = "aggLoading") { SkeletonRows(6) }
         } else {
-            itemsIndexed(searchable, key = { _, provider -> "agg:${provider.id}" }) { index, provider ->
+            itemsIndexed(
+                searchable,
+                key = { _, provider -> "agg:${provider.id}" },
+                contentType = { _, _ -> "provider" },
+            ) { index, provider ->
                 val on = provider.id in enabledIds
                 ListRow(
                     title = provider.name,
@@ -770,7 +819,11 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
         if (providers.isEmpty()) {
             item(key = "loading") { SkeletonRows(5) }
         } else {
-            itemsIndexed(providers, key = { _, provider -> "account:${provider.id}" }) { index, provider ->
+            itemsIndexed(
+                providers,
+                key = { _, provider -> "account:${provider.id}" },
+                contentType = { _, _ -> "provider" },
+            ) { index, provider ->
                 AccountRow(
                     provider = provider,
                     loggedIn = !state.cookies[provider.id].isNullOrBlank(),
@@ -979,16 +1032,19 @@ private fun QrLoginBody(
             val url = login?.session?.url.orEmpty()
             when {
                 image.startsWith("data:") -> {
-                    // 平台直接返回的二维码图片：自己解码，放大时用最近邻，保持边缘清晰
-                    val bitmap = remember(image) {
-                        runCatching {
-                            val bytes = android.util.Base64.decode(image.substringAfter(','), android.util.Base64.DEFAULT)
-                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                        }.getOrNull()
+                    // 平台直接返回的二维码图片：解码放后台线程，放大时用最近邻，保持边缘清晰
+                    val bitmap by produceState<ImageBitmap?>(initialValue = null, image) {
+                        value = withContext(Dispatchers.Default) {
+                            runCatching {
+                                val bytes = android.util.Base64.decode(image.substringAfter(','), android.util.Base64.DEFAULT)
+                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                            }.getOrNull()
+                        }
                     }
-                    if (bitmap != null) {
+                    val decoded = bitmap
+                    if (decoded != null) {
                         androidx.compose.foundation.Image(
-                            bitmap,
+                            decoded,
                             "登录二维码",
                             Modifier.fillMaxSize(),
                             filterQuality = androidx.compose.ui.graphics.FilterQuality.None,
@@ -1307,7 +1363,11 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
             )
         }
         item(key = "thirdHead") { SectionLabel("上游与第三方") }
-        itemsIndexed(thirdParty, key = { _, item -> "license:${item.first}" }) { index, (title, body) ->
+        itemsIndexed(
+            thirdParty,
+            key = { _, item -> "license:${item.first}" },
+            contentType = { _, _ -> "license" },
+        ) { index, (title, body) ->
             TextCard(title, body, index, thirdParty.size)
         }
         item(key = "note") {
@@ -1327,7 +1387,11 @@ fun PrivacyScreen(onBack: () -> Unit, embedded: Boolean = false) {
         "诊断信息" to "复制诊断只包含版本、设备型号、Android 版本、启用平台和最近错误；不包含 Cookie、令牌或完整播放 URL。",
     )
     SettingsPage(SettingsSection.Privacy, embedded, onBack) {
-        itemsIndexed(blocks, key = { _, item -> "privacy:${item.first}" }) { index, (title, body) ->
+        itemsIndexed(
+            blocks,
+            key = { _, item -> "privacy:${item.first}" },
+            contentType = { _, _ -> "privacy" },
+        ) { index, (title, body) ->
             TextCard(title, body, index, blocks.size, titleColor = MaterialTheme.colorScheme.primary)
         }
         item(key = "note") {

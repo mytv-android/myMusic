@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.isTelevision
 
 /** 设备形态。平板按宽度细分导航和播放器形态，电视单独走遥控器交互。 */
@@ -46,18 +47,23 @@ val LocalAppSnackbar = staticCompositionLocalOf<SnackbarHostState> { error("Loca
 val LocalOverlayPadding = compositionLocalOf { PaddingValues(0.dp) }
 
 @Composable
-fun rememberAppWindow(): AppWindow {
+fun rememberAppWindow(layout: LayoutMode = LayoutMode.Auto): AppWindow {
     val configuration = LocalConfiguration.current
     val context = LocalContext.current
     val tv = remember(context) { context.isTelevision() }
     val width = configuration.screenWidthDp
     val height = configuration.screenHeightDp
-    return remember(tv, width, height) {
+    return remember(layout, tv, width, height) {
         AppWindow(
-            kind = when {
-                tv -> DeviceKind.Tv
-                width >= 600 -> DeviceKind.Tablet
-                else -> DeviceKind.Phone
+            kind = when (layout) {
+                LayoutMode.Phone -> DeviceKind.Phone
+                LayoutMode.Tablet -> DeviceKind.Tablet
+                LayoutMode.Tv -> DeviceKind.Tv
+                LayoutMode.Auto -> when {
+                    tv -> DeviceKind.Tv
+                    width >= 600 -> DeviceKind.Tablet
+                    else -> DeviceKind.Phone
+                }
             },
             widthDp = width,
             heightDp = height,

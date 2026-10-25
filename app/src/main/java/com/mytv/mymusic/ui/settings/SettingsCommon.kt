@@ -62,7 +62,7 @@ internal enum class SettingsSection(
     val icon: ImageVector,
     val tone: IconTone,
 ) {
-    Appearance("settings/appearance", "外观", "主题、配色来源、风格与对比度", Icons.Filled.Palette, IconTone.Primary),
+    Appearance("settings/appearance", "外观", "布局、主题、配色来源、风格与对比度", Icons.Filled.Palette, IconTone.Primary),
     Playback("settings/playback", "播放与换源", "换源模式、平台优先级与匹配", Icons.Filled.SwapHoriz, IconTone.Primary),
     Equalizer("settings/equalizer", "均衡器", "本机播放音效，不影响下载文件", Icons.Filled.GraphicEq, IconTone.Primary),
     Search("settings/search", "搜索与浏览", "聚合平台与默认浏览来源", Icons.Filled.Search, IconTone.Primary),

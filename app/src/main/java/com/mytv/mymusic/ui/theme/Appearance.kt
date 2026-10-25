@@ -28,10 +28,19 @@ enum class BlurMode(val label: String) {
     Off("关"),
 }
 
+/** 布局模式：自动按设备判断，其余同时把屏幕方向锁到对应形态。 */
+enum class LayoutMode(val label: String) {
+    Auto("自动"),
+    Phone("手机竖屏"),
+    Tablet("平板横屏"),
+    Tv("电视横屏"),
+}
+
 /** 外观设置的完整快照，主题层只读这一个对象。 */
 @Immutable
 data class Appearance(
     val theme: String = "system",
+    val layout: LayoutMode = LayoutMode.Auto,
     val colorSource: ColorSource = ColorSource.Cover,
     val customSeed: Int = BrandSeed.toArgb(),
     val browseStyle: SchemeStyle = SchemeStyle.TonalSpot,

@@ -54,6 +54,8 @@ import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +64,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -165,6 +168,7 @@ private fun PhoneCharts(
             val featured = charts.charts.firstOrNull()
             val carousel = charts.charts.take(CAROUSEL_COUNT)
             val more = charts.charts.drop(CAROUSEL_COUNT)
+            val moreRows = remember(charts.charts, columns) { charts.charts.drop(CAROUSEL_COUNT).chunked(columns) }
             val empty = charts.charts.isEmpty() && charts.hotSongs.isEmpty()
             val other = sources.firstOrNull { it.id != charts.providerId }
             val featuredSongs = charts.featuredSongs
@@ -243,7 +247,11 @@ private fun PhoneCharts(
                             }
                             if (more.isNotEmpty()) {
                                 item(key = "moreLabel") { SectionLabel("更多榜单", Modifier.padding(horizontal = gutter)) }
-                                items(more.chunked(columns)) { row ->
+                                items(
+                                    moreRows,
+                                    key = { row -> "charts:${row.first().id}" },
+                                    contentType = { "chartRow" },
+                                ) { row ->
                                     ChartCardRow(
                                         row,
                                         columns,
@@ -329,6 +337,8 @@ private fun ChartCarousel(
     ) { index ->
         val chart = charts[index]
         val info = carouselItemDrawInfo
+        // 只在布尔值翻转时失效组合；直接读 info.size 会让轮播滚动时每帧重组
+        val showPlay by remember(info) { derivedStateOf { info.size > info.maxSize * 0.7f } }
         Box(
             Modifier
                 .fillMaxHeight()
@@ -366,7 +376,7 @@ private fun ChartCarousel(
                     }
                 }
                 // 只有大项才能点播放键，窄条上点到的一律是“打开榜单”
-                if (info.size > info.maxSize * 0.7f) {
+                if (showPlay) {
                     FilledIconButton(onClick = { onPlay(chart) }) {
                         Icon(Icons.Filled.PlayArrow, "播放${chart.name}")
                     }
@@ -669,16 +679,22 @@ private fun TvHero(item: TvHeroItem, actions: MusicActions, playFocus: FocusRequ
             }
         }
         Box(
-            Modifier.matchParentSize().background(
-                Brush.horizontalGradient(
-                    0f to surface,
-                    0.34f to surface,
-                    0.72f to tint.copy(alpha = 0.55f),
-                    1f to tint.copy(alpha = 0f),
-                ),
-            ),
+            Modifier.matchParentSize().drawBehind {
+                drawRect(
+                    Brush.horizontalGradient(
+                        0f to surface,
+                        0.34f to surface,
+                        0.72f to tint.value.copy(alpha = 0.55f),
+                        1f to tint.value.copy(alpha = 0f),
+                    ),
+                )
+            },
         )
-        Box(Modifier.matchParentSize().background(Brush.verticalGradient(0.55f to surface.copy(alpha = 0f), 1f to surface)))
+        Box(
+            Modifier.matchParentSize().drawBehind {
+                drawRect(Brush.verticalGradient(0.55f to surface.copy(alpha = 0f), 1f to surface))
+            },
+        )
         Column(Modifier.padding(start = gutter, end = gutter, top = 40.dp).widthIn(max = 560.dp)) {
             Text(item.meta, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
@@ -720,7 +736,7 @@ private fun TvCardRow(title: String, items: List<TvHeroItem>, onFocused: (TvHero
             contentPadding = PaddingValues(horizontal = gutter, vertical = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            items(items) { item ->
+            items(items, key = { it.key }, contentType = { "tvHero" }) { item ->
                 DiscoverCard(
                     cover = item.cover,
                     title = item.title,
@@ -800,7 +816,7 @@ internal fun ProviderChips(
         contentPadding = PaddingValues(horizontal = gutter, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(sources, key = { it.id }) { provider ->
+        items(sources, key = { it.id }, contentType = { "provider" }) { provider ->
             MusicChip(provider.name, provider.id == selectedId) { onSelect(provider.id) }
         }
     }
@@ -984,7 +1000,7 @@ internal fun TvDefaultFocus(requester: FocusRequester, key: Any? = Unit) {
  * 只用于详情页头部渐变和电视 Hero，其余界面仍是全局配色。
  */
 @Composable
-internal fun rememberCoverTint(url: String, actions: MusicActions): Color {
+internal fun rememberCoverTint(url: String, actions: MusicActions): State<Color> {
     var seed by remember(url) { mutableStateOf<Int?>(null) }
     LaunchedEffect(url) { seed = if (url.isBlank()) null else actions.coverSeed(url) }
     val fallback = MaterialTheme.colorScheme.primaryContainer
@@ -999,12 +1015,12 @@ internal fun rememberCoverTint(url: String, actions: MusicActions): Color {
         specVersion = ColorSpec.SpecVersion.SPEC_2025,
     )
     val target = if (seed != null) scheme.primaryContainer else fallback
-    val animated by animateColorAsState(
+    // 返回 State：调用方在绘制阶段读值，配色过渡时不会把整页重组一遍
+    return animateColorAsState(
         target,
         if (appearance.reduceMotion) snap() else MaterialTheme.motionScheme.slowEffectsSpec(),
         label = "coverTint",
     )
-    return animated
 }
 
 /** 播放量：过亿 / 过万用中文单位。 */

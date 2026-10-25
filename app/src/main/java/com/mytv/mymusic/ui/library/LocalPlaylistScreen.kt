@@ -51,7 +51,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -100,6 +100,7 @@ import com.mytv.mymusic.ui.components.PlayAllSplitButton
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatDuration
@@ -129,7 +130,7 @@ fun LocalPlaylistScreen(
     embedded: Boolean = false,
 ) {
     val window = LocalAppWindow.current
-    val load by remember(detailFlow) { detailFlow.map { Loaded(it) } }.collectAsState(initial = null)
+    val load by remember(detailFlow) { detailFlow.map { Loaded(it) } }.collectAsStateWithLifecycle(initialValue = null)
     val detail = load?.detail
     val playlist = detail?.playlist
     val entries = detail?.entries.orEmpty()
@@ -174,15 +175,8 @@ fun LocalPlaylistScreen(
     }
     val rowContainer = if (embedded) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLow
     val coverUrls = remember(songs) { songs.map { it.cover }.filter { it.isNotBlank() }.take(4) }
-    // 以 songKey 作行 key，移动后焦点跟着这首歌走；万一有重复（旧数据），追加序号避免崩溃
-    val rowKeys = remember(entries) {
-        val seen = mutableMapOf<String, Int>()
-        entries.map { entry ->
-            val n = (seen[entry.songKey] ?: 0) + 1
-            seen[entry.songKey] = n
-            if (n == 1) entry.songKey else "${entry.songKey}#$n"
-        }
-    }
+    // 以 songKey 作行 key，移动后焦点跟着这首歌走；重复的旧数据由 distinctKeys 追加序号
+    val rowKeys = remember(entries) { distinctKeys(entries) { it.songKey } }
     val meta = remember(songs) { playlistMeta(songs) }
 
     val menu = PlaylistMenu(
@@ -194,7 +188,11 @@ fun LocalPlaylistScreen(
     // ---- 列表片段：普通模式 / 编辑模式 ----
     val trackList: LazyListScope.() -> Unit = {
         if (editing) {
-            itemsIndexed(entries, key = { i, _ -> "edit:${rowKeys[i]}" }) { index, entry ->
+            itemsIndexed(
+                entries,
+                key = { i, _ -> "edit:${rowKeys[i]}" },
+                contentType = { _, _ -> "edit" },
+            ) { index, entry ->
                 val song = detail?.songByPosition?.get(entry.position) ?: Song()
                 EditTrackRow(
                     song = song,
@@ -208,7 +206,11 @@ fun LocalPlaylistScreen(
                 )
             }
         } else {
-            itemsIndexed(entries, key = { i, _ -> "row:${rowKeys[i]}" }) { index, entry ->
+            itemsIndexed(
+                entries,
+                key = { i, _ -> "row:${rowKeys[i]}" },
+                contentType = { _, _ -> "song" },
+            ) { index, entry ->
                 val song = detail?.songByPosition?.get(entry.position) ?: Song()
                 SongRow(
                     title = song.title,

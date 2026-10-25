@@ -1,12 +1,13 @@
 package com.mytv.mymusic.ui.settings
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlin.math.abs
@@ -19,22 +20,35 @@ import kotlin.math.floor
 @Composable
 internal fun QrCodeImage(text: String, modifier: Modifier = Modifier, description: String = "登录二维码") {
     val matrix = remember(text) { QrEncoder.encode(text) }
-    Canvas(modifier.semantics { contentDescription = description }) {
-        drawRect(Color.White)
-        val modules = matrix ?: return@Canvas
-        // 四周留 4 格静区；格子取整像素，避免抗锯齿在格子之间留下细缝
-        val cells = modules.size + 8
-        val cell = floor(size.minDimension / cells)
-        if (cell <= 0f) return@Canvas
-        val origin = Offset((size.width - cell * modules.size) / 2f, (size.height - cell * modules.size) / 2f)
-        for (y in modules.indices) {
-            for (x in modules.indices) {
-                if (modules[y][x]) {
-                    drawRect(Color.Black, Offset(origin.x + x * cell, origin.y + y * cell), Size(cell, cell))
+    Spacer(
+        modifier
+            .semantics { contentDescription = description }
+            .drawWithCache {
+                // 所有黑格合并成一条 Path，一次 drawPath；尺寸变化时才重建
+                val cells = (matrix?.size ?: 0) + 8
+                val cell = if (matrix == null) 0f else floor(size.minDimension / cells)
+                val path = if (matrix != null && cell > 0f) {
+                    // 四周留 4 格静区；格子取整像素，避免抗锯齿在格子之间留下细缝
+                    val originX = (size.width - cell * matrix.size) / 2f
+                    val originY = (size.height - cell * matrix.size) / 2f
+                    Path().apply {
+                        for (y in matrix.indices) {
+                            for (x in matrix.indices) {
+                                if (matrix[y][x]) {
+                                    addRect(Rect(originX + x * cell, originY + y * cell, originX + (x + 1) * cell, originY + (y + 1) * cell))
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    null
                 }
-            }
-        }
-    }
+                onDrawBehind {
+                    drawRect(Color.White)
+                    path?.let { drawPath(it, Color.Black) }
+                }
+            },
+    )
 }
 
 /**

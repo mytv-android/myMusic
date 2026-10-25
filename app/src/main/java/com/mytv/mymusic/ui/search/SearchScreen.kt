@@ -149,6 +149,7 @@ import com.mytv.mymusic.ui.components.AppLoading
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.PlatformBadges
 import com.mytv.mymusic.ui.components.PlayButtonSize
@@ -222,11 +223,12 @@ fun SearchScreen(
         }
     }
 
+    val favoriteKeys = remember(favorites) { favorites.mapTo(HashSet()) { it.key } }
     val ctx = SearchCtx(
         state = state,
         search = search,
         actions = actions,
-        favoriteKeys = favorites.mapTo(HashSet()) { it.key },
+        favoriteKeys = favoriteKeys,
         playlists = playlists,
         openSettings = onOpenSearchSettings,
         submit = { raw ->
@@ -797,7 +799,11 @@ private fun LazyListScope.songItems(
     }
     val rows = groups.drop(1)
     val rowKeys = distinctKeys(rows) { it.id }
-    itemsIndexed(rows, key = { index, _ -> rowKeys[index] }) { index, track ->
+    itemsIndexed(
+        rows,
+        key = { index, _ -> rowKeys[index] },
+        contentType = { _, _ -> "song" },
+    ) { index, track ->
         SearchSongRow(
             ctx,
             track,
@@ -815,7 +821,11 @@ private fun LazyListScope.songItems(
     if (alternatives.isNotEmpty()) {
         item("alt-head") { AlternativesHeader(alternatives.size, altExpanded, onToggleAlt) }
         if (altExpanded) {
-            itemsIndexed(alternatives, key = { _, pair -> "alt:${pair.second.song.key}" }) { index, (track, source) ->
+            itemsIndexed(
+                alternatives,
+                key = { _, pair -> "alt:${pair.second.song.key}" },
+                contentType = { _, _ -> "alt" },
+            ) { index, (track, source) ->
                 SongRow(
                     title = source.song.title,
                     subtitle = listOf(source.song.artist, source.providerName, source.qualityLabel)
@@ -1548,7 +1558,11 @@ private fun LazyListScope.collectionItems(ctx: SearchCtx, stateFocus: FocusReque
         return
     }
     val keys = distinctKeys(items) { it.id }
-    itemsIndexed(items, key = { index, _ -> keys[index] }) { index, item ->
+    itemsIndexed(
+        items,
+        key = { index, _ -> keys[index] },
+        contentType = { _, _ -> "collection" },
+    ) { index, item ->
         CollectionRow(ctx, item, index, items.size, Modifier.padding(top = if (index == 0) 4.dp else SegmentGap))
     }
     item("note") { CollectionNote(search.kind) }
@@ -1730,7 +1744,7 @@ private fun TvKeyboard(
     onVoiceResult: ((String) -> Unit)?,
     firstKey: FocusRequester,
 ) {
-    val keys = "abcdefghijklmnopqrstuvwxyz0123456789".toList()
+    val keys = remember { "abcdefghijklmnopqrstuvwxyz0123456789".toList() }
     val voice = rememberVoiceSearchWithFeedback { text -> onVoiceResult?.invoke(text) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         keys.chunked(6).forEachIndexed { row, chars ->
@@ -1913,7 +1927,11 @@ private fun TvCollectionResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit) {
                     contentPadding = PaddingValues(vertical = 20.dp, horizontal = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
-                    itemsIndexed(items, key = { index, _ -> keys[index] }) { index, item ->
+                    itemsIndexed(
+                        items,
+                        key = { index, _ -> keys[index] },
+                        contentType = { _, _ -> "collection" },
+                    ) { index, item ->
                         TvCollectionCard(
                             item,
                             album,
@@ -1977,17 +1995,6 @@ private fun TvCollectionCard(
 }
 
 /* ======================== 工具 ======================== */
-
-/** 列表 key：id 可能重复（拆分出的版本、同名同歌手的专辑），后出现的加序号，否则 Lazy 列表会因重复 key 崩溃。 */
-private fun <T> distinctKeys(items: List<T>, id: (T) -> String): List<String> {
-    val seen = HashMap<String, Int>()
-    return items.map { item ->
-        val base = id(item)
-        val count = (seen[base] ?: 0) + 1
-        seen[base] = count
-        if (count == 1) base else "$base#$count"
-    }
-}
 
 /** 电视遥控器菜单键打开歌曲操作。 */
 private fun Modifier.onMenuKey(action: () -> Unit): Modifier = onPreviewKeyEvent { event ->

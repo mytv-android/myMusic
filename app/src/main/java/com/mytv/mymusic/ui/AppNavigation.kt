@@ -113,11 +113,13 @@ fun MyMusicApp(model: MusicViewModel) {
     val favorites by model.favorites.collectAsState()
     val search by model.searchState.collectAsState()
     val sleep by model.sleepTimer.collectAsState()
+    // 不在这里读 value：进度每 500ms 变一次，读了会让整棵界面跟着重组
+    val position = model.position.collectAsState()
 
     val actions = remember(model) { MusicActions(model) }
     val snackbar = remember { SnackbarHostState() }
     val nav = rememberNavController()
-    val window = rememberAppWindow()
+    val window = rememberAppWindow(state.appearance.layout)
     val hazeState = rememberHazeState()
     var selectedTab by rememberSaveable { mutableStateOf(TopTab.Charts.route) }
     var queueOpen by rememberSaveable { mutableStateOf(false) }
@@ -156,6 +158,8 @@ fun MyMusicApp(model: MusicViewModel) {
 
     LaunchedEffect(Unit) {
         model.onAppForeground()
+        // 两个互不相关的收集器合并成一个 effect，少一套协程与 effect 节点
+        launch { model.syncEvents.collect { event -> snackbar.showSnackbar(event.message) } }
         model.events.collect { event ->
             when (event) {
                 is UiEvent.OpenCollection -> nav.navigate("collection") { launchSingleTop = true }
@@ -163,9 +167,6 @@ fun MyMusicApp(model: MusicViewModel) {
                 is UiEvent.Message -> launch { snackbar.showSnackbar(event.text) }
             }
         }
-    }
-    LaunchedEffect(Unit) {
-        model.syncEvents.collect { event -> snackbar.showSnackbar(event.message) }
     }
     LaunchedEffect(state.error) {
         val message = state.error
@@ -260,6 +261,7 @@ fun MyMusicApp(model: MusicViewModel) {
                             CompositionLocalProvider(LocalCoverVisibilityScope provides this) {
                                 PhoneBottomBar(
                                     state = state,
+                                    position = position,
                                     selected = selectedTab,
                                     actions = actions,
                                     onSelect = ::openTab,
@@ -269,11 +271,11 @@ fun MyMusicApp(model: MusicViewModel) {
                         }
                     }
                     if (window.showBottomPlayerBar && state.current != null) {
-                        BottomPlayerBar(state, actions, onOpenQueue = { queueOpen = true })
+                        BottomPlayerBar(state, position, actions, onOpenQueue = { queueOpen = true })
                     }
                 }
                 if (window.showNowPlayingPane) {
-                    NowPlayingPane(state, favorites, actions, onOpenQueue = { queueOpen = true }, onOpenTimer = { timerOpen = true }, sleep = sleep)
+                    NowPlayingPane(state, position, favorites, actions, onOpenQueue = { queueOpen = true }, onOpenTimer = { timerOpen = true }, sleep = sleep)
                 }
             }
             AnimatedVisibility(
@@ -286,6 +288,7 @@ fun MyMusicApp(model: MusicViewModel) {
                 PlayerTheme {
                     PlayerScreen(
                         state = state,
+                        position = position,
                         favorites = favorites,
                         sleep = sleep,
                         actions = actions,

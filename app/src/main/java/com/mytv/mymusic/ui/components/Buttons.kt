@@ -30,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,7 +39,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -47,6 +51,13 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+
+/** 宽度动画放在布局阶段读值：按下形变只重新测量，不触发重组。 */
+private fun Modifier.animatedWidth(width: State<Dp>): Modifier = layout { measurable, constraints ->
+    val w = width.value.roundToPx().coerceIn(constraints.minWidth, constraints.maxWidth)
+    val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+    layout(w, placeable.height) { placeable.place(0, 0) }
+}
 
 /** 播放键尺寸。Hero 是播放页的 128×96 宽按钮；播放时圆角变小（方），暂停时是满圆。 */
 enum class PlayButtonSize(
@@ -79,7 +90,7 @@ fun PlayPauseButton(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Dp>()
-    val corner by animateDpAsState(
+    val corner = animateDpAsState(
         when {
             pressed -> 16.dp.coerceAtMost(size.height / 2)
             playing -> size.playingCorner
@@ -88,18 +99,23 @@ fun PlayPauseButton(
         spatial,
         label = "playCorner",
     )
-    val width by animateDpAsState(if (pressed) size.pressedWidth else size.width, spatial, label = "playWidth")
+    val width = animateDpAsState(if (pressed) size.pressedWidth else size.width, spatial, label = "playWidth")
     Surface(
         onClick = onClick,
         modifier = modifier
-            .size(width, size.height)
-            .tvFocusRing(RoundedCornerShape(corner))
+            .height(size.height)
+            .animatedWidth(width)
+            .graphicsLayer {
+                shape = RoundedCornerShape(corner.value)
+                clip = true
+            }
+            .tvFocusRing(RoundedCornerShape(size.playingCorner))
             .semantics {
                 role = Role.Button
                 contentDescription = if (playing) "暂停" else "播放"
                 stateDescription = if (playing) "正在播放" else "已暂停"
             },
-        shape = RoundedCornerShape(corner),
+        shape = RectangleShape,
         color = containerColor,
         contentColor = contentColor,
         interactionSource = interaction,
@@ -131,15 +147,20 @@ fun MorphIconButton(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Dp>()
-    val width by animateDpAsState(if (pressed) size * 1.28f else size, spatial, label = "skipWidth")
-    val corner by animateDpAsState(if (pressed) 16.dp else size / 2, spatial, label = "skipCorner")
+    val width = animateDpAsState(if (pressed) size * 1.28f else size, spatial, label = "skipWidth")
+    val corner = animateDpAsState(if (pressed) 16.dp else size / 2, spatial, label = "skipCorner")
     Surface(
         onClick = onClick,
         modifier = modifier
-            .size(width, size)
-            .tvFocusRing(RoundedCornerShape(corner))
+            .height(size)
+            .animatedWidth(width)
+            .graphicsLayer {
+                shape = RoundedCornerShape(corner.value)
+                clip = true
+            }
+            .tvFocusRing(RoundedCornerShape(size / 2))
             .semantics { this.contentDescription = contentDescription },
-        shape = RoundedCornerShape(corner),
+        shape = RectangleShape,
         color = containerColor,
         contentColor = contentColor,
         interactionSource = interaction,

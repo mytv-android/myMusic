@@ -156,7 +156,7 @@ fun SyncCenterScreen(
         }
         if (sync.conflicts.isNotEmpty()) {
             item(key = "conflictHead") { SectionLabel("待处理冲突", trailing = { CountTag("${sync.conflicts.size} 个") }) }
-            items(sync.conflicts, key = { "conflict:${it.playlistId}" }) { conflict ->
+            items(sync.conflicts, key = { "conflict:${it.playlistId}" }, contentType = { "conflict" }) { conflict ->
                 SyncConflictCard(conflict, actions)
             }
         }

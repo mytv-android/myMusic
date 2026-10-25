@@ -178,6 +178,7 @@ class MusicActions(private val model: MusicViewModel) {
 
     fun selectProvider(id: String) = model.selectProvider(id)
     fun setTheme(value: String) = model.selectTheme(value)
+    fun setLayoutMode(value: com.mytv.mymusic.ui.theme.LayoutMode) = model.setLayoutMode(value)
     fun setColorSource(value: com.mytv.mymusic.ui.theme.ColorSource) = model.setColorSource(value)
     fun setCustomSeed(value: Int) = model.setCustomSeed(value)
     fun setBrowseStyle(value: com.mytv.mymusic.ui.theme.SchemeStyle) = model.setBrowseStyle(value)
@@ -655,6 +656,8 @@ fun formatTime(ms: Long): String =
 fun formatDuration(seconds: Int): String =
     if (seconds <= 0) "" else String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60)
 
+private val MonthDayFormat = SimpleDateFormat("MM-dd", Locale.getDefault())
+
 fun relativeTime(millis: Long): String {
     if (millis <= 0) return ""
     val delta = System.currentTimeMillis() - millis
@@ -663,7 +666,7 @@ fun relativeTime(millis: Long): String {
         delta < 3_600_000 -> "${delta / 60_000} 分钟前"
         delta < 86_400_000 -> "${delta / 3_600_000} 小时前"
         delta < 7L * 86_400_000 -> "${delta / 86_400_000} 天前"
-        else -> SimpleDateFormat("MM-dd", Locale.getDefault()).format(Date(millis))
+        else -> MonthDayFormat.format(Date(millis))
     }
 }
 

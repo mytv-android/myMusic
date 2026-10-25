@@ -94,7 +94,8 @@ private const val COLOR_TRANSITION_MS = 450
 fun MyMusicTheme(appearance: Appearance, coverSeed: Color?, content: @Composable () -> Unit) {
     val context = LocalContext.current
     // 电视固定深色：客厅环境暗，浅色界面刺眼
-    val tv = remember(context) { context.isTelevision() }
+    val physicalTv = remember(context) { context.isTelevision() }
+    val tv = physicalTv || appearance.layout == LayoutMode.Tv
     val dark = tv || appearance.isDark(isSystemInDarkTheme())
     val seed = when (appearance.colorSource) {
         ColorSource.Cover -> coverSeed ?: appearance.lastSeed.takeIf { it != 0 }?.let(::Color) ?: BrandSeed
@@ -113,7 +114,7 @@ fun MyMusicTheme(appearance: Appearance, coverSeed: Color?, content: @Composable
     CompositionLocalProvider(
         LocalAppearance provides appearance,
         LocalSeedColor provides seed,
-        LocalBlurPolicy provides rememberBlurPolicy(appearance.blur),
+        LocalBlurPolicy provides rememberBlurPolicy(appearance.blur, tv),
     ) {
         MaterialExpressiveTheme(
             colorScheme = animated(scheme, appearance.reduceMotion),

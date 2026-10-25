@@ -44,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -82,6 +83,8 @@ import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatBytes
 import com.mytv.mymusic.ui.relativeTime
 import com.mytv.mymusic.ui.song
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 // ======================= 喜欢 =======================
@@ -104,7 +107,10 @@ fun FavoritesScreen(
     val playFocus = remember { FocusRequester() }
     var filter by rememberSaveable { mutableStateOf(FavFilter.All) }
     var actionSong by remember { mutableStateOf<Pair<SavedSong, Song>?>(null) }
-    val all = remember(favorites) { favorites.map { it to it.song() } }
+    // 收藏列表的 payload 是 JSON；解码放后台，别在组合里逐条 parse
+    val all by produceState(initialValue = emptyList<Pair<SavedSong, Song>>(), favorites) {
+        value = withContext(Dispatchers.IO) { favorites.map { it to it.song() } }
+    }
     val downloaded = remember(downloads) { downloads.filter { it.state == DOWNLOAD_DONE }.map { it.key }.toSet() }
     val shown = remember(all, filter, downloaded) {
         val weekAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
@@ -115,7 +121,7 @@ fun FavoritesScreen(
             FavFilter.Recent -> all.filter { it.first.updatedAt >= weekAgo }
         }
     }
-    val songs = shown.map { it.second }
+    val songs = remember(shown) { shown.map { it.second } }
     val unfavorite: (SavedSong, Song) -> Unit = { saved, song ->
         actions.favorite(song)
         undo.show("已取消收藏“${song.title}”") { actions.restoreSaved(listOf(saved)) }
@@ -149,7 +155,11 @@ fun FavoritesScreen(
                 )
             }
         }
-        itemsIndexed(shown, key = { _, it -> "fav:${it.first.key}" }) { index, (saved, song) ->
+        itemsIndexed(
+            shown,
+            key = { _, it -> "fav:${it.first.key}" },
+            contentType = { _, _ -> "song" },
+        ) { index, (saved, song) ->
             SongRow(
                 title = song.title,
                 subtitle = listOf(song.artist, sourceLabel(song)).filter { it.isNotBlank() }.joinToString(" · "),
@@ -253,14 +263,20 @@ fun HistoryScreen(
     val settled = rememberSettled()
     val firstRow = remember { FocusRequester() }
     var actionSong by remember { mutableStateOf<Song?>(null) }
-    val songs = remember(history) { history.map { it to it.song() } }
-    val queue = songs.map { it.second }
+    val songs by produceState(initialValue = emptyList<Pair<SavedSong, Song>>(), history) {
+        value = withContext(Dispatchers.IO) { history.map { it to it.song() } }
+    }
+    val queue = remember(songs) { songs.map { it.second } }
     val groups = remember(songs) { songs.groupBy { dayLabel(it.first.updatedAt) }.toList() }
     TvDefaultFocus(firstRow, history.isEmpty())
 
     fun LazyListScope.group(label: String, items: List<Pair<SavedSong, Song>>, focusFirst: Boolean) {
         item(key = "day:$label") { DayLabel(label) }
-        itemsIndexed(items, key = { _, it -> "hist:${it.first.key}" }) { index, (saved, song) ->
+        itemsIndexed(
+            items,
+            key = { _, it -> "hist:${it.first.key}" },
+            contentType = { _, _ -> "song" },
+        ) { index, (saved, song) ->
             SongRow(
                 title = song.title,
                 subtitle = song.artist.ifBlank { song.album },
@@ -387,16 +403,21 @@ fun DownloadsScreen(
     val settled = rememberSettled()
     val firstRow = remember { FocusRequester() }
     var deleting by remember { mutableStateOf<DownloadRecord?>(null) }
-    val items = remember(downloads) {
-        downloads.map { record ->
-            val file = File(record.path)
-            DownloadItem(record, record.song(), file.length(), record.state == DOWNLOAD_DONE && !file.exists())
+    // 文件大小、是否存在、剩余空间都要走磁盘：放到 IO 线程，别在组合里同步取
+    val items by produceState(initialValue = emptyList<DownloadItem>(), downloads) {
+        value = withContext(Dispatchers.IO) {
+            downloads.map { record ->
+                val file = File(record.path)
+                DownloadItem(record, record.song(), file.length(), record.state == DOWNLOAD_DONE && !file.exists())
+            }
         }
     }
     val done = items.filter { it.record.state == DOWNLOAD_DONE }
     val active = items.filter { it.record.state != DOWNLOAD_DONE }
-    val freeBytes = remember(downloads) {
-        runCatching { (context.getExternalFilesDir("music") ?: context.filesDir).usableSpace }.getOrDefault(0L)
+    val freeBytes by produceState(initialValue = 0L, downloads) {
+        value = withContext(Dispatchers.IO) {
+            runCatching { (context.getExternalFilesDir("music") ?: context.filesDir).usableSpace }.getOrDefault(0L)
+        }
     }
     val doneBytes = done.sumOf { it.size }
     TvDefaultFocus(firstRow, done.isEmpty())
@@ -405,7 +426,7 @@ fun DownloadsScreen(
         item(key = "usage") { StorageCard(done.size, doneBytes, cacheBytes, freeBytes) }
         if (active.isNotEmpty()) {
             item(key = "activeHead") { DayLabel("正在下载") }
-            itemsIndexed(active, key = { _, it -> "active:${it.record.key}" }) { index, item ->
+            itemsIndexed(active, key = { _, it -> "active:${it.record.key}" }, contentType = { _, _ -> "download" }) { index, item ->
                 SongRow(
                     title = item.song.title,
                     subtitle = "${item.song.artist.ifBlank { "未知歌手" }} · 正在下载",
@@ -430,7 +451,7 @@ fun DownloadsScreen(
                 )
             }
         }
-        itemsIndexed(done, key = { _, it -> "done:${it.record.key}" }) { index, item ->
+        itemsIndexed(done, key = { _, it -> "done:${it.record.key}" }, contentType = { _, _ -> "download" }) { index, item ->
             val detail = if (item.missing) "文件已不存在" else listOf(item.song.ext.uppercase(), formatBytes(item.size))
                 .filter { it.isNotBlank() }.joinToString(" · ")
             SongRow(

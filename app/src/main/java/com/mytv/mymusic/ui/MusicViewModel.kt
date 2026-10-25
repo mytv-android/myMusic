@@ -68,9 +68,11 @@ import com.mytv.mymusic.ui.theme.Appearance
 import com.mytv.mymusic.ui.theme.BlurMode
 import com.mytv.mymusic.ui.theme.ColorSource
 import com.mytv.mymusic.ui.theme.CoverSeedRepository
+import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.SchemeStyle
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -117,7 +119,6 @@ data class MusicUiState(
     val currentTrack: CanonicalTrack? = null,
     val currentSource: TrackSource? = null,
     val playing: Boolean = false,
-    val position: Long = 0,
     val duration: Long = 0,
     val shuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.Off,
@@ -182,6 +183,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var librarySearchGeneration = 0
     private val _events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 12)
     val events = _events.asSharedFlow()
+
+    // 播放进度单独成流：每 500ms 更新一次，放在 MusicUiState 里会让所有页面跟着重组
+    private val _position = MutableStateFlow(0L)
+    val position: StateFlow<Long> = _position
 
     val syncState = app.sync.state
     val syncEvents = app.sync.events
@@ -1280,7 +1285,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     songByPosition = decoded.toMap(),
                 )
             }
-        }
+        }.flowOn(Dispatchers.Default)
 
     fun createPlaylist(name: String) {
         val value = name.trim()
@@ -1837,6 +1842,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun seek(position: Long) {
         controller?.seekTo(position)
+        _position.value = position.coerceAtLeast(0)
     }
 
     fun playQueueIndex(index: Int) {
@@ -1849,7 +1855,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun clearQueue() {
         controller?.clearMediaItems()
         controller?.stop()
-        base.value = base.value.copy(current = null, currentTrack = null, currentSource = null, queue = emptyList(), canonicalQueue = emptyList(), playerOpen = false)
+        _position.value = 0
+        base.value = base.value.copy(current = null, currentTrack = null, currentSource = null, duration = 0, queue = emptyList(), canonicalQueue = emptyList(), playerOpen = false)
     }
 
     fun openDeepLink() {
@@ -2181,10 +2188,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         progressJob = viewModelScope.launch {
             while (true) {
                 controller?.let {
-                    base.value = base.value.copy(
-                        position = it.currentPosition.coerceAtLeast(0),
-                        duration = it.duration.coerceAtLeast(0),
-                    )
+                    _position.value = it.currentPosition.coerceAtLeast(0)
+                    val duration = it.duration.coerceAtLeast(0)
+                    if (base.value.duration != duration) {
+                        base.value = base.value.copy(duration = duration)
+                    }
                 }
                 delay(500)
             }
@@ -2198,6 +2206,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectTheme(value: String) = viewModelScope.launch { app.settings.theme(value) }
+    fun setLayoutMode(value: LayoutMode) = viewModelScope.launch { app.settings.layoutMode(value.name) }
     fun setColorSource(value: ColorSource) = viewModelScope.launch { app.settings.colorSource(value.name) }
     fun setCustomSeed(value: Int) = viewModelScope.launch {
         app.settings.customSeed(value)
@@ -2549,6 +2558,7 @@ fun DownloadRecord.song(json: Json = Json { ignoreUnknownKeys = true }) = json.d
 
 private fun AppSettings.toAppearance() = Appearance(
     theme = theme,
+    layout = LayoutMode.entries.find { it.name == layoutMode } ?: LayoutMode.Auto,
     colorSource = ColorSource.entries.find { it.name == colorSource } ?: ColorSource.Cover,
     customSeed = customSeed,
     browseStyle = SchemeStyle.entries.find { it.name == browseStyle } ?: SchemeStyle.TonalSpot,

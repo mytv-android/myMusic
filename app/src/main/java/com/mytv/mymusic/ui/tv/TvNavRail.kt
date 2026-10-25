@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,11 +42,13 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.mytv.mymusic.data.Song
@@ -68,7 +71,7 @@ fun TvNavRail(
     onOpenPlayer: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val width by animateDpAsState(if (expanded) Expanded else Collapsed, MaterialTheme.motionScheme.fastSpatialSpec(), label = "tvRail")
+    val width = animateDpAsState(if (expanded) Expanded else Collapsed, MaterialTheme.motionScheme.fastSpatialSpec(), label = "tvRail")
     val order = listOf(TopTab.Search, TopTab.Charts, TopTab.Playlists, TopTab.Library)
     // 从内容区按左键进入抽屉时，焦点落在当前入口上，而不是几何上最近的一项
     val tabFocus = remember { order.associateWith { FocusRequester() } }
@@ -79,7 +82,7 @@ fun TvNavRail(
             Column(
                 Modifier
                     .fillMaxHeight()
-                    .width(width)
+                    .animatedWidth(width)
                     .background(MaterialTheme.colorScheme.surfaceContainerLow)
                     .onFocusChanged { expanded = it.hasFocus }
                     .focusProperties { onEnter = { selectedFocus?.requestFocus() } }
@@ -120,6 +123,13 @@ fun TvNavRail(
             }
         }
     }
+}
+
+/** 宽度动画在布局阶段读值，展开/收起时只重新测量，不触发重组。 */
+private fun Modifier.animatedWidth(width: State<Dp>): Modifier = layout { measurable, constraints ->
+    val w = width.value.roundToPx().coerceIn(constraints.minWidth, constraints.maxWidth)
+    val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+    layout(w, placeable.height) { placeable.place(0, 0) }
 }
 
 @Composable

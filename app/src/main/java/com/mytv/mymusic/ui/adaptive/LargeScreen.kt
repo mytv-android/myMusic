@@ -44,6 +44,7 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -107,7 +108,7 @@ val BottomPlayerBarHeight = 88.dp
 
 /** 840–1199dp：底部播放条，把右侧空间还给内容。 */
 @Composable
-fun BottomPlayerBar(state: MusicUiState, actions: MusicActions, onOpenQueue: () -> Unit) {
+fun BottomPlayerBar(state: MusicUiState, position: State<Long>, actions: MusicActions, onOpenQueue: () -> Unit) {
     val song = state.current ?: return
     val blur = LocalBlurPolicy.current.enabled
     val container = MaterialTheme.colorScheme.surfaceContainer
@@ -147,7 +148,7 @@ fun BottomPlayerBar(state: MusicUiState, actions: MusicActions, onOpenQueue: () 
         PlayPauseButton(state.playing, { actions.transport("play") }, size = PlayButtonSize.Medium)
         IconButton(onClick = { actions.transport("next") }) { Icon(Icons.Filled.SkipNext, "下一首") }
         WavySeekBar(
-            position = state.position,
+            position = position,
             duration = state.duration,
             playing = state.playing,
             onSeek = actions::seek,
@@ -162,6 +163,7 @@ fun BottomPlayerBar(state: MusicUiState, actions: MusicActions, onOpenQueue: () 
 @Composable
 fun NowPlayingPane(
     state: MusicUiState,
+    position: State<Long>,
     favorites: List<SavedSong>,
     actions: MusicActions,
     onOpenQueue: () -> Unit,
@@ -249,7 +251,7 @@ fun NowPlayingPane(
                         },
                     )
                 }
-                WavySeekBar(state.position, state.duration, state.playing, actions::seek)
+                WavySeekBar(position, state.duration, state.playing, actions::seek)
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),

@@ -51,6 +51,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -60,7 +62,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
@@ -101,6 +102,7 @@ import kotlin.coroutines.cancellation.CancellationException
 @Composable
 fun PlayerScreen(
     state: MusicUiState,
+    position: State<Long>,
     favorites: List<SavedSong>,
     sleep: SleepTimerState,
     actions: MusicActions,
@@ -126,7 +128,12 @@ fun PlayerScreen(
     val idle = rememberIdleState(state.playing)
     val favorite = favorites.any { it.key == song.key }
     val lyrics = remember(state.lyrics) { LyricsParser.parse(state.lyrics) }
-    val active = if (lyrics.synced) LyricsParser.activeLineIndex(lyrics.lines, state.position) else -1
+    // 进度每 500ms 变一次；派生状态只在当前歌词行变化时才让播放页重组
+    val active by remember(lyrics, position) {
+        derivedStateOf {
+            if (lyrics.synced) LyricsParser.activeLineIndex(lyrics.lines, position.value) else -1
+        }
+    }
 
     // 换源结果在音源 chip 下方停留 8 秒
     LaunchedEffect(state.playbackNotice) {
@@ -138,6 +145,7 @@ fun PlayerScreen(
 
     val ui = PlayerUi(
         state = state,
+        position = position,
         song = song,
         favorite = favorite,
         sleep = sleep,
@@ -184,6 +192,7 @@ fun PlayerScreen(
 
 private class PlayerUi(
     val state: MusicUiState,
+    val position: State<Long>,
     val song: Song,
     val favorite: Boolean,
     val sleep: SleepTimerState,
@@ -213,7 +222,7 @@ private fun PhonePlayer(ui: PlayerUi) {
         PhoneLyrics(ui)
         return
     }
-    val chrome by animateFloatAsState(if (ui.idle) 0f else 1f, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "chrome")
+    val chrome = animateFloatAsState(if (ui.idle) 0f else 1f, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "chrome")
     BoxWithConstraints(Modifier.fillMaxSize()) {
         PlayerArt(
             cover = ui.song.cover,
@@ -224,7 +233,7 @@ private fun PhonePlayer(ui: PlayerUi) {
             onDoubleTap = ui.onFavoriteBurst,
             modifier = Modifier.sharedNowPlayingCover(RectangleShape).fillMaxWidth().height(maxHeight * 0.58f),
         )
-        TopBar(ui, Modifier.align(Alignment.TopCenter).alpha(chrome).blockTouchesWhen(ui.idle))
+        TopBar(ui, Modifier.align(Alignment.TopCenter).graphicsLayer { alpha = chrome.value }.blockTouchesWhen(ui.idle))
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -235,7 +244,7 @@ private fun PhonePlayer(ui: PlayerUi) {
             Meta(ui, titleSize = 30)
             LyricsPreview(ui, Modifier.padding(top = 12.dp))
             WavySeekBar(
-                ui.state.position,
+                ui.position,
                 ui.state.duration,
                 ui.state.playing,
                 ui.actions::seek,
@@ -243,14 +252,14 @@ private fun PhonePlayer(ui: PlayerUi) {
             )
             Controls(ui, Modifier.fillMaxWidth().padding(top = 6.dp, end = 6.dp))
             Notice(ui)
-            BottomRow(ui, Modifier.padding(top = 6.dp).alpha(chrome).blockTouchesWhen(ui.idle))
+            BottomRow(ui, Modifier.padding(top = 6.dp).graphicsLayer { alpha = chrome.value }.blockTouchesWhen(ui.idle))
         }
     }
 }
 
 @Composable
 private fun PhoneLyrics(ui: PlayerUi) {
-    val chrome by animateFloatAsState(if (ui.idle) 0f else 1f, label = "lyricsChrome")
+    val chrome = animateFloatAsState(if (ui.idle) 0f else 1f, label = "lyricsChrome")
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 8.dp),
@@ -267,8 +276,8 @@ private fun PhoneLyrics(ui: PlayerUi) {
             FavoriteButton(ui)
         }
         LyricsList(ui.lyrics, ui.active, ui.actions::seek, Modifier.weight(1f).padding(horizontal = 18.dp))
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).alpha(chrome).blockTouchesWhen(ui.idle)) {
-            WavySeekBar(ui.state.position, ui.state.duration, ui.state.playing, ui.actions::seek)
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).graphicsLayer { alpha = chrome.value }.blockTouchesWhen(ui.idle)) {
+            WavySeekBar(ui.position, ui.state.duration, ui.state.playing, ui.actions::seek)
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
@@ -286,8 +295,8 @@ private fun PhoneLyrics(ui: PlayerUi) {
 
 @Composable
 private fun WidePlayer(ui: PlayerUi) {
-    val chrome by animateFloatAsState(if (ui.idle) 0f else 1f, label = "wideChrome")
-    val artAlpha by animateFloatAsState(if (ui.lyricsMode) 0f else 1f, MaterialTheme.motionScheme.slowEffectsSpec(), label = "artAlpha")
+    val chrome = animateFloatAsState(if (ui.idle) 0f else 1f, label = "wideChrome")
+    val artAlpha = animateFloatAsState(if (ui.lyricsMode) 0f else 1f, MaterialTheme.motionScheme.slowEffectsSpec(), label = "artAlpha")
     Row(Modifier.fillMaxSize()) {
         PlayerArt(
             cover = ui.song.cover,
@@ -299,7 +308,7 @@ private fun WidePlayer(ui: PlayerUi) {
             modifier = Modifier
                 .weight(if (ui.lyricsMode) 0.2f else 1f)
                 .fillMaxHeight()
-                .graphicsLayer { alpha = artAlpha },
+                .graphicsLayer { alpha = artAlpha.value },
         )
         Column(
             Modifier
@@ -319,14 +328,14 @@ private fun WidePlayer(ui: PlayerUi) {
                 Modifier.weight(1f).padding(vertical = 8.dp),
                 large = ui.lyricsMode,
             )
-            WavySeekBar(ui.state.position, ui.state.duration, ui.state.playing, ui.actions::seek)
+            WavySeekBar(ui.position, ui.state.duration, ui.state.playing, ui.actions::seek)
             Controls(ui, Modifier.fillMaxWidth().padding(top = 6.dp))
-            BottomRow(ui, Modifier.padding(top = 6.dp).alpha(chrome).blockTouchesWhen(ui.idle), showSource = false)
+            BottomRow(ui, Modifier.padding(top = 6.dp).graphicsLayer { alpha = chrome.value }.blockTouchesWhen(ui.idle), showSource = false)
         }
     }
     IconButton(
         onClick = ui.onClose,
-        modifier = Modifier.statusBarsPadding().padding(16.dp).alpha(chrome).blockTouchesWhen(ui.idle),
+        modifier = Modifier.statusBarsPadding().padding(16.dp).graphicsLayer { alpha = chrome.value }.blockTouchesWhen(ui.idle),
     ) { Icon(Icons.Filled.KeyboardArrowDown, "收起播放页", tint = MaterialTheme.colorScheme.onSurface) }
 }
 
@@ -363,8 +372,8 @@ private fun TvPlayer(ui: PlayerUi) {
         }
     }
     // 环境模式下控制条只是淡出，不移出组合：焦点留在播放键上，按任意键先唤醒
-    val barAlpha by animateFloatAsState(if (ambient) 0f else 1f, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "tvBar")
-    Box(Modifier.fillMaxSize().graphicsLayer { alpha = barAlpha }) {
+    val barAlpha = animateFloatAsState(if (ambient) 0f else 1f, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "tvBar")
+    Box(Modifier.fillMaxSize().graphicsLayer { alpha = barAlpha.value }) {
         Box(Modifier.fillMaxSize()) {
             Column(
                 Modifier
@@ -383,7 +392,7 @@ private fun TvPlayer(ui: PlayerUi) {
                     TvAction(Icons.AutoMirrored.Filled.QueueMusic, "播放队列", ui.onOpenQueue)
                     TvAction(Icons.Filled.SwapHoriz, "换音源", ui::openSource)
                 }
-                WavySeekBar(ui.state.position, ui.state.duration, ui.state.playing, ui.actions::seek, Modifier.padding(top = 12.dp).tvFocusRing(RoundedCornerShape(12.dp), scale = 1f))
+                WavySeekBar(ui.position, ui.state.duration, ui.state.playing, ui.actions::seek, Modifier.padding(top = 12.dp).tvFocusRing(RoundedCornerShape(12.dp), scale = 1f))
             }
         }
     }
@@ -456,9 +465,9 @@ private fun SleepChip(ui: PlayerUi) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Icon(Icons.Filled.Bedtime, null, Modifier.size(16.dp))
             Text(
-                if (ui.sleep.endOfTrack) "本首结束" else formatClock(remaining),
+                if (ui.sleep.endOfTrack) "本首结束" else formatClock(remaining.value),
                 modifier = Modifier.semantics {
-                    contentDescription = if (ui.sleep.endOfTrack) "定时关闭：本首结束后停止" else "定时关闭：还剩 ${formatClock(remaining)}"
+                    contentDescription = if (ui.sleep.endOfTrack) "定时关闭：本首结束后停止" else "定时关闭：还剩 ${formatClock(remaining.value)}"
                 },
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,

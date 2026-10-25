@@ -50,6 +50,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -91,6 +92,7 @@ import com.mytv.mymusic.ui.components.PlayAllSplitButton
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.components.tvFocusRing
 
 /** 详情页的几种主操作，三种布局共用。 */
@@ -150,7 +152,7 @@ fun CollectionScreen(
 private fun PhoneCollection(
     state: MusicUiState,
     collection: CollectionUiState,
-    tint: Color,
+    tint: State<Color>,
     ops: CollectionOps,
     actions: MusicActions,
     onBack: () -> Unit,
@@ -171,7 +173,7 @@ private fun PhoneCollection(
                 .graphicsLayer {
                     translationY = if (listState.firstVisibleItemIndex == 0) -listState.firstVisibleItemScrollOffset.toFloat() else -size.height
                 }
-                .background(Brush.verticalGradient(listOf(tint, surface))),
+                .drawBehind { drawRect(Brush.verticalGradient(listOf(tint.value, surface))) },
         )
         Column(Modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection)) {
             TopAppBar(
@@ -236,7 +238,7 @@ private fun PhoneCollection(
 private fun TwoPaneCollection(
     state: MusicUiState,
     collection: CollectionUiState,
-    tint: Color,
+    tint: State<Color>,
     ops: CollectionOps,
     actions: MusicActions,
     onBack: () -> Unit,
@@ -253,12 +255,13 @@ private fun TwoPaneCollection(
             .fillMaxSize()
             .background(surface)
             .drawBehind {
+                val color = tint.value
                 if (tv) {
                     // 电视：封面色的两团环境光，静态，不给电视盒子的 GPU 加负担
-                    drawRect(Brush.radialGradient(listOf(tint.copy(alpha = 0.6f), tint.copy(alpha = 0f)), Offset(size.width * 0.12f, size.height * 0.2f), size.maxDimension * 0.55f))
-                    drawRect(Brush.radialGradient(listOf(tint.copy(alpha = 0.3f), tint.copy(alpha = 0f)), Offset(size.width * 0.85f, size.height * 0.95f), size.maxDimension * 0.5f))
+                    drawRect(Brush.radialGradient(listOf(color.copy(alpha = 0.6f), color.copy(alpha = 0f)), Offset(size.width * 0.12f, size.height * 0.2f), size.maxDimension * 0.55f))
+                    drawRect(Brush.radialGradient(listOf(color.copy(alpha = 0.3f), color.copy(alpha = 0f)), Offset(size.width * 0.85f, size.height * 0.95f), size.maxDimension * 0.5f))
                 } else {
-                    drawRect(Brush.verticalGradient(0f to tint, 0.5f to surface))
+                    drawRect(Brush.verticalGradient(0f to color, 0.5f to surface))
                 }
             },
     ) {
@@ -440,7 +443,12 @@ private fun LazyListScope.collectionSongs(
             }
             val ranked = collection.kind != CollectionKind.Playlist
             val playingKey = state.current?.key
-            itemsIndexed(songs, key = { index, song -> "${song.key}:$index" }) { index, song ->
+            val songKeys = distinctKeys(songs) { it.key }
+            itemsIndexed(
+                songs,
+                key = { index, _ -> songKeys[index] },
+                contentType = { _, _ -> "song" },
+            ) { index, song ->
                 SongRow(
                     title = song.title,
                     subtitle = if (collection.kind == CollectionKind.Album) song.artist.ifBlank { song.subtitle } else song.subtitle,

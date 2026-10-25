@@ -54,6 +54,7 @@ fun AdaptiveSheet(
     onDismiss: () -> Unit,
     title: String,
     subtitle: String = "",
+    subtitleProvider: (() -> String)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val window = LocalAppWindow.current
@@ -64,7 +65,7 @@ fun AdaptiveSheet(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ) {
             Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
-                SheetHeader(title, subtitle, null)
+                SheetHeader(title, subtitle, subtitleProvider, null)
                 content()
             }
         }
@@ -103,7 +104,7 @@ fun AdaptiveSheet(
                     shadowElevation = 6.dp,
                 ) {
                     Column(Modifier.fillMaxSize().padding(top = if (tv) 36.dp else 16.dp, bottom = 16.dp)) {
-                        SheetHeader(title, subtitle, if (tv) null else onDismiss)
+                        SheetHeader(title, subtitle, subtitleProvider, if (tv) null else onDismiss)
                         content()
                     }
                 }
@@ -113,15 +114,17 @@ fun AdaptiveSheet(
 }
 
 @Composable
-private fun SheetHeader(title: String, subtitle: String, onClose: (() -> Unit)?) {
+private fun SheetHeader(title: String, subtitle: String, subtitleProvider: (() -> String)?, onClose: (() -> Unit)?) {
     Row(
         Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            if (subtitle.isNotBlank()) {
-                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // provider 在这个作用域里求值：每秒变化的倒计时只重组标题，不会带动整张面板
+            val subtitleText = subtitleProvider?.invoke() ?: subtitle
+            if (subtitleText.isNotBlank()) {
+                Text(subtitleText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         if (onClose != null) {

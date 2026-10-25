@@ -32,6 +32,7 @@ import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -75,6 +76,7 @@ fun phoneOverlayHeight(hasMini: Boolean): Dp = NavBarHeight + if (hasMini) MiniH
 @Composable
 fun PhoneBottomBar(
     state: MusicUiState,
+    position: State<Long>,
     selected: String,
     actions: MusicActions,
     onSelect: (String) -> Unit,
@@ -87,7 +89,7 @@ fun PhoneBottomBar(
             enter = slideInVertically { it } + fadeIn(),
             exit = slideOutVertically { it } + fadeOut(),
         ) {
-            MiniPlayer(state, actions, onOpenQueue, Modifier.padding(horizontal = 12.dp, vertical = MiniGap))
+            MiniPlayer(state, position, actions, onOpenQueue, Modifier.padding(horizontal = 12.dp, vertical = MiniGap))
         }
         val blur = LocalBlurPolicy.current.enabled
         val container = MaterialTheme.colorScheme.surfaceContainer
@@ -115,7 +117,7 @@ fun PhoneBottomBar(
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MiniPlayer(state: MusicUiState, actions: MusicActions, onOpenQueue: () -> Unit, modifier: Modifier = Modifier) {
+fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions, onOpenQueue: () -> Unit, modifier: Modifier = Modifier) {
     val song = state.current ?: return
     val scope = rememberCoroutineScope()
     val drag = remember { Animatable(0f) }
@@ -193,12 +195,18 @@ fun MiniPlayer(state: MusicUiState, actions: MusicActions, onOpenQueue: () -> Un
             )
         }
         Box(contentAlignment = Alignment.Center) {
-            val fraction = if (state.duration > 0) (state.position.toFloat() / state.duration).coerceIn(0f, 1f) else 0f
-            ProgressRing(fraction, state.playing, size = 52.dp)
+            MiniProgress(position, state.duration, state.playing)
             PlayPauseButton(state.playing, { actions.transport("play") }, size = PlayButtonSize.Mini)
         }
         IconButton(onClick = { actions.transport("next") }, modifier = Modifier.size(48.dp)) {
             Icon(Icons.Filled.SkipNext, "下一首", tint = MaterialTheme.colorScheme.onSecondaryContainer)
         }
     }
+}
+
+/** 只有这圈进度环读播放进度，迷你播放器其余部分不跟着每 500ms 重组。 */
+@Composable
+private fun MiniProgress(position: State<Long>, duration: Long, playing: Boolean) {
+    val fraction = if (duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f
+    ProgressRing(fraction, playing, size = 52.dp)
 }
