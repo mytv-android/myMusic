@@ -2533,6 +2533,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         app.sync.syncIfStaleOnForeground()
     }
 
+    /** 进入同步、音乐库或平台账号页面时拉取一次，避免两台设备停在不同版本。 */
+    fun syncIfStaleOnScreen() {
+        app.sync.syncIfStaleOnScreen()
+    }
+
     fun diagnostics(): String {
         val context = getApplication<Application>()
         val info = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()

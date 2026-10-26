@@ -120,6 +120,7 @@ fun SyncCenterScreen(
     val exportFile = rememberExportLauncher(actions)
     val importFile = rememberImportLauncher(actions)
     val primaryFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { actions.syncIfStaleOnScreen() }
     // 嵌在设置右栏时焦点留在左侧列表，不抢
     if (!embedded) TvDefaultFocus(primaryFocus, sync.account == null)
 
@@ -367,7 +368,7 @@ private fun SyncAccountCard(sync: SyncUiState, actions: MusicActions, focus: Foc
             ShapeIcon(if (sync.conflicts.isNotEmpty()) Icons.Filled.SyncProblem else Icons.Filled.CloudDone)
             Text(title, Modifier.padding(top = 12.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
             Text(
-                "$detail\n只同步自建歌单和歌曲信息",
+                "$detail\n同步歌单、收藏和平台账号 Cookie",
                 Modifier.padding(top = 2.dp),
                 style = MaterialTheme.typography.bodyMedium,
             )

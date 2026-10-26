@@ -216,6 +216,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun cancelLogin() = model.cancelLogin()
 
     fun syncNow() = model.syncNow()
+    fun syncIfStaleOnScreen() = model.syncIfStaleOnScreen()
     fun connectSync(providerId: String, token: String, remote: String) = model.connectSync(providerId, token, remote)
     fun resolveInitial(strategy: SyncStrategy) = model.resolveInitialSync(strategy)
     fun cancelInitial() = model.cancelInitialSync()

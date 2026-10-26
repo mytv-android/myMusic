@@ -1,6 +1,8 @@
 package com.mytv.mymusic.data.sync
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.room.withTransaction
 import androidx.work.Constraints
@@ -22,6 +24,8 @@ import com.mytv.mymusic.data.SyncDao
 import com.mytv.mymusic.data.Song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -115,6 +119,7 @@ class SyncCoordinator(
 
     private val mutex = Mutex()
     private var pendingInitial: PendingInitial? = null
+    private var localChangeJob: Job? = null
     private val musicDao = db.dao()
 
     private val deviceId: String by lazy {
@@ -260,8 +265,9 @@ class SyncCoordinator(
                             remoteRevision = uploaded.revision,
                             remoteUrl = uploaded.htmlUrl,
                         ))
-                        finish("已上传 ${local.summary()}")
-                        true
+                        val aligned = reconcileAfterPush(provider, token, account, uploaded, local)
+                        if (aligned) finish("已上传 ${local.summary()}")
+                        aligned
                     }
                     localEmpty -> {
                         applySnapshot(remote, removeAbsent = true)
@@ -305,20 +311,7 @@ class SyncCoordinator(
                 _state.update { it.copy(phase = "正在合并歌单") }
                 val result = SyncMerge.merge(base, local, remote)
                 if (result.conflicts.isNotEmpty()) {
-                    db.withTransaction {
-                        syncDao.clearConflicts()
-                        result.conflicts.forEach { conflict ->
-                            syncDao.putConflict(
-                                SyncConflictEntity(
-                                    playlistId = conflict.playlistId,
-                                    localSnapshot = SyncJson.encodePlaylist(conflict.local),
-                                    remoteSnapshot = SyncJson.encodePlaylist(conflict.remote),
-                                    baseSnapshot = SyncJson.encodePlaylist(conflict.base),
-                                    detectedAt = System.currentTimeMillis(),
-                                )
-                            )
-                        }
-                    }
+                    recordConflicts(result.conflicts)
                     if (result.playlists.isNotEmpty() || result.favorites.isNotEmpty() || result.cookies.isNotEmpty()) {
                         applySnapshot(
                             SyncSnapshot(
@@ -357,25 +350,90 @@ class SyncCoordinator(
                         fail("同步过程中本机数据有新的修改，请再次同步。")
                         return@withLock false
                     }
-                    val merged = SyncSnapshot(
+                    var currentRemoteFile = remoteFile
+                    var merged = SyncSnapshot(
                         deviceId = deviceId,
                         updatedAt = SyncTime.nowIso(),
                         playlists = result.playlists,
                         favorites = result.favorites,
                         cookies = result.cookies,
                     )
-                    applySnapshot(merged, removeAbsent = false, dirty = true)
-                    _state.update { it.copy(phase = "正在上传数据") }
-                    val uploaded = upload(provider, token, account, merged, remoteFile)
-                    saveBase(merged, uploaded.revision)
+                    var uploaded: RemoteFile? = null
+                    var round = 0
+                    while (uploaded == null) {
+                        if (round++ >= MAX_PUSH_ROUNDS) {
+                            fail("云端文件在同步期间持续变化，请稍后再试。")
+                            return@withLock false
+                        }
+                        val latest = provider.read(token, account.remoteId)
+                        if (!remoteMatches(latest, currentRemoteFile)) {
+                            // 云端在合并期间被其他设备更新：按最新内容重新合并，避免覆盖对方
+                            val latestSnapshot = SyncJson.decode(latest.content)
+                            val latestLocal = localSnapshot()
+                            val again = SyncMerge.merge(base, latestLocal, latestSnapshot)
+                            if (again.conflicts.isNotEmpty()) {
+                                recordConflicts(again.conflicts)
+                                if (again.playlists.isNotEmpty() || again.favorites.isNotEmpty() || again.cookies.isNotEmpty()) {
+                                    applySnapshot(
+                                        SyncSnapshot(
+                                            deviceId = deviceId,
+                                            playlists = again.playlists,
+                                            favorites = again.favorites,
+                                            cookies = again.cookies,
+                                        ),
+                                        removeAbsent = false,
+                                        dirty = true,
+                                    )
+                                }
+                                saveAccount(account.copy(remoteRevision = latest.revision, remoteUrl = latest.htmlUrl))
+                                _state.update {
+                                    it.copy(
+                                        status = SyncStatus.NeedsAttention,
+                                        phase = "",
+                                        message = "有 ${again.conflicts.size} 个歌单需要处理冲突，处理前不会上传。",
+                                        error = "",
+                                    )
+                                }
+                                if (notify) emit("发现 ${again.conflicts.size} 个同步冲突，请先处理。", error = true)
+                                return@withLock false
+                            }
+                            if (snapshotSignature(latestLocal) == snapshotSignature(latestSnapshot)) {
+                                saveBase(latestSnapshot, latest.revision)
+                                saveAccount(account.copy(
+                                    lastSyncedAt = System.currentTimeMillis(),
+                                    remoteRevision = latest.revision,
+                                    remoteUrl = latest.htmlUrl,
+                                ))
+                                pruneTombstones()
+                                finish("已是最新")
+                                return@withLock true
+                            }
+                            merged = SyncSnapshot(
+                                deviceId = deviceId,
+                                updatedAt = SyncTime.nowIso(),
+                                playlists = again.playlists,
+                                favorites = again.favorites,
+                                cookies = again.cookies,
+                            )
+                            currentRemoteFile = latest
+                            continue
+                        }
+                        applySnapshot(merged, removeAbsent = false, dirty = true)
+                        _state.update { it.copy(phase = "正在上传数据") }
+                        uploaded = upload(provider, token, account, merged, latest)
+                    }
+                    val finalSnapshot = merged
+                    val finalUpload = uploaded ?: return@withLock false
+                    saveBase(finalSnapshot, finalUpload.revision)
                     saveAccount(account.copy(
                         lastSyncedAt = System.currentTimeMillis(),
-                        remoteRevision = uploaded.revision,
-                        remoteUrl = uploaded.htmlUrl,
+                        remoteRevision = finalUpload.revision,
+                        remoteUrl = finalUpload.htmlUrl,
                     ))
+                    val aligned = reconcileAfterPush(provider, token, account, finalUpload, finalSnapshot)
                     pruneTombstones()
-                    finish("已同步 ${merged.summary()}")
-                    true
+                    if (aligned) finish("已同步 ${finalSnapshot.summary()}")
+                    aligned
                 }
             }
         } catch (error: SyncException) {
@@ -470,22 +528,24 @@ class SyncCoordinator(
                         syncDao.clearBases()
                         syncDao.clearConflicts()
                         val uploaded = provider.update(token, remoteFile.id, encodeForUpload(local))
-                        saveAccount(
-                            SyncAccountEntity(
-                                provider = providerId,
-                                remoteId = remoteFile.id,
-                                fileName = provider.fileName,
-                                lastSyncedAt = System.currentTimeMillis(),
-                                remoteRevision = uploaded.revision,
-                                remoteUrl = uploaded.htmlUrl,
-                                accountLabel = accountInfo.login,
-                                updatedAt = System.currentTimeMillis(),
-                            )
+                        val newAccount = SyncAccountEntity(
+                            provider = providerId,
+                            remoteId = remoteFile.id,
+                            fileName = provider.fileName,
+                            lastSyncedAt = System.currentTimeMillis(),
+                            remoteRevision = uploaded.revision,
+                            remoteUrl = uploaded.htmlUrl,
+                            accountLabel = accountInfo.login,
+                            updatedAt = System.currentTimeMillis(),
                         )
+                        saveAccount(newAccount)
                         saveBase(local, uploaded.revision)
                         markClean(local)
-                        finish("已上传本机数据")
-                        emit("已连接 ${provider.label}，本机数据已上传")
+                        val aligned = reconcileAfterPush(provider, token, newAccount, uploaded, local)
+                        if (aligned) {
+                            finish("已上传本机数据")
+                            emit("已连接 ${provider.label}，本机数据已上传")
+                        }
                         true
                     }
                     localEmpty -> {
@@ -576,24 +636,26 @@ class SyncCoordinator(
             syncDao.clearBases()
             syncDao.clearConflicts()
             secretStore.saveToken(pending.providerId, pending.token)
-            saveAccount(
-                SyncAccountEntity(
-                    provider = pending.providerId,
-                    remoteId = pending.remoteId,
-                    fileName = provider.fileName,
-                    lastSyncedAt = System.currentTimeMillis(),
-                    remoteRevision = uploaded.revision,
-                    remoteUrl = uploaded.htmlUrl,
-                    accountLabel = pending.accountLabel,
-                    updatedAt = System.currentTimeMillis(),
-                )
+            val initialAccount = SyncAccountEntity(
+                provider = pending.providerId,
+                remoteId = pending.remoteId,
+                fileName = provider.fileName,
+                lastSyncedAt = System.currentTimeMillis(),
+                remoteRevision = uploaded.revision,
+                remoteUrl = uploaded.htmlUrl,
+                accountLabel = pending.accountLabel,
+                updatedAt = System.currentTimeMillis(),
             )
+            saveAccount(initialAccount)
             saveBase(merged, uploaded.revision)
             pendingInitial = null
-            finish("首次合并完成")
-            emit("首次合并完成，已同步 ${merged.summary()}")
+            val aligned = reconcileAfterPush(provider, pending.token, initialAccount, uploaded, merged)
+            if (aligned) {
+                finish("首次合并完成")
+                emit("首次合并完成，已同步 ${merged.summary()}")
+            }
             scheduleAutoSync()
-            true
+            aligned
         } catch (error: Exception) {
             fail(error.message ?: "首次合并失败")
             emit(error.message ?: "首次合并失败", error = true)
@@ -675,10 +737,13 @@ class SyncCoordinator(
                     remoteUrl = uploaded.htmlUrl,
                 )
             )
+            val aligned = reconcileAfterPush(provider, token, account, uploaded, local)
             pruneTombstones()
-            finish("冲突已处理，已同步 ${local.playlists.count { it.deletedAt == null }} 个歌单")
-            emit("冲突已处理并完成同步")
-            true
+            if (aligned) {
+                finish("冲突已处理，已同步 ${local.playlists.count { it.deletedAt == null }} 个歌单")
+                emit("冲突已处理并完成同步")
+            }
+            aligned
         } catch (error: SyncException) {
             fail(error.message)
             emit(error.message, error = true)
@@ -694,7 +759,7 @@ class SyncCoordinator(
     suspend fun setAutoSync(enabled: Boolean) {
         val account = syncDao.accountOnce() ?: return
         syncDao.putAccount(account.copy(autoSync = enabled, updatedAt = System.currentTimeMillis()))
-        if (enabled) scheduleAutoSync()
+        if (enabled) onLocalChange()
     }
 
     suspend fun setWifiOnly(enabled: Boolean) {
@@ -775,7 +840,7 @@ class SyncCoordinator(
         }
         applySnapshot(snapshot, removeAbsent = strategy == SyncStrategy.Remote, dirty = true)
         emit("已导入 ${snapshot.summary()}")
-        scheduleAutoSync()
+        onLocalChange()
         true
     } catch (error: SyncException) {
         emit(error.message, error = true)
@@ -785,8 +850,24 @@ class SyncCoordinator(
         false
     }
 
+    /** 本机一有修改就短暂防抖后立即同步，不再等 WorkManager 的 30 秒延迟。 */
     fun onLocalChange() {
-        scheduleAutoSync()
+        localChangeJob?.cancel()
+        localChangeJob = scope.launch {
+            delay(LOCAL_CHANGE_DEBOUNCE_MS)
+            // 用独立协程执行同步：后续修改只会取消防抖计时，不会打断正在进行的同步
+            scope.launch {
+                val account = syncDao.accountOnce() ?: return@launch
+                if (!account.autoSync) return@launch
+                if (!networkAllowsSync(account.wifiOnly)) {
+                    scheduleAutoSync()
+                    return@launch
+                }
+                val success = runSync(manual = false, notify = false)
+                // 离线或服务端临时失败时交给带网络约束的 WorkManager 重试
+                if (!success && state.value.status == SyncStatus.Error) scheduleAutoSync()
+            }
+        }
     }
 
     fun scheduleAutoSync() {
@@ -811,8 +892,37 @@ class SyncCoordinator(
             val account = syncDao.accountOnce() ?: return@launch
             if (!account.autoSync || syncDao.conflictsOnce().isNotEmpty()) return@launch
             val stale = System.currentTimeMillis() - account.lastSyncedAt > 15 * 60 * 1000
-            if (stale) runSync(manual = false, notify = false)
+            if (!stale) return@launch
+            if (!networkAllowsSync(account.wifiOnly)) {
+                scheduleAutoSync()
+                return@launch
+            }
+            runSync(manual = false, notify = false)
         }
+    }
+
+    /** 进入同步 / 音乐库 / 平台账号页面时拉取一次，避免两台设备长时间停在不同版本。 */
+    fun syncIfStaleOnScreen() {
+        scope.launch {
+            val account = syncDao.accountOnce() ?: return@launch
+            if (!account.autoSync || pendingInitial != null) return@launch
+            if (syncDao.conflictsOnce().isNotEmpty()) return@launch
+            if (!shouldPullOnScreen(account.lastSyncedAt, System.currentTimeMillis())) return@launch
+            if (!networkAllowsSync(account.wifiOnly)) {
+                scheduleAutoSync()
+                return@launch
+            }
+            runSync(manual = false, notify = false)
+        }
+    }
+
+    private fun networkAllowsSync(wifiOnly: Boolean): Boolean {
+        if (!wifiOnly) return true
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
 
     private fun encodeForUpload(snapshot: SyncSnapshot): String {
@@ -995,6 +1105,125 @@ class SyncCoordinator(
         }
     }
 
+    /**
+     * 推送成功后再读一次云端。如果其他设备在推送前后也写了，把最新内容合回本机并再推一次，
+     * 避免本机停在旧 revision；云端若再次变化则继续合并，最多往返几轮。
+     */
+    private suspend fun reconcileAfterPush(
+        provider: PlaylistSyncProvider,
+        token: String,
+        account: SyncAccountEntity,
+        uploaded: RemoteFile,
+        pushed: SyncSnapshot,
+    ): Boolean = try {
+        reconcileAfterPushOrThrow(provider, token, account, uploaded, pushed)
+    } catch (error: SyncException) {
+        fail("已上传，但读取云端最新版本失败：${error.message}")
+        scheduleAutoSync()
+        false
+    } catch (error: Exception) {
+        val message = error.message ?: "请稍后重试"
+        fail("已上传，但校验云端最新版本失败：$message")
+        scheduleAutoSync()
+        false
+    }
+
+    private suspend fun reconcileAfterPushOrThrow(
+        provider: PlaylistSyncProvider,
+        token: String,
+        account: SyncAccountEntity,
+        uploaded: RemoteFile,
+        pushed: SyncSnapshot,
+    ): Boolean {
+        var base = pushed
+        var lastUploaded = uploaded
+        var round = 0
+        while (true) {
+            if (round++ >= MAX_PUSH_ROUNDS) {
+                fail("云端文件在同步期间持续变化，请稍后再试。")
+                return false
+            }
+            val latest = provider.read(token, account.remoteId)
+            if (remoteMatches(latest, lastUploaded)) {
+                saveBase(base, latest.revision)
+                saveAccount(account.copy(
+                    lastSyncedAt = System.currentTimeMillis(),
+                    remoteRevision = latest.revision,
+                    remoteUrl = latest.htmlUrl,
+                ))
+                return true
+            }
+            val remote = SyncJson.decode(latest.content)
+            val local = localSnapshot()
+            val result = SyncMerge.merge(base, local, remote)
+            if (result.conflicts.isNotEmpty()) {
+                recordConflicts(result.conflicts)
+                if (result.playlists.isNotEmpty() || result.favorites.isNotEmpty() || result.cookies.isNotEmpty()) {
+                    applySnapshot(
+                        SyncSnapshot(
+                            deviceId = deviceId,
+                            playlists = result.playlists,
+                            favorites = result.favorites,
+                            cookies = result.cookies,
+                        ),
+                        removeAbsent = false,
+                        dirty = true,
+                    )
+                }
+                saveAccount(account.copy(remoteRevision = latest.revision, remoteUrl = latest.htmlUrl))
+                _state.update {
+                    it.copy(
+                        status = SyncStatus.NeedsAttention,
+                        phase = "",
+                        message = "有 ${result.conflicts.size} 个歌单需要处理冲突，处理前不会上传。",
+                        error = "",
+                    )
+                }
+                return false
+            }
+            if (snapshotSignature(local) == snapshotSignature(remote)) {
+                saveBase(remote, latest.revision)
+                saveAccount(account.copy(
+                    lastSyncedAt = System.currentTimeMillis(),
+                    remoteRevision = latest.revision,
+                    remoteUrl = latest.htmlUrl,
+                ))
+                return true
+            }
+            val merged = SyncSnapshot(
+                deviceId = deviceId,
+                updatedAt = SyncTime.nowIso(),
+                playlists = result.playlists,
+                favorites = result.favorites,
+                cookies = result.cookies,
+            )
+            // 上传前再确认一次；若又变了，回到循环开头按最新内容重新合并
+            val check = provider.read(token, account.remoteId)
+            if (!remoteMatches(check, latest)) continue
+            _state.update { it.copy(phase = "正在同步其他设备的更新") }
+            applySnapshot(merged, removeAbsent = false, dirty = true)
+            lastUploaded = upload(provider, token, account, merged, check)
+            base = merged
+        }
+    }
+
+    private suspend fun recordConflicts(conflicts: List<MergeConflict>) {
+        db.withTransaction {
+            syncDao.clearConflicts()
+            conflicts.forEach { conflict ->
+                syncDao.putConflict(
+                    SyncConflictEntity(
+                        playlistId = conflict.playlistId,
+                        localSnapshot = SyncJson.encodePlaylist(conflict.local),
+                        remoteSnapshot = SyncJson.encodePlaylist(conflict.remote),
+                        baseSnapshot = SyncJson.encodePlaylist(conflict.base),
+                        detectedAt = System.currentTimeMillis(),
+                    )
+                )
+            }
+        }
+    }
+
     private suspend fun upload(
         provider: PlaylistSyncProvider,
         token: String,
@@ -1087,5 +1316,18 @@ class SyncCoordinator(
     companion object {
         const val WORK_NAME = "mymusic-library-sync"
         const val MAX_SYNC_BYTES = 900 * 1024
+        const val LOCAL_CHANGE_DEBOUNCE_MS = 1_000L
+        const val SCREEN_PULL_STALE_MS = 30_000L
+        private const val MAX_PUSH_ROUNDS = 3
     }
+}
+
+/** 进入页面时是否值得拉取：比前台 15 分钟阈值短得多，但避免页面切换连续请求。 */
+internal fun shouldPullOnScreen(lastSyncedAt: Long, now: Long): Boolean =
+    now - lastSyncedAt >= SyncCoordinator.SCREEN_PULL_STALE_MS
+
+/** revision 是首选依据；服务端没给 revision 时退回比较时间戳和内容。 */
+internal fun remoteMatches(current: RemoteFile, other: RemoteFile): Boolean {
+    if (current.revision.isNotBlank() && other.revision.isNotBlank()) return current.revision == other.revision
+    return current.updatedAt == other.updatedAt && current.content == other.content
 }

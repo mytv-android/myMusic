@@ -66,6 +66,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -798,6 +799,7 @@ private fun BrowseSourceSheet(state: MusicUiState, actions: MusicActions, onDism
 @Composable
 fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: () -> Unit, embedded: Boolean = false) {
     val tv = LocalAppWindow.current.isTv
+    LaunchedEffect(Unit) { actions.syncIfStaleOnScreen() }
     var cookieFor by remember { mutableStateOf<ProviderInfo?>(null) }
     var qrFor by remember { mutableStateOf<ProviderInfo?>(null) }
     var signerOpen by remember { mutableStateOf(false) }

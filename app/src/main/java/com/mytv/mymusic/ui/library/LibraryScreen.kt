@@ -177,6 +177,7 @@ fun LibraryScreen(
     val importFile = rememberImportLauncher(actions)
     val menu = remember(importFile) { NewMenu({ createOpen = true }, { linkOpen = true }, importFile) }
     val stats = rememberLibraryStats(favorites, history, downloads)
+    LaunchedEffect(Unit) { actions.syncIfStaleOnScreen() }
 
     when {
         window.isTv -> TvLibrary(state, history, playlists, covers, sync, stats, actions, nav, menu)
