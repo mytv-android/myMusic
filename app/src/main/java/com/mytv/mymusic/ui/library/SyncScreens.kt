@@ -292,7 +292,7 @@ fun SyncCenterScreen(
 }
 
 @Composable
-private fun ShapeIcon(icon: ImageVector) {
+internal fun ShapeIcon(icon: ImageVector) {
     // Cookie 形状只做装饰
     Box(
         Modifier
@@ -586,6 +586,8 @@ fun SyncConnectScreen(
 ) {
     val window = LocalAppWindow.current
     val uri = LocalUriHandler.current
+    var tvManualInput by rememberSaveable { mutableStateOf(false) }
+    val useQrSetup = window.isTv && !tvManualInput
     var provider by rememberSaveable { mutableStateOf(initialProvider?.takeIf { it == "gist" || it == "gitee" } ?: "gist") }
     var token by remember { mutableStateOf("") }
     var remote by rememberSaveable { mutableStateOf("") }
@@ -603,7 +605,8 @@ fun SyncConnectScreen(
     LaunchedEffect(sync.account, sync.initialMerge, sync.error, syncing) {
         if (!connected && attempted && !syncing && sync.account != null && sync.initialMerge == null && sync.error.isBlank()) {
             connected = true
-            onConnected()
+            // 扫码连接保留成功页，等手机收到结果后再由遥控器确认返回。
+            if (!useQrSetup) onConnected()
         }
     }
     val leave = {
@@ -611,7 +614,7 @@ fun SyncConnectScreen(
         onBack()
     }
     BackHandler(enabled = sync.initialMerge != null) { leave() }
-    TvDefaultFocus(tokenFocus)
+    if (!useQrSetup) TvDefaultFocus(tokenFocus, provider)
 
     val providerPicker: @Composable () -> Unit = {
         ConnectedToggleGroup(
@@ -703,8 +706,12 @@ fun SyncConnectScreen(
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
         )
         if (window.isTv) {
-            Box(Modifier.padding(top = 8.dp)) {
-                InfoNote("令牌很长，建议用手机上的 Google TV 应用输入；或者在手机上连接后导出文件，再在这里“从文件导入”。")
+            Column(Modifier.padding(top = 8.dp)) {
+                InfoNote("手机扫码可避免在电视上输入长令牌。")
+                TextButton(
+                    onClick = { tvManualInput = false },
+                    modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+                ) { Text("使用扫码配置") }
             }
         }
         if (sync.error.isNotBlank()) {
@@ -739,8 +746,24 @@ fun SyncConnectScreen(
         }
     }
 
-    PageScaffold(title = "连接同步", subtitle = if (gist) "GitHub Gist" else "Gitee 代码片段", onBack = leave) { padding ->
-        if (window.twoPane) {
+    PageScaffold(
+        title = "连接同步",
+        subtitle = if (useQrSetup) "手机扫码配置" else if (gist) "GitHub Gist" else "Gitee 代码片段",
+        onBack = leave,
+    ) { padding ->
+        if (useQrSetup) {
+            TvSyncSetupContent(
+                sync = sync,
+                actions = actions,
+                provider = provider,
+                connected = connected,
+                padding = padding,
+                onSubmission = { attempted = true },
+                onManualInput = { tvManualInput = true },
+                onDone = onConnected,
+                infoContent = whatCard,
+            )
+        } else if (window.twoPane) {
             // 左栏选位置和说明，右栏是表单（最宽 440dp，不拉满）
             Row(
                 Modifier

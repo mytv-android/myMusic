@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0f1513">
+  <meta name="referrer" content="no-referrer">
+  <title>连接云端同步 · myMusic TV</title>
+  <link rel="stylesheet" href="setup.css">
+  <link rel="stylesheet" href="theme.css">
+  <script src="setup.js" defer></script>
+</head>
+<body>
+  <header class="app-bar">
+    <div class="brand" aria-label="myMusic">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M9 18V6.7c0-.8.6-1.5 1.4-1.6l8-1.4v10.1M9 10l9.4-1.7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="18" r="2.5" fill="currentColor"/><circle cx="15.9" cy="13.8" r="2.5" fill="currentColor"/></svg>
+      </span>
+      <span>myMusic</span>
+    </div>
+    <span class="local-badge"><span class="local-dot" aria-hidden="true"></span>与电视直连</span>
+  </header>
+
+  <main class="page">
+    <section class="intro" aria-labelledby="page-title">
+      <div class="shape-icon" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none"><path d="M9 24h14a6 6 0 0 0 .7-11.9A8 8 0 0 0 8.3 10 7 7 0 0 0 9 24Z" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M16 20V11m0 0-3.5 3.5M16 11l3.5 3.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div>
+        <h1 id="page-title">在手机上完成电视同步</h1>
+        <p>不用遥控器输入长令牌。配置只发送到这台电视，验证后由电视加密保存。</p>
+      </div>
+    </section>
+
+    <div class="workspace">
+      <section class="setup-card" aria-label="同步配置">
+        <form id="setup-form" novalidate>
+          <fieldset class="provider-fieldset">
+            <legend>同步位置</legend>
+            <div class="segmented" aria-label="选择同步位置">
+              <button type="button" class="provider-option" data-provider="gist" aria-pressed="true">GitHub Gist</button>
+              <button type="button" class="provider-option" data-provider="gitee" aria-pressed="false">Gitee 代码片段</button>
+            </div>
+            <p id="provider-description" class="field-help provider-description">使用 GitHub 账号创建一个私密 Gist，或连接已有 Gist。</p>
+          </fieldset>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="token">访问令牌</label>
+              <a id="token-link" class="text-link" href="https://github.com/settings/tokens/new?scopes=gist&amp;description=myMusic" target="_blank" rel="noopener noreferrer">
+                创建 GitHub 令牌
+                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7 5h8v8M15 5l-9 9M11 15H5V9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </a>
+            </div>
+            <div class="input-shell">
+              <input id="token" name="token" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="1024" required aria-describedby="token-help">
+              <button id="toggle-token" class="reveal-button" type="button" aria-label="显示令牌" aria-pressed="false">显示</button>
+            </div>
+            <p id="token-help" class="field-help">需要 gist 权限。令牌不会写进同步文件，也不会被此网页保存。</p>
+          </div>
+
+          <div class="field">
+            <label for="remote" id="remote-label">Gist ID（可选）</label>
+            <input id="remote" name="remote" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="2048" placeholder="留空则新建一个私密 Gist" aria-describedby="remote-help">
+            <p id="remote-help" class="field-help">也可以粘贴已有文件的完整链接。</p>
+          </div>
+
+          <div id="form-error" class="inline-error" role="alert" hidden></div>
+
+          <button id="submit-button" class="primary-button" type="submit" aria-label="连接并同步" disabled>
+            <svg id="submit-icon" class="button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 18h11a4.5 4.5 0 0 0 .5-9 6 6 0 0 0-11.3-1.6A5 5 0 0 0 7 18Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 15V8m0 0-2.5 2.5M12 8l2.5 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span id="submit-loader" class="loader" aria-hidden="true" hidden></span>
+            <span id="submit-label">连接并同步</span>
+          </button>
+          <p class="privacy-note">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4.5" y="8.5" width="11" height="8" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7 8.5v-2a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            请在手机与电视连接同一可信局域网时使用。
+          </p>
+        </form>
+
+        <section id="status-card" class="status-card" aria-live="polite" hidden>
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <h2 id="status-title">正在连接</h2>
+            <p id="status-detail"></p>
+          </div>
+        </section>
+        <noscript><p class="inline-error">请启用浏览器 JavaScript，才能将配置发送给电视。</p></noscript>
+      </section>
+
+      <aside class="side-content">
+        <section class="note-card">
+          <h2>会同步什么</h2>
+          <p>自建歌单、收藏、歌曲元数据和平台账号 Cookie。Cookie 会以明文写入私密 Gist / 代码片段，请勿公开文件链接。</p>
+          <div class="note-divider"></div>
+          <h3>不会包含</h3>
+          <p>最近播放、下载文件、播放地址和播放进度。Gist / Gitee 访问令牌只用于连接，不会写进同步文件。</p>
+        </section>
+        <section class="next-steps" aria-labelledby="next-title">
+          <h2 id="next-title">接下来</h2>
+          <ol>
+            <li>电视验证令牌，并创建或读取云端文件。</li>
+            <li>如果本机和云端都有歌单，在电视大屏上选择首次合并方式。</li>
+          </ol>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <footer>此页面由电视临时提供，不经过第三方服务器。离开电视配置页后自动关闭。</footer>
+</body>
+</html>
