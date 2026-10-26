@@ -197,7 +197,7 @@ fun SyncCenterScreen(
                 onClick = exportFile,
                 icon = Icons.Filled.SaveAlt,
                 iconTone = IconTone.Tertiary,
-                summary = "保存为 JSON，可在其他设备导入",
+                summary = "保存歌单、收藏和平台 Cookie 为 JSON",
             )
         }
         item(key = "import", contentType = "row") {
@@ -208,7 +208,7 @@ fun SyncCenterScreen(
                 onClick = importFile,
                 icon = Icons.Filled.FileOpen,
                 iconTone = IconTone.Tertiary,
-                summary = "与本机歌单合并，不会覆盖",
+                summary = "与本机歌单、收藏和 Cookie 合并，不会覆盖",
             )
         }
         if (account != null) {
@@ -245,7 +245,7 @@ fun SyncCenterScreen(
         }
         item(key = "note", contentType = "note") {
             Box(Modifier.padding(top = 16.dp)) {
-                InfoNote("只同步自建歌单和歌曲元数据。收藏、最近播放、下载文件、Cookie、播放地址都不会进入云端。")
+                InfoNote("同步自建歌单、收藏和平台账号 Cookie。Cookie 会以明文写入私密同步文件，请勿公开文件链接；最近播放、下载文件、播放地址不会进入云端。")
             }
         }
     }
@@ -353,6 +353,8 @@ private fun SyncAccountCard(sync: SyncUiState, actions: MusicActions, focus: Foc
         relativeTime(account.lastSyncedAt).ifBlank { "尚未同步" },
         "${sync.playlistCount} 个歌单",
         "${sync.trackCount} 首",
+        if (sync.favoritesCount > 0) "${sync.favoritesCount} 首收藏" else "",
+        if (sync.cookieCount > 0) "${sync.cookieCount} 个平台账号" else "",
         account.accountLabel,
     ).filter { it.isNotBlank() }.joinToString(" · ")
     Surface(
@@ -548,10 +550,18 @@ private fun InitialMergeDialog(
     actions: MusicActions,
     dismissible: Boolean = true,
 ) {
+    val extras = { favorites: Int, cookies: Int ->
+        buildString {
+            if (favorites > 0) append(" / $favorites 首收藏")
+            if (cookies > 0) append(" / $cookies 个平台账号")
+        }
+    }
     ConflictResolver(
         title = "首次合并",
-        detail = "本机：${preview.localPlaylists} 个歌单 / ${preview.localTracks} 首 · " +
-            "${preview.providerLabel}：${preview.remotePlaylists} 个歌单 / ${preview.remoteTracks} 首",
+        detail = "本机：${preview.localPlaylists} 个歌单 / ${preview.localTracks} 首" +
+            extras(preview.localFavorites, preview.localCookies) + " · " +
+            "${preview.providerLabel}：${preview.remotePlaylists} 个歌单 / ${preview.remoteTracks} 首" +
+            extras(preview.remoteFavorites, preview.remoteCookies),
         onApply = actions::resolveInitial,
         // 大屏不可关闭时对话框不会调用它；手机面板收起后必须清掉 initialMerge
         onCancel = actions::cancelInitial,
@@ -621,7 +631,7 @@ fun SyncConnectScreen(
             Column(Modifier.padding(18.dp)) {
                 Text("会同步什么", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "自建歌单和歌曲元数据。不包括收藏、最近播放、下载文件、Cookie、播放地址和进度。",
+                    "自建歌单、收藏和平台账号 Cookie。Cookie 会以明文写入私密 Gist / 代码片段，请勿公开文件链接。不包括最近播放、下载文件和播放进度。",
                     Modifier.padding(top = 4.dp),
                     style = MaterialTheme.typography.bodyMedium,
                 )

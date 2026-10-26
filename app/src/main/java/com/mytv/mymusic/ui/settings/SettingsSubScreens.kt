@@ -811,8 +811,8 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
     ) {
         item(key = "intro", contentType = "note") {
             SettingsNote(
-                if (tv) "各平台账号相互独立。电视上用手机扫码登录，Cookie 只保存在这台设备上。"
-                else "各平台账号相互独立。Cookie 只保存在本机，用于换源和 VIP 检测，不会写进同步文件。点按平台可以粘贴或更新 Cookie。",
+                if (tv) "各平台账号相互独立。电视上用手机扫码登录，Cookie 保存在本机；连接同步后会以明文写入私密同步文件。"
+                else "各平台账号相互独立。Cookie 用于换源和 VIP 检测；连接同步后会以明文写入私密同步文件，请勿公开文件链接。点按平台可以粘贴或更新 Cookie。",
                 Modifier.padding(bottom = 8.dp),
             )
         }
@@ -1382,9 +1382,9 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
 @Composable
 fun PrivacyScreen(onBack: () -> Unit, embedded: Boolean = false) {
     val blocks = listOf(
-        "留在本机" to "Cookie、令牌、收藏、最近播放、下载文件、播放进度和匹配缓存都只保存在设备上。Cookie 与同步令牌使用 Android Keystore 加密。",
+        "留在本机" to "最近播放、下载文件、播放进度和匹配缓存只保存在设备上。同步令牌使用 Android Keystore 加密，只保存在本机。",
         "歌词背景音频分析" to "“律动”只分析 ExoPlayer 已解码、正在输出的 PCM，不读取麦克风，不申请录音权限，也不保存或上传音频及频谱。暂停或离开播放页后停止分析。",
-        "写入你选择的云端" to "启用同步后，只把自建歌单和歌曲元数据写入你的 GitHub Gist 或 Gitee 代码片段。同步文件不包含 Cookie、令牌、播放地址和下载文件。",
+        "写入你选择的云端" to "启用同步后，自建歌单、收藏和平台账号 Cookie 会写入你的 GitHub Gist 或 Gitee 代码片段。Cookie 以明文保存，请勿公开文件链接；同步文件不包含同步令牌、播放地址和下载文件。",
         "网络请求" to "应用直接请求音乐平台上游接口、更新清单和同步服务，没有 myMusic 自建中转服务器。配置汽水签名器后，取流请求会额外发给你填写的签名服务。第三方仍会看到其服务所需的常规请求信息。扫码登录的二维码在本机生成。",
         "诊断信息" to "复制诊断只包含版本、设备型号、Android 版本、启用平台和最近错误；不包含 Cookie、令牌或完整播放 URL。",
     )

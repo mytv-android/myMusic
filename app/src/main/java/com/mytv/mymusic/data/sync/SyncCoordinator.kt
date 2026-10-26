@@ -12,6 +12,8 @@ import com.mytv.mymusic.data.AppDatabase
 import com.mytv.mymusic.data.LibraryDao
 import com.mytv.mymusic.data.PlaylistEntity
 import com.mytv.mymusic.data.PlaylistEntryEntity
+import com.mytv.mymusic.data.SavedSong
+import com.mytv.mymusic.data.SavedSongTombstone
 import com.mytv.mymusic.data.SettingsStore
 import com.mytv.mymusic.data.SyncAccountEntity
 import com.mytv.mymusic.data.SyncBaseEntity
@@ -57,6 +59,10 @@ data class InitialMergePreview(
     val localTracks: Int,
     val remotePlaylists: Int,
     val remoteTracks: Int,
+    val localFavorites: Int = 0,
+    val remoteFavorites: Int = 0,
+    val localCookies: Int = 0,
+    val remoteCookies: Int = 0,
 )
 
 data class SyncUiState(
@@ -69,6 +75,8 @@ data class SyncUiState(
     val conflicts: List<SyncConflictUi> = emptyList(),
     val playlistCount: Int = 0,
     val trackCount: Int = 0,
+    val favoritesCount: Int = 0,
+    val cookieCount: Int = 0,
     val initialMerge: InitialMergePreview? = null,
 )
 
@@ -107,6 +115,7 @@ class SyncCoordinator(
 
     private val mutex = Mutex()
     private var pendingInitial: PendingInitial? = null
+    private val musicDao = db.dao()
 
     private val deviceId: String by lazy {
         val preferences = context.getSharedPreferences("mymusic_device", Context.MODE_PRIVATE)
@@ -124,12 +133,17 @@ class SyncCoordinator(
                 syncDao.conflicts(),
                 libraryDao.playlists(),
                 libraryDao.entryCounts(),
-            ) { accounts, conflicts, playlists, counts ->
+                combine(musicDao.songs("favorite"), settings.state) { favorites, current ->
+                    favorites.size to current.cookies.count { cookie -> cookie.value.isNotBlank() }
+                },
+            ) { accounts, conflicts, playlists, counts, extras ->
                 Derived(
                     account = accounts.firstOrNull(),
                     conflicts = conflicts,
                     playlistCount = playlists.size,
                     trackCount = counts.sumOf { it.total },
+                    favoritesCount = extras.first,
+                    cookieCount = extras.second,
                 )
             }.collect { derived ->
                 _state.update { current ->
@@ -148,6 +162,8 @@ class SyncCoordinator(
                         conflicts = derived.conflicts.map(::toConflictUi),
                         playlistCount = derived.playlistCount,
                         trackCount = derived.trackCount,
+                        favoritesCount = derived.favoritesCount,
+                        cookieCount = derived.cookieCount,
                     )
                 }
             }
@@ -159,6 +175,8 @@ class SyncCoordinator(
         val conflicts: List<SyncConflictEntity>,
         val playlistCount: Int,
         val trackCount: Int,
+        val favoritesCount: Int,
+        val cookieCount: Int,
     )
 
     fun requestSync(manual: Boolean) {
@@ -220,8 +238,10 @@ class SyncCoordinator(
                 runCatching { SyncJson.format.decodeFromString<SyncSnapshot>(raw) }.getOrNull()
             }
             if (base == null) {
+                val remoteEmpty = !remote.hasUserData()
+                val localEmpty = !local.hasUserData()
                 when {
-                    remote.playlists.isEmpty() && local.playlists.isEmpty() -> {
+                    remoteEmpty && localEmpty -> {
                         saveAccount(account.copy(
                             accountLabel = account.accountLabel,
                             lastSyncedAt = System.currentTimeMillis(),
@@ -232,7 +252,7 @@ class SyncCoordinator(
                         finish("同步已就绪")
                         true
                     }
-                    remote.playlists.isEmpty() -> {
+                    remoteEmpty -> {
                         val uploaded = upload(provider, token, account, local, remoteFile)
                         saveBase(local, uploaded.revision)
                         saveAccount(account.copy(
@@ -240,10 +260,10 @@ class SyncCoordinator(
                             remoteRevision = uploaded.revision,
                             remoteUrl = uploaded.htmlUrl,
                         ))
-                        finish("已上传 ${local.playlists.count { it.deletedAt == null }} 个歌单")
+                        finish("已上传 ${local.summary()}")
                         true
                     }
-                    local.playlists.isEmpty() -> {
+                    localEmpty -> {
                         applySnapshot(remote, removeAbsent = true)
                         saveBase(remote, remoteFile.revision)
                         saveAccount(account.copy(
@@ -251,7 +271,7 @@ class SyncCoordinator(
                             remoteRevision = remoteFile.revision,
                             remoteUrl = remoteFile.htmlUrl,
                         ))
-                        finish("已从云端恢复 ${remote.playlists.count { it.deletedAt == null }} 个歌单")
+                        finish("已从云端恢复 ${remote.summary()}")
                         true
                     }
                     else -> {
@@ -268,15 +288,13 @@ class SyncCoordinator(
                             it.copy(
                                 status = SyncStatus.NeedsAttention,
                                 phase = "",
-                                initialMerge = InitialMergePreview(
+                                initialMerge = initialPreview(
                                     provider = account.provider,
                                     providerLabel = provider.label,
-                                    localPlaylists = local.playlists.count { p -> p.deletedAt == null },
-                                    localTracks = local.playlists.sumOf { p -> p.tracks.size },
-                                    remotePlaylists = remote.playlists.count { p -> p.deletedAt == null },
-                                    remoteTracks = remote.playlists.sumOf { p -> p.tracks.size },
+                                    local = local,
+                                    remote = remote,
                                 ),
-                                message = "本机和云端都有歌单，请选择首次合并方式。",
+                                message = "本机和云端都有数据，请选择首次合并方式。",
                                 error = "",
                             )
                         }
@@ -301,9 +319,14 @@ class SyncCoordinator(
                             )
                         }
                     }
-                    if (result.playlists.isNotEmpty()) {
+                    if (result.playlists.isNotEmpty() || result.favorites.isNotEmpty() || result.cookies.isNotEmpty()) {
                         applySnapshot(
-                            SyncSnapshot(deviceId = deviceId, playlists = result.playlists),
+                            SyncSnapshot(
+                                deviceId = deviceId,
+                                playlists = result.playlists,
+                                favorites = result.favorites,
+                                cookies = result.cookies,
+                            ),
                             removeAbsent = false,
                             dirty = true,
                         )
@@ -331,16 +354,18 @@ class SyncCoordinator(
                     true
                 } else {
                     if (snapshotSignature(localSnapshot()) != snapshotSignature(local)) {
-                        fail("同步过程中本机歌单有新的修改，请再次同步。")
+                        fail("同步过程中本机数据有新的修改，请再次同步。")
                         return@withLock false
                     }
                     val merged = SyncSnapshot(
                         deviceId = deviceId,
                         updatedAt = SyncTime.nowIso(),
                         playlists = result.playlists,
+                        favorites = result.favorites,
+                        cookies = result.cookies,
                     )
                     applySnapshot(merged, removeAbsent = false, dirty = true)
-                    _state.update { it.copy(phase = "正在上传歌单") }
+                    _state.update { it.copy(phase = "正在上传数据") }
                     val uploaded = upload(provider, token, account, merged, remoteFile)
                     saveBase(merged, uploaded.revision)
                     saveAccount(account.copy(
@@ -349,7 +374,7 @@ class SyncCoordinator(
                         remoteUrl = uploaded.htmlUrl,
                     ))
                     pruneTombstones()
-                    finish("已同步 ${merged.playlists.count { it.deletedAt == null }} 个歌单")
+                    finish("已同步 ${merged.summary()}")
                     true
                 }
             }
@@ -414,8 +439,10 @@ class SyncCoordinator(
             } else {
                 val remoteFile = provider.read(token, remoteId)
                 val remote = SyncJson.decode(remoteFile.content)
+                val remoteEmpty = !remote.hasUserData()
+                val localEmpty = !local.hasUserData()
                 when {
-                    remote.playlists.isEmpty() && local.playlists.isEmpty() -> {
+                    remoteEmpty && localEmpty -> {
                         secretStore.saveToken(providerId, token)
                         syncDao.clearAccounts()
                         syncDao.clearBases()
@@ -437,7 +464,7 @@ class SyncCoordinator(
                         emit("已连接 ${provider.label}")
                         true
                     }
-                    remote.playlists.isEmpty() -> {
+                    remoteEmpty -> {
                         secretStore.saveToken(providerId, token)
                         syncDao.clearAccounts()
                         syncDao.clearBases()
@@ -457,11 +484,11 @@ class SyncCoordinator(
                         )
                         saveBase(local, uploaded.revision)
                         markClean(local)
-                        finish("已上传本机歌单")
-                        emit("已连接 ${provider.label}，本机歌单已上传")
+                        finish("已上传本机数据")
+                        emit("已连接 ${provider.label}，本机数据已上传")
                         true
                     }
-                    local.playlists.isEmpty() -> {
+                    localEmpty -> {
                         secretStore.saveToken(providerId, token)
                         syncDao.clearAccounts()
                         syncDao.clearBases()
@@ -480,8 +507,8 @@ class SyncCoordinator(
                             )
                         )
                         saveBase(remote, remoteFile.revision)
-                        finish("已从云端恢复歌单")
-                        emit("已连接 ${provider.label}，已从云端恢复歌单")
+                        finish("已从云端恢复数据")
+                        emit("已连接 ${provider.label}，已从云端恢复数据")
                         scheduleAutoSync()
                         true
                     }
@@ -499,15 +526,13 @@ class SyncCoordinator(
                             it.copy(
                                 status = SyncStatus.Idle,
                                 phase = "",
-                                initialMerge = InitialMergePreview(
+                                initialMerge = initialPreview(
                                     provider = providerId,
                                     providerLabel = provider.label,
-                                    localPlaylists = local.playlists.count { p -> p.deletedAt == null },
-                                    localTracks = local.playlists.sumOf { p -> p.tracks.size },
-                                    remotePlaylists = remote.playlists.count { p -> p.deletedAt == null },
-                                    remoteTracks = remote.playlists.sumOf { p -> p.tracks.size },
+                                    local = local,
+                                    remote = remote,
                                 ),
-                                message = "本机和云端都有歌单，请选择首次合并方式。",
+                                message = "本机和云端都有数据，请选择首次合并方式。",
                                 error = "",
                             )
                         }
@@ -534,15 +559,13 @@ class SyncCoordinator(
         return@withLock try {
             val provider = providers[pending.providerId]
                 ?: throw SyncException(SyncFailureKind.Unknown, "同步后端不可用")
-            val playlists = if (strategy == SyncStrategy.Remote) {
-                pending.remote.playlists
-            } else {
-                SyncMerge.applyStrategy(pending.local, pending.remote, strategy)
-            }
+            val content = SyncMerge.applyStrategy(pending.local, pending.remote, strategy)
             val merged = SyncSnapshot(
                 deviceId = deviceId,
                 updatedAt = SyncTime.nowIso(),
-                playlists = playlists,
+                playlists = content.playlists,
+                favorites = content.favorites,
+                cookies = content.cookies,
             )
             if (strategy == SyncStrategy.Remote) {
                 db.withTransaction { libraryDao.clearPlaylists() }
@@ -568,7 +591,7 @@ class SyncCoordinator(
             saveBase(merged, uploaded.revision)
             pendingInitial = null
             finish("首次合并完成")
-            emit("首次合并完成，已同步 ${merged.playlists.count { it.deletedAt == null }} 个歌单")
+            emit("首次合并完成，已同步 ${merged.summary()}")
             scheduleAutoSync()
             true
         } catch (error: Exception) {
@@ -725,7 +748,7 @@ class SyncCoordinator(
         context.contentResolver.openOutputStream(uri)?.use { output ->
             output.write(SyncJson.encode(snapshot).toByteArray(Charsets.UTF_8))
         } ?: error("无法写入所选文件")
-        emit("已导出 ${snapshot.playlists.size} 个歌单")
+        emit("已导出 ${snapshot.summary()}")
         true
     } catch (error: Exception) {
         emit(error.message ?: "导出失败", error = true)
@@ -739,13 +762,19 @@ class SyncCoordinator(
         val remote = SyncJson.decode(raw)
         if (strategy == SyncStrategy.Remote && !ensureBackup()) return false
         val local = localSnapshot()
-        val playlists = SyncMerge.applyStrategy(local, remote, strategy)
-        val snapshot = SyncSnapshot(deviceId = deviceId, updatedAt = SyncTime.nowIso(), playlists = playlists)
+        val content = SyncMerge.applyStrategy(local, remote, strategy)
+        val snapshot = SyncSnapshot(
+            deviceId = deviceId,
+            updatedAt = SyncTime.nowIso(),
+            playlists = content.playlists,
+            favorites = content.favorites,
+            cookies = content.cookies,
+        )
         if (strategy == SyncStrategy.Remote) {
             db.withTransaction { libraryDao.clearPlaylists() }
         }
         applySnapshot(snapshot, removeAbsent = strategy == SyncStrategy.Remote, dirty = true)
-        emit("已导入 ${snapshot.playlists.count { it.deletedAt == null }} 个歌单")
+        emit("已导入 ${snapshot.summary()}")
         scheduleAutoSync()
         true
     } catch (error: SyncException) {
@@ -799,7 +828,7 @@ class SyncCoordinator(
 
     private suspend fun ensureBackup(): Boolean {
         val snapshot = localSnapshot(includeDeleted = false)
-        if (snapshot.playlists.isEmpty()) return true
+        if (!snapshot.hasUserData()) return true
         return try {
             withContext(Dispatchers.IO) {
                 val directory = File(context.filesDir, "backups").apply { mkdirs() }
@@ -810,7 +839,7 @@ class SyncCoordinator(
                     ?.drop(10)
                     ?.forEach { old -> old.delete() }
             }
-            emit("已在本机创建处理前备份（${snapshot.playlists.size} 个歌单）")
+            emit("已在本机创建处理前备份（${snapshot.summary()}）")
             true
         } catch (error: Exception) {
             fail("无法创建本机备份，已取消本次操作：${error.message ?: "存储不可写"}")
@@ -819,12 +848,19 @@ class SyncCoordinator(
         }
     }
 
-    private suspend fun localSnapshot(includeDeleted: Boolean = true): SyncSnapshot = buildSnapshot(
-        playlists = libraryDao.allPlaylistsOnce(),
-        entries = libraryDao.allEntriesOnce(),
-        deviceId = deviceId,
-        includeDeleted = includeDeleted,
-    )
+    private suspend fun localSnapshot(includeDeleted: Boolean = true): SyncSnapshot {
+        val cookieSnapshot = settings.cookieSnapshot()
+        return buildSnapshot(
+            playlists = libraryDao.allPlaylistsOnce(),
+            entries = libraryDao.allEntriesOnce(),
+            deviceId = deviceId,
+            includeDeleted = includeDeleted,
+            favorites = musicDao.songsOnce("favorite"),
+            favoriteTombstones = musicDao.tombstones("favorite"),
+            cookies = cookieSnapshot.cookies,
+            cookieUpdatedAt = cookieSnapshot.updatedAt,
+        )
+    }
 
     private suspend fun applySnapshot(
         snapshot: SyncSnapshot,
@@ -842,7 +878,91 @@ class SyncCoordinator(
                 applyPlaylist(playlist, dirty = dirty)
             }
         }
+        applyFavorites(snapshot.favorites, removeAbsent)
+        applyCookies(snapshot.cookies, removeAbsent)
     }
+
+    private suspend fun applyFavorites(favorites: List<SyncFavorite>, removeAbsent: Boolean) {
+        val active = favorites.filter { it.deletedAt == null }.associateBy { it.key }
+        if (removeAbsent) {
+            musicDao.songsOnce("favorite")
+                .filterNot { it.key in active }
+                .forEach { record -> musicDao.remove("favorite", record.key) }
+            musicDao.tombstones("favorite").forEach { tombstone ->
+                musicDao.clearTombstone("favorite", tombstone.key)
+            }
+        }
+        favorites.forEach { favorite ->
+            if (favorite.deletedAt != null) {
+                val deletedAt = SyncTime.toMillis(favorite.deletedAt).takeIf { it > 0 } ?: System.currentTimeMillis()
+                musicDao.remove("favorite", favorite.key)
+                musicDao.saveTombstone(SavedSongTombstone(favorite.key, "favorite", deletedAt))
+            } else {
+                val song = favorite.track?.toSong() ?: return@forEach
+                val addedAt = SyncTime.toMillis(favorite.addedAt).takeIf { it > 0 } ?: System.currentTimeMillis()
+                musicDao.clearTombstone("favorite", favorite.key)
+                musicDao.save(
+                    SavedSong(
+                        key = favorite.key,
+                        bucket = "favorite",
+                        payload = SyncJson.format.encodeToString(Song.serializer(), song),
+                        updatedAt = addedAt,
+                    )
+                )
+            }
+        }
+    }
+
+    private suspend fun applyCookies(cookies: List<SyncCookie>, removeAbsent: Boolean) {
+        val active = mutableMapOf<String, String>()
+        val updatedAt = mutableMapOf<String, Long>()
+        cookies.forEach { cookie ->
+            val time = if (cookie.deletedAt != null) {
+                SyncTime.toMillis(cookie.deletedAt)
+            } else {
+                SyncTime.toMillis(cookie.updatedAt)
+            }
+            updatedAt[cookie.provider] = time
+            if (cookie.deletedAt == null && cookie.value.isNotBlank()) {
+                active[cookie.provider] = cookie.value
+            }
+        }
+        settings.applyCookies(active, updatedAt, removeAbsent)
+    }
+
+    private fun SyncSnapshot.hasUserData(): Boolean =
+        playlists.any { it.deletedAt == null } ||
+            favorites.any { it.deletedAt == null } ||
+            cookies.any { it.deletedAt == null && it.value.isNotBlank() }
+
+    private fun SyncSnapshot.summary(): String {
+        val playlistCount = playlists.count { it.deletedAt == null }
+        val favoriteCount = favorites.count { it.deletedAt == null }
+        val cookieCount = cookies.count { it.deletedAt == null && it.value.isNotBlank() }
+        return buildString {
+            append("$playlistCount 个歌单")
+            if (favoriteCount > 0) append("、$favoriteCount 首收藏")
+            if (cookieCount > 0) append("、$cookieCount 个平台账号")
+        }
+    }
+
+    private fun initialPreview(
+        provider: String,
+        providerLabel: String,
+        local: SyncSnapshot,
+        remote: SyncSnapshot,
+    ) = InitialMergePreview(
+        provider = provider,
+        providerLabel = providerLabel,
+        localPlaylists = local.playlists.count { it.deletedAt == null },
+        localTracks = local.playlists.sumOf { it.tracks.size },
+        remotePlaylists = remote.playlists.count { it.deletedAt == null },
+        remoteTracks = remote.playlists.sumOf { it.tracks.size },
+        localFavorites = local.favorites.count { it.deletedAt == null },
+        remoteFavorites = remote.favorites.count { it.deletedAt == null },
+        localCookies = local.cookies.count { it.deletedAt == null && it.value.isNotBlank() },
+        remoteCookies = remote.cookies.count { it.deletedAt == null && it.value.isNotBlank() },
+    )
 
     private suspend fun applyPlaylist(playlist: SyncPlaylist, dirty: Boolean) {
         val deletedAt = playlist.deletedAt?.let(SyncTime::toMillis)

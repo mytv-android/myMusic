@@ -146,7 +146,7 @@ internal fun SettingsHomeScreen(
         ) {
             item(key = "groups", contentType = "settingsGroups") { SettingsGroups(overview, selected = null, twoPane = false, onOpen = onOpen) }
             item(key = "note", contentType = "note") {
-                SettingsNote("Cookie 与同步令牌只保存在本机，不会进入日志或同步文件。", Modifier.padding(top = 8.dp))
+                SettingsNote("开启同步后，平台 Cookie 会写入私密同步文件；同步令牌只保存在本机，不会进入日志或同步文件。", Modifier.padding(top = 8.dp))
             }
         }
     }

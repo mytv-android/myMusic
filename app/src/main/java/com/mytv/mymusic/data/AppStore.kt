@@ -25,6 +25,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.mytv.mymusic.aggregate.AggregationSettings
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -55,6 +56,7 @@ class SettingsStore(private val context: Context) {
     private val themeKey = stringPreferencesKey("theme")
     private val layoutModeKey = stringPreferencesKey("layout_mode")
     private val cookiesKey = stringPreferencesKey("cookies")
+    private val cookieUpdatedAtKey = stringPreferencesKey("cookie_updated_at")
     private val sodaSignerUrlKey = stringPreferencesKey("soda_signer_url")
     private val sodaSignerTokenKey = stringPreferencesKey("soda_signer_token")
     private val aggregationKey = stringPreferencesKey("aggregation")
@@ -155,8 +157,57 @@ class SettingsStore(private val context: Context) {
         val current = runCatching {
             json.decodeFromString<Map<String, String>>(it[cookiesKey] ?: "{}")
         }.getOrDefault(emptyMap()).toMutableMap()
+        val updatedAt = runCatching {
+            json.decodeFromString<Map<String, Long>>(it[cookieUpdatedAtKey] ?: "{}")
+        }.getOrDefault(emptyMap()).toMutableMap()
         if (cookie.isBlank()) current.remove(provider) else current[provider] = cookie
+        updatedAt[provider] = System.currentTimeMillis()
         it[cookiesKey] = json.encodeToString(current)
+        it[cookieUpdatedAtKey] = json.encodeToString(updatedAt)
+    }
+
+    /** 同步读取 Cookie 和修改时间，避免两次 DataStore 读取之间出现不一致。 */
+    suspend fun cookieSnapshot(): CookieSnapshot {
+        val values = context.dataStore.data.first()
+        return CookieSnapshot(
+            cookies = runCatching {
+                json.decodeFromString<Map<String, String>>(values[cookiesKey] ?: "{}")
+            }.getOrDefault(emptyMap()),
+            updatedAt = runCatching {
+                json.decodeFromString<Map<String, Long>>(values[cookieUpdatedAtKey] ?: "{}")
+            }.getOrDefault(emptyMap()),
+        )
+    }
+
+    /**
+     * 应用同步合并结果。updatedAt 里出现但 active 里没有的平台视为已退出登录。
+     * removeAbsent 为 true 时（用云端覆盖本机）连未出现在快照里的平台一起清掉。
+     */
+    suspend fun applyCookies(
+        active: Map<String, String>,
+        updatedAt: Map<String, Long>,
+        removeAbsent: Boolean,
+    ) = context.dataStore.edit {
+        val current = runCatching {
+            json.decodeFromString<Map<String, String>>(it[cookiesKey] ?: "{}")
+        }.getOrDefault(emptyMap()).toMutableMap()
+        val times = runCatching {
+            json.decodeFromString<Map<String, Long>>(it[cookieUpdatedAtKey] ?: "{}")
+        }.getOrDefault(emptyMap()).toMutableMap()
+        if (removeAbsent) {
+            current.keys.filterNot { provider -> provider in updatedAt }.forEach { current.remove(it) }
+            times.keys.filterNot { provider -> provider in updatedAt }.forEach { times.remove(it) }
+        }
+        updatedAt.forEach { (provider, time) ->
+            if (active.containsKey(provider)) {
+                current[provider] = active.getValue(provider)
+            } else {
+                current.remove(provider)
+            }
+            times[provider] = time
+        }
+        it[cookiesKey] = json.encodeToString(current)
+        it[cookieUpdatedAtKey] = json.encodeToString(times)
     }
 
     suspend fun saveAggregation(value: AggregationSettings) = context.dataStore.edit {
@@ -192,6 +243,11 @@ class SettingsStore(private val context: Context) {
     suspend fun lastUpdateCheck(value: Long) = context.dataStore.edit { it[lastUpdateCheckKey] = value }
     suspend fun skippedUpdateCode(value: Long) = context.dataStore.edit { it[skippedUpdateKey] = value }
 }
+
+data class CookieSnapshot(
+    val cookies: Map<String, String> = emptyMap(),
+    val updatedAt: Map<String, Long> = emptyMap(),
+)
 
 data class AppSettings(
     val provider: String = "netease",
@@ -229,6 +285,14 @@ data class AppSettings(
 // 同一首歌可以同时在“喜欢”和“最近播放”里，所以主键是 (key, bucket)
 @Entity(tableName = "saved_songs", primaryKeys = ["key", "bucket"])
 data class SavedSong(val key: String, val bucket: String, val payload: String, val updatedAt: Long)
+
+/** 取消收藏的墓碑，用来把删除同步到其他设备。 */
+@Entity(tableName = "saved_song_tombstones", primaryKeys = ["key", "bucket"])
+data class SavedSongTombstone(
+    val key: String,
+    val bucket: String,
+    @ColumnInfo(name = "deleted_at") val deletedAt: Long,
+)
 
 @Entity(tableName = "downloads")
 data class DownloadRecord(@PrimaryKey val key: String, val payload: String, val path: String, val state: String, val updatedAt: Long)
@@ -372,8 +436,15 @@ data class TrackOverrideEntity(
 interface MusicDao {
     @Query("SELECT * FROM saved_songs WHERE bucket = :bucket ORDER BY updatedAt DESC")
     fun songs(bucket: String): Flow<List<SavedSong>>
+    @Query("SELECT * FROM saved_songs WHERE bucket = :bucket ORDER BY updatedAt DESC")
+    suspend fun songsOnce(bucket: String): List<SavedSong>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun save(song: SavedSong)
     @Query("DELETE FROM saved_songs WHERE key = :key AND bucket = :bucket") suspend fun remove(bucket: String, key: String)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveTombstone(tombstone: SavedSongTombstone)
+    @Query("DELETE FROM saved_song_tombstones WHERE key = :key AND bucket = :bucket")
+    suspend fun clearTombstone(bucket: String, key: String)
+    @Query("SELECT * FROM saved_song_tombstones WHERE bucket = :bucket")
+    suspend fun tombstones(bucket: String): List<SavedSongTombstone>
     @Query("SELECT * FROM downloads ORDER BY updatedAt DESC") fun downloads(): Flow<List<DownloadRecord>>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveDownload(record: DownloadRecord)
     @Query("DELETE FROM downloads WHERE key = :key") suspend fun deleteDownload(key: String)
@@ -475,6 +546,7 @@ interface AggregateDao {
 @Database(
     entities = [
         SavedSong::class,
+        SavedSongTombstone::class,
         DownloadRecord::class,
         PlaylistEntity::class,
         PlaylistEntryEntity::class,
@@ -486,7 +558,7 @@ interface AggregateDao {
         MatchCacheEntity::class,
         TrackOverrideEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -679,8 +751,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** 收藏同步需要墓碑表来传播取消收藏。 */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `saved_song_tombstones` (
+                        `key` TEXT NOT NULL,
+                        `bucket` TEXT NOT NULL,
+                        `deleted_at` INTEGER NOT NULL,
+                        PRIMARY KEY(`key`, `bucket`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun create(context: Context) = Room.databaseBuilder(context, AppDatabase::class.java, "mymusic.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
     }
 }

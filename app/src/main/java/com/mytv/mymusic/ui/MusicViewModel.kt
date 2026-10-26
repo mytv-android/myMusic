@@ -44,6 +44,7 @@ import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.RepeatMode
 import com.mytv.mymusic.data.SavedSong
+import com.mytv.mymusic.data.SavedSongTombstone
 import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
@@ -1425,7 +1426,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 撤销取消收藏 / 清除记录：按原时间写回。 */
     fun restoreSavedSongs(songs: List<SavedSong>) = viewModelScope.launch {
-        songs.forEach { app.database.dao().save(it) }
+        val dao = app.database.dao()
+        songs.forEach {
+            dao.clearTombstone(it.bucket, it.key)
+            dao.save(it)
+        }
+        if (songs.any { it.bucket == "favorite" }) app.sync.onLocalChange()
     }
 
     fun addSongsToLibrary(name: String, songs: List<Song>) {
@@ -1454,8 +1460,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleFavorite(song: Song) = viewModelScope.launch {
-        if (favorites.value.any { it.key == song.key }) app.database.dao().remove("favorite", song.key)
-        else remember("favorite", song)
+        val dao = app.database.dao()
+        if (favorites.value.any { it.key == song.key }) {
+            dao.remove("favorite", song.key)
+            dao.saveTombstone(SavedSongTombstone(song.key, "favorite", System.currentTimeMillis()))
+        } else {
+            dao.clearTombstone("favorite", song.key)
+            remember("favorite", song)
+        }
+        app.sync.onLocalChange()
     }
 
     fun download(song: Song) = viewModelScope.launch {
@@ -2320,6 +2333,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 base.value = base.value.copy(loginStatus = result.message.ifBlank { result.status })
                 if (result.status == "success" && result.cookie.isNotBlank()) {
                     app.settings.cookie(providerId, result.cookie)
+                    app.sync.onLocalChange()
                     base.value = base.value.copy(login = null, loginProviderId = "")
                     return@launch
                 }
@@ -2332,6 +2346,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         resolver.clearCache()
         searchEngine.clearCache()
         app.settings.cookie(providerId, cookie)
+        app.sync.onLocalChange()
         base.value = base.value.copy(login = null, loginProviderId = "")
         message("Cookie 已保存")
     }
@@ -2347,6 +2362,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         resolver.clearCache()
         searchEngine.clearCache()
         app.settings.cookie(providerId, "")
+        app.sync.onLocalChange()
         message("已退出平台账号")
     }
 
@@ -2382,6 +2398,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         resolver.clearCache()
                         searchEngine.clearCache()
                         app.settings.cookie(providerId, result.cookie)
+                        app.sync.onLocalChange()
                         base.value = base.value.copy(login = null, loginStatus = "", loginProviderId = "")
                         message("登录成功")
                         return@launch

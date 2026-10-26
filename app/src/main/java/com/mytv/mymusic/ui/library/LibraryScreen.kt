@@ -852,7 +852,7 @@ private fun SyncStatusCard(sync: SyncUiState, onOpen: () -> Unit, modifier: Modi
         )
         sync.account != null && sync.error.isNotBlank() -> Triple("同步失败", sync.error, IconTone.Error)
         sync.status == SyncStatus.Syncing -> Triple("正在同步…", sync.phase.ifBlank { sync.providerLabel }, IconTone.Primary)
-        sync.account == null -> Triple("把自建歌单同步到云端", "连接 GitHub Gist 或 Gitee，只同步自建歌单和歌曲信息", IconTone.Secondary)
+        sync.account == null -> Triple("把音乐库同步到云端", "连接 GitHub Gist 或 Gitee，同步歌单、收藏和平台账号", IconTone.Secondary)
         else -> return
     }
     ListRow(
