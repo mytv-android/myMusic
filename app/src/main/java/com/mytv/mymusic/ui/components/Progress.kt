@@ -68,6 +68,7 @@ import com.mytv.mymusic.ui.theme.LocalAppearance
 /**
  * 波浪进度条：播放时有波浪，暂停或减少动画时拉平。可拖动、可点按跳转；电视上左右键快退快进 10 秒。
  * 进度只在动画/绘制 lambda 中读取；时间文字按秒降频，无障碍语义按 10 秒播报。
+ * [amplitudeScale] 是波幅倍数（0..1，律动时随低频起伏），只在指示器的绘制阶段读。
  */
 @Composable
 fun WavySeekBar(
@@ -79,6 +80,7 @@ fun WavySeekBar(
     color: Color = MaterialTheme.colorScheme.primary,
     trackColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f),
     showTimes: Boolean = true,
+    amplitudeScale: () -> Float = { 1f },
 ) {
     val reduceMotion = LocalAppearance.current.reduceMotion
     var dragging by remember { mutableStateOf(false) }
@@ -148,7 +150,7 @@ fun WavySeekBar(
                 modifier = Modifier.fillMaxWidth(),
                 color = color,
                 trackColor = trackColor,
-                amplitude = { if (playing && !dragging && !reduceMotion) 1f else 0f },
+                amplitude = { if (playing && !dragging && !reduceMotion) amplitudeScale().coerceIn(0f, 1f) else 0f },
             )
         }
         if (showTimes) {

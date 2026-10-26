@@ -1,27 +1,29 @@
 package com.mytv.mymusic.ui.player
 
 import androidx.activity.compose.PredictiveBackHandler
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.IconToggleButtonShapes
+import androidx.compose.material3.IconButtonDefaults
+import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -60,27 +62,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mytv.mymusic.data.RhythmIntensity
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.playback.SleepTimerState
-import com.mytv.mymusic.ui.Cover
 import com.mytv.mymusic.ui.LyricsParser
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
@@ -91,8 +88,6 @@ import com.mytv.mymusic.ui.components.MorphIconButton
 import com.mytv.mymusic.ui.components.PlayButtonSize
 import com.mytv.mymusic.ui.components.PlayPauseButton
 import com.mytv.mymusic.ui.components.SourceChip
-import com.mytv.mymusic.ui.components.WavySeekBar
-import com.mytv.mymusic.ui.components.sharedNowPlayingCover
 import com.mytv.mymusic.ui.components.tvFocusRing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -131,6 +126,7 @@ fun PlayerScreen(
         }
     }
     val idle = rememberIdleState(state.playing)
+    val pulse = rememberBackdropPulse()
     val favorite = remember(favorites, song.key) { favorites.any { it.key == song.key } }
     // 解析放在后台；状态不随原文重建，切歌时先保留上一份结果，等新原文解析完成再替换。
     val lyricsState = rememberParsedLyrics(state.lyrics)
@@ -180,12 +176,17 @@ fun PlayerScreen(
             .then(if (window.isTv) Modifier.focusProperties { onExit = { cancelFocusChange() } }.focusGroup() else Modifier)
             .wakeOnInput(idle, consumeKeyWhenIdle = window.isTv),
     ) {
+        val wideBackdrop = window.isTv || (window.widthDp >= 600 && window.widthDp > window.heightDp)
         LyricsBackdrop(
             cover = song.cover,
             playing = state.playing,
             mode = state.lyricsBackground,
+            intensity = state.rhythmIntensity,
             trackKey = song.key,
-            wide = window.isTv || (window.widthDp >= 600 && window.widthDp > window.heightDp),
+            wide = wideBackdrop,
+            pulse = pulse,
+            // 光环从封面中心散开：手机的形状封面中心大约在屏幕高度的 30% 处
+            rippleOrigin = if (wideBackdrop) Offset(0.25f, 0.5f) else Offset(0.5f, 0.3f),
         )
         when {
             window.isTv -> TvPlayer(
@@ -258,6 +259,8 @@ fun PlayerScreen(
                 onFavoriteBurst = onFavoriteBurst,
                 onOpenSource = onOpenSource,
                 onSkip = onSkip,
+                pulse = pulse,
+                coverShape = state.coverShape,
             )
         }
         HeartBurst(burst, Modifier.align(Alignment.Center))
@@ -283,420 +286,24 @@ internal fun rememberParsedLyrics(raw: String): ParsedLyricsState {
     return ParsedLyricsState(lyrics, loading = raw.isNotBlank() && lyrics.raw != raw)
 }
 
-// ---------- 手机 ----------
-
-@Composable
-private fun PhonePlayer(
-    song: Song,
-    playing: Boolean,
-    duration: Long,
-    position: State<Long>,
-    favorite: Boolean,
-    sleep: SleepTimerState,
-    lyrics: ParsedLyrics,
-    lyricsLoading: Boolean,
-    active: State<Int>,
-    sourceProvider: String?,
-    sourceDetail: String,
-    playbackMode: String,
-    notice: String,
-    deepLink: String,
-    actions: MusicActions,
-    idle: IdleState,
-    lyricsMode: Boolean,
-    onLyricsMode: (Boolean) -> Unit,
-    onClose: () -> Unit,
-    onOpenQueue: () -> Unit,
-    onOpenTimer: () -> Unit,
-    onFavoriteBurst: () -> Unit,
-    onOpenSource: () -> Unit,
-    onSkip: (Int) -> Unit,
-) {
-    if (lyricsMode) {
-        PhoneLyrics(song, playing, duration, position, favorite, lyrics, lyricsLoading, active, actions, idle, onLyricsMode, onSkip)
-        return
-    }
-    val chrome = rememberIdleAlpha(idle, MaterialTheme.motionScheme.defaultEffectsSpec())
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        PlayerArt(
-            cover = song.cover,
-            title = song.title,
-            playing = playing,
-            horizontalFade = false,
-            onSkip = onSkip,
-            onDoubleTap = onFavoriteBurst,
-            modifier = Modifier.sharedNowPlayingCover(RectangleShape).fillMaxWidth().height(maxHeight * 0.58f),
-        )
-        TopBar(
-            song = song,
-            sourceProvider = sourceProvider,
-            sleep = sleep,
-            deepLink = deepLink,
-            actions = actions,
-            onClose = onClose,
-            onOpenTimer = onOpenTimer,
-            onLyricsMode = onLyricsMode,
-            onOpenSource = onOpenSource,
-            idle = idle,
-            modifier = Modifier.align(Alignment.TopCenter).graphicsLayer { alpha = chrome.value },
-        )
-        Column(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(start = 24.dp, end = 18.dp, bottom = 8.dp),
-        ) {
-            Meta(song, favorite, actions, titleSize = 30)
-            LyricsPreview(lyrics, active, onLyricsMode, Modifier.padding(top = 12.dp))
-            WavySeekBar(
-                position,
-                duration,
-                playing,
-                actions::seek,
-                Modifier.padding(top = 14.dp, end = 6.dp),
-            )
-            Controls(playing, actions, Modifier.fillMaxWidth().padding(top = 6.dp, end = 6.dp))
-            Notice(notice)
-            BottomRow(
-                song = song,
-                sourceProvider = sourceProvider,
-                sourceDetail = sourceDetail,
-                playbackMode = playbackMode,
-                sleep = sleep,
-                lyricsMode = lyricsMode,
-                onOpenSource = onOpenSource,
-                onOpenTimer = onOpenTimer,
-                onOpenQueue = onOpenQueue,
-                onLyricsMode = onLyricsMode,
-                idle = idle,
-                modifier = Modifier.padding(top = 6.dp).graphicsLayer { alpha = chrome.value },
-            )
-        }
-    }
-}
-
-@Composable
-private fun PhoneLyrics(
-    song: Song,
-    playing: Boolean,
-    duration: Long,
-    position: State<Long>,
-    favorite: Boolean,
-    lyrics: ParsedLyrics,
-    lyricsLoading: Boolean,
-    active: State<Int>,
-    actions: MusicActions,
-    idle: IdleState,
-    onLyricsMode: (Boolean) -> Unit,
-    onSkip: (Int) -> Unit,
-) {
-    val chrome = rememberIdleAlpha(idle)
-    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            IconButton(onClick = { onLyricsMode(false) }) { Icon(Icons.Filled.KeyboardArrowDown, "回到封面", tint = MaterialTheme.colorScheme.onSurface) }
-            // 旁边的“回到封面”按钮已经覆盖这个操作，小封面不再单独读一次
-            Cover(song.cover, song.title, 48.dp, Modifier.clearAndSetSemantics {}.clickable { onLyricsMode(false) }, corner = 14.dp)
-            Column(Modifier.weight(1f)) {
-                Text(song.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(song.artist, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            FavoriteButton(song, favorite, actions)
-        }
-        LyricsList(lyrics, active, actions::seek, Modifier.weight(1f).padding(horizontal = 18.dp), loading = lyricsLoading, position = position, playing = playing)
-        PhoneLyricsChrome(position, duration, playing, actions, idle, chrome, onSkip)
-    }
-}
-
-/** 歌词页底部控制条：空闲时自己重组并拦截点按，唤醒的那一下不会点到看不见的按钮。 */
-@Composable
-private fun PhoneLyricsChrome(
-    position: State<Long>,
-    duration: Long,
-    playing: Boolean,
-    actions: MusicActions,
-    idle: IdleState,
-    chrome: State<Float>,
-    onSkip: (Int) -> Unit,
-) {
-    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).graphicsLayer { alpha = chrome.value }.blockTouchesWhen(idle.idle)) {
-        WavySeekBar(position, duration, playing, actions::seek)
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { onSkip(-1) }) { Icon(Icons.Filled.SkipPrevious, "上一首", tint = MaterialTheme.colorScheme.onSurface) }
-            PlayPauseButton(playing, { actions.transport("play") }, size = PlayButtonSize.Medium)
-            IconButton(onClick = { onSkip(1) }) { Icon(Icons.Filled.SkipNext, "下一首", tint = MaterialTheme.colorScheme.onSurface) }
-        }
-    }
-}
-
-// ---------- 平板横屏 ----------
-
-@Composable
-private fun WidePlayer(
-    song: Song,
-    playing: Boolean,
-    duration: Long,
-    position: State<Long>,
-    favorite: Boolean,
-    sleep: SleepTimerState,
-    lyrics: ParsedLyrics,
-    lyricsLoading: Boolean,
-    active: State<Int>,
-    sourceProvider: String?,
-    sourceDetail: String,
-    playbackMode: String,
-    notice: String,
-    actions: MusicActions,
-    idle: IdleState,
-    lyricsMode: Boolean,
-    onLyricsMode: (Boolean) -> Unit,
-    onClose: () -> Unit,
-    onFavoriteBurst: () -> Unit,
-    onOpenSource: () -> Unit,
-    onOpenQueue: () -> Unit,
-    onOpenTimer: () -> Unit,
-    onSkip: (Int) -> Unit,
-) {
-    val chrome = rememberIdleAlpha(idle)
-    // 淡出完成后才停呼吸：减少动画时封面仍保留组合，共享封面转场不受影响
-    var artVisible by remember { mutableStateOf(!lyricsMode) }
-    val artAlpha = animateFloatAsState(
-        targetValue = if (lyricsMode) 0f else 1f,
-        animationSpec = MaterialTheme.motionScheme.slowEffectsSpec(),
-        label = "artAlpha",
-        finishedListener = { target -> artVisible = target > 0f },
-    )
-    Row(Modifier.fillMaxSize()) {
-        PlayerArt(
-            cover = song.cover,
-            title = song.title,
-            playing = playing,
-            horizontalFade = true,
-            onSkip = onSkip,
-            onDoubleTap = onFavoriteBurst,
-            visible = artVisible,
-            modifier = Modifier
-                .weight(if (lyricsMode) 0.2f else 1f)
-                .fillMaxHeight()
-                .graphicsLayer { alpha = artAlpha.value },
-        )
-        Column(
-            Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(start = 24.dp, end = 48.dp, top = 24.dp, bottom = 24.dp),
-        ) {
-            Meta(song, favorite, actions, titleSize = 36)
-            Row(Modifier.padding(top = 12.dp)) {
-                Source(song, sourceProvider, sourceDetail, playbackMode, onOpenSource)
-            }
-            Notice(notice)
-            LyricsList(
-                lyrics,
-                active,
-                actions::seek,
-                Modifier.weight(1f).padding(vertical = 8.dp),
-                large = lyricsMode,
-                loading = lyricsLoading,
-                position = position,
-                playing = playing,
-            )
-            WavySeekBar(position, duration, playing, actions::seek)
-            Controls(playing, actions, Modifier.fillMaxWidth().padding(top = 6.dp))
-            BottomRow(
-                song = song,
-                sourceProvider = sourceProvider,
-                sourceDetail = sourceDetail,
-                playbackMode = playbackMode,
-                sleep = sleep,
-                lyricsMode = lyricsMode,
-                onOpenSource = onOpenSource,
-                onOpenTimer = onOpenTimer,
-                onOpenQueue = onOpenQueue,
-                onLyricsMode = onLyricsMode,
-                idle = idle,
-                modifier = Modifier.padding(top = 6.dp).graphicsLayer { alpha = chrome.value },
-                showSource = false,
-            )
-        }
-    }
-    PlayerCloseButton(onClose, chrome, idle)
-}
-
-/** 空闲时淡出的收起按钮；点按拦截只在这个小组件里随空闲状态重组。 */
-@Composable
-private fun PlayerCloseButton(onClose: () -> Unit, chrome: State<Float>, idle: IdleState) {
-    IconButton(
-        onClick = onClose,
-        modifier = Modifier.statusBarsPadding().padding(16.dp).graphicsLayer { alpha = chrome.value }.blockTouchesWhen(idle.idle),
-    ) { Icon(Icons.Filled.KeyboardArrowDown, "收起播放页", tint = MaterialTheme.colorScheme.onSurface) }
-}
-
-// ---------- 电视 ----------
-
-@Composable
-private fun TvPlayer(
-    song: Song,
-    playing: Boolean,
-    duration: Long,
-    position: State<Long>,
-    favorite: Boolean,
-    sleep: SleepTimerState,
-    lyrics: ParsedLyrics,
-    lyricsLoading: Boolean,
-    active: State<Int>,
-    sourceProvider: String?,
-    sourceDetail: String,
-    playbackMode: String,
-    notice: String,
-    actions: MusicActions,
-    idle: IdleState,
-    onOpenQueue: () -> Unit,
-    onOpenTimer: () -> Unit,
-    onOpenSource: () -> Unit,
-) {
-    val playFocus = remember { FocusRequester() }
-    val idleFocus = remember { FocusRequester() }
-    val ambient = idle.idle
-    // 环境模式下焦点交给一个不可见的占位节点，保证第一下按键能被唤醒逻辑收到；唤醒后回到播放键
-    LaunchedEffect(ambient) { runCatching { if (ambient) idleFocus.requestFocus() else playFocus.requestFocus() } }
-    // 只在环境模式下可聚焦，否则在最左侧控件或歌词上按左键，焦点会跳到这个看不见的节点
-    Box(Modifier.size(1.dp).focusRequester(idleFocus).focusProperties { canFocus = ambient }.focusable())
-    Row(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(0.46f).fillMaxHeight()) {
-            PlayerArt(song.cover, song.title, playing, horizontalFade = true, onSkip = { direction -> actions.transport(if (direction > 0) "next" else "previous") }, onDoubleTap = {}, modifier = Modifier.fillMaxSize())
-        }
-        Column(
-            Modifier
-                .weight(0.54f)
-                .fillMaxHeight()
-                .padding(start = 24.dp, end = 64.dp, top = 48.dp, bottom = if (ambient) 48.dp else 180.dp),
-        ) {
-            Text(song.title, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(song.artist, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-            AnimatedVisibility(!ambient, enter = fadeIn(), exit = fadeOut()) {
-                Column {
-                    Row(Modifier.padding(top = 16.dp)) {
-                        Source(song, sourceProvider, sourceDetail, playbackMode, onOpenSource, focusable = false)
-                    }
-                    Notice(notice)
-                }
-            }
-            LyricsList(lyrics, active, actions::seek, Modifier.weight(1f).padding(top = 16.dp), large = true, loading = lyricsLoading, position = position, playing = playing)
-        }
-    }
-    // 环境模式下控制条只是淡出，不移出组合：焦点留在播放键上，按任意键先唤醒
-    val barAlpha = animateFloatAsState(if (ambient) 0f else 1f, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "tvBar")
-    Box(Modifier.fillMaxSize().graphicsLayer { alpha = barAlpha.value }) {
-        Box(Modifier.fillMaxSize()) {
-            Column(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f))
-                    .padding(horizontal = 48.dp, vertical = 20.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MorphIconButton(Icons.Filled.SkipPrevious, "上一首", { actions.transport("previous") }, size = 64.dp, iconSize = 30.dp)
-                    PlayPauseButton(playing, { actions.transport("play") }, Modifier.focusRequester(playFocus), size = PlayButtonSize.Large)
-                    MorphIconButton(Icons.Filled.SkipNext, "下一首", { actions.transport("next") }, size = 64.dp, iconSize = 30.dp)
-                    Spacer(Modifier.weight(1f))
-                    TvAction(Icons.Filled.Bedtime, if (sleep.active) "定时 ${sleepLabel(sleep)}" else "定时关闭", onOpenTimer, sleep.active)
-                    TvAction(if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏", { actions.favorite(song) }, favorite, state = if (favorite) "已收藏" else "未收藏")
-                    TvAction(Icons.AutoMirrored.Filled.QueueMusic, "播放队列", onOpenQueue)
-                    TvAction(Icons.Filled.SwapHoriz, "换音源", onOpenSource)
-                }
-                WavySeekBar(position, duration, playing, actions::seek, Modifier.padding(top = 12.dp).tvFocusRing(RoundedCornerShape(12.dp), scale = 1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun TvAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    on: Boolean = false,
-    state: String? = null,
-) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .size(56.dp)
-            .tvFocusRing(CircleShape)
-            .semantics {
-                role = Role.Button
-                state?.let { stateDescription = it }
-            },
-        shape = CircleShape,
-        color = if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-        contentColor = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-    ) {
-        Box(contentAlignment = Alignment.Center) { Icon(icon, label) }
-    }
-}
-
 // ---------- 共用片段 ----------
 
-/** 空闲时控件淡出。读取 idle 的动画在这个小组件里，播放页主体不因空闲状态重组。 */
+/**
+ * 空闲时控件淡出的透明度，只在图层里读。空闲状态在效果协程里收集：返回值的函数不是独立的重组作用域，
+ * 在这里直接读 idle 会让调用它的整个播放页跟着空闲状态重组。
+ */
 @Composable
-private fun rememberIdleAlpha(idle: IdleState, spec: AnimationSpec<Float> = spring()): State<Float> =
-    animateFloatAsState(if (idle.idle) 0f else 1f, spec, label = "chrome")
-
-@Composable
-private fun TopBar(
-    song: Song,
-    sourceProvider: String?,
-    sleep: SleepTimerState,
-    deepLink: String,
-    actions: MusicActions,
-    onClose: () -> Unit,
-    onOpenTimer: () -> Unit,
-    onLyricsMode: (Boolean) -> Unit,
-    onOpenSource: () -> Unit,
-    idle: IdleState,
-    modifier: Modifier,
-) {
-    Row(
-        modifier
-            .blockTouchesWhen(idle.idle)
-            .fillMaxWidth()
-            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surface.copy(alpha = 0.78f), androidx.compose.ui.graphics.Color.Transparent)))
-            .statusBarsPadding()
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = onClose) { Icon(Icons.Filled.KeyboardArrowDown, "收起播放页", tint = MaterialTheme.colorScheme.onSurface) }
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            if (sleep.active) {
-                SleepChip(sleep, onOpenTimer)
-            } else {
-                Text(
-                    "来自 ${sourceProvider ?: song.source}",
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        shadow = androidx.compose.ui.graphics.Shadow(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f), blurRadius = 8f),
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
-        MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+internal fun rememberIdleAlpha(idle: IdleState, spec: AnimationSpec<Float> = spring()): State<Float> {
+    val alpha = remember { Animatable(1f) }
+    val currentSpec by rememberUpdatedState(spec)
+    LaunchedEffect(idle, alpha) {
+        snapshotFlow { idle.idle }.collectLatest { alpha.animateTo(if (it) 0f else 1f, currentSpec) }
     }
+    return alpha.asState()
 }
 
 @Composable
-private fun SleepChip(sleep: SleepTimerState, onOpenTimer: () -> Unit) {
+internal fun SleepChip(sleep: SleepTimerState, onOpenTimer: () -> Unit) {
     val remaining = rememberSleepRemaining(sleep)
     Surface(
         onClick = onOpenTimer,
@@ -719,7 +326,7 @@ private fun SleepChip(sleep: SleepTimerState, onOpenTimer: () -> Unit) {
 }
 
 @Composable
-private fun MoreMenu(
+internal fun MoreMenu(
     song: Song,
     deepLink: String,
     actions: MusicActions,
@@ -741,7 +348,7 @@ private fun MoreMenu(
 }
 
 @Composable
-private fun Meta(song: Song, favorite: Boolean, actions: MusicActions, titleSize: Int) {
+internal fun Meta(song: Song, favorite: Boolean, actions: MusicActions, titleSize: Int) {
     Row(verticalAlignment = Alignment.Bottom) {
         Column(Modifier.weight(1f)) {
             Text(
@@ -766,7 +373,7 @@ private fun Meta(song: Song, favorite: Boolean, actions: MusicActions, titleSize
 }
 
 @Composable
-private fun FavoriteButton(song: Song, favorite: Boolean, actions: MusicActions) {
+internal fun FavoriteButton(song: Song, favorite: Boolean, actions: MusicActions) {
     IconToggleButton(
         checked = favorite,
         onCheckedChange = { actions.favorite(song) },
@@ -782,29 +389,90 @@ private fun FavoriteButton(song: Song, favorite: Boolean, actions: MusicActions)
     }
 }
 
-/** 歌名下常驻两行歌词：当前行和下一行。点按进入全屏歌词。只在歌词 leaf 读取当前行。 */
+/**
+ * 进度条波幅倍数：只在律动“标准”档下随低频起伏（0.6..1，原型规定最大不超过 1 倍），其余情况固定 1。
+ * 读的是每帧变化的低频，只能交给 WavySeekBar 的 amplitudeScale，在绘制阶段调用。
+ */
+internal fun pulseWaveScale(pulse: BackdropPulse): Float =
+    if (pulse.reactive && pulse.intensity == RhythmIntensity.Standard) 0.6f + 0.4f * pulse.bass else 1f
+
+/**
+ * 收藏切换按钮（M3E）：48dp，未收藏是透明底的圆，收藏后变成 14dp 圆角的 primaryContainer 方块，
+ * 圆角随快速空间弹簧过渡。读屏文案与原来的收藏按钮一致。
+ */
 @Composable
-private fun LyricsPreview(lyrics: ParsedLyrics, active: State<Int>, onLyricsMode: (Boolean) -> Unit, modifier: Modifier) {
-    if (!lyrics.synced) return
-    val activeIndex = active.value
-    if (activeIndex < 0) return
-    val current = lyrics.lines.getOrNull(activeIndex)?.text.orEmpty()
-    val next = lyrics.lines.getOrNull(activeIndex + 1)?.text.orEmpty()
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clickable(onClickLabel = "打开全屏歌词") { onLyricsMode(true) },
+internal fun FavoriteToggle(song: Song, favorite: Boolean, actions: MusicActions, modifier: Modifier = Modifier) {
+    IconToggleButton(
+        checked = favorite,
+        onCheckedChange = { actions.favorite(song) },
+        shapes = IconToggleButtonShapes(
+            shape = CircleShape,
+            pressedShape = RoundedCornerShape(12.dp),
+            checkedShape = RoundedCornerShape(14.dp),
+        ),
+        modifier = modifier
+            .size(48.dp)
+            .tvFocusRing(if (favorite) RoundedCornerShape(14.dp) else CircleShape)
+            .semantics { stateDescription = if (favorite) "已收藏" else "未收藏" },
+        colors = IconButtonDefaults.iconToggleButtonColors(
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            checkedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            checkedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
     ) {
-        Text(current, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (next.isNotBlank()) {
-            Text(next, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Icon(if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏")
+    }
+}
+
+/**
+ * 音源胶囊：32dp 高、16dp 圆角，主色圆点 + 平台名 + “· 音质”，右侧小箭头，点开换源面板。
+ * 读屏文案沿用音源 chip（含自动 / 固定模式），胶囊上不显示模式。
+ */
+@Composable
+internal fun SourcePill(
+    song: Song,
+    sourceProvider: String?,
+    sourceDetail: String,
+    playbackMode: String,
+    onOpenSource: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val provider = sourceProvider ?: if (song.url.startsWith("file:")) "本机" else song.source
+    Surface(
+        onClick = onOpenSource,
+        modifier = modifier
+            .height(32.dp)
+            .tvFocusRing(RoundedCornerShape(16.dp))
+            .semantics { contentDescription = "音源：$provider $sourceDetail，$playbackMode。点按切换音源" },
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.13f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        Row(
+            Modifier.padding(start = 10.dp, end = 8.dp).clearAndSetSemantics {},
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Box(Modifier.size(7.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+            Text(provider, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            if (sourceDetail.isNotBlank()) {
+                Text(
+                    "· $sourceDetail",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            Icon(Icons.Filled.KeyboardArrowDown, null, Modifier.size(16.dp))
         }
     }
 }
 
 /** 标准按钮组：上一首、128×96 宽播放键、下一首。 */
 @Composable
-private fun Controls(playing: Boolean, actions: MusicActions, modifier: Modifier) {
+internal fun Controls(playing: Boolean, actions: MusicActions, modifier: Modifier) {
     Row(
         modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
@@ -817,7 +485,7 @@ private fun Controls(playing: Boolean, actions: MusicActions, modifier: Modifier
 }
 
 @Composable
-private fun Source(
+internal fun Source(
     song: Song,
     sourceProvider: String?,
     sourceDetail: String,
@@ -836,7 +504,7 @@ private fun Source(
 }
 
 @Composable
-private fun Notice(notice: String) {
+internal fun Notice(notice: String) {
     if (notice.isBlank()) return
     Text(
         notice,
@@ -848,7 +516,7 @@ private fun Notice(notice: String) {
 }
 
 @Composable
-private fun BottomRow(
+internal fun BottomRow(
     song: Song,
     sourceProvider: String?,
     sourceDetail: String,
@@ -883,7 +551,7 @@ private fun BottomRow(
 }
 
 /** 控件淡出后不响应点按：唤醒的那一下只用来显示控件，不会误触看不见的按钮。 */
-private fun Modifier.blockTouchesWhen(block: Boolean): Modifier = if (!block) this else pointerInput(Unit) {
+internal fun Modifier.blockTouchesWhen(block: Boolean): Modifier = if (!block) this else pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
             awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }

@@ -35,7 +35,9 @@ import com.mytv.mymusic.data.AppSettings
 import com.mytv.mymusic.data.CanonicalSourceEntity
 import com.mytv.mymusic.data.CanonicalTrackEntity
 import com.mytv.mymusic.data.DownloadRecord
+import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.data.LyricsBackgroundMode
+import com.mytv.mymusic.data.RhythmIntensity
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.PlaylistEntity
@@ -106,6 +108,9 @@ data class MusicUiState(
     val theme: String = "system",
     val appearance: Appearance = Appearance(),
     val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
+    val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,
+    val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
+    val tvAmbientClock: Boolean = true,
     val coverSeed: Int = 0,
     val sleepFade: Boolean = true,
     val cacheLimitMb: Int = 512,
@@ -247,6 +252,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             theme = settings.theme,
             appearance = settings.toAppearance(),
             lyricsBackground = settings.lyricsBackground,
+            rhythmIntensity = settings.rhythmIntensity,
+            coverShape = settings.coverShape,
+            tvAmbientClock = settings.tvAmbientClock,
             sleepFade = settings.sleepFade,
             cacheLimitMb = settings.cacheLimitMb.takeIf { it > 0 } ?: app.defaultCacheLimitMb(),
             reduceMotion = settings.reduceMotion,
@@ -2253,6 +2261,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setSleepFade(value: Boolean) = viewModelScope.launch { app.settings.sleepFade(value) }
     fun setReduceMotion(value: Boolean) = viewModelScope.launch { app.settings.reduceMotion(value) }
     fun setLyricsBackground(value: LyricsBackgroundMode) = viewModelScope.launch { app.settings.lyricsBackground(value) }
+    fun setRhythmIntensity(value: RhythmIntensity) = viewModelScope.launch { app.settings.rhythmIntensity(value) }
+    fun setCoverShape(value: CoverShapeChoice) = viewModelScope.launch { app.settings.coverShape(value) }
+    fun setTvAmbientClock(value: Boolean) = viewModelScope.launch { app.settings.tvAmbientClock(value) }
     fun setShowBottomNav(value: Boolean) = viewModelScope.launch { app.settings.showBottomNav(value) }
 
     fun toggleAggregateProvider(id: String) = viewModelScope.launch {

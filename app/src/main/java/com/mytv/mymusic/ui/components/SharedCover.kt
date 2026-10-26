@@ -21,7 +21,9 @@ val LocalCoverVisibilityScope = staticCompositionLocalOf<AnimatedVisibilityScope
 const val NowPlayingCoverKey = "now-playing-cover"
 
 /**
- * 正在播放的封面在迷你播放器和播放页之间飞过去：从 48dp 的圆角封面变成铺满的大图。
+ * 正在播放的封面在迷你播放器和播放页之间飞过去：从 48dp 的圆角封面变成播放页的形状封面，收起时再飞回来。
+ * [clip] 是飞行途中浮层的裁切：迷你播放器一侧是固定圆角，播放页一侧传一个随形变和旋转实时取轮廓的 Shape，
+ * 浮层每帧按封面此刻的形状裁切，落地时和原位的形状对得上。
  * 没有作用域（平板、电视）或打开了减少动画时不做共享元素。
  */
 @OptIn(ExperimentalSharedTransitionApi::class)

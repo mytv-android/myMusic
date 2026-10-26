@@ -21,6 +21,10 @@ data class RhythmFrame(
     val treble: Float = 0f,
     val pulse: Float = 0f,
     val beat: Boolean = false,
+    /** 整个分析窗口的 RMS 响度，-42 dBFS → 0、-8 dBFS → 1；逐帧原始值，平滑交给界面。 */
+    val loudness: Float = 0f,
+    /** 只看 0–690 Hz 的起拍：镲片和人声咬字不算鼓点，驱动背景的是它而不是全频的 [beat]。 */
+    val kick: Boolean = false,
 )
 
 class RhythmAnalysis {
@@ -36,6 +40,7 @@ class RhythmAnalysis {
     private val midAgc = AgcTracker()
     private val trebleAgc = AgcTracker()
     private val onset = OnsetDetector(bins = RHYTHM_FFT_SIZE / 2)
+    private val kickOnset = OnsetDetector(bins = RHYTHM_FFT_SIZE / 2, refractoryMs = KICK_REFRACTORY_MS)
     private var smoothEnergy = 0f
 
     /** Raw all-band level, retained for diagnostics; the soft preset drives energy from bass. */
@@ -47,6 +52,7 @@ class RhythmAnalysis {
         midAgc.reset()
         trebleAgc.reset()
         onset.reset()
+        kickOnset.reset()
         smoothEnergy = 0f
         lastRawEnergy = 0f
     }
@@ -59,8 +65,11 @@ class RhythmAnalysis {
         require(samples.size == RHYTHM_FFT_SIZE) { "Expected exactly $RHYTHM_FFT_SIZE PCM samples" }
         require(sampleRateHz > 0) { "sampleRateHz must be positive" }
 
+        var squares = 0f
         for (i in samples.indices) {
-            real[i] = samples[i] * window[i]
+            val sample = samples[i]
+            squares += sample * sample
+            real[i] = sample * window[i]
             imag[i] = 0f
         }
         fft.transform(real, imag)
@@ -70,10 +79,15 @@ class RhythmAnalysis {
             val db = 20f * log10(magnitude.coerceAtLeast(1e-12f))
             spectrum[i] = ((db - MIN_DB) / (MAX_DB - MIN_DB) * 255f).coerceIn(0f, 255f)
         }
-        return analyzeSpectrum(spectrum, sampleRateHz, dtMs)
+        return analyzeSpectrum(spectrum, sampleRateHz, dtMs, rhythmLoudness(sqrt(squares / samples.size)))
     }
 
-    internal fun analyzeSpectrum(spectrum: FloatArray, sampleRateHz: Int, dtMs: Float): RhythmFrame {
+    internal fun analyzeSpectrum(
+        spectrum: FloatArray,
+        sampleRateHz: Int,
+        dtMs: Float,
+        loudness: Float = 0f,
+    ): RhythmFrame {
         require(spectrum.isNotEmpty()) { "Spectrum must not be empty" }
         require(sampleRateHz > 0) { "sampleRateHz must be positive" }
 
@@ -82,6 +96,7 @@ class RhythmAnalysis {
         val trebleEnd = rhythmBandEnd(14_000f, spectrum.size, sampleRateHz)
         // Convert the 14 kHz cutoff instead of reusing the upstream analyser's bin count.
         val onsetResult = onset.push(spectrum, dtMs, binLimit = trebleEnd)
+        val kickResult = kickOnset.push(spectrum, dtMs, sensitivity = KICK_SENSITIVITY, binLimit = bassEnd)
 
         val rawBass = average(spectrum, 0, bassEnd)
         val rawMid = average(spectrum, bassEnd, midEnd)
@@ -102,6 +117,8 @@ class RhythmAnalysis {
             treble = treble,
             pulse = onsetResult.pulse,
             beat = onsetResult.onset,
+            loudness = loudness,
+            kick = kickResult.onset,
         )
     }
 
@@ -111,6 +128,12 @@ class RhythmAnalysis {
         for (i in from until to) sum += values[i]
         return sum / (to - from)
     }
+}
+
+/** 窗口 RMS（时域、未加窗）换算成 0..1 的响度。 */
+internal fun rhythmLoudness(rms: Float): Float {
+    val db = 20f * log10(rms.coerceAtLeast(1e-6f))
+    return ((db - LOUDNESS_FLOOR_DB) / (LOUDNESS_CEIL_DB - LOUDNESS_FLOOR_DB)).coerceIn(0f, 1f)
 }
 
 internal fun rhythmBandEnd(frequencyHz: Float, bins: Int, sampleRateHz: Int): Int {
@@ -232,7 +255,10 @@ internal data class OnsetResult(
     val pulse: Float,
 )
 
-internal class OnsetDetector(private val bins: Int = ONSET_BINS) {
+internal class OnsetDetector(
+    private val bins: Int = ONSET_BINS,
+    private val refractoryMs: Float = ONSET_REFRACTORY_MS,
+) {
     private data class FluxSample(val timeMs: Float, val flux: Float)
 
     private var previous: FloatArray? = null
@@ -302,7 +328,7 @@ internal class OnsetDetector(private val bins: Int = ONSET_BINS) {
         val detected = history.size >= ONSET_MIN_HISTORY &&
             flux >= ONSET_MIN_FLUX &&
             flux > threshold &&
-            clockMs - lastOnsetMs >= ONSET_REFRACTORY_MS
+            clockMs - lastOnsetMs >= refractoryMs
         if (detected) {
             lastOnsetMs = clockMs
             envelope = 1f
@@ -332,3 +358,10 @@ private const val ONSET_RELEASE_MS = 125f
 private const val ONSET_MIN_FLUX = 40f
 private const val ONSET_MIN_HISTORY = 8
 private const val ONSET_JUMP = 1.6f
+
+// 鼓点只看低频；不应期 280 ms，最快每秒约 3.5 次，灵敏度也比全频低一档
+private const val KICK_REFRACTORY_MS = 280f
+private const val KICK_SENSITIVITY = 45f
+
+private const val LOUDNESS_FLOOR_DB = -42f
+private const val LOUDNESS_CEIL_DB = -8f

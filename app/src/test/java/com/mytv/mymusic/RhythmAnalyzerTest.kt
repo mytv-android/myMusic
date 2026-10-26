@@ -56,6 +56,8 @@ class RhythmAnalyzerTest {
             delay(60)
         }
         assertNotNull("PCM fed through TeeAudioProcessor's sink must produce an onset", detected)
+        assertTrue("a 110 Hz tone onset is also a bass kick", detected!!.kick)
+        assertTrue(detected.loudness > 0f)
 
         analyzer.setActive(false)
         assertEquals(RhythmFrame(), analyzer.frames.value)

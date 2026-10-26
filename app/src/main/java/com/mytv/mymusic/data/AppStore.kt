@@ -49,6 +49,18 @@ enum class LyricsBackgroundMode { Off, Ambient, Reactive }
 private fun String?.toLyricsBackgroundMode(): LyricsBackgroundMode =
     LyricsBackgroundMode.entries.firstOrNull { it.name == this } ?: LyricsBackgroundMode.Ambient
 
+/** 歌词背景“律动”的幅度：柔和只改流速和光量；标准还让光团随低频胀缩，鼓点时散开一圈光环。 */
+enum class RhythmIntensity { Soft, Standard }
+
+private fun String?.toRhythmIntensity(): RhythmIntensity =
+    RhythmIntensity.entries.firstOrNull { it.name == this } ?: RhythmIntensity.Standard
+
+/** 播放页封面形状：随机（每次切歌换一种，不和上一首重复）或固定成某一种 MaterialShapes。 */
+enum class CoverShapeChoice { Random, Cookie12, Cookie9, Cookie7, Sunny, SoftBurst, Clover8 }
+
+private fun String?.toCoverShapeChoice(): CoverShapeChoice =
+    CoverShapeChoice.entries.firstOrNull { it.name == this } ?: CoverShapeChoice.Random
+
 class SettingsStore(private val context: Context) {
     private val providerKey = stringPreferencesKey("provider")
     private val chartsSourceKey = stringPreferencesKey("charts_source")
@@ -80,6 +92,9 @@ class SettingsStore(private val context: Context) {
     private val sleepFadeKey = booleanPreferencesKey("sleep_fade")
     private val cacheLimitKey = intPreferencesKey("cache_limit_mb")
     private val lyricsBackgroundKey = stringPreferencesKey("lyrics_background")
+    private val rhythmIntensityKey = stringPreferencesKey("rhythm_intensity")
+    private val coverShapeKey = stringPreferencesKey("cover_shape")
+    private val tvAmbientClockKey = booleanPreferencesKey("tv_ambient_clock")
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -101,6 +116,9 @@ class SettingsStore(private val context: Context) {
             reduceMotion = values[reduceMotionKey] ?: false,
             showBottomNav = values[showBottomNavKey] ?: true,
             lyricsBackground = values[lyricsBackgroundKey].toLyricsBackgroundMode(),
+            rhythmIntensity = values[rhythmIntensityKey].toRhythmIntensity(),
+            coverShape = values[coverShapeKey].toCoverShapeChoice(),
+            tvAmbientClock = values[tvAmbientClockKey] ?: true,
             equalizer = EqualizerSettings(
                 enabled = values[equalizerEnabledKey] ?: false,
                 presetId = values[equalizerPresetKey] ?: "flat",
@@ -144,6 +162,9 @@ class SettingsStore(private val context: Context) {
     suspend fun amoled(value: Boolean) = context.dataStore.edit { it[amoledKey] = value }
     suspend fun blurMode(value: String) = context.dataStore.edit { it[blurModeKey] = value }
     suspend fun lyricsBackground(value: LyricsBackgroundMode) = context.dataStore.edit { it[lyricsBackgroundKey] = value.name }
+    suspend fun rhythmIntensity(value: RhythmIntensity) = context.dataStore.edit { it[rhythmIntensityKey] = value.name }
+    suspend fun coverShape(value: CoverShapeChoice) = context.dataStore.edit { it[coverShapeKey] = value.name }
+    suspend fun tvAmbientClock(value: Boolean) = context.dataStore.edit { it[tvAmbientClockKey] = value }
     suspend fun lastSeed(value: Int) = context.dataStore.edit { it[lastSeedKey] = value }
     suspend fun sleepFade(value: Boolean) = context.dataStore.edit { it[sleepFadeKey] = value }
     suspend fun cacheLimitMb(value: Int) = context.dataStore.edit { it[cacheLimitKey] = value }
@@ -265,6 +286,10 @@ data class AppSettings(
     val reduceMotion: Boolean = false,
     val showBottomNav: Boolean = true,
     val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
+    val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,
+    val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
+    /** 电视环境模式右上角是否显示时钟。 */
+    val tvAmbientClock: Boolean = true,
     val equalizer: EqualizerSettings = EqualizerSettings(),
     val searchHistory: List<String> = emptyList(),
     val lastUpdateCheck: Long = 0L,

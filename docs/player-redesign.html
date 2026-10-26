@@ -1,0 +1,1802 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>myMusic 播放页重设计</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Roboto+Flex:opsz,wght@8..144,300..1000&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+/* 原型里的配色变量注册成 <color>，切歌时能像 App 里一样 450ms 过渡 */
+@property --p { syntax: '<color>'; inherits: true; initial-value: #B9C3FF; }
+@property --op { syntax: '<color>'; inherits: true; initial-value: #1E2A60; }
+@property --pc { syntax: '<color>'; inherits: true; initial-value: #3A4580; }
+@property --opc { syntax: '<color>'; inherits: true; initial-value: #DEE0FF; }
+@property --sc { syntax: '<color>'; inherits: true; initial-value: #3F4466; }
+@property --osc { syntax: '<color>'; inherits: true; initial-value: #DFE1F9; }
+@property --s { syntax: '<color>'; inherits: true; initial-value: #12131A; }
+@property --os { syntax: '<color>'; inherits: true; initial-value: #E4E1EC; }
+@property --osv { syntax: '<color>'; inherits: true; initial-value: #C5C5D6; }
+@property --sch { syntax: '<color>'; inherits: true; initial-value: #272833; }
+
+:root {
+  /* 版式：规格文档。每节左侧窄栏写结论，右侧画板放可操作的原型；窄屏合成一栏 */
+  --bg: #EEF2F0;
+  --panel: #FFFFFF;
+  --board: #E2E9E6;
+  --fg: #13201C;
+  --muted: #52615C;
+  --line: #CDD8D3;
+  --accent: #006B5F;
+  --on-accent: #FFFFFF;
+  --hot: #A3461F;
+  --bezel: #0A0E0D;
+
+  --display: "Roboto Flex", "Noto Sans SC", system-ui, sans-serif;
+  --body: "Roboto Flex", "Noto Sans SC", system-ui, sans-serif;
+  --mono: "Roboto Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* 播放页固定深色 Vibrant，下面是第一首歌的配色；原型按歌曲改写 */
+  --p: #B9C3FF; --op: #1E2A60; --pc: #3A4580; --opc: #DEE0FF;
+  --sc: #3F4466; --osc: #DFE1F9; --s: #12131A; --os: #E4E1EC; --osv: #C5C5D6; --sch: #272833;
+
+  /* M3 Expressive 弹簧的 CSS 近似；支持 linear() 的浏览器由脚本换成真实弹簧曲线 */
+  --fast: cubic-bezier(.3, 1.45, .45, 1); --fast-d: .36s;
+  --spatial: cubic-bezier(.3, 1.25, .4, 1); --spatial-d: .5s;
+  --slow: cubic-bezier(.3, 1.2, .4, 1); --slow-d: .7s;
+  --effects: cubic-bezier(.2, 0, 0, 1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C1211; --panel: #141B19; --board: #101715; --fg: #E1EAE6; --muted: #95A6A0;
+    --line: #26322E; --accent: #5ED4BF; --on-accent: #00382F; --hot: #F2A07A; --bezel: #000000;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0C1211; --panel: #141B19; --board: #101715; --fg: #E1EAE6; --muted: #95A6A0;
+  --line: #26322E; --accent: #5ED4BF; --on-accent: #00382F; --hot: #F2A07A; --bezel: #000000;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 96px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+p { margin: 0; }
+code, .mono { font-family: var(--mono); font-size: .86em; }
+code { background: var(--board); border-radius: 6px; padding: 1px 6px; overflow-wrap: anywhere; }
+a { color: var(--accent); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+/* ---------- 页头 ---------- */
+.mast { display: grid; gap: 20px; padding-block: 24px 40px; }
+.eyebrow { font: 500 12px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.mast h1 { font-size: clamp(44px, 8vw, 92px); line-height: .98; font-weight: 900; letter-spacing: -.025em; }
+.mast h1 em { font-style: normal; color: var(--accent); }
+.lede { font-size: clamp(17px, 2vw, 20px); line-height: 1.65; max-width: 44em; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font: 500 12.5px/1 var(--mono); padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); }
+.chip b { color: var(--fg); font-weight: 500; }
+
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+.keys > div { background: var(--panel); padding: 18px 18px 20px; display: grid; gap: 6px; align-content: start; }
+.keys h3 { font-size: 16px; font-weight: 800; }
+.keys p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+/* ---------- 章节 ---------- */
+section.sec { display: grid; grid-template-columns: minmax(0, 270px) minmax(0, 1fr); gap: 20px 44px; border-top: 1px solid var(--line); padding-block: 52px; }
+.side { display: grid; gap: 14px; align-content: start; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); }
+.side .eyebrow { color: var(--accent); }
+.side h2 { font-size: 30px; line-height: 1.15; font-weight: 900; letter-spacing: -.01em; }
+.side p { color: var(--muted); font-size: 14.5px; }
+.main { display: grid; gap: 28px; min-width: 0; }
+@media (max-width: 900px) {
+  section.sec { grid-template-columns: minmax(0, 1fr); padding-block: 40px; }
+  .side { position: static; }
+}
+
+.prose { display: grid; gap: 12px; max-width: 46em; }
+.prose h3 { font-size: 19px; font-weight: 800; margin-top: 8px; }
+.list { display: grid; gap: 0; border-top: 1px solid var(--line); }
+.list > li { list-style: none; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.list { padding: 0; margin: 0; }
+.list .n { font: 500 13px/1.9 var(--mono); color: var(--accent); }
+.list b { display: block; font-size: 15.5px; }
+.list span { color: var(--muted); font-size: 14px; }
+
+.board { position: relative; background-color: var(--board); background-image: radial-gradient(var(--line) 1px, transparent 1.3px); background-size: 18px 18px; border-radius: 22px; padding: 28px clamp(14px, 3vw, 32px); display: flex; flex-wrap: wrap; gap: 32px 28px; justify-content: center; align-items: flex-start; min-width: 0; }
+[hidden] { display: none !important; }
+figure { width: min(100%, 230px); margin: 0; display: grid; gap: 10px; justify-items: center; min-width: 0; }
+figcaption { font: 500 12px/1.4 var(--mono); color: var(--muted); letter-spacing: .04em; text-align: center; }
+figcaption b { color: var(--fg); font-weight: 500; }
+
+/* 设备外框：内部按 dp 原尺寸排版，脚本按可用宽度整体缩放 */
+.dev { position: relative; width: 100%; overflow: hidden; background: var(--bezel); box-shadow: 0 0 0 7px var(--bezel), 0 18px 40px -18px rgba(0, 0, 0, .55); isolation: isolate; }
+.dev.phone { max-width: 300px; aspect-ratio: 360 / 800; border-radius: 30px; }
+.dev.phone.big { max-width: 340px; }
+.dev.tablet { max-width: 760px; aspect-ratio: 1280 / 800; border-radius: 18px; }
+.dev.tv { max-width: 760px; aspect-ratio: 960 / 540; border-radius: 6px; box-shadow: 0 0 0 9px var(--bezel), 0 22px 44px -18px rgba(0, 0, 0, .55); }
+.screen { position: absolute; left: 0; top: 0; transform-origin: 0 0; transform: scale(var(--k, 1)); overflow: hidden; background: var(--s); color: var(--os); font-family: var(--body); }
+.phone .screen { width: 360px; height: 800px; }
+.tablet .screen { width: 1280px; height: 800px; }
+.tv .screen { width: 960px; height: 540px; }
+
+.tabs { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); width: max-content; max-width: 100%; overflow-x: auto; }
+.tabs button { font: 600 14px/1 var(--body); border: 0; background: transparent; color: var(--muted); padding: 11px 18px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.tabs button[aria-selected="true"], .tabs button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px 28px; }
+.notes > div { display: grid; gap: 4px; align-content: start; }
+.notes h3 { font-size: 15px; font-weight: 800; }
+.notes p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+.legend { display: grid; gap: 0; counter-reset: lg; padding: 0; margin: 0; }
+.legend li { list-style: none; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.legend li b { color: var(--fg); display: block; font-size: 15px; }
+.dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 600 11px/1 var(--mono); background: var(--accent); color: var(--on-accent); margin-top: 1px; }
+.proto figure { width: 100%; }
+.proto { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 32px; align-items: start; }
+@media (max-width: 760px) { .proto { grid-template-columns: minmax(0, 1fr); justify-items: center; } .proto .legend { width: 100%; } }
+.protoside { display: grid; gap: 18px; min-width: 0; align-content: start; }
+.ctl { display: grid; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; }
+.ctl .row { display: grid; gap: 8px; }
+.ctl .lab { font: 600 13px/1.3 var(--body); color: var(--muted); }
+.chipset { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; }
+.schip { display: grid; justify-items: center; gap: 4px; padding: 8px 4px 6px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; font: 500 12px/1.2 var(--body); }
+.schip svg { width: 34px; height: 34px; }
+.schip[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel)); font-weight: 700; }
+.hint { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kbd { font: 500 12px/1 var(--mono); padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
+
+/* 表格 */
+.tablebox { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 12px/1.4 var(--mono); letter-spacing: .06em; color: var(--muted); background: var(--board); }
+tr:last-child td { border-bottom: 0; }
+td.k { font-weight: 700; white-space: nowrap; }
+td .mono { color: var(--muted); }
+
+.shapes { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; }
+.shape { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px 10px 12px; display: grid; justify-items: center; gap: 8px; }
+.shape svg { width: 76px; height: 76px; }
+.shape span { font: 500 11.5px/1.3 var(--mono); color: var(--muted); text-align: center; }
+.shape.pick { border-color: var(--accent); }
+
+.shot { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); max-width: 640px; }
+.shot img { display: block; width: 100%; height: auto; }
+
+/* 对照演示 */
+.duo { display: flex; flex-wrap: wrap; gap: 24px; justify-content: center; }
+.duo figure { width: min(100%, 280px); }
+.stage { position: relative; width: 100%; aspect-ratio: 9 / 16; border-radius: 22px; overflow: hidden; background: #111; box-shadow: 0 0 0 6px var(--bezel); }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ctrls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; }
+.btn { font: 600 14px/1 var(--body); border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 11px 16px; border-radius: 999px; cursor: pointer; display: inline-flex; gap: 8px; align-items: center; }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn svg { width: 18px; height: 18px; fill: currentColor; }
+.file { position: relative; overflow: hidden; }
+.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.src { font-size: 13px; color: var(--muted); text-align: center; min-height: 1.6em; }
+.meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; }
+.meter { display: grid; gap: 5px; }
+.meter .lab { display: flex; justify-content: space-between; font: 500 12px/1.3 var(--mono); color: var(--muted); }
+.meter .bar { height: 6px; border-radius: 3px; background: var(--board); overflow: hidden; }
+.meter .bar i { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: 0 50%; transform: scaleX(0); }
+.meter.old .bar i { background: var(--hot); }
+.count { font: 500 12.5px/1.5 var(--mono); color: var(--muted); }
+.count b { font-size: 20px; color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.phases { display: grid; gap: 14px; }
+.phase { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 18px 20px; display: grid; gap: 8px; }
+.phase header { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.phase h3 { font-size: 18px; font-weight: 800; }
+.phase .tag { font: 500 11.5px/1 var(--mono); color: var(--accent); letter-spacing: .08em; }
+.phase ul { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: 14px; display: grid; gap: 4px; }
+.qs { display: grid; gap: 14px; }
+.q { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; display: grid; gap: 4px; }
+.q b { font-size: 15.5px; }
+.q span { color: var(--muted); font-size: 14px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; }
+}
+</style>
+<style>
+/* ================= 原型内部（固定深色，单位按 dp） ================= */
+.screen svg.i { width: 24px; height: 24px; fill: currentColor; display: block; flex: none; }
+.m-abs { position: absolute; }
+.m-field { position: absolute; inset: 0; background: var(--s); overflow: hidden; isolation: isolate; }
+.m-field .cv { position: absolute; left: 50%; top: 38%; width: 170%; aspect-ratio: 1; translate: -50% -50%; background-size: cover; background-position: center; filter: blur(42px) saturate(1.25); opacity: .55; animation: m-spin 80s linear infinite; }
+.m-field .b { position: absolute; border-radius: 50%; mix-blend-mode: screen; background: radial-gradient(closest-side, var(--c), transparent); opacity: var(--a, .5); animation: var(--anim) var(--d, 24s) ease-in-out infinite alternate; }
+.m-scrim { position: absolute; inset: 0; background: linear-gradient(to bottom, color-mix(in srgb, var(--s) 12%, transparent), color-mix(in srgb, var(--s) 28%, transparent) 46%, color-mix(in srgb, var(--s) 84%, transparent)); }
+.m-scrim.wide { background: linear-gradient(to right, color-mix(in srgb, var(--s) 18%, transparent), color-mix(in srgb, var(--s) 40%, transparent) 46%, color-mix(in srgb, var(--s) 74%, transparent)); }
+.m-scrim.tv { background: linear-gradient(to right, color-mix(in srgb, var(--s) 22%, transparent), color-mix(in srgb, var(--s) 56%, transparent) 50%, color-mix(in srgb, var(--s) 78%, transparent)), linear-gradient(to top, color-mix(in srgb, var(--s) 70%, transparent), transparent 40%); }
+@keyframes m-spin { to { rotate: 360deg; } }
+@keyframes m-d1 { 0% { translate: 0 0; } 50% { translate: 18% 14%; } 100% { translate: -8% 26%; } }
+@keyframes m-d2 { 0% { translate: 0 0; } 50% { translate: -22% -10%; } 100% { translate: 10% -24%; } }
+@keyframes m-d3 { 0% { translate: 0 0; } 50% { translate: 14% -18%; } 100% { translate: -20% 6%; } }
+@keyframes m-d4 { 0% { translate: 0 0; } 50% { translate: -12% 20%; } 100% { translate: 16% 10%; } }
+
+.m-status { position: absolute; left: 0; right: 0; top: 0; height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; font: 500 13px/1 var(--body); color: var(--os); }
+.m-status .sig { display: flex; gap: 5px; align-items: center; }
+.m-status .sig i { display: block; width: 14px; height: 10px; border-radius: 2px; background: currentColor; opacity: .9; }
+.m-status .sig i.bat { width: 9px; height: 13px; border-radius: 2px; }
+.m-handle { position: absolute; bottom: 8px; left: 50%; translate: -50% 0; width: 108px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--os) 45%, transparent); }
+
+.m-ib { width: 48px; height: 48px; border-radius: 24px; display: grid; place-items: center; color: var(--os); flex: none; }
+.m-pill { height: 32px; border-radius: 16px; padding: 0 12px 0 10px; display: inline-flex; align-items: center; gap: 7px; font: 600 13px/1 var(--body); color: var(--os); background: color-mix(in srgb, var(--os) 13%, transparent); white-space: nowrap; }
+.m-pill .d { width: 7px; height: 7px; border-radius: 50%; background: var(--p); }
+.m-pill .ql { font-weight: 500; color: var(--osv); }
+.m-top { position: absolute; left: 8px; right: 8px; top: 30px; height: 52px; display: flex; align-items: center; justify-content: space-between; }
+
+/* 形状封面 */
+.m-cover { position: absolute; }
+.m-cover .halo { position: absolute; inset: 4%; border-radius: 50%; background-size: cover; background-position: center; filter: blur(30px) saturate(1.4); opacity: .62; transform: scale(1.12); }
+.m-cover svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.m-cover .spin { transform-box: view-box; transform-origin: 50px 50px; animation: m-spin 40s linear infinite; }
+.m-cover.paused .spin { animation-play-state: paused; }
+
+.m-title { font: 800 30px/1.24 var(--body); letter-spacing: -.01em; color: var(--os); }
+.m-artist { font: 500 17px/1.4 var(--body); color: var(--p); }
+.m-fav { padding: 0; border: 0; background: transparent; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 24px; color: var(--os); flex: none; transition: border-radius var(--fast-d) var(--fast), background-color .2s; }
+.m-fav.on { background: var(--pc); color: var(--opc); border-radius: 14px; }
+
+.kara { background: linear-gradient(90deg, var(--os) var(--k, 40%), color-mix(in srgb, var(--os) 38%, transparent) var(--k, 40%)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.m-ly1 { font: 700 20px/1.4 var(--body); }
+.m-ly2 { font: 600 16px/1.5 var(--body); color: color-mix(in srgb, var(--os) 42%, transparent); }
+
+.m-wave { position: absolute; display: block; overflow: visible; }
+.m-wave .w { fill: none; stroke: var(--p); stroke-width: 4; stroke-linecap: round; }
+.m-wave .t { fill: none; stroke: color-mix(in srgb, var(--os) 22%, transparent); stroke-width: 4; stroke-linecap: round; }
+.m-wave .stop { fill: var(--p); }
+.m-wave .move { animation: m-wave 1.1s linear infinite; }
+@keyframes m-wave { to { transform: translateX(var(--wl, 40px)); } }
+.m-times { position: absolute; display: flex; justify-content: space-between; font: 500 12px/1 var(--body); color: var(--osv); font-variant-numeric: tabular-nums; }
+
+/* 连接按钮组：两端满圆、内侧 14dp；播放中中段变胶囊并拉开 */
+.m-group { position: absolute; display: flex; gap: 4px; transition: gap var(--spatial-d) var(--spatial); }
+.m-seg { display: grid; place-items: center; border: 0; padding: 0; cursor: pointer; background: var(--sc); color: var(--osc); flex: 0 0 var(--w); transition: flex-basis var(--fast-d) var(--fast), border-radius var(--spatial-d) var(--spatial), background-color .45s; }
+.m-seg.lead { border-radius: var(--r) 14px 14px var(--r); }
+.m-seg.trail { border-radius: 14px var(--r) var(--r) 14px; }
+.m-seg.mid { background: var(--p); color: var(--op); border-radius: 14px; }
+.m-group.playing { gap: 8px; }
+.m-group.playing .mid { border-radius: var(--r); }
+.m-seg svg.i { width: var(--ic, 34px); height: var(--ic, 34px); }
+
+/* 浮动工具栏 */
+.m-tool { position: absolute; left: 50%; translate: -50% 0; height: 60px; border-radius: 30px; padding: 6px; display: flex; gap: 2px; align-items: center; background: color-mix(in srgb, var(--sch) 84%, transparent); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); box-shadow: 0 6px 20px -8px rgba(0, 0, 0, .5); }
+.m-tool .m-ib { cursor: pointer; border: 0; background: transparent; padding: 0; }
+.m-tool .m-ib.on { width: auto; padding: 0 16px 0 12px; display: flex; gap: 6px; background: var(--pc); color: var(--opc); font: 600 14px/1 var(--body); }
+.screen .m-ib.sel { background: var(--pc); color: var(--opc); border-radius: 16px; }
+.m-tool .tm { width: auto; padding: 0 12px; display: flex; gap: 4px; font: 600 13px/1 var(--body); color: var(--p); font-variant-numeric: tabular-nums; }
+
+/* 歌词列表 */
+.m-lyrics { position: absolute; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14%, #000 80%, transparent); mask-image: linear-gradient(to bottom, transparent, #000 14%, #000 80%, transparent); }
+.m-lyrics .col { position: absolute; left: 0; right: 0; top: 0; display: grid; gap: var(--gap, 14px); transition: transform var(--slow-d) var(--slow); }
+.m-lyrics .ln { font: 700 var(--fs, 22px)/1.36 var(--body); color: color-mix(in srgb, var(--os) 38%, transparent); transform-origin: 0 50%; transition: color .4s, filter .4s, transform var(--spatial-d) var(--spatial); }
+.m-lyrics .ln.near { color: color-mix(in srgb, var(--os) 62%, transparent); }
+.m-lyrics .ln.far { filter: blur(1.4px); }
+.m-lyrics .ln.cur { font-weight: 800; transform: scale(var(--grow, 1.24)); }
+.m-lyrics .ln.cur.kara { color: transparent; }
+
+.m-dock { position: absolute; border-radius: 32px; background: color-mix(in srgb, var(--sch) 90%, transparent); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); display: flex; align-items: center; gap: 12px; }
+.m-ring { box-shadow: 0 0 0 3px var(--s), 0 0 0 6px var(--os); }
+.m-thin { position: absolute; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--os) 18%, transparent); overflow: hidden; }
+.m-thin i { display: block; height: 100%; background: var(--p); }
+.m-clock { position: absolute; font: 300 34px/1 var(--body); color: var(--os); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.m-toast { position: absolute; left: 50%; bottom: 96px; translate: -50% 8px; padding: 10px 16px; border-radius: 12px; background: var(--os); color: var(--s); font: 500 13px/1.3 var(--body); white-space: nowrap; opacity: 0; transition: opacity .2s, translate .3s var(--spatial); pointer-events: none; }
+.m-toast.show { opacity: 1; translate: -50% 0; }
+
+/* 设置页原型 */
+.st-label { position: absolute; font: 700 16px/1.3 var(--body); color: var(--os); }
+.st-card { position: absolute; background: var(--scl); border-radius: 16px; }
+.st-note { position: absolute; font: 400 13.5px/1.55 var(--body); color: var(--osv); }
+.st-tg { position: absolute; display: flex; gap: 2px; }
+.st-tg span { flex: 1; display: flex; gap: 6px; align-items: center; justify-content: center; background: var(--sch); color: var(--osv); font: 500 14px/1 var(--body); border-radius: 8px; }
+.st-tg span:first-child { border-radius: var(--h) 8px 8px var(--h); }
+.st-tg span:last-child { border-radius: 8px var(--h) var(--h) 8px; }
+.st-tg span.on { background: var(--p); color: var(--op); border-radius: var(--h); }
+.st-chip { display: grid; justify-items: center; gap: 6px; font: 500 12px/1.2 var(--body); color: var(--osv); }
+.st-chip .pv { position: relative; }
+.st-chip .pv svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.st-chip.on { color: var(--os); font-weight: 700; }
+.st-chip.on .pv { outline: 2.5px solid var(--p); outline-offset: 4px; border-radius: 50%; }
+.st-chip .ck { position: absolute; right: -6px; top: -6px; width: 20px; height: 20px; border-radius: 50%; background: var(--p); color: var(--op); display: grid; place-items: center; }
+.st-row { display: flex; align-items: center; gap: 12px; }
+.st-row .tone { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--pc); color: var(--opc); flex: none; }
+.st-row .t { font: 700 15px/1.3 var(--body); color: var(--os); }
+.st-row .u { font: 400 12px/1.4 var(--body); color: var(--osv); }
+.st-sw { width: 52px; height: 32px; border-radius: 16px; background: var(--p); position: relative; flex: none; }
+.st-sw::after { content: ""; position: absolute; right: 4px; top: 4px; width: 24px; height: 24px; border-radius: 50%; background: var(--op); }
+
+/* 交互原型 */
+.ip { transition: --p .45s, --op .45s, --pc .45s, --opc .45s, --sc .45s, --osc .45s, --s .45s, --os .45s, --osv .45s, --sch .45s; }
+.ip .layer { position: absolute; inset: 0; transition: opacity .32s var(--effects); }
+.ip .layer.off { opacity: 0; pointer-events: none; }
+.ip .ipc .halo { transition: opacity .3s; }
+.ip.lyr .ipc .halo { opacity: 0; }
+.ip .m-cover { transition: transform var(--spatial-d) var(--spatial); transform-origin: 0 0; }
+.ip canvas.fld { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+.ip .m-ib { border: 0; background: transparent; cursor: pointer; padding: 0; }
+.ip .num { position: absolute; z-index: 5; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font: 600 11px/1 var(--mono); background: #FFFFFF; color: #0B1512; box-shadow: 0 0 0 2px rgba(0, 0, 0, .35); pointer-events: none; transition: opacity .3s; }
+.ip.nonum .num, .ip.lyr .num { opacity: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow">myMusic · 设计方案 · 2026-10-26 · 方向已确认，未实现</div>
+  <h1>播放页<em>重设计</em></h1>
+  <p class="lede">三端播放页改成以「形状封面」为中心的布局：封面裁成 Expressive 形状，播放时轮廓慢慢转，暂停和切歌时形变；控件收进一组连接按钮和一条浮动工具栏。歌词背景的“动态”和“律动”改用同一套流光场，音乐只调节流速、光斑大小和亮度，不再整屏抖动和闪白。</p>
+  <div class="chips">
+    <span class="chip">手机 <b>360×800 dp</b></span>
+    <span class="chip">平板横屏 <b>1280×800 dp</b></span>
+    <span class="chip">电视 <b>960×540 dp</b></span>
+    <span class="chip">新增设置：<b>封面形状 · 律动强度 · 电视时钟</b></span>
+    <span class="chip">不改：队列 / 音源 / 定时面板、手势、读屏文案</span>
+  </div>
+  <div class="keys">
+    <div><h3>形状封面</h3><p>MaterialShapes 裁切，切歌随机换形状，也能在设置里固定一种；暂停变圆角方形看全图。</p></div>
+    <div><h3>连接按钮组</h3><p>上一首、播放、下一首连成一块；播放中中段变胶囊，按下的那段变宽。</p></div>
+    <div><h3>浮动工具栏</h3><p>歌词、队列、定时、音源收进底部悬浮条，替换右下角 24dp 小图标。</p></div>
+    <div><h3>歌词升为一栏</h3><p>平板和电视右侧整栏给歌词，当前行放大、远处的行降透明度并轻微模糊。</p></div>
+    <div><h3>流光场背景</h3><p>四团封面色光沿各自轨迹流动；律动只改流速和光量，分柔和、标准两档。</p></div>
+  </div>
+</header>
+
+<section class="sec" id="now">
+  <div class="side">
+    <div class="eyebrow">现状</div>
+    <h2>为什么显得中规中矩</h2>
+    <p>右图是现在的平板横屏播放页（模拟器截图，封面原图只有 128px 量级）。</p>
+  </div>
+  <div class="main">
+    <div class="shot"><img alt="现在的平板横屏播放页：左边铺满模糊封面，右边一列依次是歌名、音源、单行歌词、进度条和三个按钮" src="data:image/webp;base64,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"></div>
+    <ul class="list">
+      <li><span class="n">1</span><div><b>版式是通用模板</b><span>封面铺满 → 歌名 → 进度 → 三个按钮，和大多数音乐 App 一样。封面清晰度不够时铺满半屏只剩一片糊。</span></div></li>
+      <li><span class="n">2</span><div><b>播放页里没有形状语言</b><span>Expressive 的形状只出现在双击收藏的心形爆发里，主画面没有任何会形变的元素。</span></div></li>
+      <li><span class="n">3</span><div><b>控件散落</b><span>上一首 / 播放 / 下一首是三颗独立按钮；定时、队列、歌词挤在右下角，图标 24dp、没有底色，看起来像次要信息。</span></div></li>
+      <li><span class="n">4</span><div><b>横屏把歌词挤成一行</b><span>右栏同时放歌名、音源、歌词、进度、按钮，歌词区只剩一行高度，横屏最该展示的内容反而最小。</span></div></li>
+    </ul>
+  </div>
+</section>
+
+<section class="sec" id="proto">
+  <div class="side">
+    <div class="eyebrow">交互原型 · 手机</div>
+    <h2>形状舞台</h2>
+    <p>原型可以直接点：播放 / 暂停看封面形变，上一首 / 下一首看形状和配色切换，点工具栏里的「歌词」进入歌词页。背景跟着内置节奏律动（静音），暂停后慢慢停下。</p>
+    <p>右侧的“设置预览”和设置页里的选项一致：选「随机」后每次切歌换一种形状，选具体形状会立刻形变过去；律动强度可以在柔和和标准之间切换。</p>
+    <p class="hint"><span class="kbd">编号</span>对应右侧说明，进入歌词页后自动隐藏。</p>
+  </div>
+  <div class="main">
+    <div class="proto">
+      <figure>
+        <div class="dev phone big" id="ip"></div>
+        <figcaption><b>手机 · 默认</b> · 360×800 dp · 可操作</figcaption>
+      </figure>
+      <div class="protoside">
+      <div class="ctl" aria-label="设置预览">
+        <div class="row"><span class="lab">封面形状（设置 → 播放页）</span><div class="chipset" id="shapeSet"></div></div>
+        <div class="row"><span class="lab">律动强度</span><div class="tabs" role="group" aria-label="律动强度" id="intSet"><button type="button" aria-pressed="false" data-v="soft">柔和</button><button type="button" aria-pressed="true" data-v="standard">标准</button></div></div>
+      </div>
+      <ol class="legend">
+        <li><span class="dot">1</span><div><b>音源胶囊</b>顶部居中显示「QQ音乐 · 无损」，点开就是现在的换源面板。剩余定时只显示在工具栏里，这里始终是音源。</div></li>
+        <li><span class="dot">2</span><div><b>形状封面</b>封面裁成 MaterialShapes 形状。默认每次切歌随机换一种（不和上一首重复），也可以在设置里固定成一种。播放时外轮廓 40 秒转一圈，画面本身保持正向；暂停时轮廓形变成圆角方形并停下，能看到完整封面；切歌时旧形状直接形变到新形状。</div></li>
+        <li><span class="dot">3</span><div><b>封面光晕</b>封面后面放一层放大、模糊的同图，让封面像从背景里透出来；律动开启时随低频轻微变亮。</div></li>
+        <li><span class="dot">4</span><div><b>标题与收藏</b>中文歌名 30sp 粗体，两行内放不下才缩小；歌手名用 primary 色。收藏是 M3E 切换按钮：未收藏是圆形，收藏后变成圆角方形并填色。</div></li>
+        <li><span class="dot">5</span><div><b>两行歌词</b>当前行逐字填色，下一行 40% 透明；点按进入歌词页。没有同步歌词时这一块不占位。</div></li>
+        <li><span class="dot">6</span><div><b>波浪进度条</b>沿用现在的 WavySeekBar；律动“标准”档下波幅跟着低频起伏，“柔和”档保持固定波幅，暂停都拉平。</div></li>
+        <li><span class="dot">7</span><div><b>连接按钮组</b>三段连成 312×88dp 的整块，两端满圆、内侧 14dp。播放中中段变成胶囊并和两侧拉开 8dp；按下哪段哪段变宽，相邻段让位。</div></li>
+        <li><span class="dot">8</span><div><b>浮动工具栏</b>HorizontalFloatingToolbar：歌词（开启时带文字和底色）、队列、定时、音源、更多。定时开启后，定时按钮展开成剩余时间（如 28:40）。</div></li>
+      </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="layouts">
+  <div class="side">
+    <div class="eyebrow">三端布局</div>
+    <h2>同一套部件，三种排法</h2>
+    <p>手机竖排；平板左边是播放、右边整栏是歌词；电视是 10 英尺距离，字号和焦点都放大，空闲后进入环境模式。</p>
+  </div>
+  <div class="main">
+    <div class="tabs" role="tablist" aria-label="设备">
+      <button role="tab" id="tab-phone" aria-selected="true" aria-controls="pane-phone">手机</button>
+      <button role="tab" id="tab-tablet" aria-selected="false" aria-controls="pane-tablet">平板</button>
+      <button role="tab" id="tab-tv" aria-selected="false" aria-controls="pane-tv">电视</button>
+    </div>
+    <div id="pane-phone" role="tabpanel" aria-labelledby="tab-phone" class="main">
+      <div class="board">
+        <figure><div class="dev phone" data-mock="phoneDefault" data-song="1"></div><figcaption><b>默认</b> · 暂停态</figcaption></figure>
+        <figure><div class="dev phone" data-mock="phoneLyrics" data-song="0"></div><figcaption><b>歌词页</b></figcaption></figure>
+        <figure><div class="dev phone" data-mock="phoneIdle" data-song="2"></div><figcaption><b>空闲 4 秒后</b></figcaption></figure>
+      </div>
+      <div class="notes">
+        <div><h3>默认</h3><p>封面 280dp 居中，下面依次是标题、两行歌词、进度、按钮组、工具栏。暂停时封面是圆角方形，按钮组三段贴在一起。</p></div>
+        <div><h3>歌词页</h3><p>大封面缩到左上角 52dp 并形变成圆形（共享元素），歌词左对齐，当前行放大 1.24 倍；底部是小号按钮组和“歌词 / 队列”。</p></div>
+        <div><h3>空闲</h3><p>4 秒无操作后顶栏、按钮组、工具栏淡出，留下封面、标题、三行歌词和一条细进度。第一下触摸只唤醒，不触发按钮（与现在一致）。</p></div>
+      </div>
+    </div>
+    <div id="pane-tablet" role="tabpanel" aria-labelledby="tab-tablet" class="main" hidden>
+      <div class="board">
+        <figure style="width:100%"><div class="dev tablet" data-mock="tabletDefault" data-song="0"></div><figcaption><b>默认</b> · 左播放、右歌词</figcaption></figure>
+        <figure style="width:100%"><div class="dev tablet" data-mock="tabletFocus" data-song="2"></div><figcaption><b>专注歌词</b> · 左侧收成竖向工具栏</figcaption></figure>
+      </div>
+      <div class="notes">
+        <div><h3>默认</h3><p>左栏 560dp：320dp 形状封面、标题、音源、进度、按钮组、工具栏。右栏整栏歌词，当前行 38sp。背景遮罩向右加深，保证歌词对比度。</p></div>
+        <div><h3>专注歌词</h3><p>工具栏里点「歌词」后左栏收成 VerticalFloatingToolbar（小封面、上一首、播放、下一首、退出），歌词扩到 48sp，进度条横跨底部。</p></div>
+        <div><h3>≥1200dp 窗口</h3><p>外壳右侧的 NowPlayingPane 用同一个形状封面和按钮组的小号版本，不另做一套。</p></div>
+      </div>
+    </div>
+    <div id="pane-tv" role="tabpanel" aria-labelledby="tab-tv" class="main" hidden>
+      <div class="board">
+        <figure style="width:100%"><div class="dev tv" data-mock="tvDefault" data-song="1"></div><figcaption><b>控制条显示</b> · 焦点在播放键</figcaption></figure>
+        <figure style="width:100%"><div class="dev tv" data-mock="tvAmbient" data-song="0"></div><figcaption><b>环境模式</b> · 4 秒无按键 · 时钟开启</figcaption></figure>
+      </div>
+      <div class="notes">
+        <div><h3>控制条</h3><p>底部一条浮动条：按钮组（播放键带焦点环并放大 1.06 倍）、进度、定时 / 收藏 / 队列 / 音源。焦点顺序和现在一样，左右键在进度条上快退快进 10 秒。</p></div>
+        <div><h3>环境模式</h3><p>控制条淡出但不移出组合（焦点仍在播放键，第一下按键只唤醒），歌词区向下扩展、当前行放大到 36sp，底部只留一条细进度。</p></div>
+        <div><h3>时钟（可设置）</h3><p>环境模式右上角显示时间，跟随系统 12/24 小时制。默认显示，在“设置 → 播放页 → 电视”里关闭；关闭后右上角留空。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="spec">
+  <div class="side">
+    <div class="eyebrow">部件规格</div>
+    <h2>尺寸、形状、动效</h2>
+    <p>全部用 material3 1.5.0-alpha25 里已有的组件：<code>ButtonGroup</code>、<code>HorizontalFloatingToolbar</code>、<code>VerticalFloatingToolbar</code>、<code>MaterialShapes</code>（已在本机 jar 里核对过）。</p>
+  </div>
+  <div class="main">
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>部件</th><th>手机</th><th>平板</th><th>电视</th><th>动效</th></tr></thead>
+        <tbody>
+          <tr><td class="k">形状封面</td><td>280dp</td><td>320dp</td><td>280dp</td><td>轮廓 40s/圈；暂停 → 圆角方形 <span class="mono">slowSpatial</span>；切歌形变 <span class="mono">defaultSpatial</span></td></tr>
+          <tr><td class="k">形状来源</td><td colspan="3">随机（默认）：每次切歌从 6 种里抽一种，不和上一首重复，重新打开播放页不换；固定：所有歌用同一种，切歌只换封面图</td><td>固定模式下切歌不形变，封面图交叉淡入 <span class="mono">defaultEffects</span></td></tr>
+          <tr><td class="k">歌名</td><td>30sp / 800</td><td>34sp / 800</td><td>34sp / 800</td><td>切歌时淡出淡入 <span class="mono">defaultEffects</span></td></tr>
+          <tr><td class="k">按钮组</td><td>312×88，播放段 144</td><td>320×88</td><td>232×64</td><td>按下变宽 <span class="mono">fastSpatial</span>；中段变胶囊 <span class="mono">defaultSpatial</span></td></tr>
+          <tr><td class="k">工具栏</td><td>高 60，5 项</td><td>高 56，5 项</td><td>并入控制条</td><td>空闲淡出 <span class="mono">defaultEffects</span></td></tr>
+          <tr><td class="k">当前歌词行</td><td>20sp（预览）/ 28sp（歌词页）</td><td>38sp / 48sp</td><td>30sp / 36sp</td><td>换行滚动 <span class="mono">slowSpatial</span>，放大 1.24 倍</td></tr>
+          <tr><td class="k">远处歌词行</td><td colspan="3">相邻行 60% 透明度；更远 38% 透明度，API 31+ 再加 1.4dp 模糊（以下版本只降透明度）</td><td>透明度 <span class="mono">defaultEffects</span></td></tr>
+          <tr><td class="k">弹簧参数</td><td colspan="4"><span class="mono">fastSpatial 0.6/800 · defaultSpatial 0.8/380 · slowSpatial 0.8/200 · effects 阻尼 1.0</span>（MotionScheme.expressive；开启“减少动画”时换 standard 并关闭旋转）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <h3>封面形状候选</h3>
+      <p>随机从前 6 种里抽，设置里也可以固定成其中一种。圆角方形只用于暂停态，不参与随机。图里是近似画法，实机直接用 MaterialShapes 原形。</p>
+    </div>
+    <div class="shapes" id="shapes"></div>
+  </div>
+</section>
+
+<section class="sec" id="settings">
+  <div class="side">
+    <div class="eyebrow">设置</div>
+    <h2>设置 → 播放页</h2>
+    <p>原来的「歌词」设置页改名为「播放页」，副标题改成“封面形状、歌词背景、律动强度”。新增三项，和现有的外观、歌词设置一样只存在本机，不参与歌单同步。</p>
+  </div>
+  <div class="main">
+    <div class="board">
+      <figure><div class="dev phone" data-mock="settingsPhone" data-song="0"></div><figcaption><b>手机 / 平板</b> · 独立设置页</figcaption></figure>
+      <figure style="width:100%;max-width:560px"><div class="dev tv" data-mock="settingsTv" data-song="0"></div><figcaption><b>电视</b> · 设置双栏右侧，焦点在时钟开关</figcaption></figure>
+    </div>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>设置项</th><th>选项</th><th>默认</th><th>出现在</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td class="k">封面形状</td><td>随机 / 十二瓣 / 九瓣 / 七瓣 / 太阳 / 星芒 / 八叶</td><td>随机</td><td>三端</td><td>随机：每次切歌换一种，不和上一首重复。固定：所有歌都用这一种。选项本身用当前封面裁成对应形状做预览。</td></tr>
+          <tr><td class="k">显示歌词背景</td><td>关闭 / 动态 / 律动</td><td>动态</td><td>三端</td><td>现有设置，不变。</td></tr>
+          <tr><td class="k">律动强度</td><td>柔和 / 标准</td><td>标准</td><td>三端；只在选了“律动”时出现</td><td>两档参数见下一节的对照表。</td></tr>
+          <tr><td class="k">环境模式显示时钟</td><td>开 / 关</td><td>开</td><td>只在电视上出现（含强制电视布局）</td><td>空闲 4 秒进入环境模式后右上角显示时间。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="list">
+      <li><span class="n">·</span><div><b>形状选择器</b><span>4 列网格（电视一行 7 个），每个选项是 56dp 的形状预览加名字；选中项加 primary 描边和对勾。电视上方向键在网格里移动，OK 选中。</span></div></li>
+      <li><span class="n">·</span><div><b>改动立即生效</b><span>播放页开着时改形状，封面直接形变到新形状；选回“随机”从下一次切歌开始生效。</span></div></li>
+      <li><span class="n">·</span><div><b>减少动画</b><span>开启后封面不旋转，切歌和暂停的形变改成直接切换；律动强度选项仍显示，但背景按现在的规则回退成静止。</span></div></li>
+    </ul>
+  </div>
+</section>
+
+<section class="sec" id="rhythm">
+  <div class="side">
+    <div class="eyebrow">歌词背景律动</div>
+    <h2>为什么现在看着怪</h2>
+    <p>对照的是 <code>LyricsBackdrop.kt</code> 里的 <code>ReactiveBackdrop</code> 和 <code>RhythmAnalysis.kt</code>。</p>
+  </div>
+  <div class="main">
+    <ul class="list">
+      <li><span class="n">1</span><div><b>整张背景跟着低频缩放和平移</b><span>封面层 <code>scale = 1.06 + energy×0.055 + pulse×0.075</code>，同时按 energy 往右下平移（92–99 行）。位置直接等于音量，画面一下一下地晃，像镜头在抖。</span></div></li>
+      <li><span class="n">2</span><div><b>全屏明暗在抽动</b><span>黑色遮罩透明度随 energy 和 pulse 变化（135 行），再叠一层白色 Screen 光（169–173 行），每次起拍中间闪白，颜色被冲淡，歌词对比度也跟着变。</span></div></li>
+      <li><span class="n">3</span><div><b>光斑钉在三个角上</b><span>低 / 中 / 高频三团光固定在左上、右下、右上（116–118 行），只在原地胀缩，看起来像三盏灯在闪，不像音乐在流动。而且每团光是“平移整块画布大小的矩形”画出来的，低频大时左上角光斑的矩形右移约 6%，左边缘会露出一条随节拍滑动的竖直硬边（对照演示里左图能看到）。</span></div></li>
+      <li><span class="n">4</span><div><b>没有逐帧插值</b><span>分析器每秒发 30 帧，绘制直接用最新值，60/120Hz 屏幕上是阶梯式跳变；energy 的上升系数 0.62 几乎等于原始值。</span></div></li>
+      <li><span class="n">5</span><div><b>起拍检测太灵敏</b><span>全频段（到 14kHz）的谱通量判起拍，不应期只有 110ms，镲片、人声咬字这类高频瞬态也算起拍，最快每秒能触发 9 次；每次都带一下缩放和闪白。</span></div></li>
+      <li><span class="n">6</span><div><b>拍与拍之间是静止的</b><span>律动模式没有“动态”那样的持续流动，于是变成“静止—抖一下—静止”。</span></div></li>
+    </ul>
+
+    <div class="prose">
+      <h3>同一段音乐，两种画法</h3>
+      <p>左边按现在的代码 1:1 移植，右边是新的流光场。两边吃的是同一路分析数据，分析算法也是从 <code>RhythmAnalysis.kt</code> 照搬的 JS 版本。默认用页面内置的一段 104 BPM 节奏（第 5–6 小节是安静的过门），也可以换成本机音乐。内置节奏是干净的鼓机，两边的起拍次数差不多，区别主要在画法；有镲片和人声的真实歌曲可以换进来自己对比。</p>
+    </div>
+    <div class="ctrls">
+      <button class="btn primary" id="snd" type="button"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.47 4.47 0 0 0 2.5-4z"/></svg><span>播放声音</span></button>
+      <label class="btn file" for="pick"><svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg><span>换成本机音乐</span><input id="pick" type="file" accept="audio/*"></label>
+      <button class="btn" id="builtin" type="button">内置节奏</button>
+      <div class="tabs" role="group" aria-label="律动强度" id="demoInt"><button type="button" aria-pressed="false" data-v="soft">柔和</button><button type="button" aria-pressed="true" data-v="standard">标准</button></div>
+      <div class="tabs" role="group" aria-label="封面" id="songpick"></div>
+    </div>
+    <p class="src" id="srcline">正在生成内置节奏…</p>
+    <div class="duo">
+      <figure><div class="stage" id="stOld"><canvas></canvas></div><figcaption><b>现在</b> · ReactiveBackdrop 原样移植</figcaption></figure>
+      <figure><div class="stage" id="stNew"><canvas></canvas></div><figcaption><b>新方案</b> · 流光场</figcaption></figure>
+    </div>
+    <div class="meters" id="meters"></div>
+    <div class="count" id="counts"></div>
+
+    <div class="prose">
+      <h3>新方案：流光场</h3>
+      <p>“动态”和“律动”用同一个渲染器。底层是放大旋转的 24px 封面，上面四团取自封面主色的光，各自沿一条李萨如曲线慢慢漂；最上面是一层固定的遮罩，保证歌词对比度。“动态”以固定速度流动，“律动”在此基础上让音乐调参数。下表是“标准”档：</p>
+    </div>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>信号</th><th>驱动什么</th><th>幅度</th><th>平滑（上升 / 回落）</th></tr></thead>
+        <tbody>
+          <tr><td class="k">响度（新增）</td><td>流动速度：相位按速度积分，位置永远连续</td><td>基础速度 × 1 → 2.3</td><td>500ms / 1200ms</td></tr>
+          <tr><td class="k">低频</td><td>四团光的半径、封面光晕亮度、进度条波幅</td><td>半径 +0–14%</td><td>70ms / 380ms</td></tr>
+          <tr><td class="k">中频</td><td>第二团光（tertiary 色）的不透明度</td><td>+0–0.12</td><td>120ms / 600ms</td></tr>
+          <tr><td class="k">高频</td><td>一小团高光的不透明度，不再驱动缩放</td><td>+0–0.08</td><td>200ms / 500ms</td></tr>
+          <tr><td class="k">鼓点（改成低频起拍）</td><td>四团光同时胀开一下，从封面位置散开一圈很淡的光环</td><td>半径 +10%，光环不透明度 ≤ 0.09</td><td>50ms / 450ms</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <h3>律动强度：柔和与标准</h3>
+      <p>两档用同一套平滑参数，只是幅度不同。柔和档去掉鼓点光环，适合抒情歌或者觉得背景太活跃的人。上面的演示可以直接切换两档对比。</p>
+    </div>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>参数</th><th>柔和</th><th>标准（默认）</th></tr></thead>
+        <tbody>
+          <tr><td class="k">流动速度</td><td>× 1 → 1.5</td><td>× 1 → 2.3</td></tr>
+          <tr><td class="k">光团半径（低频）</td><td>+0–7%</td><td>+0–14%</td></tr>
+          <tr><td class="k">中频 / 高频光量</td><td>+0.06 / +0.04</td><td>+0.12 / +0.08</td></tr>
+          <tr><td class="k">鼓点</td><td>光团胀开 +5%，没有光环</td><td>光团胀开 +10%，散开一圈光环</td></tr>
+          <tr><td class="k">封面光晕亮度</td><td>+0–0.04</td><td>+0–0.08</td></tr>
+          <tr><td class="k">进度条波幅</td><td>固定</td><td>随低频起伏</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="list">
+      <li><span class="n">A</span><div><b>不再移动整张画面</b><span>音乐只改速度和大小，任何图层的位置都由相位积分得到，不会跟着音量来回跳。</span></div></li>
+      <li><span class="n">B</span><div><b>不闪白、不抽动亮度</b><span>去掉白色 Screen 光和随能量变化的黑遮罩；遮罩改成固定渐变。整体亮度波动控制在 6% 以内。</span></div></li>
+      <li><span class="n">C</span><div><b>按屏幕刷新率插值</b><span>分析仍是 30 帧，绘制用 <code>withFrameNanos</code> 逐帧做一阶平滑，时间常数与帧率无关，90/120Hz 上同样顺滑。</span></div></li>
+      <li><span class="n">D</span><div><b>安静就平静</b><span>响度包络慢，过门和抒情段会自然慢下来，接近“动态”；暂停后速度用 1.2 秒降到 0，停住而不是跳回原位。</span></div></li>
+      <li><span class="n">E</span><div><b>分析器改动</b><span><code>RhythmFrame</code> 加 <code>loudness</code>（整段 RMS 的慢包络）和 <code>kick</code>（只看 0–690Hz 的谱通量，不应期 280ms）。原来的全频起拍保留给测试和诊断，不再驱动画面。</span></div></li>
+      <li><span class="n">F</span><div><b>减少动画</b><span>与现在一样回退到静止背景，不做分析。</span></div></li>
+    </ul>
+  </div>
+</section>
+
+<section class="sec" id="plan">
+  <div class="side">
+    <div class="eyebrow">实施</div>
+    <h2>分四步做</h2>
+    <p>背景先做，它独立、改动小，可以先在真机上确认手感。</p>
+  </div>
+  <div class="main">
+    <div class="phases">
+      <div class="phase"><header><span class="tag">P1</span><h3>流光场 + 分析器</h3></header><ul>
+        <li><code>playback/RhythmAnalysis.kt</code>：加 loudness、低频起拍检测器；更新 <code>RhythmAnalysisTest</code>。</li>
+        <li><code>ui/player/LyricsBackdrop.kt</code>：FlowField 取代 AmbientBackdrop 和 ReactiveBackdrop；光团颜色取封面量化后的前 4 个颜色。</li>
+        <li><code>data/AppStore.kt</code>：新增 <code>rhythmIntensity</code>（柔和 / 标准，默认标准）。</li>
+        <li><code>ui/settings/LyricsSettingsScreen.kt</code>：页面改名「播放页」，更新三档说明，加律动强度。</li>
+      </ul></div>
+      <div class="phase"><header><span class="tag">P2</span><h3>手机播放页</h3></header><ul>
+        <li>新增 <code>ui/player/CoverStage.kt</code>：形状封面（Morph 缓存路径，轮廓旋转在 graphicsLayer 里读角度，不触发重组）和光晕。</li>
+        <li>新增 <code>ui/player/TransportControls.kt</code>：连接按钮组、浮动工具栏。</li>
+        <li><code>PlayerScreen.kt</code> 的 PhonePlayer / PhoneLyrics 重排；<code>SharedCover.kt</code> 的共享元素改成形状裁切。</li>
+        <li><code>AppStore.kt</code> 新增 <code>coverShape</code>（随机或某个形状名，默认随机）；设置页加形状选择器。随机结果存在播放会话里，重新打开播放页不换。</li>
+      </ul></div>
+      <div class="phase"><header><span class="tag">P3</span><h3>平板与电视</h3></header><ul>
+        <li>WidePlayer 改成左播放右歌词，加专注歌词模式（VerticalFloatingToolbar）。</li>
+        <li>TvPlayer 换成浮动控制条和新的环境模式，焦点顺序保持不变。</li>
+        <li><code>AppStore.kt</code> 新增 <code>tvAmbientClock</code>（默认开）；设置页只在电视上显示这个开关。</li>
+        <li><code>PlayerParts.kt</code> 的 LyricsList 加按距离降透明度 / 模糊。</li>
+      </ul></div>
+      <div class="phase"><header><span class="tag">P4</span><h3>验证</h3></header><ul>
+        <li><code>:app:compileDebugKotlin :app:testDebugUnitTest</code>。</li>
+        <li>手机、平板、电视模拟器截图；电视上用方向键走一遍焦点和返回键。</li>
+        <li>API 23 电视镜像上测绘制耗时，确认流光场每帧不超过 4ms；开 TalkBack 检查文案不变。</li>
+      </ul></div>
+    </div>
+    <ul class="list">
+      <li><span class="n">!</span><div><b>形状会裁掉封面边角</b><span>大约 8–12% 的面积，封面上的字可能被切到；所以暂停时变成圆角方形看全图。</span></div></li>
+      <li><span class="n">!</span><div><b>弱 GPU 电视盒子</b><span>没有 RenderEffect 模糊（API 31 以下），流光场靠 24px 封面放大和径向渐变本身的柔和；如果实测超时，电视上律动降到 30fps 绘制。</span></div></li>
+      <li><span class="n">!</span><div><b>中文歌名没有宽度轴</b><span>内置的 Roboto Flex 只含拉丁字形，中文走系统字体，强调只能靠字号和字重。</span></div></li>
+    </ul>
+  </div>
+</section>
+
+<section class="sec" id="ask">
+  <div class="side">
+    <div class="eyebrow">已确认</div>
+    <h2>四个决定</h2>
+    <p>2026-10-26 确认。括号里是我补的细节和默认值，有不同意见直接改。</p>
+  </div>
+  <div class="main">
+    <div class="qs">
+      <div class="q"><b>1. 封面形状：随机，并提供设置</b><span>每次切歌从 6 种里随机抽，不和上一首重复（同一首歌再播一次可能换形状）。设置里可以固定成其中一种，默认随机。</span></div>
+      <div class="q"><b>2. 封面轮廓旋转：播放时 40 秒一圈</b><span>暂停时停下并转正成圆角方形；开启“减少动画”时不转。</span></div>
+      <div class="q"><b>3. 律动强度：新增柔和 / 标准</b><span>默认标准；只在“显示歌词背景”选了律动时出现。</span></div>
+      <div class="q"><b>4. 电视环境模式时钟：可设置</b><span>默认显示，只在电视上出现这个开关。</span></div>
+    </div>
+  </div>
+</section>
+
+</div>
+<script>
+'use strict';
+const TAU = Math.PI * 2;
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- 图标（Material Symbols 24dp 路径） ---------- */
+const IC = {
+  down: 'M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z',
+  more: 'M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
+  play: 'M8 5.14v13.72a1 1 0 0 0 1.5.86l10.6-6.86a1 1 0 0 0 0-1.72L9.5 4.28A1 1 0 0 0 8 5.14z',
+  pause: 'M7.5 5h3v14h-3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm6 0h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3z',
+  prev: 'M6 6h2.2v12H6zm3.6 6 8.4 6V6z',
+  next: 'M6 18l8.4-6L6 6zm9.8-12H18v12h-2.2z',
+  fav: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
+  favo: 'M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z',
+  queue: 'M15 6H3v2h12zm0 4H3v2h12zM3 16h8v-2H3zM17 6v8.18A3 3 0 1 0 19 17V8h3V6z',
+  timer: 'M12.34 2.02A10 10 0 1 0 20.66 16.98C13.15 16.73 8.57 8.55 12.34 2.02z',
+  lyrics: 'M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm0 14H5.17L4 17.17V4h16zM6 12h7v2H6zm0-3h12v2H6zm0-3h12v2H6z',
+  swap: 'M6.99 11 3 15l3.99 4v-3H14v-2H6.99zM21 9l-3.99-4v3H10v2h7.01v3z',
+  shuffle: 'M10.59 9.17 5.41 4 4 5.41l5.17 5.17zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04z',
+  check: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
+  back: 'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z',
+  palette: 'M12 3a9 9 0 0 0 0 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z',
+  nowplaying: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-2 14.5v-9l6 4.5z',
+  eq: 'M7 18h2V6H7zm4 4h2V2h-2zm-8-8h2v-4H3zm12 4h2V6h-2zm4-8v4h2v-4z',
+  search: 'M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
+  close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
+};
+const ic = (n, size = 24) => `<svg class="i" viewBox="0 0 24 24" style="width:${size}px;height:${size}px" aria-hidden="true"><path d="${IC[n]}"/></svg>`;
+
+/* ---------- 形状：用极坐标半径函数近似 MaterialShapes，最大半径都是 1 ---------- */
+const SQ_P = 5;
+const SHAPES = {
+  Cookie12Sided: th => 1 - 0.07 * (1 - Math.cos(12 * th)) / 2,
+  Cookie9Sided: th => 1 - 0.095 * (1 - Math.cos(9 * th)) / 2,
+  Cookie7Sided: th => 1 - 0.115 * (1 - Math.cos(7 * th)) / 2,
+  Sunny: th => { const w = (Math.cos(8 * th) + 1) / 2; return 1 - 0.12 * (1 - w * w); },
+  SoftBurst: th => { const w = (Math.cos(10 * th) + 1) / 2; return 1 - 0.17 * (1 - Math.pow(w, 1.6)); },
+  Clover8Leaf: th => { const v = (1 - Math.cos(8 * th)) / 2; return 1 - 0.22 * Math.pow(v, 4); },
+  Circle: () => 1,
+  // 圆角方形：平边贴到边框，四角比圆更外，暂停时能看到几乎完整的封面
+  Square: th => {
+    const c = Math.abs(Math.cos(th)), s = Math.abs(Math.sin(th));
+    return Math.pow(Math.pow(c, SQ_P) + Math.pow(s, SQ_P), -1 / SQ_P);
+  },
+};
+const SHAPE_PICKS = ['Cookie12Sided', 'Cookie9Sided', 'Cookie7Sided', 'Sunny', 'SoftBurst', 'Clover8Leaf'];
+const SHAPE_LABEL = { random: '随机', Cookie12Sided: '十二瓣', Cookie9Sided: '九瓣', Cookie7Sided: '七瓣', Sunny: '太阳', SoftBurst: '星芒', Clover8Leaf: '八叶', Square: '圆角方形' };
+/* 随机：从 6 种里抽一种，不与上一首相同 */
+const randomShape = except => { const pool = SHAPE_PICKS.filter(n => n !== except); return pool[Math.floor(Math.random() * pool.length)]; };
+
+function polarPath(fn, rot = 0, R = 50, cx = 50, cy = 50, n = 220) {
+  let d = '';
+  for (let i = 0; i < n; i++) {
+    const th = i / n * TAU;
+    const r = fn(th - rot) * R;
+    d += (i ? 'L' : 'M') + (cx + r * Math.cos(th)).toFixed(2) + ' ' + (cy + r * Math.sin(th)).toFixed(2);
+  }
+  return d + 'Z';
+}
+
+/* ---------- M3 Expressive 弹簧 → CSS linear() ---------- */
+function springCurve(z, k) {
+  const c = 2 * z * Math.sqrt(k), dt = 1 / 1000, xs = [];
+  let x = 0, v = 0, t = 0;
+  while (t < 2) {
+    v += (-k * (x - 1) - c * v) * dt; x += v * dt; t += dt; xs.push(x);
+    if (t > .1 && Math.abs(1 - x) < .0015 && Math.abs(v) < .02) break;
+  }
+  const pts = [];
+  for (let i = 0; i <= 40; i++) pts.push(i === 40 ? 1 : xs[Math.min(xs.length - 1, Math.round(i / 40 * (xs.length - 1)))]);
+  return [`linear(0, ${pts.slice(1).map(p => p.toFixed(3)).join(', ')})`, t.toFixed(2) + 's'];
+}
+if (CSS.supports('transition-timing-function', 'linear(0, 1)')) {
+  const root = document.documentElement.style;
+  [['--fast', .6, 800], ['--spatial', .8, 380], ['--slow', .8, 200]].forEach(([n, z, k]) => {
+    const [curve, dur] = springCurve(z, k);
+    root.setProperty(n, curve); root.setProperty(n + '-d', dur);
+  });
+}
+
+/* ---------- 歌曲：歌词都是宋词 / 南唐词原文（公有领域） ---------- */
+const SONGS = [
+  {
+    title: '但愿人长久', artist: '王菲', src: 'QQ音乐', q: '无损', dur: 245, shape: 'Cookie9Sided',
+    pal: { p: '#B9C3FF', op: '#1E2A60', pc: '#3A4580', opc: '#DEE0FF', sc: '#3F4466', osc: '#DFE1F9', s: '#12131A', os: '#E4E1EC', osv: '#C5C5D6', sch: '#272833', t: '#F4B3DA', sec: '#C4C5E9' },
+    blobs: ['#5361C9', '#B05C9A', '#2E3C8F', '#8E9CF0'],
+    lyrics: ['明月几时有', '把酒问青天', '不知天上宫阙', '今夕是何年', '我欲乘风归去', '又恐琼楼玉宇', '高处不胜寒', '起舞弄清影', '何似在人间', '转朱阁 低绮户', '照无眠', '不应有恨', '何事长向别时圆', '人有悲欢离合', '月有阴晴圆缺', '此事古难全', '但愿人长久', '千里共婵娟'],
+  },
+  {
+    title: '独上西楼', artist: '邓丽君', src: '网易云', q: '极高', dur: 232, shape: 'Sunny',
+    pal: { p: '#FFB86E', op: '#4A2800', pc: '#6B3D00', opc: '#FFDCBE', sc: '#5A4330', osc: '#FFDCC0', s: '#18120D', os: '#EEE0D6', osv: '#D6C3B4', sch: '#2E251E', t: '#C9CC8C', sec: '#E3C1A5' },
+    blobs: ['#D07A22', '#9A3E24', '#E8AC4E', '#6B4420'],
+    lyrics: ['无言独上西楼', '月如钩', '寂寞梧桐', '深院锁清秋', '剪不断', '理还乱', '是离愁', '别是一般滋味', '在心头', '无言独上西楼', '月如钩', '寂寞梧桐', '深院锁清秋'],
+  },
+  {
+    title: '几多愁', artist: '邓丽君', src: '酷我', q: '320k', dur: 271, shape: 'Cookie12Sided',
+    pal: { p: '#66DBC6', op: '#00382F', pc: '#005046', opc: '#86F8E1', sc: '#2E4A44', osc: '#CCE8E1', s: '#0E1514', os: '#DDE4E1', osv: '#BEC9C5', sch: '#232B29', t: '#A8CAEC', sec: '#B1CCC5' },
+    blobs: ['#1E9C8A', '#3076A8', '#7ACBB8', '#C98AA0'],
+    lyrics: ['春花秋月何时了', '往事知多少', '小楼昨夜又东风', '故国不堪回首月明中', '雕栏玉砌应犹在', '只是朱颜改', '问君能有几多愁', '恰似一江春水向东流'],
+  },
+];
+const LINE_S = 3.8, LYRIC_START = 14;
+const palVars = p => `--p:${p.p};--op:${p.op};--pc:${p.pc};--opc:${p.opc};--sc:${p.sc};--osc:${p.osc};--s:${p.s};--os:${p.os};--osv:${p.osv};--sch:${p.sch}`;
+const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const hexA = (hex, a) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a.toFixed(4)})`;
+};
+
+/* ---------- 封面：每首歌一张程序生成的 512px 插画 ---------- */
+function paintCover(i) {
+  const S = 512, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  let rnd = 1234 + i * 77;
+  const rand = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
+  if (i === 0) {
+    let gr = g.createRadialGradient(360, 150, 10, 300, 220, 560);
+    gr.addColorStop(0, '#6F7FE0'); gr.addColorStop(.45, '#2B3478'); gr.addColorStop(1, '#0B0E2C');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    gr = g.createRadialGradient(350, 160, 40, 350, 160, 230);
+    gr.addColorStop(0, 'rgba(255,236,200,.45)'); gr.addColorStop(1, 'rgba(255,236,200,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    g.fillStyle = '#F5ECD6'; g.beginPath(); g.arc(350, 160, 76, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(190,175,150,.35)';
+    [[330, 140, 14], [372, 182, 10], [352, 196, 7]].forEach(([x, y, r]) => { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); });
+    g.strokeStyle = 'rgba(205,200,255,.28)'; g.lineCap = 'round';
+    for (let k = 0; k < 7; k++) { g.lineWidth = 10 + rand() * 18; const y = 230 + k * 26; g.beginPath(); g.moveTo(40 + rand() * 140, y); g.lineTo(260 + rand() * 220, y + rand() * 8); g.stroke(); }
+    g.fillStyle = '#090B22';
+    g.beginPath(); g.moveTo(0, 430); g.lineTo(60, 430); g.quadraticCurveTo(120, 380, 180, 372); g.lineTo(300, 372); g.quadraticCurveTo(360, 380, 420, 420); g.lineTo(512, 420); g.lineTo(512, 512); g.lineTo(0, 512); g.fill();
+    g.fillRect(150, 372, 180, 18);
+    g.beginPath(); g.moveTo(120, 392); g.quadraticCurveTo(240, 330, 360, 392); g.fill();
+  } else if (i === 1) {
+    let gr = g.createLinearGradient(0, 0, 0, S);
+    gr.addColorStop(0, '#F6B252'); gr.addColorStop(.5, '#C8582A'); gr.addColorStop(1, '#3F1712');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    const m = document.createElement('canvas'); m.width = m.height = S;
+    const mg = m.getContext('2d');
+    mg.fillStyle = '#FFF0C8'; mg.beginPath(); mg.arc(160, 150, 64, 0, TAU); mg.fill();
+    mg.globalCompositeOperation = 'destination-out'; mg.beginPath(); mg.arc(188, 128, 60, 0, TAU); mg.fill();
+    gr = g.createRadialGradient(150, 160, 20, 150, 160, 200);
+    gr.addColorStop(0, 'rgba(255,230,170,.4)'); gr.addColorStop(1, 'rgba(255,230,170,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    g.drawImage(m, 0, 0);
+    g.strokeStyle = '#2A100C'; g.fillStyle = '#2A100C'; g.lineWidth = 7;
+    g.beginPath(); g.moveTo(512, 60); g.bezierCurveTo(420, 90, 380, 160, 300, 190); g.stroke();
+    for (let k = 0; k < 9; k++) {
+      const t = k / 8, x = lerp(500, 310, t), y = lerp(66, 186, t) + Math.sin(t * 5) * 8;
+      g.save(); g.translate(x, y + 18); g.rotate(.4 + rand() * .8); g.beginPath(); g.ellipse(0, 0, 26, 14, 0, 0, TAU); g.fill(); g.restore();
+    }
+    g.beginPath(); g.moveTo(0, 512); g.lineTo(0, 330); g.lineTo(40, 300); g.lineTo(150, 300); g.lineTo(190, 330); g.lineTo(170, 330); g.lineTo(170, 512); g.fill();
+    g.fillRect(30, 250, 120, 14);
+    g.beginPath(); g.moveTo(10, 262); g.quadraticCurveTo(90, 210, 170, 262); g.fill();
+  } else {
+    let gr = g.createLinearGradient(0, 0, 0, S);
+    gr.addColorStop(0, '#9FE0D2'); gr.addColorStop(.42, '#22968A'); gr.addColorStop(1, '#0A3A40');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    gr = g.createRadialGradient(256, 300, 10, 256, 300, 200);
+    gr.addColorStop(0, 'rgba(255,255,255,.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    g.strokeStyle = 'rgba(255,255,255,.2)'; g.lineWidth = 3;
+    for (let k = 0; k < 9; k++) { const y = 300 + k * 24; g.beginPath(); g.ellipse(256 + rand() * 60 - 30, y, 120 + k * 22, 6 + k, 0, 0, TAU); g.stroke(); }
+    for (let k = 0; k < 34; k++) {
+      g.save(); g.translate(rand() * S, rand() * 300); g.rotate(rand() * TAU);
+      g.fillStyle = rand() > .35 ? 'rgba(248,190,206,.9)' : 'rgba(255,250,245,.9)';
+      g.beginPath(); g.ellipse(0, 0, 9 + rand() * 8, 5 + rand() * 4, 0, 0, TAU); g.fill(); g.restore();
+    }
+  }
+  const sm = document.createElement('canvas');
+  sm.width = sm.height = 24;
+  sm.getContext('2d').drawImage(cv, 0, 0, 24, 24);
+  return { url: cv.toDataURL('image/jpeg', .86), small: sm };
+}
+SONGS.forEach((s, i) => Object.assign(s, paintCover(i)));
+
+/* ---------- 设备外框按可用宽度整体缩放 ---------- */
+const BASE_W = { phone: 360, tablet: 1280, tv: 960 };
+const scaler = new ResizeObserver(entries => {
+  for (const e of entries) {
+    const dev = e.target, scr = dev.firstElementChild;
+    if (!scr) continue;
+    const kind = dev.classList.contains('tablet') ? 'tablet' : dev.classList.contains('tv') ? 'tv' : 'phone';
+    scr.style.setProperty('--k', (dev.clientWidth / BASE_W[kind]).toFixed(5));
+  }
+});
+let uid = 0;
+</script>
+<script>
+/* ================= 静态原型（CSS 动画） ================= */
+const BLOB_POS = {
+  phone: [[-35, -8, 120, 'm-d1', 26], [25, 34, 105, 'm-d2', 31], [-25, 58, 100, 'm-d3', 37], [45, -6, 70, 'm-d4', 23]],
+  wide: [[-12, -30, 62, 'm-d1', 26], [40, 20, 58, 'm-d2', 31], [-10, 40, 55, 'm-d3', 37], [58, -20, 40, 'm-d4', 23]],
+};
+const BLOB_ALPHA = [.5, .4, .36, .28];
+
+function field(song, kind) {
+  const pos = BLOB_POS[kind === 'phone' ? 'phone' : 'wide'];
+  const blobs = pos.map(([l, t, w, anim, d], i) =>
+    `<div class="b" style="left:${l}%;top:${t}%;width:${w}%;aspect-ratio:1;--c:${song.blobs[i]};--a:${BLOB_ALPHA[i]};--anim:${anim};--d:${d}s"></div>`).join('');
+  const scrim = kind === 'phone' ? '' : kind === 'tv' ? ' tv' : ' wide';
+  return `<div class="m-field"><div class="cv" style="background-image:url(${song.url})"></div>${blobs}</div><div class="m-scrim${scrim}"></div>`;
+}
+
+function cover(song, x, y, size, { paused = false, circle = false, halo = true } = {}) {
+  const id = 'cp' + (++uid);
+  const fn = circle ? SHAPES.Circle : paused ? SHAPES.Square : SHAPES[song.shape];
+  return `<div class="m-cover${paused || circle ? ' paused' : ''}" style="left:${x}px;top:${y}px;width:${size}px;height:${size}px">
+    ${halo ? `<div class="halo" style="background-image:url(${song.url})"></div>` : ''}
+    <svg viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="${id}"><path class="spin" d="${polarPath(fn)}"/></clipPath></defs>
+    <image href="${song.url}" x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMid slice" clip-path="url(#${id})"/></svg></div>`;
+}
+
+/* 波浪进度：已播放部分是正弦波（播放中平移），未播放是平直轨道 + 末端圆点 */
+function wavePath(px, amp, wl, phase = 0) {
+  let d = '';
+  for (let x = -wl; x <= px; x += 2) d += (d ? 'L' : 'M') + x.toFixed(1) + ' ' + (12 + amp * Math.sin((x + phase) / wl * TAU)).toFixed(2);
+  return d;
+}
+function wave(x, y, w, frac, playing, { amp = 3.2, wl = 40 } = {}) {
+  const id = 'wv' + (++uid), px = Math.max(4, frac * w);
+  return `<svg class="m-wave" style="left:${x}px;top:${y}px;width:${w}px;height:24px" viewBox="0 0 ${w} 24" aria-hidden="true">
+    <defs><clipPath id="${id}"><rect x="0" y="0" width="${px.toFixed(1)}" height="24"/></clipPath></defs>
+    <g clip-path="url(#${id})"><path class="w${playing ? ' move' : ''}" style="--wl:${wl}px" d="${wavePath(px + wl, playing ? amp : 0, wl)}"/></g>
+    <path class="t" d="M${(px + 8).toFixed(1)} 12L${w - 2} 12"/><circle class="stop" cx="${w - 2}" cy="12" r="2"/></svg>`;
+}
+const times = (x, y, w, pos, dur) => `<div class="m-times" style="left:${x}px;top:${y}px;width:${w}px"><span>${fmt(pos)}</span><span>${fmt(dur)}</span></div>`;
+
+function group(x, y, [a, b, c], h, playing, { focus = false, ic: icSize = 34 } = {}) {
+  const r = h / 2, gap = playing ? 8 : 4, shrink = playing ? 4 : 0;
+  return `<div class="m-group${playing ? ' playing' : ''}" style="left:${x}px;top:${y}px;height:${h}px;--r:${r}px;--ic:${icSize}px">
+    <div class="m-seg lead" style="--w:${a - shrink}px">${ic('prev')}</div>
+    <div class="m-seg mid${focus ? ' m-ring' : ''}" style="--w:${b}px${focus ? ';transform:scale(1.06)' : ''}">${ic(playing ? 'pause' : 'play', icSize + 6)}</div>
+    <div class="m-seg trail" style="--w:${c - shrink}px">${ic('next')}</div></div>`;
+}
+const status = (t = '21:30') => `<div class="m-status"><span>${t}</span><span class="sig"><i></i><i></i><i class="bat"></i></span></div>`;
+const pill = song => `<span class="m-pill"><span class="d"></span>${song.src}<span class="ql">· ${song.q}</span>${ic('down', 16)}</span>`;
+const fav = (on, extra = '') => `<span class="m-fav${on ? ' on' : ''}" ${extra}>${ic(on ? 'fav' : 'favo')}</span>`;
+
+function toolbar(x, y, { lyricsOn = false, timer = '', h = 60 } = {}) {
+  return `<div class="m-tool" style="left:${x}px;top:${y}px;height:${h}px">
+    <span class="m-ib${lyricsOn ? ' on' : ''}">${ic('lyrics')}${lyricsOn ? '歌词' : ''}</span>
+    <span class="m-ib">${ic('queue')}</span>
+    <span class="m-ib${timer ? ' tm' : ''}">${ic('timer', timer ? 20 : 24)}${timer}</span>
+    <span class="m-ib">${ic('swap')}</span>
+    <span class="m-ib">${ic('more')}</span></div>`;
+}
+
+/* 歌词列：当前行放在 anchor 处，远处的行降透明度并模糊 */
+function lyricCol(song, ci, k, { x, y, w, h, fs, grow, gap, anchor = .4 }) {
+  const lh = fs * 1.36 + gap;
+  const shift = h * anchor - ci * lh - lh / 2;
+  const lines = song.lyrics.map((t, i) => {
+    const d = Math.abs(i - ci);
+    const cls = d === 0 ? 'ln cur kara' : d === 1 ? 'ln near' : 'ln far';
+    return `<div class="${cls}"${d === 0 ? ` style="--k:${k}%"` : ''}>${t}</div>`;
+  }).join('');
+  return `<div class="m-lyrics" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;--fs:${fs}px;--grow:${grow};--gap:${gap}px">
+    <div class="col" style="transform:translateY(${shift.toFixed(1)}px)">${lines}</div></div>`;
+}
+
+const MOCKS = {
+  phoneDefault(song) {
+    const playing = false;
+    return field(song, 'phone') + status() +
+      `<div class="m-top"><span class="m-ib">${ic('down')}</span>${pill(song)}<span class="m-ib">${ic('more')}</span></div>` +
+      cover(song, 40, 100, 280, { paused: !playing }) +
+      `<div class="m-abs" style="left:24px;right:16px;top:402px;display:flex;align-items:center;gap:8px">
+        <div style="flex:1;min-width:0"><div class="m-title">${song.title}</div><div class="m-artist">${song.artist}</div></div>${fav(true)}</div>
+      <div class="m-abs" style="left:24px;right:24px;top:486px"><div class="m-ly1 kara" style="--k:0%">${song.lyrics[2]}</div><div class="m-ly2">${song.lyrics[3]}</div></div>` +
+      wave(24, 552, 312, .22, playing) + times(24, 582, 312, 51, song.dur) +
+      group(24, 606, [80, 144, 80], 88, playing) + toolbar(180, 712, { timer: '28:40' }) +
+      `<div class="m-handle"></div>`;
+  },
+  phoneLyrics(song) {
+    return field(song, 'phone') + `<div class="m-abs" style="inset:0;background:color-mix(in srgb,var(--s) 30%,transparent)"></div>` + status() +
+      cover(song, 20, 40, 52, { circle: true, halo: false }) +
+      `<div class="m-abs" style="left:86px;right:64px;top:44px"><div style="font:700 17px/1.3 var(--body)">${song.title}</div><div style="font:500 14px/1.4 var(--body);color:var(--p)">${song.artist}</div></div>
+       <div class="m-abs" style="right:8px;top:42px">${fav(false)}</div>` +
+      lyricCol(song, 6, 55, { x: 24, y: 104, w: 312, h: 516, fs: 23, grow: 1.22, gap: 18, anchor: .42 }) +
+      wave(24, 636, 312, .46, true) + times(24, 666, 312, 113, song.dur) +
+      group(20, 696, [52, 88, 52], 56, true, { ic: 26 }) +
+      `<div class="m-tool" style="left:auto;right:16px;translate:none;top:694px;height:60px"><span class="m-ib sel">${ic('lyrics')}</span><span class="m-ib">${ic('queue')}</span></div>` +
+      `<div class="m-handle"></div>`;
+  },
+  phoneIdle(song) {
+    return field(song, 'phone') + status() +
+      cover(song, 40, 108, 280) +
+      `<div class="m-abs" style="left:24px;right:24px;top:414px"><div class="m-title">${song.title}</div><div class="m-artist">${song.artist}</div></div>
+       <div class="m-abs" style="left:24px;right:24px;top:500px;display:grid;gap:8px">
+         <div class="kara" style="--k:62%;font:800 24px/1.35 var(--body)">${song.lyrics[3]}</div>
+         <div class="m-ly2" style="font-size:18px">${song.lyrics[4]}</div>
+         <div class="m-ly2" style="font-size:18px;opacity:.6">${song.lyrics[5]}</div></div>
+       <div class="m-thin" style="left:24px;right:24px;top:752px"><i style="width:31%"></i></div>
+       <div class="m-handle"></div>`;
+  },
+  tabletDefault(song) {
+    return field(song, 'tablet') + status() +
+      `<span class="m-ib m-abs" style="left:16px;top:34px">${ic('down')}</span><span class="m-ib m-abs" style="right:16px;top:34px">${ic('more')}</span>` +
+      cover(song, 120, 72, 320) +
+      `<div class="m-abs" style="left:120px;width:328px;top:410px;display:flex;align-items:center;gap:8px">
+        <div style="flex:1;min-width:0"><div class="m-title" style="font-size:34px">${song.title}</div><div class="m-artist" style="font-size:19px">${song.artist}</div></div>${fav(true)}</div>
+       <div class="m-abs" style="left:120px;top:500px">${pill(song)}</div>` +
+      wave(120, 548, 320, .38, true) + times(120, 578, 320, 93, song.dur) +
+      group(120, 604, [80, 152, 80], 88, true) +
+      toolbar(280, 714, { h: 56 }) +
+      lyricCol(song, 5, 38, { x: 600, y: 56, w: 616, h: 688, fs: 28, grow: 1.36, gap: 24, anchor: .44 });
+  },
+  tabletFocus(song) {
+    return field(song, 'tablet') + `<div class="m-abs" style="inset:0;background:color-mix(in srgb,var(--s) 22%,transparent)"></div>` + status() +
+      `<div class="m-dock" style="left:32px;top:132px;width:88px;padding:12px 0;flex-direction:column;gap:10px;border-radius:44px">
+        <div style="position:relative;width:64px;height:64px">${cover(song, 0, 0, 64, { circle: true, halo: false })}</div>
+        <span class="m-ib">${ic('prev', 28)}</span>
+        <span style="width:72px;height:72px;border-radius:24px;background:var(--p);color:var(--op);display:grid;place-items:center">${ic('pause', 36)}</span>
+        <span class="m-ib">${ic('next', 28)}</span>
+        <span style="width:40px;height:1px;background:color-mix(in srgb,var(--os) 20%,transparent)"></span>
+        <span class="m-ib" style="background:var(--pc);color:var(--opc);border-radius:16px">${ic('lyrics')}</span>
+        <span class="m-ib">${ic('queue')}</span></div>
+       <div class="m-abs" style="left:180px;top:40px;font:600 17px/1.3 var(--body);color:var(--osv)">${song.title} · ${song.artist}</div>` +
+      lyricCol(song, 3, 70, { x: 180, y: 84, w: 1000, h: 610, fs: 34, grow: 1.42, gap: 28, anchor: .46 }) +
+      wave(180, 716, 980, .52, true, { amp: 3.6, wl: 48 }) + times(180, 746, 980, 141, song.dur);
+  },
+  tvDefault(song) {
+    return field(song, 'tv') +
+      cover(song, 72, 50, 280) +
+      `<div class="m-abs" style="left:72px;top:350px">${pill(song)}</div>
+       <div class="m-abs" style="left:400px;right:56px;top:46px"><div class="m-title" style="font-size:34px">${song.title}</div><div class="m-artist" style="font-size:20px">${song.artist}</div></div>` +
+      lyricCol(song, 2, 64, { x: 400, y: 136, w: 500, h: 280, fs: 22, grow: 1.36, gap: 12, anchor: .42 }) +
+      `<div class="m-dock" style="left:48px;right:48px;top:440px;height:76px;padding:0 14px;border-radius:38px">
+        <div style="position:relative;width:236px;height:56px;flex:none">${group(0, 0, [64, 100, 64], 56, true, { focus: true, ic: 26 })}</div>
+        <div style="position:relative;flex:1;height:48px">${wave(0, 2, 330, .3, true)}${times(0, 32, 330, 70, song.dur)}</div>
+        <span class="m-ib" style="background:color-mix(in srgb,var(--os) 12%,transparent)">${ic('timer')}</span>
+        <span class="m-ib" style="background:var(--pc);color:var(--opc)">${ic('fav')}</span>
+        <span class="m-ib" style="background:color-mix(in srgb,var(--os) 12%,transparent)">${ic('queue')}</span>
+        <span class="m-ib" style="background:color-mix(in srgb,var(--os) 12%,transparent)">${ic('swap')}</span></div>`;
+  },
+  tvAmbient(song) {
+    return field(song, 'tv') +
+      cover(song, 72, 60, 300) +
+      `<div class="m-clock" style="right:56px;top:40px">21:30</div>
+       <div class="m-abs" style="left:420px;right:150px;top:46px"><div class="m-title" style="font-size:30px">${song.title}</div><div class="m-artist" style="font-size:19px">${song.artist}</div></div>` +
+      lyricCol(song, 13, 48, { x: 420, y: 128, w: 500, h: 370, fs: 26, grow: 1.38, gap: 16, anchor: .44 }) +
+      `<div class="m-thin" style="left:48px;right:48px;top:516px"><i style="width:64%"></i></div>`;
+  },
+};
+
+/* ---------- 设置 → 播放页（浏览配色：深色 TonalSpot） ---------- */
+const BROWSE = { p: '#B9C3FF', op: '#212C61', pc: '#394379', opc: '#DDE1FF', sc: '#424659', osc: '#DFE1F9', s: '#121318', os: '#E3E1E9', osv: '#C6C5D0', sch: '#292A2F' };
+const browseVars = palVars(BROWSE) + ';--scl:#1A1B21';
+
+function shapeChip(song, m, on, size = 56) {
+  const id = 'sc' + (++uid);
+  const art = m === 'random'
+    ? `<path d="${polarPath(SHAPES.Cookie9Sided)}" fill="var(--pc)"/><g transform="translate(26 26) scale(2)"><path d="${IC.shuffle}" fill="var(--opc)"/></g>`
+    : `<defs><clipPath id="${id}"><path d="${polarPath(SHAPES[m])}"/></clipPath></defs><image href="${song.url}" x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMid slice" clip-path="url(#${id})"/>`;
+  return `<div class="st-chip${on ? ' on' : ''}"><div class="pv" style="width:${size}px;height:${size}px"><svg viewBox="0 0 100 100">${art}</svg>${on ? `<i class="ck">${ic('check', 14)}</i>` : ''}</div><span>${SHAPE_LABEL[m]}</span></div>`;
+}
+const toggles = (x, y, w, h, opts, on) => `<div class="st-tg" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;--h:${h / 2}px">${opts.map(o => `<span${o === on ? ' class="on"' : ''}>${o === on ? ic('check', 18) : ''}${o}</span>`).join('')}</div>`;
+const label = (x, y, t) => `<div class="st-label" style="left:${x}px;top:${y}px">${t}</div>`;
+const note = (x, y, w, t) => `<div class="st-note" style="left:${x}px;top:${y}px;width:${w}px">${t}</div>`;
+
+Object.assign(MOCKS, {
+  settingsPhone(song) {
+    return `<div class="m-abs" style="inset:0;background:var(--s)"></div>` + status() +
+      `<span class="m-ib m-abs" style="left:4px;top:32px">${ic('back')}</span>
+       <div class="m-abs" style="left:16px;top:96px;font:500 30px/1.25 var(--body);color:var(--os)">播放页</div>
+       <div class="m-abs" style="left:16px;top:138px;font:400 14px/1.4 var(--body);color:var(--osv)">封面形状、歌词背景、律动强度</div>` +
+      label(20, 184, '封面形状') +
+      `<div class="st-card" style="left:16px;right:16px;top:216px;padding:16px 4px;display:grid;grid-template-columns:repeat(4,1fr);row-gap:14px;justify-items:center">
+        ${['random', ...SHAPE_PICKS].map(m => shapeChip(song, m, m === 'random')).join('')}</div>` +
+      note(20, 424, 320, '随机：每次切歌换一种，不和上一首重复。选了具体形状后所有歌都用它。暂停时都会变成圆角方形。') +
+      label(20, 498, '显示歌词背景') + toggles(16, 530, 328, 48, ['关闭', '动态', '律动'], '律动') +
+      label(20, 598, '律动强度') + toggles(16, 630, 328, 48, ['柔和', '标准'], '标准') +
+      note(20, 688, 320, '柔和只改流速和光量，没有鼓点光环。标准下光团随低频胀缩，鼓点时从封面散开一圈很淡的光环。') +
+      `<div class="m-handle"></div>`;
+  },
+  settingsTv(song) {
+    const rows = [['palette', '外观', '布局、主题、配色来源'], ['nowplaying', '播放页', '封面形状、歌词背景、律动'], ['swap', '播放与换源', '换源模式、平台优先级'], ['eq', '均衡器', '本机播放音效'], ['search', '搜索与浏览', '聚合平台与默认来源']];
+    const seg = (i, n) => i === 0 ? '16px 16px 4px 4px' : i === n - 1 ? '4px 4px 16px 16px' : '4px';
+    return `<div class="m-abs" style="inset:0;background:var(--s)"></div>
+      <div class="m-abs" style="left:32px;top:30px;font:900 30px/1.2 var(--body);color:var(--os)">设置</div>
+      <div class="m-abs" style="left:28px;top:84px;width:276px;display:grid;gap:2px">
+        ${rows.map(([icn, t, sub], i) => `<div class="st-row" style="height:60px;padding:0 12px;border-radius:${seg(i, rows.length)};background:${i === 1 ? 'var(--sc)' : 'var(--scl)'}">
+          <span class="tone">${ic(icn, 20)}</span><div><div class="t">${t}</div><div class="u">${sub}</div></div></div>`).join('')}</div>
+      <div class="m-abs" style="left:28px;top:406px;width:276px;display:grid;gap:2px">
+        <div class="st-row" style="height:60px;padding:0 12px;border-radius:16px 16px 4px 4px;background:var(--scl)"><span class="tone" style="background:var(--sch);color:var(--osc)">${ic('swap', 20)}</span><div><div class="t">平台账号</div><div class="u">扫码登录、Cookie 与退出</div></div></div>
+        <div class="st-row" style="height:60px;padding:0 12px;border-radius:4px 4px 16px 16px;background:var(--scl)"><span class="tone" style="background:var(--sch);color:var(--osc)">${ic('queue', 20)}</span><div><div class="t">音乐库同步</div><div class="u">自建歌单的云端同步</div></div></div></div>
+      <div class="m-abs" style="left:336px;top:30px;font:700 26px/1.25 var(--body);color:var(--os)">播放页</div>
+      <div class="m-abs" style="left:336px;top:66px;font:400 13px/1.4 var(--body);color:var(--osv)">封面形状、歌词背景、律动强度、环境模式</div>` +
+      label(340, 102, '封面形状') +
+      `<div class="m-abs" style="left:336px;top:134px;display:flex;gap:12px">${['random', ...SHAPE_PICKS].map(m => shapeChip(song, m, m === 'random', 54)).join('')}</div>` +
+      label(340, 226, '显示歌词背景') + toggles(336, 256, 420, 44, ['关闭', '动态', '律动'], '律动') +
+      label(340, 314, '律动强度') + toggles(336, 344, 280, 44, ['柔和', '标准'], '标准') +
+      label(340, 402, '电视') +
+      `<div class="st-row m-ring" style="position:absolute;left:336px;top:434px;width:576px;height:66px;padding:0 18px;border-radius:16px;background:var(--scl);transform:scale(1.02)">
+        <div style="flex:1"><div class="t">环境模式显示时钟</div><div class="u">空闲 4 秒进入环境模式后，右上角显示时间（跟随系统 12/24 小时制）</div></div><span class="st-sw"></span></div>`;
+  },
+});
+
+function mountMocks() {
+  $$('.dev[data-mock]').forEach(dev => {
+    const song = SONGS[+dev.dataset.song || 0];
+    const scr = document.createElement('div');
+    scr.className = 'screen';
+    scr.setAttribute('style', dev.dataset.mock.startsWith('settings') ? browseVars : palVars(song.pal));
+    scr.setAttribute('aria-hidden', 'true');
+    scr.innerHTML = MOCKS[dev.dataset.mock](song);
+    dev.append(scr);
+    dev.setAttribute('role', 'img');
+    dev.setAttribute('aria-label', dev.closest('figure')?.querySelector('figcaption')?.textContent || '播放页原型');
+    scaler.observe(dev);
+  });
+}
+
+function mountShapes() {
+  $('#shapes').innerHTML = [...SHAPE_PICKS, 'Square'].map(n =>
+    `<div class="shape${n === 'Square' ? ' pick' : ''}"><svg viewBox="-4 -4 108 108" aria-hidden="true"><path d="${polarPath(SHAPES[n])}" fill="var(--accent)"/></svg><span><b>${SHAPE_LABEL[n]}</b><br>${n}${n === 'Square' ? '<br>暂停态，不参与随机' : ''}</span></div>`).join('');
+}
+</script>
+<script>
+/* ================= RhythmAnalysis.kt 的 JS 移植（常量与流程一致） ================= */
+const FFT_N = 2048, MIN_DB = -100, MAX_DB = -30;
+const ENERGY_ATTACK = .62, ENERGY_RELEASE = .13;
+const AGC = { floor: 24, maxRise: .35, maxFall: .0008, minFall: .15, minRise: .03, silence: 12, gamma: .75 };
+
+class Fft {
+  constructor(n) {
+    this.n = n; this.rev = new Uint32Array(n);
+    this.cos = new Float32Array(n / 2); this.sin = new Float32Array(n / 2);
+    for (let i = 0; i < n / 2; i++) { this.cos[i] = Math.cos(-TAU * i / n); this.sin[i] = Math.sin(-TAU * i / n); }
+    let v = 0;
+    for (let i = 1; i < n; i++) { let bit = n >> 1; while (v & bit) { v ^= bit; bit >>= 1; } v ^= bit; this.rev[i] = v; }
+  }
+  run(re, im) {
+    const n = this.n;
+    for (let i = 0; i < n; i++) { const j = this.rev[i]; if (j > i) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
+    for (let len = 2; len <= n; len <<= 1) {
+      const half = len >> 1, step = n / len;
+      for (let b = 0; b < n; b += len) for (let j = 0; j < half; j++) {
+        const e = b + j, o = e + half, wr = this.cos[j * step], wi = this.sin[j * step];
+        const pr = re[o] * wr - im[o] * wi, pi = re[o] * wi + im[o] * wr;
+        re[o] = re[e] - pr; im[o] = im[e] - pi; re[e] += pr; im[e] += pi;
+      }
+    }
+  }
+}
+
+class Agc {
+  constructor() { this.reset(); }
+  reset() { this.min = 0; this.max = 0; this.span = AGC.floor; this.ready = false; }
+  push(v) {
+    if (!isFinite(v) || v < AGC.silence) return 0;
+    v = clamp(v, 0, 255);
+    if (!this.ready) { this.min = v; this.max = v + AGC.floor; this.span = AGC.floor; this.ready = true; }
+    else {
+      this.max += v > this.max ? (v - this.max) * AGC.maxRise : -(this.max - v) * AGC.maxFall;
+      this.min += (v - this.min) * (v < this.min ? AGC.minFall : AGC.minRise);
+      this.min = clamp(this.min, 0, 255 - AGC.floor);
+      this.span = Math.max(AGC.floor, this.max - this.min);
+      this.max = Math.min(255, this.min + this.span);
+    }
+    return Math.pow(clamp((v - this.min) / this.span, 0, 1), AGC.gamma);
+  }
+}
+
+/* 谱通量起拍；现在的参数（全频、不应期 110ms）和新方案（只看低频、不应期 280ms）用同一个类 */
+class Onset {
+  constructor({ refractory = 110, minFlux = 40, release = 125, jump = 1.6 } = {}) {
+    Object.assign(this, { refractory, minFlux, release, jump }); this.reset();
+  }
+  reset() { this.prev = null; this.env = 0; this.clock = 0; this.last = -Infinity; this.hist = []; }
+  push(spec, dtMs, binLimit, sensitivity = 55) {
+    const dt = isFinite(dtMs) && dtMs !== 0 ? clamp(dtMs, 1, 500) : 1000 / 30;
+    this.clock += dt; this.env *= Math.exp(-dt / this.release);
+    const count = Math.min(binLimit, spec.length);
+    if (!this.prev || this.prev.length !== count) { this.prev = spec.slice(0, count); return { onset: false, pulse: this.env }; }
+    let flux = 0;
+    for (let i = 0; i < count; i++) { const d = spec[i] - this.prev[i]; if (d > 0) flux += d; this.prev[i] = spec[i]; }
+    while (this.hist.length && this.hist[0].t <= this.clock - 1000) this.hist.shift();
+    let mean = 0; for (const h of this.hist) mean += h.f; if (this.hist.length) mean /= this.hist.length;
+    let vr = 0; for (const h of this.hist) vr += (h.f - mean) ** 2;
+    const std = this.hist.length ? Math.sqrt(vr / this.hist.length) : 0;
+    const k = 2 - clamp(sensitivity, 0, 100) / 100 * 1.2;
+    const thr = Math.max(this.minFlux, mean + k * std, mean * this.jump);
+    const onset = this.hist.length >= 8 && flux >= this.minFlux && flux > thr && this.clock - this.last >= this.refractory;
+    if (onset) { this.last = this.clock; this.env = 1; }
+    this.hist.push({ t: this.clock, f: flux });
+    return { onset, pulse: this.env };
+  }
+}
+
+const bandEnd = (hz, bins, sr) => Math.min(bins, Math.ceil(hz / (sr / (bins * 2))));
+
+class Analysis {
+  constructor() {
+    this.fft = new Fft(FFT_N);
+    this.re = new Float32Array(FFT_N); this.im = new Float32Array(FFT_N); this.spec = new Float32Array(FFT_N / 2);
+    this.win = Float32Array.from({ length: FFT_N }, (_, i) => .5 - .5 * Math.cos(TAU * i / (FFT_N - 1)));
+    this.agc = [new Agc(), new Agc(), new Agc()];
+    this.onsetOld = new Onset();
+    this.onsetKick = new Onset({ refractory: 280, minFlux: 40 });
+    this.energy = 0; this.loud = 0;
+  }
+  reset() { this.agc.forEach(a => a.reset()); this.onsetOld.reset(); this.onsetKick.reset(); this.energy = 0; this.loud = 0; }
+  run(samples, sr, dtMs) {
+    let sq = 0;
+    for (let i = 0; i < FFT_N; i++) { const s = samples[i]; sq += s * s; this.re[i] = s * this.win[i]; this.im[i] = 0; }
+    this.fft.run(this.re, this.im);
+    for (let i = 0; i < this.spec.length; i++) {
+      const mag = 2 * Math.hypot(this.re[i], this.im[i]) / FFT_N;
+      const db = 20 * Math.log10(Math.max(mag, 1e-12));
+      this.spec[i] = clamp((db - MIN_DB) / (MAX_DB - MIN_DB) * 255, 0, 255);
+    }
+    const bins = this.spec.length;
+    const bassEnd = bandEnd(690, bins, sr), midEnd = bandEnd(4000, bins, sr), trebleEnd = bandEnd(14000, bins, sr);
+    const avg = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += this.spec[i]; return b > a ? s / (b - a) : 0; };
+    const old = this.onsetOld.push(this.spec, dtMs, trebleEnd);
+    const kick = this.onsetKick.push(this.spec, dtMs, bassEnd, 45);
+    const bass = this.agc[0].push(avg(0, bassEnd)), mid = this.agc[1].push(avg(bassEnd, midEnd)), treble = this.agc[2].push(avg(midEnd, trebleEnd));
+    this.energy += (bass - this.energy) * (bass > this.energy ? ENERGY_ATTACK : ENERGY_RELEASE);
+    // 新增：整段 RMS 的响度，-42dBFS → 0，-8dBFS → 1
+    const db = 20 * Math.log10(Math.max(Math.sqrt(sq / FFT_N), 1e-6));
+    const loudness = clamp((db + 42) / 34, 0, 1);
+    return {
+      old: { energy: this.energy, bass, mid, treble, pulse: old.pulse, beat: old.onset },
+      sig: { bass, mid, treble, loudness, kick: kick.onset },
+    };
+  }
+}
+
+/* ================= 内置节奏：104 BPM，12 小节，第 5–6 小节是安静的过门 ================= */
+async function renderGroove() {
+  const sr = 44100, bpm = 104, beat = 60 / bpm, bars = 12, len = bars * 4 * beat;
+  const ctx = new OfflineAudioContext(1, Math.ceil(len * sr), sr);
+  const out = ctx.createGain(); out.gain.value = .7; out.connect(ctx.destination);
+  const nb = ctx.createBuffer(1, sr, sr), nd = nb.getChannelData(0);
+  for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  const env = (g, t, peak, a, d) => { g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(.0001, t + a + d); };
+  const noise = (t, type, f, q, peak, d) => {
+    const s = ctx.createBufferSource(), fl = ctx.createBiquadFilter(), g = ctx.createGain();
+    s.buffer = nb; fl.type = type; fl.frequency.value = f; fl.Q.value = q; env(g, t, peak, .002, d);
+    s.connect(fl).connect(g).connect(out); s.start(t, Math.random() * .5); s.stop(t + d + .05);
+  };
+  const kick = t => {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(44, t + .14);
+    env(g, t, .95, .004, .4); o.connect(g).connect(out); o.start(t); o.stop(t + .45);
+  };
+  const snare = t => {
+    noise(t, 'bandpass', 1900, .7, .5, .17);
+    const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = 185; env(g, t, .22, .002, .1); o.connect(g).connect(out); o.start(t); o.stop(t + .15);
+  };
+  const hat = (t, v) => noise(t, 'highpass', 7200, .5, v, .045);
+  const tone = (t, f, d, peak, cut, type = 'sawtooth', a = .01) => {
+    const o = ctx.createOscillator(), fl = ctx.createBiquadFilter(), g = ctx.createGain();
+    o.type = type; o.frequency.value = f; fl.type = 'lowpass'; fl.frequency.value = cut;
+    g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a);
+    g.gain.setValueAtTime(peak, t + Math.max(a, d - .12)); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+    o.connect(fl).connect(g).connect(out); o.start(t); o.stop(t + d + .02);
+  };
+  const roots = [55, 43.65, 65.41, 49];
+  const chords = [[220, 261.63, 329.63], [174.61, 220, 261.63], [196, 261.63, 329.63], [196, 246.94, 293.66]];
+  for (let bar = 0; bar < bars; bar++) {
+    const t0 = bar * 4 * beat, ch = bar % 4, quiet = bar === 4 || bar === 5, big = bar >= 6;
+    chords[ch].forEach(f => { tone(t0, f, 4 * beat, quiet ? .05 : .035, 1500, 'sawtooth', .25); tone(t0, f * 1.005, 4 * beat, quiet ? .04 : .025, 1200, 'sawtooth', .25); });
+    if (quiet) { tone(t0, roots[ch] * 2, 4 * beat, .08, 300, 'triangle', .3); hat(t0 + 3 * beat, .05); continue; }
+    for (let b = 0; b < 4; b++) {
+      const t = t0 + b * beat;
+      if (b === 0 || b === 2) kick(t);
+      if (big && b === 2) kick(t + beat * .75);
+      if (b === 1 || b === 3) snare(t);
+      tone(t, roots[ch] * (b === 3 ? 1.5 : 1), beat * .9, .28, 380);
+      const steps = big ? 4 : 2;
+      for (let s = 0; s < steps; s++) hat(t + s * beat / steps, s === 0 ? .12 : .07);
+    }
+  }
+  return ctx.startRendering();
+}
+
+/* ================= 信号源：内置节奏或本机音乐；有声 / 静音共用一条时钟 ================= */
+const Engine = {
+  buf: null, pcm: null, sr: 44100, dur: 1, label: '', ready: false,
+  audible: false, ctx: null, node: null, ctxStart: 0, offset: 0, perfStart: performance.now() / 1000,
+  analysis: new Analysis(), win: new Float32Array(FFT_N), lastAt: 0, latest: null, subs: [],
+  time() {
+    if (this.audible && this.ctx) {
+      const lat = (this.ctx.outputLatency || this.ctx.baseLatency || 0);
+      return ((this.ctx.currentTime - this.ctxStart - lat + this.offset) % this.dur + this.dur) % this.dur;
+    }
+    return (performance.now() / 1000 - this.perfStart + this.offset) % this.dur;
+  },
+  load(buf, label) {
+
+    const wasAudible = this.audible;
+    this.stopSound();
+    this.buf = buf; this.sr = buf.sampleRate; this.dur = buf.duration; this.label = label;
+    const mono = new Float32Array(buf.length);
+    for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) mono[i] += d[i] / buf.numberOfChannels; }
+    this.pcm = mono; this.ready = true; this.analysis.reset();
+    this.offset = 0; this.perfStart = performance.now() / 1000;
+    if (wasAudible) this.startSound();
+  },
+  audioCtx() {
+    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    return this.ctx;
+  },
+  async startSound() {
+    if (!this.ready) return false;
+    const ctx = this.audioCtx();
+    try { await ctx.resume(); } catch (e) { return false; }
+    if (ctx.state !== 'running') return false;
+    const t = this.time();
+    this.node = ctx.createBufferSource(); this.node.buffer = this.buf; this.node.loop = true;
+    this.node.connect(ctx.destination); this.node.start(0, t);
+    this.ctxStart = ctx.currentTime; this.offset = t; this.audible = true;
+    return true;
+  },
+  stopSound() {
+    if (!this.audible) return;
+    const t = this.time();
+    try { this.node.stop(); } catch (e) { /* 已停止 */ }
+    this.node = null; this.audible = false; this.offset = t; this.perfStart = performance.now() / 1000;
+  },
+  tick(now) {
+    if (!this.ready || now - this.lastAt < 1000 / 30) return;
+    const dtMs = this.lastAt ? clamp(now - this.lastAt, 1, 200) : 1000 / 30;
+    this.lastAt = now;
+    const end = Math.floor(this.time() * this.sr), n = this.pcm.length;
+    for (let i = 0; i < FFT_N; i++) this.win[i] = this.pcm[((end - FFT_N + i) % n + n) % n];
+    this.latest = this.analysis.run(this.win, this.sr, dtMs);
+    this.latest.at = now;
+    for (const f of this.subs) f(this.latest);
+  },
+};
+</script>
+<script>
+/* ================= 两种背景渲染器（画在半分辨率画布上，本来就是模糊的） ================= */
+const CAN_FILTER = 'filter' in CanvasRenderingContext2D.prototype;
+
+function fitCanvas(cv, scale = .5) {
+  const w = Math.max(1, Math.round(cv.clientWidth * scale)), h = Math.max(1, Math.round(cv.clientHeight * scale));
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  return [w, h];
+}
+const follow = (cur, target, dt, up, down) => cur + (target - cur) * (1 - Math.exp(-dt / (target > cur ? up : down)));
+
+/* 现在的 ReactiveBackdrop，按 LyricsBackdrop.kt 逐行移植；值只在 30fps 分析帧到来时变化，不插值 */
+class OldBackdrop {
+  constructor(cv) { this.cv = cv; this.c = cv.getContext('2d'); this.f = { energy: 0, bass: 0, mid: 0, treble: 0, pulse: 0 }; }
+  setSong(song) { this.song = song; }
+  feed(frame) { this.f = frame; }
+  draw() {
+    const [w, h] = fitCanvas(this.cv), c = this.c, { pal } = this.song, v = this.f, m = Math.max(w, h);
+    c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1; c.filter = 'none';
+    c.fillStyle = pal.s; c.fillRect(0, 0, w, h);
+    // 封面层：scale = 1.06 + energy×0.055 + pulse×0.075，并按 energy 平移
+    const sc = 1.06 + v.energy * .055 + v.pulse * .075;
+    c.save();
+    c.translate(w / 2 + v.energy * w * .018, h / 2 - v.energy * h * .012); c.scale(sc, sc);
+    c.globalAlpha = .76 + v.energy * .1;
+    if (CAN_FILTER) c.filter = `blur(${(w * .061).toFixed(1)}px)`;
+    c.drawImage(this.song.small, -m / 2, -m / 2, m, m);
+    c.restore(); c.filter = 'none'; c.globalAlpha = 1;
+    c.fillStyle = `rgba(0,0,0,${(.16 * (1 - v.energy) * (1 - v.pulse * .65)).toFixed(4)})`; c.fillRect(0, 0, w, h);
+    const spot = (color, cx, cy, r, tx, ty, s, alpha) => {
+      c.save(); c.translate(tx, ty); c.translate(cx, cy); c.scale(s, s); c.translate(-cx, -cy);
+      const g = c.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, hexA(color, .78)); g.addColorStop(.3, hexA(color, .48)); g.addColorStop(.62, hexA(color, .13)); g.addColorStop(1, hexA(color, 0));
+      // 与 Compose 一样只画画布大小的矩形：平移后矩形边缘会露出一条硬边
+      c.globalCompositeOperation = 'screen'; c.globalAlpha = clamp(alpha, 0, 1); c.fillStyle = g;
+      c.fillRect(0, 0, w, h); c.restore();
+    };
+    spot(pal.p, w * .1, h * .16, m * .76, v.bass * w * .08, v.bass * h * .045, 1 + v.bass * .18 + v.pulse * .08, Math.min(.06 + v.bass * .32 + v.pulse * .06, .46));
+    spot(pal.t, w * .9, h * .84, m * .66, -v.mid * w * .065, -v.mid * h * .04, 1 + v.mid * .14, .04 + v.mid * .28 + v.pulse * .025);
+    spot(pal.sec, w * .8, h * .12, m * .48, v.treble * w * .035, -v.treble * h * .03, 1 + v.pulse * .24, .025 + v.treble * .22 + v.pulse * .08);
+    // 白色脉冲光
+    const pg = c.createRadialGradient(w * .5, h * .44, 0, w * .5, h * .44, m * .58);
+    pg.addColorStop(0, 'rgba(255,255,255,.42)'); pg.addColorStop(.45, 'rgba(255,255,255,.10)'); pg.addColorStop(1, 'rgba(255,255,255,0)');
+    c.globalCompositeOperation = 'screen'; c.globalAlpha = clamp(.015 + v.energy * .035 + v.pulse * .2, 0, 1); c.fillStyle = pg; c.fillRect(0, 0, w, h);
+    c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+    const sh = c.createLinearGradient(0, 0, 0, h);
+    sh.addColorStop(0, hexA(pal.s, .08)); sh.addColorStop(.45, hexA(pal.s, .18)); sh.addColorStop(1, hexA(pal.s, .74));
+    c.fillStyle = sh; c.fillRect(0, 0, w, h);
+  }
+}
+
+/* 新方案：流光场。音乐只调速度、半径和光量；位置由相位积分得到，始终连续 */
+const FLOW_BLOBS = [
+  { cx: .26, cy: .24, ax: .22, ay: .13, fx: 1, fy: 1.3, p: 0, q: 1.1, r: .66, a: .36 },
+  { cx: .76, cy: .6, ax: .18, ay: .18, fx: .8, fy: 1.1, p: 2, q: .3, r: .6, a: .28 },
+  { cx: .34, cy: .84, ax: .25, ay: .1, fx: 1.2, fy: .9, p: 4, q: 2.2, r: .56, a: .25 },
+  { cx: .72, cy: .16, ax: .15, ay: .14, fx: 1.5, fy: 1.7, p: 1, q: 3, r: .36, a: .16 },
+];
+/* 律动强度：柔和只改流速和光量，不画鼓点光环；标准是完整方案 */
+const INTENSITY = {
+  soft: { speed: .5, radius: .07, mid: .06, treble: .04, bass: .03, bloomR: .05, bloomA: .02, cover: .04, ripple: false },
+  standard: { speed: 1.3, radius: .14, mid: .12, treble: .08, bass: .05, bloomR: .1, bloomA: .04, cover: .08, ripple: true },
+};
+class FlowField {
+  constructor(cv, { origin = [.5, .42], scrim = [.14, .3, .82], wide = false } = {}) {
+    Object.assign(this, { cv, origin, scrim, wide });
+    this.c = cv.getContext('2d');
+    this.ph = [0, 1.7, 3.1, 4.4, .6];
+    this.angle = 0; this.run = 1;
+    this.s = { bass: 0, mid: 0, treble: 0, loud: 0, bloom: 0, env: 0 };
+    this.ripples = [];
+    this.target = { bass: 0, mid: 0, treble: 0, loud: 0 };
+    this.reactive = true; this.playing = true; this.fade = 1; this.intensity = 'standard';
+  }
+  setSong(song) { if (this.song && this.song !== song) { this.prev = this.song; this.fade = 0; } this.song = song; }
+  feed(sig) {
+    if (!this.reactive || !this.playing) return;
+    this.target = { bass: sig.bass, mid: sig.mid, treble: sig.treble, loud: sig.loudness };
+    if (sig.kick && !REDUCED) {
+      this.s.env = 1;
+      if (INTENSITY[this.intensity].ripple) { this.ripples.push({ age: 0 }); if (this.ripples.length > 2) this.ripples.shift(); }
+    }
+  }
+  step(dt) {
+    const live = this.reactive && this.playing;
+    const t = live ? this.target : { bass: 0, mid: 0, treble: 0, loud: 0 }, s = this.s;
+    s.bass = follow(s.bass, t.bass, dt, .07, .38);
+    s.mid = follow(s.mid, t.mid, dt, .12, .6);
+    s.treble = follow(s.treble, t.treble, dt, .2, .5);
+    s.loud = follow(s.loud, t.loud, dt, .5, 1.2);
+    s.env *= Math.exp(-dt / .45);
+    s.bloom = follow(s.bloom, s.env, dt, .05, .3);
+    this.run = follow(this.run, this.playing && !REDUCED ? 1 : 0, dt, .5, .5);
+    const I = INTENSITY[this.intensity];
+    const speed = this.run * (1 + I.speed * s.loud) * TAU / 26;
+    for (let i = 0; i < 5; i++) this.ph[i] += dt * speed * (.7 + i * .13);
+    this.angle += dt * this.run * (1 + .5 * s.loud) * TAU / 70;
+    for (const r of this.ripples) r.age += dt;
+    this.ripples = this.ripples.filter(r => r.age < .9);
+    this.fade = Math.min(1, this.fade + dt / .45);
+  }
+  draw() {
+    if (!this.song) return;
+    const [w, h] = fitCanvas(this.cv), c = this.c, pal = this.song.pal, s = this.s, m = Math.max(w, h), I = INTENSITY[this.intensity];
+    c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1; c.filter = 'none';
+    c.fillStyle = pal.s; c.fillRect(0, 0, w, h);
+    // 底层：放大、慢慢旋转的封面
+    const cover = (img, alpha) => {
+      c.save();
+      c.translate(w * (.5 + .06 * Math.sin(this.ph[4])), h * (this.wide ? .5 : .38) + h * .04 * Math.cos(this.ph[4] * .8));
+      c.rotate(this.angle);
+      const S = m * 1.7;
+      if (CAN_FILTER) c.filter = `blur(${(m * .035).toFixed(1)}px)`;
+      c.globalAlpha = alpha; c.drawImage(img, -S / 2, -S / 2, S, S); c.restore(); c.filter = 'none';
+    };
+    const base = .42 + I.cover * s.bass;
+    if (this.prev && this.fade < 1) cover(this.prev.small, base * (1 - this.fade));
+    cover(this.song.small, base * (this.prev && this.fade < 1 ? this.fade : 1));
+    // 四团封面色光
+    c.globalCompositeOperation = 'screen'; c.globalAlpha = 1;
+    FLOW_BLOBS.forEach((b, i) => {
+      const x = w * (b.cx + b.ax * Math.sin(this.ph[i] * b.fx + b.p));
+      const y = h * (b.cy + b.ay * Math.sin(this.ph[i] * b.fy + b.q));
+      const r = m * b.r * (1 + I.radius * s.bass + I.bloomR * s.bloom);
+      const a = clamp(b.a + (i === 1 ? I.mid * s.mid : i === 3 ? I.treble * s.treble : I.bass * s.bass) + I.bloomA * s.bloom, 0, .7);
+      const col = this.song.blobs[i];
+      const g = c.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, hexA(col, a)); g.addColorStop(.45, hexA(col, a * .55)); g.addColorStop(1, hexA(col, 0));
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+    });
+    // 鼓点光环：从封面位置散开，很淡
+    const [ox, oy] = [w * this.origin[0], h * this.origin[1]];
+    for (const r of this.ripples) {
+      const rad = m * (.16 + r.age * .7), a = .09 * Math.pow(1 - r.age / .9, 1.5);
+      const g = c.createRadialGradient(ox, oy, Math.max(0, rad - m * .14), ox, oy, rad + m * .04);
+      g.addColorStop(0, hexA(pal.p, 0)); g.addColorStop(.72, hexA(pal.p, a)); g.addColorStop(1, hexA(pal.p, 0));
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+    }
+    // 固定遮罩，不随音乐变化
+    c.globalCompositeOperation = 'source-over';
+    const sh = this.wide ? c.createLinearGradient(0, 0, w, 0) : c.createLinearGradient(0, 0, 0, h);
+    sh.addColorStop(0, hexA(pal.s, this.scrim[0])); sh.addColorStop(.46, hexA(pal.s, this.scrim[1])); sh.addColorStop(1, hexA(pal.s, this.scrim[2]));
+    c.fillStyle = sh; c.fillRect(0, 0, w, h);
+  }
+}
+</script>
+<script>
+/* ================= 可操作的手机原型 ================= */
+const springStep = (o, target, dt, z, k) => {
+  const c = 2 * z * Math.sqrt(k);
+  for (let t = dt; t > 0; t -= 1 / 240) {
+    const h = Math.min(t, 1 / 240);
+    o.v += (-k * (o.x - target) - c * o.v) * h; o.x += o.v * h;
+  }
+};
+const waveSvg = (cls, x, y, w) => `<svg class="m-wave ${cls}" style="left:${x}px;top:${y}px;width:${w}px;height:24px" viewBox="0 0 ${w} 24" aria-hidden="true">
+  <defs><clipPath id="${cls}-clip"><rect class="wclip" x="0" y="0" width="0" height="24"/></clipPath></defs>
+  <g clip-path="url(#${cls}-clip)"><path class="w"/></g><path class="t"/><circle class="stop" cx="${w - 2}" cy="12" r="2"/></svg>`;
+
+const Proto = {
+  i: 0, shape: SONGS[0].shape, mode: 'random', playing: true, lyr: false, pos: 20, favs: [true, false, false], rot: 0, ci: -1, amp: 1, wph: 0,
+  pm: { x: 0, v: 0 }, lm: { x: 0, v: 0 }, sm: { x: 1, v: 0 }, prevShape: null, visible: true,
+
+  build() {
+    const dev = $('#ip'), song = SONGS[0];
+    const scr = this.scr = document.createElement('div');
+    scr.className = 'screen ip';
+    scr.setAttribute('style', palVars(song.pal));
+    const num = (n, x, y) => `<span class="num" style="left:${x}px;top:${y}px">${n}</span>`;
+    scr.innerHTML = `<canvas class="fld" aria-hidden="true"></canvas>${status()}
+      <div class="layer L-main">
+        <div class="m-top"><button class="m-ib" data-act="close" aria-label="收起播放页">${ic('down')}</button>
+          <button class="m-pill" data-act="source" style="border:0;cursor:pointer"><span class="d"></span><span class="t-src"></span><span class="ql t-q"></span>${ic('down', 16)}</button>
+          <button class="m-ib" data-act="more" aria-label="更多">${ic('more')}</button></div>
+        <div class="m-abs" style="left:24px;right:16px;top:402px;display:flex;align-items:center;gap:8px">
+          <div style="flex:1;min-width:0"><div class="m-title t-title"></div><div class="m-artist t-artist"></div></div>
+          <button class="m-fav" data-act="fav" style="border:0;cursor:pointer"></button></div>
+        <div class="m-abs" style="left:24px;right:24px;top:486px;cursor:pointer" data-act="lyrics"><div class="m-ly1 kara pv1"></div><div class="m-ly2 pv2"></div></div>
+        ${waveSvg('wv-main', 24, 552, 312)}
+        <div class="m-times" style="left:24px;top:582px;width:312px"><span class="t-pos"></span><span class="t-dur"></span></div>
+        <div class="m-group g-main" style="left:24px;top:606px;height:88px;--r:44px;--ic:34px">
+          <button class="m-seg lead" data-act="prev" aria-label="上一首">${ic('prev')}</button>
+          <button class="m-seg mid" data-act="play"></button>
+          <button class="m-seg trail" data-act="next" aria-label="下一首">${ic('next')}</button></div>
+        <div class="m-tool" style="left:180px;top:712px">
+          <button class="m-ib" data-act="lyrics" aria-label="歌词">${ic('lyrics')}</button>
+          <button class="m-ib" data-act="queue" aria-label="播放队列">${ic('queue')}</button>
+          <button class="m-ib" data-act="timer" aria-label="定时关闭">${ic('timer')}</button>
+          <button class="m-ib" data-act="source" aria-label="换音源">${ic('swap')}</button>
+          <button class="m-ib" data-act="more" aria-label="更多">${ic('more')}</button></div>
+      </div>
+      <div class="layer L-lyr off">
+        <div class="m-abs" style="left:86px;right:64px;top:44px"><div class="t-title" style="font:700 17px/1.3 var(--body)"></div><div class="t-artist" style="font:500 14px/1.4 var(--body);color:var(--p)"></div></div>
+        <div class="m-abs" style="right:8px;top:42px"><button class="m-fav" data-act="fav" style="border:0;cursor:pointer"></button></div>
+        <div class="m-lyrics ly" style="left:24px;top:104px;width:312px;height:516px;--fs:23px;--grow:1.22;--gap:18px"><div class="col"></div></div>
+        ${waveSvg('wv-lyr', 24, 636, 312)}
+        <div class="m-times" style="left:24px;top:666px;width:312px"><span class="t-pos"></span><span class="t-dur"></span></div>
+        <div class="m-group g-lyr" style="left:20px;top:696px;height:56px;--r:28px;--ic:26px">
+          <button class="m-seg lead" data-act="prev" aria-label="上一首">${ic('prev')}</button>
+          <button class="m-seg mid" data-act="play"></button>
+          <button class="m-seg trail" data-act="next" aria-label="下一首">${ic('next')}</button></div>
+        <div class="m-tool" style="left:auto;right:16px;translate:none;top:694px">
+          <button class="m-ib sel" data-act="lyrics" aria-label="退出歌词">${ic('lyrics')}</button>
+          <button class="m-ib" data-act="queue" aria-label="播放队列">${ic('queue')}</button></div>
+      </div>
+      <div class="m-cover ipc" style="left:40px;top:100px;width:280px;height:280px">
+        <div class="halo"></div>
+        <svg viewBox="0 0 100 100" aria-hidden="true"><defs><clipPath id="ipcp"><path class="cpath"/></clipPath></defs>
+          <g clip-path="url(#ipcp)"><image class="img0" x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMid slice"/>
+          <image class="img1" x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMid slice" style="transition:opacity .35s"/></g></svg></div>
+      ${num(1, 98, 38)}${num(2, 48, 104)}${num(3, 300, 344)}${num(4, 4, 410)}${num(5, 4, 492)}${num(6, 4, 556)}${num(7, 4, 640)}${num(8, 22, 732)}
+      <div class="m-toast" role="status"></div><div class="m-handle"></div>`;
+    dev.append(scr);
+    scaler.observe(dev);
+    this.field = new FlowField($('canvas.fld', scr), { origin: [.5, .3], scrim: [.12, .28, .84] });
+    this.cpath = $('.cpath', scr);
+    scr.addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) this.act(b.dataset.act); });
+    $$('.m-seg', scr).forEach(seg => {
+      const up = () => this.press(null);
+      seg.addEventListener('pointerdown', () => this.press(seg));
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => seg.addEventListener(t, up));
+    });
+    Engine.subs.push(s => this.field.feed(s.sig));
+    new IntersectionObserver(([e]) => { this.visible = e.isIntersecting; }).observe(dev);
+    this.setSong(0, true);
+    this.syncPlay();
+    this.buildControls();
+  },
+  /* 原型旁边的设置预览：与“设置 → 播放页”的选项一致 */
+  buildControls() {
+    const chip = m => `<button class="schip" type="button" aria-pressed="${m === this.mode}" data-m="${m}">
+      <svg viewBox="-4 -4 108 108" aria-hidden="true">${m === 'random'
+        ? `<circle cx="50" cy="50" r="48" fill="none" stroke="var(--accent)" stroke-width="4" stroke-dasharray="9 7"/><g transform="translate(22 22) scale(2.33)"><path d="${IC.shuffle}" fill="var(--accent)"/></g>`
+        : `<path d="${polarPath(SHAPES[m])}" fill="var(--accent)"/>`}</svg><span>${SHAPE_LABEL[m]}</span></button>`;
+    const set = $('#shapeSet');
+    set.innerHTML = ['random', ...SHAPE_PICKS].map(chip).join('');
+    set.addEventListener('click', e => {
+      const b = e.target.closest('[data-m]'); if (!b) return;
+      this.mode = b.dataset.m;
+      $$('[data-m]', set).forEach(x => x.setAttribute('aria-pressed', x === b));
+      // 固定形状时立刻形变过去；随机在下一次切歌时生效
+      if (this.mode !== 'random' && this.mode !== this.shape) { this.prevShape = this.shape; this.shape = this.mode; this.sm = { x: 0, v: 0 }; }
+    });
+    const ints = $('#intSet');
+    ints.addEventListener('click', e => {
+      const b = e.target.closest('[data-v]'); if (!b) return;
+      this.field.intensity = b.dataset.v;
+      $$('[data-v]', ints).forEach(x => x.setAttribute('aria-pressed', x === b));
+    });
+  },
+  toast(msg) {
+    const t = $('.m-toast', this.scr);
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(this.tt); this.tt = setTimeout(() => t.classList.remove('show'), 1800);
+  },
+  act(a) {
+    const msgs = {
+      queue: '队列面板沿用现在的设计', timer: '定时面板沿用现在的设计', source: '换源面板沿用现在的设计',
+      more: '更多：全屏歌词 · 选择音源 · 下载到本机', close: '收起后封面飞回迷你播放器',
+    };
+    if (a === 'play') { this.playing = !this.playing; this.syncPlay(); }
+    else if (a === 'next' || a === 'prev') this.setSong((this.i + (a === 'next' ? 1 : 2)) % 3);
+    else if (a === 'lyrics') { this.lyr = !this.lyr; this.syncLyr(); }
+    else if (a === 'fav') { this.favs[this.i] = !this.favs[this.i]; this.syncFav(); }
+    else if (msgs[a]) this.toast(msgs[a]);
+  },
+  press(seg) {
+    $$('.m-group', this.scr).forEach(g => {
+      const big = g.classList.contains('g-main');
+      const segs = $$('.m-seg', g), idx = segs.indexOf(seg);
+      const w = big ? (this.playing ? [76, 144, 76] : [80, 144, 80]) : (this.playing ? [50, 88, 50] : [52, 88, 52]);
+      if (idx === 1) { w[1] += 20; w[0] -= 10; w[2] -= 10; }
+      else if (idx >= 0) { w[idx] += 20; w[1] -= 20; }
+      segs.forEach((s, j) => s.style.setProperty('--w', w[j] + 'px'));
+    });
+  },
+  syncPlay() {
+    $$('.m-group', this.scr).forEach(g => g.classList.toggle('playing', this.playing));
+    $$('.m-seg.mid', this.scr).forEach(b => {
+      b.innerHTML = ic(this.playing ? 'pause' : 'play', b.closest('.g-main') ? 40 : 30);
+      b.setAttribute('aria-label', this.playing ? '暂停' : '播放');
+    });
+    this.press(null);
+    this.field.playing = this.playing;
+  },
+  syncLyr() {
+    this.scr.classList.toggle('lyr', this.lyr);
+    $('.L-main', this.scr).classList.toggle('off', this.lyr);
+    $('.L-lyr', this.scr).classList.toggle('off', !this.lyr);
+    $('.ipc', this.scr).style.transform = this.lyr ? `translate(-20px,-60px) scale(${(52 / 280).toFixed(4)})` : '';
+    this.ci = -1;
+  },
+  syncFav() {
+    const on = this.favs[this.i];
+    $$('.m-fav', this.scr).forEach(b => {
+      b.classList.toggle('on', on); b.innerHTML = ic(on ? 'fav' : 'favo');
+      b.setAttribute('aria-label', '收藏'); b.setAttribute('aria-pressed', on);
+    });
+  },
+  setSong(i, first = false) {
+    const old = SONGS[this.i], song = SONGS[i];
+    if (!first) {
+      const next = this.mode === 'random' ? randomShape(this.shape) : this.mode;
+      if (next !== this.shape) { this.prevShape = this.shape; this.shape = next; this.sm = { x: 0, v: 0 }; }
+    }
+    this.i = i; this.pos = 20; this.ci = -1;
+    this.scr.setAttribute('style', palVars(song.pal));
+    const img0 = $('.img0', this.scr), img1 = $('.img1', this.scr);
+    img0.setAttribute('href', first ? song.url : old.url);
+    img1.style.opacity = 0; img1.setAttribute('href', song.url);
+    requestAnimationFrame(() => requestAnimationFrame(() => { img1.style.opacity = 1; }));
+    $('.halo', this.scr).style.backgroundImage = `url(${song.url})`;
+    $$('.t-title', this.scr).forEach(e => { e.textContent = song.title; if (!first) e.animate([{ opacity: 0 }, { opacity: 1 }], 320); });
+    $$('.t-artist', this.scr).forEach(e => { e.textContent = song.artist; });
+    $('.t-src', this.scr).textContent = song.src; $('.t-q', this.scr).textContent = '· ' + song.q;
+    $$('.t-dur', this.scr).forEach(e => { e.textContent = fmt(song.dur); });
+    $('.ly .col', this.scr).innerHTML = song.lyrics.map(t => `<div class="ln far">${t}</div>`).join('');
+    this.field.setSong(song);
+    this.syncFav();
+  },
+  frame(dt) {
+    if (!this.visible) return;
+    const song = SONGS[this.i], n = song.lyrics.length;
+    if (this.playing) this.pos += dt;
+    if (this.pos > LYRIC_START + n * LINE_S) this.pos = LYRIC_START - 2;
+    // 形状：歌曲间形变、暂停 → 圆角方形、歌词页 → 圆
+    springStep(this.sm, 1, dt, .8, 380);
+    springStep(this.pm, this.playing ? 0 : 1, dt, .8, 200);
+    springStep(this.lm, this.lyr ? 1 : 0, dt, .8, 380);
+    if (this.playing && !REDUCED) this.rot += dt * TAU / 40;
+    else { const q = Math.PI / 2; this.rot = follow(this.rot, Math.round(this.rot / q) * q, dt, .25, .25); }
+    const fa = SHAPES[this.prevShape || this.shape], fb = SHAPES[this.shape];
+    const sm = this.sm.x, pm = clamp(this.pm.x, -.1, 1.1), lm = clamp(this.lm.x, 0, 1.05);
+    this.cpath.setAttribute('d', polarPath(th => lerp(lerp(lerp(fa(th), fb(th), sm), SHAPES.Square(th), pm), 1, lm), this.rot, 50, 50, 50, 180));
+    // 歌词与进度
+    const rel = this.pos - LYRIC_START, ci = clamp(Math.floor(rel / LINE_S), 0, n - 1);
+    const k = clamp((rel - ci * LINE_S) / (LINE_S * .8), 0, 1) * 100;
+    if (ci !== this.ci) {
+      this.ci = ci;
+      $('.pv1', this.scr).textContent = song.lyrics[ci];
+      $('.pv2', this.scr).textContent = song.lyrics[ci + 1] || '';
+      const lines = $$('.ly .ln', this.scr), lh = 23 * 1.36 + 18;
+      lines.forEach((l, j) => { const d = Math.abs(j - ci); l.className = d === 0 ? 'ln cur kara' : d === 1 ? 'ln near' : 'ln far'; });
+      $('.ly .col', this.scr).style.transform = `translateY(${(516 * .42 - ci * lh - lh / 2).toFixed(1)}px)`;
+    }
+    $('.pv1', this.scr).style.setProperty('--k', k.toFixed(1) + '%');
+    const cur = $('.ly .ln.cur', this.scr); if (cur) cur.style.setProperty('--k', k.toFixed(1) + '%');
+    $$('.t-pos', this.scr).forEach(e => { e.textContent = fmt(this.pos); });
+    // 波浪进度：暂停拉平，律动时波幅跟低频
+    this.amp = follow(this.amp, this.playing && !REDUCED ? 1 : 0, dt, .2, .2);
+    if (this.playing) this.wph -= dt * 34;
+    const amp = 3.2 * this.amp * (this.field.intensity === 'standard' ? .7 + .5 * this.field.s.bass : 1);
+    for (const cls of ['wv-main', 'wv-lyr']) {
+      const svg = $('.' + cls, this.scr), px = Math.max(4, this.pos / song.dur * 312);
+      $('.wclip', svg).setAttribute('width', px.toFixed(1));
+      $('.w', svg).setAttribute('d', wavePath(px + 40, amp, 40, this.wph));
+      $('.t', svg).setAttribute('d', `M${(px + 8).toFixed(1)} 12L310 12`);
+    }
+    this.field.scrim = this.field.scrim.map((v, j) => follow(v, (this.lyr ? [.34, .42, .86] : [.12, .28, .84])[j], dt, .25, .25));
+    this.field.step(dt);
+    this.field.draw();
+  },
+};
+</script>
+<style>
+.stage { container-type: inline-size; }
+.ov { position: absolute; inset: 0; color: var(--os); pointer-events: none; }
+.ov .hd { position: absolute; left: 6.5cqw; right: 6.5cqw; top: 9cqw; display: flex; gap: 3.4cqw; align-items: center; }
+.ov .hd i { width: 13cqw; height: 13cqw; border-radius: 50%; background-size: cover; background-position: center; flex: none; }
+.ov .hd b { display: block; font: 700 4.8cqw/1.3 var(--body); }
+.ov .hd span { display: block; font: 500 3.9cqw/1.35 var(--body); color: var(--p); }
+.ov .ly { position: absolute; left: 6.5cqw; right: 4cqw; top: 33%; display: grid; gap: 4.6cqw; }
+.ov .ly div { font: 700 6.2cqw/1.35 var(--body); color: color-mix(in srgb, var(--os) 38%, transparent); white-space: nowrap; }
+.ov .ly .near { color: color-mix(in srgb, var(--os) 62%, transparent); }
+.ov .ly .cur { font-size: 7.6cqw; font-weight: 800; }
+</style>
+<script>
+/* ================= 对照演示 ================= */
+const Demo = {
+  song: SONGS[0], visible: true, oldBeats: [], kicks: [],
+  build() {
+    this.old = new OldBackdrop($('#stOld canvas'));
+    this.flow = new FlowField($('#stNew canvas'), { origin: [.5, .42], scrim: [.22, .34, .84] });
+    this.stages = [$('#stOld'), $('#stNew')];
+    for (const st of this.stages) {
+      st.insertAdjacentHTML('beforeend', `<div class="ov" aria-hidden="true"><div class="hd"><i></i><div><b></b><span></span></div></div><div class="ly">${'<div></div>'.repeat(5)}</div></div>`);
+    }
+    $('#songpick').innerHTML = SONGS.map((s, i) => `<button type="button" aria-pressed="${i === 0}" data-i="${i}">${s.title}</button>`).join('');
+    $('#songpick').addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      $$('#songpick button').forEach(x => x.setAttribute('aria-pressed', x === b));
+      this.setSong(SONGS[+b.dataset.i]);
+    });
+    const M = [
+      ['低频 bass', s => s.sig.bass], ['中频 mid', s => s.sig.mid], ['高频 treble', s => s.sig.treble],
+      ['响度（新增）', s => s.sig.loudness], ['现在 · 起拍脉冲', s => s.old.pulse, 'old'], ['新方案 · 鼓点光量', () => this.flow.s.bloom],
+    ];
+    $('#meters').innerHTML = M.map(([l, , c]) => `<div class="meter${c ? ' ' + c : ''}"><div class="lab"><span>${l}</span><span class="v">0.00</span></div><div class="bar"><i></i></div></div>`).join('');
+    const bars = $$('#meters .meter').map(m => [$('i', m), $('.v', m)]);
+    Engine.subs.push(s => {
+      this.old.feed(s.old); this.flow.feed(s.sig);
+      M.forEach(([, get], j) => { const v = clamp(get(s), 0, 1); bars[j][0].style.transform = `scaleX(${v.toFixed(3)})`; bars[j][1].textContent = v.toFixed(2); });
+      if (s.old.beat) this.oldBeats.push(s.at);
+      if (s.sig.kick) this.kicks.push(s.at);
+      const from = s.at - 6000;
+      this.oldBeats = this.oldBeats.filter(t => t > from); this.kicks = this.kicks.filter(t => t > from);
+      $('#counts').innerHTML = `最近 6 秒　现在每秒起拍 <b>${(this.oldBeats.length / 6).toFixed(1)}</b> 次　·　新方案每秒鼓点 <b>${(this.kicks.length / 6).toFixed(1)}</b> 次`;
+    });
+    new IntersectionObserver(([e]) => { this.visible = e.isIntersecting; }).observe($('.duo'));
+    this.setSong(SONGS[0]);
+
+    $('#snd').addEventListener('click', async () => {
+      if (Engine.audible) Engine.stopSound();
+      else if (!await Engine.startSound()) $('#srcline').textContent = '浏览器没有允许播放声音，画面仍按静音时钟运行。';
+      this.syncSrc();
+    });
+    $('#pick').addEventListener('change', async e => {
+      const file = e.target.files[0]; if (!file) return;
+      $('#srcline').textContent = `正在解码 ${file.name}…`;
+      try {
+        const ctx = Engine.audioCtx();
+        const buf = await ctx.decodeAudioData(await file.arrayBuffer());
+        Engine.load(buf, file.name);
+        await Engine.startSound();
+      } catch (err) {
+        $('#srcline').textContent = `无法解码 ${file.name}，换一个 mp3 / m4a / flac 文件试试。`;
+        return;
+      }
+      this.syncSrc();
+    });
+    $('#demoInt').addEventListener('click', e => {
+      const b = e.target.closest('[data-v]'); if (!b) return;
+      this.flow.intensity = b.dataset.v;
+      $$('#demoInt [data-v]').forEach(x => x.setAttribute('aria-pressed', x === b));
+    });
+    $('#builtin').addEventListener('click', () => { if (this.groove) { Engine.load(this.groove, GROOVE_LABEL); this.syncSrc(); } });
+  },
+  syncSrc() {
+    const b = $('#snd span');
+    b.textContent = Engine.audible ? '静音' : '播放声音';
+    $('#srcline').textContent = Engine.ready ? `信号源：${Engine.label} · ${Engine.audible ? '正在播放' : '静音（点「播放声音」能听到）'}` : '';
+  },
+  setSong(song) {
+    this.song = song; this.old.setSong(song); this.flow.setSong(song);
+    for (const st of this.stages) {
+      st.setAttribute('style', palVars(song.pal));
+      $('.hd i', st).style.backgroundImage = `url(${song.url})`;
+      $('.hd b', st).textContent = song.title; $('.hd span', st).textContent = song.artist;
+    }
+    this.li = -1;
+  },
+  frame(dt) {
+    if (!this.visible || !Engine.ready) return;
+    this.old.draw();
+    this.flow.step(dt); this.flow.draw();
+    const lines = this.song.lyrics, n = lines.length, t = Engine.time();
+    const idx = Math.floor(t / LINE_S) % n, k = clamp((t % LINE_S) / (LINE_S * .8), 0, 1) * 100;
+    if (idx !== this.li) {
+      this.li = idx;
+      for (const st of this.stages) $$('.ly div', st).forEach((d, j) => {
+        const off = j - 2, i = idx + off;
+        d.textContent = i >= 0 && i < n ? lines[i] : '';
+        d.className = off === 0 ? 'cur kara' : Math.abs(off) === 1 ? 'near' : '';
+      });
+    }
+    for (const st of this.stages) { const c = $('.ly .cur', st); if (c) c.style.setProperty('--k', k.toFixed(1) + '%'); }
+  },
+};
+const GROOVE_LABEL = '内置节奏 · 104 BPM · 12 小节';
+
+/* ================= 三端布局的标签页 ================= */
+function mountTabs() {
+  const tabs = $$('#layouts [role=tab]');
+  const pick = t => tabs.forEach(x => {
+    const on = x === t;
+    x.setAttribute('aria-selected', on); x.tabIndex = on ? 0 : -1;
+    $('#' + x.getAttribute('aria-controls')).hidden = !on;
+  });
+  tabs.forEach((t, i) => {
+    t.addEventListener('click', () => pick(t));
+    t.addEventListener('keydown', e => {
+      const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (d) { const n = tabs[(i + d + tabs.length) % tabs.length]; pick(n); n.focus(); }
+    });
+  });
+  pick(tabs[0]);
+}
+
+/* ================= 启动 ================= */
+mountMocks();
+mountShapes();
+mountTabs();
+Proto.build();
+Demo.build();
+(async () => {
+  try {
+    Demo.groove = await renderGroove();
+    Engine.load(Demo.groove, GROOVE_LABEL);
+    Demo.syncSrc();
+  } catch (err) {
+    $('#srcline').textContent = '这个浏览器不支持 Web Audio，律动演示无法运行。';
+  }
+})();
+let lastFrame = performance.now();
+function loop(now) {
+  const dt = clamp((now - lastFrame) / 1000, 0, .1);
+  lastFrame = now;
+  Engine.tick(now);
+  Proto.frame(dt);
+  Demo.frame(dt);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@ import com.mytv.mymusic.playback.RHYTHM_FFT_SIZE
 import com.mytv.mymusic.playback.RealFft
 import com.mytv.mymusic.playback.RhythmAnalysis
 import com.mytv.mymusic.playback.rhythmBandEnd
+import com.mytv.mymusic.playback.rhythmLoudness
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -14,6 +15,7 @@ import org.junit.Test
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.exp
+import kotlin.math.pow
 import kotlin.math.sin
 
 class RhythmAnalysisTest {
@@ -187,11 +189,59 @@ class RhythmAnalysisTest {
     }
 
     @Test
+    fun loudnessMapsWindowRmsBetweenMinus42AndMinus8Dbfs() {
+        assertEquals(0f, rhythmLoudness(10f.pow(-42f / 20f)), 0.001f)
+        assertEquals(1f, rhythmLoudness(10f.pow(-8f / 20f)), 0.001f)
+        assertEquals(0.5f, rhythmLoudness(10f.pow(-25f / 20f)), 0.001f)
+
+        val analysis = RhythmAnalysis()
+        assertEquals(0f, analysis.analyzePcm(FloatArray(RHYTHM_FFT_SIZE), 44_100).loudness, 0f)
+        val quiet = analysis.analyzePcm(sine(220.0, amplitude = 0.02), 44_100).loudness
+        val loud = analysis.analyzePcm(sine(220.0, amplitude = 0.3), 44_100).loudness
+        assertTrue("quiet tone should register above silence", quiet > 0f)
+        assertTrue("louder tone should read louder", loud > quiet + 0.3f)
+    }
+
+    @Test
+    fun kickFiresOnBassTransientButNotOnTrebleTransient() {
+        val bass = RhythmAnalysis().apply { warmUpWithSilence() }
+            .analyzePcm(sine(60.0, amplitude = 0.5), 44_100, DT)
+        assertTrue("60 Hz burst must be a kick", bass.kick)
+
+        val treble = RhythmAnalysis().apply { warmUpWithSilence() }
+            .analyzePcm(sine(8_000.0, amplitude = 0.5), 44_100, DT)
+        assertTrue("full-band onset still reports the treble transient", treble.beat)
+        assertFalse("8 kHz burst must not be a kick", treble.kick)
+    }
+
+    @Test
+    fun kickHonors280MsRefractory() {
+        val analysis = RhythmAnalysis()
+        // At 16 kHz with four bins, bin 0 is the whole bass band.
+        repeat(9) { analysis.analyzeSpectrum(FloatArray(4), 16_000, DT) }
+        fun hit(level: Float, dtMs: Float) = analysis.analyzeSpectrum(floatArrayOf(level, 0f, 0f, 0f), 16_000, dtMs)
+
+        assertTrue(hit(100f, DT).kick)
+        val tooSoon = hit(200f, 150f)
+        assertTrue("110 ms full-band refractory has passed", tooSoon.beat)
+        assertFalse("second kick 150 ms later is inside the 280 ms refractory", tooSoon.kick)
+        assertTrue(hit(300f, 140f).kick)
+    }
+
+    @Test
     fun pcmValidatesInputLengthAndSampleRate() {
         val analysis = RhythmAnalysis()
         assertIllegalArgument { analysis.analyzePcm(FloatArray(1_023), 44_100) }
         assertIllegalArgument { analysis.analyzePcm(FloatArray(RHYTHM_FFT_SIZE), 0) }
     }
+
+    private fun RhythmAnalysis.warmUpWithSilence() {
+        // The first frame only seeds the baseline; eight more fill the onset history.
+        repeat(9) { analyzePcm(FloatArray(RHYTHM_FFT_SIZE), 44_100, DT) }
+    }
+
+    private fun sine(frequency: Double, amplitude: Double, sampleRate: Double = 44_100.0) =
+        FloatArray(RHYTHM_FFT_SIZE) { i -> (amplitude * sin(2.0 * PI * frequency * i / sampleRate)).toFloat() }
 
     private fun warmedDetector(spectrum: FloatArray): OnsetDetector {
         val detector = OnsetDetector(bins = spectrum.size)

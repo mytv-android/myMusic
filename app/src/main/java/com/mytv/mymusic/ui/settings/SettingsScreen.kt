@@ -60,6 +60,7 @@ import com.mytv.mymusic.ui.components.PageScaffold
 import com.mytv.mymusic.ui.components.SegmentedGroup
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatBytes
+import com.mytv.mymusic.ui.player.label
 import com.mytv.mymusic.ui.providerName
 import com.mytv.mymusic.ui.relativeTime
 import com.mytv.mymusic.ui.theme.LayoutMode
@@ -92,7 +93,7 @@ internal fun settingsOverview(
         values = mapOf(
             SettingsSection.Appearance to "${appearance.colorSource.label} · ${appearance.browseStyle.label} · ${themeLabel(appearance.theme)}" +
                 if (appearance.layout != LayoutMode.Auto) " · ${appearance.layout.label}" else "",
-            SettingsSection.Lyrics to "歌词背景 · ${state.lyricsBackground.label}",
+            SettingsSection.Lyrics to "封面${state.coverShape.label} · 背景${state.lyricsBackground.label}",
             SettingsSection.Playback to playbackModeSummary(state.aggregation.playbackMode) +
                 if (state.aggregation.matchStrictness == MatchStrictness.Strict) " · 严格匹配" else "",
             SettingsSection.Equalizer to "$eqLabel · ${if (equalizer.enabled) "已开启" else "已关闭"}",

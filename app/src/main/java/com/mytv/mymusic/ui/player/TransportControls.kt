@@ -1,0 +1,387 @@
+package com.mytv.mymusic.ui.player
+
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.AbsoluteRoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Lyrics
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material3.FloatingToolbarDefaults
+import androidx.compose.material3.HorizontalFloatingToolbar
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
+import com.mytv.mymusic.playback.SleepTimerState
+import com.mytv.mymusic.ui.components.tvFocusRing
+import kotlin.math.roundToInt
+
+/**
+ * 连接按钮组的尺寸。总宽固定：播放中两段间距从 [gap] 拉到 [playingGap]，多出来的从两侧段里扣；
+ * 按下哪段哪段加宽 [pressGrow]，相邻段让出同样的宽度，整组宽度始终不变。
+ */
+@Immutable
+data class TransportGroupSize(
+    val height: Dp,
+    val sideWidth: Dp,
+    val playWidth: Dp,
+    val iconSize: Dp,
+    val playIconSize: Dp,
+    val pressGrow: Dp,
+    val innerCorner: Dp = 14.dp,
+    val gap: Dp = 4.dp,
+    val playingGap: Dp = 8.dp,
+) {
+    val width: Dp get() = sideWidth * 2 + playWidth + gap * 2
+
+    companion object {
+        /** 手机播放页：312×88，播放段 144。 */
+        val Phone = TransportGroupSize(88.dp, 80.dp, 144.dp, 34.dp, 40.dp, pressGrow = 20.dp)
+
+        /** 平板播放栏：320×88。 */
+        val Tablet = TransportGroupSize(88.dp, 80.dp, 152.dp, 34.dp, 40.dp, pressGrow = 20.dp)
+
+        /** 手机歌词页底部的小号：高 56，52 / 88 / 52。 */
+        val Compact = TransportGroupSize(56.dp, 52.dp, 88.dp, 26.dp, 32.dp, pressGrow = 12.dp)
+
+        /** 电视控制条：232×64。 */
+        val Tv = TransportGroupSize(64.dp, 64.dp, 96.dp, 28.dp, 32.dp, pressGrow = 14.dp)
+    }
+}
+
+/**
+ * 上一首 / 播放 / 下一首连成一块的按钮组：两端满圆、内侧 [TransportGroupSize.innerCorner]。
+ * 播放中中段变胶囊、间距拉开（默认空间弹簧）；按下哪段哪段变宽，相邻段让位（快速空间弹簧）。
+ * 宽度和间距只在布局阶段读，圆角只在图层里读：按下和播放状态的过渡不触发组合。
+ *
+ * 不用 material3 的 ButtonGroup：alpha25 的版本按条目 DSL 布局并在放不下时把按钮收进溢出菜单，
+ * 不支持固定段宽、动画间距和中段单独变形，窄屏上还可能把上一首 / 下一首藏进菜单。
+ *
+ * @param playFocusRequester 电视上让播放段拿初始焦点。
+ */
+@Composable
+fun TransportButtonGroup(
+    playing: Boolean,
+    onPrevious: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: TransportGroupSize = TransportGroupSize.Phone,
+    playFocusRequester: FocusRequester? = null,
+) {
+    val motion = MaterialTheme.motionScheme
+    val leadSource = remember { MutableInteractionSource() }
+    val playSource = remember { MutableInteractionSource() }
+    val trailSource = remember { MutableInteractionSource() }
+    val leadPressed by leadSource.collectIsPressedAsState()
+    val playPressed by playSource.collectIsPressedAsState()
+    val trailPressed by trailSource.collectIsPressedAsState()
+    val leadGrow = animateFloatAsState(if (leadPressed) 1f else 0f, motion.fastSpatialSpec(), label = "leadGrow")
+    val playGrow = animateFloatAsState(if (playPressed) 1f else 0f, motion.fastSpatialSpec(), label = "playGrow")
+    val trailGrow = animateFloatAsState(if (trailPressed) 1f else 0f, motion.fastSpatialSpec(), label = "trailGrow")
+    val gap = animateDpAsState(if (playing) size.playingGap else size.gap, motion.defaultSpatialSpec(), label = "groupGap")
+    val pill = animateFloatAsState(if (playing) 1f else 0f, motion.defaultSpatialSpec(), label = "playPill")
+
+    val outer = size.height / 2
+    val inner = size.innerCorner
+    // 媒体控制在 RTL 下也不镜像，所以用绝对方向的圆角和摆放
+    val leadShape = remember(size) { AbsoluteRoundedCornerShape(outer, inner, inner, outer) }
+    val trailShape = remember(size) { AbsoluteRoundedCornerShape(inner, outer, outer, inner) }
+    val secondary = MaterialTheme.colorScheme.secondaryContainer
+    val onSecondary = MaterialTheme.colorScheme.onSecondaryContainer
+
+    Layout(
+        content = {
+            GroupSegment(
+                onClick = onPrevious,
+                shape = { leadShape },
+                focusShape = leadShape,
+                container = secondary,
+                content = onSecondary,
+                interaction = leadSource,
+                modifier = Modifier.semantics { contentDescription = "上一首" },
+            ) { Icon(Icons.Filled.SkipPrevious, null, Modifier.size(size.iconSize)) }
+            GroupSegment(
+                onClick = onPlayPause,
+                shape = { RoundedCornerShape(lerp(inner.value, outer.value, pill.value).dp) },
+                focusShape = if (playing) CircleShape else RoundedCornerShape(inner),
+                container = MaterialTheme.colorScheme.primary,
+                content = MaterialTheme.colorScheme.onPrimary,
+                interaction = playSource,
+                focusScale = 1.06f,
+                modifier = Modifier
+                    .then(if (playFocusRequester != null) Modifier.focusRequester(playFocusRequester) else Modifier)
+                    .semantics {
+                        contentDescription = if (playing) "暂停" else "播放"
+                        stateDescription = if (playing) "正在播放" else "已暂停"
+                    },
+            ) {
+                Crossfade(playing, label = "playIcon") { isPlaying ->
+                    Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(size.playIconSize))
+                }
+            }
+            GroupSegment(
+                onClick = onNext,
+                shape = { trailShape },
+                focusShape = trailShape,
+                container = secondary,
+                content = onSecondary,
+                interaction = trailSource,
+                modifier = Modifier.semantics { contentDescription = "下一首" },
+            ) { Icon(Icons.Filled.SkipNext, null, Modifier.size(size.iconSize)) }
+        },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val total = size.width.roundToPx().coerceAtMost(constraints.maxWidth)
+        val height = size.height.roundToPx()
+        val g = gap.value.roundToPx()
+        val widths = segmentWidths(
+            total = total.toFloat(),
+            play = size.playWidth.toPx(),
+            gap = g.toFloat(),
+            grow = size.pressGrow.toPx(),
+            lead = leadGrow.value,
+            middle = playGrow.value,
+            trail = trailGrow.value,
+        )
+        val lead = widths[0].roundToInt()
+        val middle = widths[1].roundToInt()
+        // 末段吃掉取整误差，整组宽度一像素不差
+        val trail = (total - lead - middle - g * 2).coerceAtLeast(0)
+        val placeables = listOf(lead, middle, trail).mapIndexed { i, w -> measurables[i].measure(Constraints.fixed(w.coerceAtLeast(0), height)) }
+        layout(total, height) {
+            var x = 0
+            placeables.forEach {
+                it.place(x, 0)
+                x += it.width + g
+            }
+        }
+    }
+}
+
+/**
+ * 三段宽度：[lead]、[middle]、[trail] 是各段按下的程度（0..1）。中段按下时两侧各让一半；
+ * 侧段按下时由中段让位。纯函数，便于测试“总宽不变”。
+ */
+internal fun segmentWidths(total: Float, play: Float, gap: Float, grow: Float, lead: Float, middle: Float, trail: Float): FloatArray {
+    val side = (total - play - gap * 2) / 2f
+    return floatArrayOf(
+        side + grow * (lead - middle / 2f),
+        play + grow * (middle - lead - trail),
+        side + grow * (trail - middle / 2f),
+    )
+}
+
+@Composable
+private fun GroupSegment(
+    onClick: () -> Unit,
+    shape: () -> Shape,
+    focusShape: Shape,
+    container: Color,
+    content: Color,
+    interaction: MutableInteractionSource,
+    modifier: Modifier,
+    focusScale: Float = 1.04f,
+    icon: @Composable () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .graphicsLayer {
+                this.shape = shape()
+                clip = true
+            }
+            .tvFocusRing(focusShape, focusScale)
+            .semantics { role = Role.Button },
+        shape = RectangleShape,
+        color = container,
+        contentColor = content,
+        interactionSource = interaction,
+    ) {
+        Box(contentAlignment = Alignment.Center) { icon() }
+    }
+}
+
+/**
+ * 播放页的浮动工具栏：surfaceContainerHigh 84% 的胶囊、柔和阴影，里面放 48dp 的项。
+ * 手机高 60，平板 56；项由调用方按顺序放（歌词、队列、定时、音源、更多）。
+ */
+@Composable
+fun PlayerToolbar(
+    modifier: Modifier = Modifier,
+    height: Dp = 60.dp,
+    content: @Composable RowScope.() -> Unit,
+) {
+    HorizontalFloatingToolbar(
+        expanded = true,
+        modifier = modifier.height(height),
+        colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
+            toolbarContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.84f),
+            toolbarContentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        contentPadding = PaddingValues(horizontal = 6.dp),
+        content = content,
+    )
+}
+
+/** 工具栏里的普通图标项。[selected] 时是 primaryContainer 底、16dp 圆角（歌词页里的“歌词”）。 */
+@Composable
+fun ToolbarIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+) {
+    val shape = if (selected) RoundedCornerShape(16.dp) else CircleShape
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .size(48.dp)
+            .tvFocusRing(shape)
+            .semantics {
+                this.contentDescription = contentDescription
+                role = Role.Button
+            },
+        shape = shape,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+    ) {
+        Box(contentAlignment = Alignment.Center) { Icon(icon, null) }
+    }
+}
+
+/**
+ * “歌词”项：开着歌词页时带底色。[label] 为 true 时开启后展开成图标 + “歌词”的胶囊（平板专注歌词），
+ * 否则只是 16dp 圆角的选中底（手机歌词页）。读屏文案沿用“全屏歌词 / 退出全屏歌词”。
+ */
+@Composable
+fun ToolbarLyricsButton(on: Boolean, onToggle: (Boolean) -> Unit, modifier: Modifier = Modifier, label: Boolean = true) {
+    if (!on || !label) {
+        ToolbarIconButton(Icons.Filled.Lyrics, if (on) "退出全屏歌词" else "全屏歌词", { onToggle(!on) }, modifier, selected = on)
+        return
+    }
+    Surface(
+        onClick = { onToggle(false) },
+        modifier = modifier
+            .height(48.dp)
+            .tvFocusRing(CircleShape)
+            .semantics {
+                contentDescription = "退出全屏歌词"
+                role = Role.Button
+            },
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Row(
+            Modifier.padding(start = 12.dp, end = 16.dp).clearAndSetSemantics {},
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(Icons.Filled.Lyrics, null)
+            Text("歌词", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/**
+ * “定时”项：定时开着时展开成剩余时间（primary 色、等宽数字）或“本首结束”。
+ * 剩余时间每秒变化，只在这个小组件里读；读屏文案沿用原来的定时 chip。
+ */
+@Composable
+fun ToolbarSleepButton(sleep: SleepTimerState, onOpenTimer: () -> Unit, modifier: Modifier = Modifier) {
+    if (!sleep.active) {
+        ToolbarIconButton(Icons.Filled.Bedtime, "定时关闭", onOpenTimer, modifier)
+        return
+    }
+    val remaining = rememberSleepRemaining(sleep)
+    SleepRemaining(sleep, remaining, onOpenTimer, modifier)
+}
+
+@Composable
+private fun SleepRemaining(sleep: SleepTimerState, remaining: State<Long>, onOpenTimer: () -> Unit, modifier: Modifier) {
+    val text = if (sleep.endOfTrack) "本首结束" else formatClock(remaining.value)
+    Surface(
+        onClick = onOpenTimer,
+        modifier = modifier
+            .height(48.dp)
+            .widthIn(min = 48.dp)
+            .animateContentSize(MaterialTheme.motionScheme.fastSpatialSpec())
+            .tvFocusRing(CircleShape)
+            .semantics {
+                contentDescription = if (sleep.endOfTrack) "定时关闭：本首结束后停止" else "定时关闭：还剩 $text"
+                role = Role.Button
+            },
+        shape = CircleShape,
+        color = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.primary,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp).clearAndSetSemantics {},
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(Icons.Filled.Bedtime, null, Modifier.size(20.dp))
+            // labelLarge 已开 tnum：倒计时每秒跳动时宽度不抖
+            Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/** 队列项。 */
+@Composable
+fun ToolbarQueueButton(onOpenQueue: () -> Unit, modifier: Modifier = Modifier) =
+    ToolbarIconButton(Icons.AutoMirrored.Filled.QueueMusic, "播放队列", onOpenQueue, modifier)
+
+/** 换音源项。 */
+@Composable
+fun ToolbarSourceButton(onOpenSource: () -> Unit, modifier: Modifier = Modifier) =
+    ToolbarIconButton(Icons.Filled.SwapHoriz, "换音源", onOpenSource, modifier)
