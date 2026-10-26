@@ -3,6 +3,7 @@ package com.mytv.mymusic.ui.library
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavType
@@ -87,10 +88,14 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
     composable("downloads") {
         val state by app.model.state.collectAsState()
         val downloads by app.model.downloads.collectAsState()
+        // mediaCacheSize 会扫描缓存目录；用 produceState 放到后台，记录变化后再刷新
+        val cacheBytes by produceState(initialValue = 0L, downloads) {
+            value = app.model.mediaCacheSize()
+        }
         DownloadsScreen(
             state = state,
             downloads = downloads,
-            cacheBytes = remember(downloads) { app.model.mediaCacheSize() },
+            cacheBytes = cacheBytes,
             actions = app.actions,
             onBack = app::back,
         )

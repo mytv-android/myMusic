@@ -12,6 +12,7 @@ import com.mytv.mymusic.data.sync.SyncCoordinator
 import com.mytv.mymusic.data.update.UpdateRepository
 import com.mytv.mymusic.playback.AdjustableLruEvictor
 import com.mytv.mymusic.playback.EqualizerController
+import com.mytv.mymusic.playback.RhythmAnalyzer
 import com.mytv.mymusic.playback.SleepTimer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,7 @@ class MyMusicApp : Application() {
     lateinit var cacheEvictor: AdjustableLruEvictor
     lateinit var secretStore: SecretStore
     lateinit var equalizer: EqualizerController
+    lateinit var rhythmAnalyzer: RhythmAnalyzer
     lateinit var sync: SyncCoordinator
     lateinit var update: UpdateRepository
 
@@ -55,6 +57,7 @@ class MyMusicApp : Application() {
         }
         secretStore = SecretStore(this)
         equalizer = EqualizerController(this, settings)
+        rhythmAnalyzer = RhythmAnalyzer()
         sync = SyncCoordinator(
             context = this,
             db = database,

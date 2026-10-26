@@ -43,6 +43,11 @@ data class EqualizerSettings(
     val customBands: List<EqBandSetting> = emptyList(),
 )
 
+enum class LyricsBackgroundMode { Off, Ambient, Reactive }
+
+private fun String?.toLyricsBackgroundMode(): LyricsBackgroundMode =
+    LyricsBackgroundMode.entries.firstOrNull { it.name == this } ?: LyricsBackgroundMode.Ambient
+
 class SettingsStore(private val context: Context) {
     private val providerKey = stringPreferencesKey("provider")
     private val chartsSourceKey = stringPreferencesKey("charts_source")
@@ -72,6 +77,7 @@ class SettingsStore(private val context: Context) {
     private val lastSeedKey = intPreferencesKey("last_seed")
     private val sleepFadeKey = booleanPreferencesKey("sleep_fade")
     private val cacheLimitKey = intPreferencesKey("cache_limit_mb")
+    private val lyricsBackgroundKey = stringPreferencesKey("lyrics_background")
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -92,6 +98,7 @@ class SettingsStore(private val context: Context) {
             dynamicColor = values[dynamicColorKey] ?: false,
             reduceMotion = values[reduceMotionKey] ?: false,
             showBottomNav = values[showBottomNavKey] ?: true,
+            lyricsBackground = values[lyricsBackgroundKey].toLyricsBackgroundMode(),
             equalizer = EqualizerSettings(
                 enabled = values[equalizerEnabledKey] ?: false,
                 presetId = values[equalizerPresetKey] ?: "flat",
@@ -134,6 +141,7 @@ class SettingsStore(private val context: Context) {
     suspend fun contrast(value: Float) = context.dataStore.edit { it[contrastKey] = value }
     suspend fun amoled(value: Boolean) = context.dataStore.edit { it[amoledKey] = value }
     suspend fun blurMode(value: String) = context.dataStore.edit { it[blurModeKey] = value }
+    suspend fun lyricsBackground(value: LyricsBackgroundMode) = context.dataStore.edit { it[lyricsBackgroundKey] = value.name }
     suspend fun lastSeed(value: Int) = context.dataStore.edit { it[lastSeedKey] = value }
     suspend fun sleepFade(value: Boolean) = context.dataStore.edit { it[sleepFadeKey] = value }
     suspend fun cacheLimitMb(value: Int) = context.dataStore.edit { it[cacheLimitKey] = value }
@@ -200,6 +208,7 @@ data class AppSettings(
     val dynamicColor: Boolean = false,
     val reduceMotion: Boolean = false,
     val showBottomNav: Boolean = true,
+    val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
     val equalizer: EqualizerSettings = EqualizerSettings(),
     val searchHistory: List<String> = emptyList(),
     val lastUpdateCheck: Long = 0L,

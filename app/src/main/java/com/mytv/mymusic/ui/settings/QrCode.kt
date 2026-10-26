@@ -2,7 +2,11 @@ package com.mytv.mymusic.ui.settings
 
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Rect
@@ -19,7 +23,12 @@ import kotlin.math.floor
  */
 @Composable
 internal fun QrCodeImage(text: String, modifier: Modifier = Modifier, description: String = "登录二维码") {
-    val matrix = remember(text) { QrEncoder.encode(text) }
+    val matrix = key(text) {
+        val result by produceState<Array<BooleanArray>?>(null, text) {
+            value = withContext(Dispatchers.Default) { QrEncoder.encode(text) }
+        }
+        result
+    }
     Spacer(
         modifier
             .semantics { contentDescription = description }
@@ -326,16 +335,17 @@ internal object QrEncoder {
                 }
             }
             if (run >= 5) result += run - 2
-            for (i in 0..size - 11) {
-                val pattern = (0 until 11).map { at(i + it) }
-                if (pattern == FINDER_A || pattern == FINDER_B) result += 40
+            var pattern = 0
+            for (i in 0 until size) {
+                pattern = ((pattern shl 1) or if (at(i)) 1 else 0) and 0x7FF
+                if (i >= 10 && (pattern == FINDER_A || pattern == FINDER_B)) result += 40
             }
             return result
         }
 
         private companion object {
-            val FINDER_A = listOf(true, false, true, true, true, false, true, false, false, false, false)
-            val FINDER_B = FINDER_A.reversed()
+            const val FINDER_A = 0b10111010000
+            const val FINDER_B = 0b00001011101
         }
     }
 

@@ -124,7 +124,7 @@ fun SyncCenterScreen(
     if (!embedded) TvDefaultFocus(primaryFocus, sync.account == null)
 
     val status: LazyListScope.() -> Unit = {
-        item(key = "hero") {
+        item(key = "hero", contentType = "hero") {
             if (sync.account == null) {
                 SyncIntroCard(onConnect, primaryFocus)
             } else {
@@ -132,7 +132,7 @@ fun SyncCenterScreen(
             }
         }
         if (sync.status == SyncStatus.Syncing) {
-            item(key = "progress") {
+            item(key = "progress", contentType = "progress") {
                 Column(Modifier.padding(horizontal = 4.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     LinearWavyProgressIndicator(Modifier.fillMaxWidth())
                     Text(
@@ -144,18 +144,18 @@ fun SyncCenterScreen(
             }
         }
         if (sync.error.isNotBlank()) {
-            item(key = "error") {
+            item(key = "error", contentType = "error") {
                 Box(Modifier.padding(top = 8.dp)) {
                     ErrorBlock(sync.error, onRetry = if (sync.account != null) actions::syncNow else null)
                 }
             }
         } else if (sync.message.isNotBlank()) {
-            item(key = "message") {
+            item(key = "message", contentType = "message") {
                 Box(Modifier.padding(top = 8.dp)) { InfoNote(sync.message) }
             }
         }
         if (sync.conflicts.isNotEmpty()) {
-            item(key = "conflictHead") { SectionLabel("待处理冲突", trailing = { CountTag("${sync.conflicts.size} 个") }) }
+            item(key = "conflictHead", contentType = "header") { SectionLabel("待处理冲突", trailing = { CountTag("${sync.conflicts.size} 个") }) }
             items(sync.conflicts, key = { "conflict:${it.playlistId}" }, contentType = { "conflict" }) { conflict ->
                 SyncConflictCard(conflict, actions)
             }
@@ -164,8 +164,8 @@ fun SyncCenterScreen(
     val settings: LazyListScope.() -> Unit = {
         val account = sync.account
         if (account != null) {
-            item(key = "autoHead") { SectionLabel("自动同步") }
-            item(key = "auto") {
+            item(key = "autoHead", contentType = "header") { SectionLabel("自动同步") }
+            item(key = "auto", contentType = "switch") {
                 SwitchRow(
                     title = "修改后自动同步",
                     checked = account.autoSync,
@@ -176,7 +176,7 @@ fun SyncCenterScreen(
                     summary = "歌单修改后在后台调度，回到前台超过 15 分钟也会检查",
                 )
             }
-            item(key = "wifi") {
+            item(key = "wifi", contentType = "switch") {
                 SwitchRow(
                     title = "仅在 Wi-Fi 下同步",
                     checked = account.wifiOnly,
@@ -188,8 +188,8 @@ fun SyncCenterScreen(
                 )
             }
         }
-        item(key = "backupHead") { SectionLabel("备份") }
-        item(key = "export") {
+        item(key = "backupHead", contentType = "header") { SectionLabel("备份") }
+        item(key = "export", contentType = "row") {
             ListRow(
                 title = "导出到文件",
                 index = 0,
@@ -200,7 +200,7 @@ fun SyncCenterScreen(
                 summary = "保存为 JSON，可在其他设备导入",
             )
         }
-        item(key = "import") {
+        item(key = "import", contentType = "row") {
             ListRow(
                 title = "从文件导入",
                 index = 1,
@@ -212,10 +212,10 @@ fun SyncCenterScreen(
             )
         }
         if (account != null) {
-            item(key = "providerHead") { SectionLabel("同步位置") }
+            item(key = "providerHead", contentType = "header") { SectionLabel("同步位置") }
             val providers = listOf("gist" to "GitHub Gist", "gitee" to "Gitee 代码片段")
             providers.forEachIndexed { index, (id, label) ->
-                item(key = "provider:$id") {
+                item(key = "provider:$id", contentType = "row") {
                     val current = account.provider == id
                     ListRow(
                         title = label,
@@ -228,7 +228,7 @@ fun SyncCenterScreen(
                     )
                 }
             }
-            item(key = "disconnect") {
+            item(key = "disconnect", contentType = "row") {
                 ListRow(
                     title = "断开同步",
                     index = 0,
@@ -243,7 +243,7 @@ fun SyncCenterScreen(
                 )
             }
         }
-        item(key = "note") {
+        item(key = "note", contentType = "note") {
             Box(Modifier.padding(top = 16.dp)) {
                 InfoNote("只同步自建歌单和歌曲元数据。收藏、最近播放、下载文件、Cookie、播放地址都不会进入云端。")
             }

@@ -92,6 +92,7 @@ internal fun settingsOverview(
         values = mapOf(
             SettingsSection.Appearance to "${appearance.colorSource.label} · ${appearance.browseStyle.label} · ${themeLabel(appearance.theme)}" +
                 if (appearance.layout != LayoutMode.Auto) " · ${appearance.layout.label}" else "",
+            SettingsSection.Lyrics to "歌词背景 · ${state.lyricsBackground.label}",
             SettingsSection.Playback to playbackModeSummary(state.aggregation.playbackMode) +
                 if (state.aggregation.matchStrictness == MatchStrictness.Strict) " · 严格匹配" else "",
             SettingsSection.Equalizer to "$eqLabel · ${if (equalizer.enabled) "已开启" else "已关闭"}",
@@ -143,8 +144,8 @@ internal fun SettingsHomeScreen(
                 bottom = padding.calculateBottomPadding(),
             ),
         ) {
-            item(key = "groups") { SettingsGroups(overview, selected = null, twoPane = false, onOpen = onOpen) }
-            item(key = "note") {
+            item(key = "groups", contentType = "settingsGroups") { SettingsGroups(overview, selected = null, twoPane = false, onOpen = onOpen) }
+            item(key = "note", contentType = "note") {
                 SettingsNote("Cookie 与同步令牌只保存在本机，不会进入日志或同步文件。", Modifier.padding(top = 8.dp))
             }
         }

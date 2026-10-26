@@ -8,7 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusEventModifierNode
 import androidx.compose.ui.focus.FocusState
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
@@ -17,6 +19,7 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.invalidateDraw
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
@@ -77,6 +80,16 @@ private class TvFocusNode(
     private val animated = Animatable(1f)
     private var focused = false
 
+    // 轮廓和描边只随尺寸、形状、密度、布局方向变化；缩放动画帧直接复用
+    private var cachedOutline: Outline? = null
+    private var cachedStroke: Stroke? = null
+    private var cachedShape: Shape? = null
+    private var cachedSize: Size = Size.Zero
+    private var cachedLayoutDirection: LayoutDirection? = null
+    private var cachedOutlineDensity: Float = Float.NaN
+    private var cachedOutlineFontScale: Float = Float.NaN
+    private var cachedStrokeDensity: Float = Float.NaN
+
     override fun onFocusEvent(focusState: FocusState) {
         val now = focusState.isFocused || focusState.hasFocus
         if (now == focused) return
@@ -91,8 +104,32 @@ private class TvFocusNode(
         scale(current, current) {
             this@draw.drawContent()
             if (focused) {
-                val outline = shape.createOutline(size, layoutDirection, this)
-                drawOutline(outline, ring, style = Stroke(width = 3.dp.toPx()))
+                val density = this.density
+                val fontScale = this.fontScale
+                if (cachedStroke == null || cachedStrokeDensity != density) {
+                    cachedStroke = Stroke(width = 3.dp.toPx())
+                    cachedStrokeDensity = density
+                }
+                val outline = if (
+                    cachedOutline == null ||
+                    cachedSize != size ||
+                    cachedLayoutDirection != layoutDirection ||
+                    cachedOutlineDensity != density ||
+                    cachedOutlineFontScale != fontScale ||
+                    cachedShape != shape
+                ) {
+                    shape.createOutline(size, layoutDirection, this).also {
+                        cachedOutline = it
+                        cachedShape = shape
+                        cachedSize = size
+                        cachedLayoutDirection = layoutDirection
+                        cachedOutlineDensity = density
+                        cachedOutlineFontScale = fontScale
+                    }
+                } else {
+                    cachedOutline!!
+                }
+                drawOutline(outline, ring, style = cachedStroke!!)
             }
         }
     }

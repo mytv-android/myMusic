@@ -7,7 +7,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import android.content.Context
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.mytv.mymusic.MyMusicApp
@@ -36,6 +41,7 @@ class PlaybackService : MediaSessionService() {
                 )
             )
         }
+        app?.let { builder.setRenderersFactory(RhythmRenderersFactory(this, it.rhythmAnalyzer)) }
         val player = builder.build()
         equalizer = app?.equalizer
         equalizer?.let { controller ->
@@ -57,8 +63,25 @@ class PlaybackService : MediaSessionService() {
         (application as? MyMusicApp)?.sleepTimer?.detach()
         equalizer?.detach()
         equalizer = null
+        (application as? MyMusicApp)?.rhythmAnalyzer?.setActive(false)
         session?.run { player.release(); release() }
         session = null
         super.onDestroy()
     }
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+private class RhythmRenderersFactory(
+    context: Context,
+    private val analyzer: RhythmAnalyzer,
+) : DefaultRenderersFactory(context) {
+    override fun buildAudioSink(
+        context: Context,
+        enableFloatOutput: Boolean,
+        enableAudioOutputPlaybackParams: Boolean,
+    ): AudioSink = DefaultAudioSink.Builder(context)
+        .setEnableFloatOutput(enableFloatOutput)
+        .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
+        .setAudioProcessors(arrayOf(TeeAudioProcessor(analyzer.audioBufferSink)))
+        .build()
 }

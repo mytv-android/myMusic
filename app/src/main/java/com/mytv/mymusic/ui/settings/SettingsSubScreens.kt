@@ -66,7 +66,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -165,17 +165,17 @@ fun AppearanceSettingsScreen(state: MusicUiState, actions: MusicActions, onBack:
     val appearance = state.appearance
     val groupWidth = Modifier.widthIn(max = 480.dp).fillMaxWidth()
     SettingsPage(SettingsSection.Appearance, embedded, onBack) {
-        item(key = "preview") { AppearancePreview(state, actions) }
-        item(key = "layoutHead") { SectionLabel("布局模式") }
-        item(key = "layout") {
+        item(key = "preview", contentType = "appearancePreview") { AppearancePreview(state, actions) }
+        item(key = "layoutHead", contentType = "sectionHeader") { SectionLabel("布局模式") }
+        item(key = "layout", contentType = "layoutOptions") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 LayoutModeChips(appearance.layout) { actions.setLayoutMode(it) }
                 SettingsNote(layoutModeHint(appearance.layout))
             }
         }
         // 电视固定深色，不提供浅色主题
-        if (!tv) item(key = "themeHead") { SectionLabel("主题") }
-        if (!tv) item(key = "theme") {
+        if (!tv) item(key = "themeHead", contentType = "sectionHeader") { SectionLabel("主题") }
+        if (!tv) item(key = "theme", contentType = "toggleGroup") {
             ConnectedToggleGroup(
                 options = listOf("system", "light", "dark"),
                 selected = appearance.theme,
@@ -191,16 +191,16 @@ fun AppearanceSettingsScreen(state: MusicUiState, actions: MusicActions, onBack:
                 },
             )
         }
-        item(key = "sourceHead") { SectionLabel("配色来源") }
-        item(key = "source") { ColorSourceOptions(state, actions, perRow = if (window.twoPane) 4 else 2) }
+        item(key = "sourceHead", contentType = "sectionHeader") { SectionLabel("配色来源") }
+        item(key = "source", contentType = "colorOptions") { ColorSourceOptions(state, actions, perRow = if (window.twoPane) 4 else 2) }
         if (appearance.colorSource == ColorSource.Custom) {
-            item(key = "swatches") { SeedSwatches(appearance.customSeed) { actions.setCustomSeed(it) } }
+            item(key = "swatches", contentType = "swatches") { SeedSwatches(appearance.customSeed) { actions.setCustomSeed(it) } }
         }
-        item(key = "styleHead") { SectionLabel("配色风格") }
-        item(key = "browseStyle") { StyleChips("浏览页", appearance.browseStyle) { actions.setBrowseStyle(it) } }
-        item(key = "playerStyle") { StyleChips("播放页（固定深色）", appearance.playerStyle) { actions.setPlayerStyle(it) } }
-        item(key = "contrastHead") { SectionLabel("对比度") }
-        item(key = "contrast") {
+        item(key = "styleHead", contentType = "sectionHeader") { SectionLabel("配色风格") }
+        item(key = "browseStyle", contentType = "styleChips") { StyleChips("浏览页", appearance.browseStyle) { actions.setBrowseStyle(it) } }
+        item(key = "playerStyle", contentType = "styleChips") { StyleChips("播放页（固定深色）", appearance.playerStyle) { actions.setPlayerStyle(it) } }
+        item(key = "contrastHead", contentType = "sectionHeader") { SectionLabel("对比度") }
+        item(key = "contrast", contentType = "toggleGroup") {
             ConnectedToggleGroup(
                 options = CONTRAST_LEVELS,
                 selected = CONTRAST_LEVELS.minBy { abs(it - appearance.contrast) },
@@ -209,9 +209,9 @@ fun AppearanceSettingsScreen(state: MusicUiState, actions: MusicActions, onBack:
                 modifier = groupWidth,
             )
         }
-        item(key = "displayHead") { SectionLabel("显示") }
+        item(key = "displayHead", contentType = "sectionHeader") { SectionLabel("显示") }
         if (!tv) {
-            item(key = "amoled") {
+            item(key = "amoled", contentType = "switch") {
                 SwitchRow(
                     title = "纯黑背景",
                     checked = appearance.amoled,
@@ -223,7 +223,7 @@ fun AppearanceSettingsScreen(state: MusicUiState, actions: MusicActions, onBack:
                 )
             }
         }
-        item(key = "motion") {
+        item(key = "motion", contentType = "switch") {
             SwitchRow(
                 title = "减少动画",
                 checked = appearance.reduceMotion,
@@ -234,8 +234,8 @@ fun AppearanceSettingsScreen(state: MusicUiState, actions: MusicActions, onBack:
                 icon = Icons.Filled.Animation,
             )
         }
-        item(key = "blurHead") { SectionLabel("模糊效果") }
-        item(key = "blur") {
+        item(key = "blurHead", contentType = "sectionHeader") { SectionLabel("模糊效果") }
+        item(key = "blur", contentType = "toggleGroup") {
             ConnectedToggleGroup(
                 options = BlurMode.entries,
                 selected = appearance.blur,
@@ -244,7 +244,7 @@ fun AppearanceSettingsScreen(state: MusicUiState, actions: MusicActions, onBack:
                 modifier = groupWidth,
             )
         }
-        item(key = "blurNote") {
+        item(key = "blurNote", contentType = "note") {
             SettingsNote(
                 if (tv) "电视在“自动”下不做实时模糊，迷你播放器和导航栏改用不透明底色，滑动更流畅。"
                 else "自动：Android 12 以上且内存充足时，迷你播放器和导航栏用磨砂底；关闭后改用不透明底色。",
@@ -484,8 +484,8 @@ fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
     val searchable = state.providers.filter { it.search }
     val priority = aggregation.priorityFor(searchable.map { it.id })
     SettingsPage(SettingsSection.Playback, embedded, onBack) {
-        item(key = "modeHead") { SectionLabel("换源模式") }
-        item(key = "mode") {
+        item(key = "modeHead", contentType = "sectionHeader") { SectionLabel("换源模式") }
+        item(key = "mode", contentType = "toggleGroup") {
             ConnectedToggleGroup(
                 options = PlaybackMode.entries,
                 selected = aggregation.playbackMode,
@@ -500,7 +500,7 @@ fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                 modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
             )
         }
-        item(key = "modeNote") {
+        item(key = "modeNote", contentType = "note") {
             SettingsNote(
                 when (aggregation.playbackMode) {
                     PlaybackMode.Auto -> "完整音源优先，其次按下面的平台顺序和码率选择。当前音源失败时自动换到下一个，播放页的音源标签会说明。"
@@ -510,8 +510,8 @@ fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
             )
         }
         if (aggregation.playbackMode == PlaybackMode.Pinned) {
-            item(key = "pinHead") { SectionLabel("固定平台") }
-            item(key = "pin") {
+            item(key = "pinHead", contentType = "sectionHeader") { SectionLabel("固定平台") }
+            item(key = "pin", contentType = "chips") {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     searchable.forEach { provider ->
                         MusicChip(provider.name, aggregation.pinnedProvider == provider.id) { actions.setPinnedProvider(provider.id) }
@@ -519,21 +519,21 @@ fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                 }
             }
         }
-        item(key = "priorityHead") {
+        item(key = "priorityHead", contentType = "sectionHeader") {
             SectionLabel("平台优先级") {
                 Text("越靠前越先尝试", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        item(key = "priority") {
+        item(key = "priority", contentType = "priorityList") {
             if (priority.isEmpty()) {
                 SkeletonRows(4)
             } else {
                 PriorityList(priority, state.providers) { id, delta -> actions.movePriority(id, delta) }
             }
         }
-        if (tv) item(key = "priorityTip") { SettingsNote("按 OK 拿起平台，用上下键移动，再按 OK 放下。") }
-        item(key = "matchHead") { SectionLabel("匹配") }
-        item(key = "strict") {
+        if (tv) item(key = "priorityTip", contentType = "note") { SettingsNote("按 OK 拿起平台，用上下键移动，再按 OK 放下。") }
+        item(key = "matchHead", contentType = "sectionHeader") { SectionLabel("匹配") }
+        item(key = "strict", contentType = "switch") {
             SwitchRow(
                 title = "严格匹配",
                 checked = aggregation.matchStrictness == MatchStrictness.Strict,
@@ -544,7 +544,7 @@ fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                 icon = Icons.Filled.Shield,
             )
         }
-        item(key = "preview") {
+        item(key = "preview", contentType = "switch") {
             SwitchRow(
                 title = "允许试听片段",
                 checked = aggregation.allowPreview,
@@ -555,7 +555,7 @@ fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                 icon = Icons.Filled.MusicNote,
             )
         }
-        item(key = "clearMatch") {
+        item(key = "clearMatch", contentType = "settingRow") {
             ListRow(
                 title = "清除匹配缓存",
                 index = 2,
@@ -569,7 +569,7 @@ fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                 },
             )
         }
-        item(key = "note") {
+        item(key = "note", contentType = "note") {
             Box(Modifier.padding(top = 16.dp)) {
                 InfoNote("自动换源与手动换源都使用这里的规则。播放器里始终显示当前实际播放源。")
             }
@@ -692,8 +692,8 @@ fun SearchBrowseSettingsScreen(state: MusicUiState, actions: MusicActions, onBac
     var pickerOpen by rememberSaveable { mutableStateOf(false) }
     val currentName = providerName(state.providers, state.providerId)
     SettingsPage(SettingsSection.Search, embedded, onBack) {
-        item(key = "browseHead") { SectionLabel("默认浏览来源") }
-        item(key = "browse") {
+        item(key = "browseHead", contentType = "sectionHeader") { SectionLabel("默认浏览来源") }
+        item(key = "browse", contentType = "settingRow") {
             ListRow(
                 title = currentName,
                 index = 0,
@@ -703,13 +703,13 @@ fun SearchBrowseSettingsScreen(state: MusicUiState, actions: MusicActions, onBac
                 summary = "榜单、歌单页打开时的来源；不影响播放换源",
             )
         }
-        item(key = "aggHead") {
+        item(key = "aggHead", contentType = "sectionHeader") {
             SectionLabel("参与聚合搜索的平台") {
                 Text("已启用 ${enabledIds.size} 个", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         if (searchable.isEmpty()) {
-            item(key = "aggLoading") { SkeletonRows(6) }
+            item(key = "aggLoading", contentType = "skeleton") { SkeletonRows(6) }
         } else {
             itemsIndexed(
                 searchable,
@@ -733,7 +733,7 @@ fun SearchBrowseSettingsScreen(state: MusicUiState, actions: MusicActions, onBac
                 )
             }
         }
-        item(key = "note") { SettingsNote("平台越多结果越全，搜索和匹配也可能更慢。关闭的平台不参与聚合搜索。") }
+        item(key = "note", contentType = "note") { SettingsNote("平台越多结果越全，搜索和匹配也可能更慢。关闭的平台不参与聚合搜索。") }
     }
     if (pickerOpen) {
         BrowseSourceSheet(state, actions, onDismiss = { pickerOpen = false })
@@ -809,7 +809,7 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
         onBack,
         subtitle = if (loggedCount > 0) "已登录 $loggedCount 个平台" else SettingsSection.Accounts.subtitle,
     ) {
-        item(key = "intro") {
+        item(key = "intro", contentType = "note") {
             SettingsNote(
                 if (tv) "各平台账号相互独立。电视上用手机扫码登录，Cookie 只保存在这台设备上。"
                 else "各平台账号相互独立。Cookie 只保存在本机，用于换源和 VIP 检测，不会写进同步文件。点按平台可以粘贴或更新 Cookie。",
@@ -817,7 +817,7 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
             )
         }
         if (providers.isEmpty()) {
-            item(key = "loading") { SkeletonRows(5) }
+            item(key = "loading", contentType = "skeleton") { SkeletonRows(5) }
         } else {
             itemsIndexed(
                 providers,
@@ -837,7 +837,7 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
             }
         }
         if (providers.any { it.id == "soda" }) {
-            item(key = "soda_signer") {
+            item(key = "soda_signer", contentType = "signerGroup") {
                 Column(Modifier.padding(top = 12.dp)) {
                     SectionLabel("汽水播放")
                     ListRow(
@@ -855,7 +855,7 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                 }
             }
         }
-        item(key = "note") {
+        item(key = "note", contentType = "note") {
             Box(Modifier.padding(top = 16.dp)) {
                 InfoNote(
                     if (tv) "不支持扫码的平台请在手机或平板上登录。"
@@ -955,13 +955,13 @@ private fun QrLoginPanel(
 ) {
     val window = LocalAppWindow.current
     val type = ""
-    LaunchedEffect(provider.id) { actions.startQrLogin(provider.id, type) }
+    SideEffect(provider.id, actions) { actions.startQrLogin(provider.id, type) }
     // 面板不经 onDismiss 离开组合时（旋转屏幕、窗口尺寸变化，qrFor 不会保存）也要停掉轮询
     DisposableEffect(provider.id) { onDispose { actions.cancelLogin() } }
     // 登录成功后 Cookie 会变，变了就关闭
     val initialCookie = remember(provider.id) { state.cookies[provider.id].orEmpty() }
     val cookie = state.cookies[provider.id].orEmpty()
-    LaunchedEffect(cookie) {
+    SideEffect(provider.id, cookie, initialCookie) {
         if (cookie.isNotBlank() && cookie != initialCookie) onDismiss()
     }
     val title = "扫码登录${provider.name}"
@@ -1213,9 +1213,9 @@ fun StorageSettingsScreen(
     embedded: Boolean = false,
 ) {
     SettingsPage(SettingsSection.Storage, embedded, onBack, subtitle = "应用共占用 ${formatBytes(cacheBytes + downloadsBytes)}") {
-        item(key = "usage") { StorageUsageCard(cacheBytes, downloadsBytes) }
-        item(key = "limitHead") { SectionLabel("播放缓存上限") }
-        item(key = "limit") {
+        item(key = "usage", contentType = "storageUsage") { StorageUsageCard(cacheBytes, downloadsBytes) }
+        item(key = "limitHead", contentType = "sectionHeader") { SectionLabel("播放缓存上限") }
+        item(key = "limit", contentType = "cacheLimit") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ConnectedToggleGroup(
                     options = listOf(128, 256, 512, 1024),
@@ -1230,7 +1230,7 @@ fun StorageSettingsScreen(
                 )
             }
         }
-        item(key = "rows") {
+        item(key = "rows", contentType = "settingsGroup") {
             SegmentedGroup(Modifier.padding(top = 12.dp)) {
                 ListRow(
                     title = "播放缓存",
@@ -1269,7 +1269,7 @@ fun StorageSettingsScreen(
                 )
             }
         }
-        item(key = "note") { SettingsNote("清除缓存不会影响歌单、收藏和下载文件。下载文件是唯一的离线音源，请在“下载”里管理。") }
+        item(key = "note", contentType = "note") { SettingsNote("清除缓存不会影响歌单、收藏和下载文件。下载文件是唯一的离线音源，请在“下载”里管理。") }
     }
 }
 
@@ -1344,10 +1344,11 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
         "AndroidX、Media3、Coil、Room、WorkManager" to "均按其 Apache-2.0 或对应开源许可使用；完整列表随应用和仓库提供。",
         "二维码生成" to "扫码登录的二维码按 Nayuki QR Code generator（MIT）的算法在本机生成。",
         "MaterialKolor、Haze" to "动态配色（MIT）与模糊效果（Apache-2.0）。",
+        "YesPlayMusic" to "歌词背景“律动”的分频段自适应增益与频谱通量鼓点检测参考其 MIT 实现；音频分析改由本机 ExoPlayer PCM 完成。",
         "Roboto Flex 字体" to "拉丁字母和数字使用 Roboto Flex（SIL Open Font License 1.1），应用内为只含字重轴和拉丁字符的子集。",
     )
     SettingsPage(SettingsSection.Licenses, embedded, onBack) {
-        item(key = "app") {
+        item(key = "app", contentType = "licenseCard") {
             TextCard(
                 title = "GNU Affero General Public License v3.0",
                 body = "myMusic 的应用代码与移植的平台层均以 AGPL-3.0 发布。",
@@ -1362,7 +1363,7 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
                 },
             )
         }
-        item(key = "thirdHead") { SectionLabel("上游与第三方") }
+        item(key = "thirdHead", contentType = "sectionHeader") { SectionLabel("上游与第三方") }
         itemsIndexed(
             thirdParty,
             key = { _, item -> "license:${item.first}" },
@@ -1370,7 +1371,7 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
         ) { index, (title, body) ->
             TextCard(title, body, index, thirdParty.size)
         }
-        item(key = "note") {
+        item(key = "note", contentType = "note") {
             Box(Modifier.padding(top = 16.dp)) {
                 InfoNote("如果二次分发，请保留许可证、版权声明与修改说明，并遵守 AGPL-3.0 的源码提供义务。")
             }
@@ -1382,6 +1383,7 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
 fun PrivacyScreen(onBack: () -> Unit, embedded: Boolean = false) {
     val blocks = listOf(
         "留在本机" to "Cookie、令牌、收藏、最近播放、下载文件、播放进度和匹配缓存都只保存在设备上。Cookie 与同步令牌使用 Android Keystore 加密。",
+        "歌词背景音频分析" to "“律动”只分析 ExoPlayer 已解码、正在输出的 PCM，不读取麦克风，不申请录音权限，也不保存或上传音频及频谱。暂停或离开播放页后停止分析。",
         "写入你选择的云端" to "启用同步后，只把自建歌单和歌曲元数据写入你的 GitHub Gist 或 Gitee 代码片段。同步文件不包含 Cookie、令牌、播放地址和下载文件。",
         "网络请求" to "应用直接请求音乐平台上游接口、更新清单和同步服务，没有 myMusic 自建中转服务器。配置汽水签名器后，取流请求会额外发给你填写的签名服务。第三方仍会看到其服务所需的常规请求信息。扫码登录的二维码在本机生成。",
         "诊断信息" to "复制诊断只包含版本、设备型号、Android 版本、启用平台和最近错误；不包含 Cookie、令牌或完整播放 URL。",
@@ -1394,7 +1396,7 @@ fun PrivacyScreen(onBack: () -> Unit, embedded: Boolean = false) {
         ) { index, (title, body) ->
             TextCard(title, body, index, blocks.size, titleColor = MaterialTheme.colorScheme.primary)
         }
-        item(key = "note") {
+        item(key = "note", contentType = "note") {
             Box(Modifier.padding(top = 16.dp)) {
                 InfoNote("退出平台账号或断开同步会清除对应的本机凭据；卸载应用会删除应用目录内的所有本地数据。")
             }

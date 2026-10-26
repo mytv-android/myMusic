@@ -21,6 +21,37 @@ The vendored Go source is retained as the reference for the Kotlin native port i
 - License: MIT License (the repository's own source); the official `bdms.node` / `metasecml.dll` binaries are proprietary and are not included or redistributed by myMusic.
 - Usage: reference for the signer service HTTP contract and device identity (`/sign`, `/config`). No libmssdk code or binary is bundled.
 
+## YesPlayMusic (lyrics background rhythm)
+
+- Upstream: https://github.com/ijoji42/YesPlayMusic
+- Reference revision: 347cf629a07340bae33a09ed0ae9ee502be27c1a
+- License: MIT License
+- Usage: the per-band automatic gain control, spectral-flux onset detection, refractory window and beat envelope in `playback/RhythmAnalysis.kt`, and the reactive lyrics backdrop design in `ui/player/LyricsBackdrop.kt`, are adapted from `src/utils/audioAnalyser.js` and `src/views/lyrics.vue`. The Android implementation taps ExoPlayer PCM instead of Web Audio. No upstream binaries, images or other assets are bundled.
+
+```
+MIT License
+
+Copyright (c) 2020-2023 qier222
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## MaterialKolor
 
 - Upstream: https://github.com/jordond/MaterialKolor

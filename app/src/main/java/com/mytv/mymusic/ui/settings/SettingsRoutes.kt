@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -13,7 +13,9 @@ import androidx.navigation.compose.composable
 import com.mytv.mymusic.ui.AppNav
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.library.SyncCenterScreen
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -79,6 +81,10 @@ private fun SectionContent(
             val state by app.model.state.collectAsState()
             AppearanceSettingsScreen(state, actions, onBack, embedded)
         }
+        SettingsSection.Lyrics -> {
+            val state by app.model.state.collectAsState()
+            LyricsSettingsScreen(state, actions, onBack, embedded)
+        }
         SettingsSection.Playback -> {
             val state by app.model.state.collectAsState()
             PlaybackSettingsScreen(state, actions, onBack, embedded)
@@ -105,7 +111,8 @@ private fun SectionContent(
         SettingsSection.Storage -> StorageContent(app, onBack, embedded, onCacheCleared)
         SettingsSection.About -> {
             val state by app.model.state.collectAsState()
-            val update by app.model.updateState.collectAsState()
+            val update by app.model.updateDetails.collectAsState()
+            val progress = app.model.updateState.collectAsState()
             AboutScreen(
                 state = state,
                 update = update,
@@ -114,6 +121,7 @@ private fun SectionContent(
                 onLicenses = { onOpen(SettingsSection.Licenses) },
                 onPrivacy = { onOpen(SettingsSection.Privacy) },
                 embedded = embedded,
+                progress = { progress.value.progress },
             )
         }
         SettingsSection.Licenses -> LicensesScreen(onBack, embedded)
@@ -125,8 +133,11 @@ private fun SectionContent(
 private fun StorageContent(app: AppNav, onBack: () -> Unit, embedded: Boolean, onCleared: () -> Unit) {
     val downloads by app.model.downloads.collectAsState()
     val state by app.model.state.collectAsState()
-    val downloadsBytes = remember(downloads) { downloads.sumOf { downloadSize(it.path) } }
-    var cacheBytes by remember { mutableLongStateOf(app.model.mediaCacheSize()) }
+    val downloadsBytes = rememberDownloadBytes(downloads)
+    var refreshTick by remember { mutableIntStateOf(0) }
+    val cacheBytes by produceState(0L, app.model, downloads, refreshTick) {
+        value = app.model.mediaCacheSize()
+    }
     val scope = rememberCoroutineScope()
     StorageSettingsScreen(
         cacheBytes = cacheBytes,
@@ -136,7 +147,7 @@ private fun StorageContent(app: AppNav, onBack: () -> Unit, embedded: Boolean, o
             scope.launch {
                 // 清除在 IO 线程进行，完成后再读一次占用
                 app.actions.clearMediaCache().join()
-                cacheBytes = app.model.mediaCacheSize()
+                refreshTick++
                 onCleared()
             }
         },
@@ -147,7 +158,8 @@ private fun StorageContent(app: AppNav, onBack: () -> Unit, embedded: Boolean, o
             // 调低上限会立即淘汰，稍后刷新占用
             scope.launch {
                 kotlinx.coroutines.delay(600)
-                cacheBytes = app.model.mediaCacheSize()
+                refreshTick++
+                onCleared()
             }
         },
         onOpenDownloads = { app.nav.navigate("downloads") { launchSingleTop = true } },
@@ -160,12 +172,27 @@ private fun StorageContent(app: AppNav, onBack: () -> Unit, embedded: Boolean, o
 private fun rememberSettingsOverview(app: AppNav, cacheTick: Int): SettingsOverview {
     val state by app.model.state.collectAsState()
     val sync by app.model.syncState.collectAsState()
-    val update by app.model.updateState.collectAsState()
+    val update by app.model.updateDetails.collectAsState()
     val equalizer by app.model.equalizerState.collectAsState()
     val downloads by app.model.downloads.collectAsState()
-    val downloadsBytes = remember(downloads) { downloads.sumOf { downloadSize(it.path) } }
-    val cacheBytes = remember(state.current?.key, cacheTick) { app.model.mediaCacheSize() }
-    return settingsOverview(state, sync, update, equalizer, cacheBytes, downloadsBytes)
+    val downloadsBytes = rememberDownloadBytes(downloads)
+    val cacheBytes by produceState(0L, app.model, state.current?.key, cacheTick) {
+        value = app.model.mediaCacheSize()
+    }
+    return remember(state, sync, update, equalizer, cacheBytes, downloadsBytes) {
+        settingsOverview(state, sync, update, equalizer, cacheBytes, downloadsBytes)
+    }
 }
 
-private fun downloadSize(path: String): Long = runCatching { File(path).length() }.getOrDefault(0L)
+private data class DownloadFile(val path: String, val state: String)
+
+@Composable
+private fun rememberDownloadBytes(downloads: List<com.mytv.mymusic.data.DownloadRecord>): Long {
+    val files = remember(downloads) { downloads.map { DownloadFile(it.path, it.state) } }
+    val bytes by produceState(0L, files) {
+        value = withContext(Dispatchers.IO) {
+            files.sumOf { runCatching { File(it.path).length() }.getOrDefault(0L) }
+        }
+    }
+    return bytes
+}

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PrivacyTip
@@ -63,6 +64,7 @@ internal enum class SettingsSection(
     val tone: IconTone,
 ) {
     Appearance("settings/appearance", "外观", "布局、主题、配色来源、风格与对比度", Icons.Filled.Palette, IconTone.Primary),
+    Lyrics("settings/lyrics", "歌词", "歌词背景与音频律动", Icons.Filled.Lyrics, IconTone.Primary),
     Playback("settings/playback", "播放与换源", "换源模式、平台优先级与匹配", Icons.Filled.SwapHoriz, IconTone.Primary),
     Equalizer("settings/equalizer", "均衡器", "本机播放音效，不影响下载文件", Icons.Filled.GraphicEq, IconTone.Primary),
     Search("settings/search", "搜索与浏览", "聚合平台与默认浏览来源", Icons.Filled.Search, IconTone.Primary),
@@ -79,7 +81,7 @@ internal enum class SettingsSection(
     companion object {
         /** 设置首页 / 双栏左栏的三组。 */
         val groups = listOf(
-            listOf(Appearance, Playback, Equalizer, Search),
+            listOf(Appearance, Lyrics, Playback, Equalizer, Search),
             listOf(Accounts, Sync),
             listOf(Storage, About),
         )

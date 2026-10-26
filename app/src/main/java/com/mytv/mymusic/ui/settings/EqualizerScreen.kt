@@ -96,21 +96,21 @@ fun EqualizerScreen(
     val buttonsFocus = remember { FocusRequester() }
     val presets: List<EqPreset> = EqPresets.all + EqPreset("custom", "自定义")
     SettingsPage(SettingsSection.Equalizer, embedded, onBack) {
-        item(key = "status") { EqualizerStatusCard(equalizer) { actions.setEqEnabled(it) } }
-        item(key = "presetHead") { SectionLabel("预设") }
-        item(key = "presets") {
+        item(key = "status", contentType = "eqStatus") { EqualizerStatusCard(equalizer) { actions.setEqEnabled(it) } }
+        item(key = "presetHead", contentType = "sectionHeader") { SectionLabel("预设") }
+        item(key = "presets", contentType = "chips") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 presets.forEach { preset ->
                     MusicChip(preset.label, equalizer.presetId == preset.id) { actions.selectEqPreset(preset.id) }
                 }
             }
         }
-        item(key = "bandsHead") {
+        item(key = "bandsHead", contentType = "sectionHeader") {
             SectionLabel("频段") {
                 Text(rangeLabel(equalizer), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        item(key = "bands") {
+        item(key = "bands", contentType = "eqBands") {
             BandsPanel(
                 bands = equalizer.bands,
                 enabled = supported,
@@ -119,24 +119,24 @@ fun EqualizerScreen(
                 exitNext = buttonsFocus,
             )
         }
-        item(key = "buttons") {
+        item(key = "buttons", contentType = "actions") {
             Row(Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = actions::resetEq, modifier = Modifier.focusRequester(buttonsFocus).tvFocusRing()) { Text("恢复平直") }
                 Spacer(Modifier.weight(1f))
                 FilledTonalButton(onClick = actions::saveEqCustom, modifier = Modifier.tvFocusRing()) { Text("保存为自定义") }
             }
         }
-        if (window.isTv) item(key = "tvTip") { SettingsNote("左右键选择频段，上下键调整增益；在最右侧频段再按右键，移到下方按钮。") }
-        item(key = "note") {
+        if (window.isTv) item(key = "tvTip", contentType = "note") { SettingsNote("左右键选择频段，上下键调整增益；在最右侧频段再按右键，移到下方按钮。") }
+        item(key = "note", contentType = "note") {
             SettingsNote("只作用于这台设备的播放输出，不修改音频文件，也不同步。切换歌曲或音源后保持当前设置。")
         }
-        item(key = "warn") {
+        item(key = "warn", contentType = "infoNote") {
             Box(Modifier.padding(top = 8.dp)) {
                 InfoNote("部分蓝牙耳机、USB 声卡或系统省电模式可能不支持第三方音效。此时会保留设置，但提示“当前输出未生效”。", "amber")
             }
         }
         state.current?.let { song ->
-            item(key = "playing") {
+            item(key = "playing", contentType = "infoNote") {
                 Box(Modifier.padding(top = 8.dp)) {
                     InfoNote(
                         "正在播放：${song.title} · ${state.currentSource?.providerName ?: song.source}" +

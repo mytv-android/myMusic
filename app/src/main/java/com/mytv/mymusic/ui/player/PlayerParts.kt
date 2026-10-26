@@ -1,12 +1,9 @@
 package com.mytv.mymusic.ui.player
 
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.runtime.DisposableEffect
-import android.view.accessibility.AccessibilityManager
-import android.content.Context
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.Context
 import android.os.Build
+import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -22,12 +19,15 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,13 +39,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -65,7 +67,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -75,6 +79,7 @@ import coil3.request.ImageRequest
 import com.mytv.mymusic.ui.LyricLine
 import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.components.distinctKeys
+import com.mytv.mymusic.ui.components.rememberSettlingOffsetState
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -139,17 +144,24 @@ fun Modifier.wakeOnInput(idle: IdleState, consumeKeyWhenIdle: Boolean): Modifier
         consumeKeyWhenIdle && wasIdle
     }
 
+/** 封面可以呼吸/旋转的前提：可见、播放中、未减少动画并且确实有封面。 */
+internal fun shouldBreathe(playing: Boolean, visible: Boolean, reduceMotion: Boolean, cover: String): Boolean =
+    playing && visible && !reduceMotion && cover.isNotBlank()
+
+internal fun ambientSpinEnabled(playing: Boolean, reduceMotion: Boolean, cover: String): Boolean =
+    playing && !reduceMotion && cover.isNotBlank()
+
 /**
  * 流动的封面光：一张 24px 的封面放大、慢慢旋转，本身就是模糊的；Android 12+ 再叠一层真模糊。
- * 暂停、减少动画或不可见时停止转动。
+ * 暂停、减少动画、没有封面或不可见时停止转动。
  */
 @Composable
 fun AmbientBackdrop(cover: String, playing: Boolean, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val reduceMotion = LocalAppearance.current.reduceMotion
     val scheme = MaterialTheme.colorScheme
-    val request = remember(cover) { ImageRequest.Builder(context).data(cover).size(24).build() }
-    val spin = !reduceMotion && playing
+    val request = remember(context, cover) { ImageRequest.Builder(context).data(cover).size(24).build() }
+    val spin = ambientSpinEnabled(playing, reduceMotion, cover)
     // 只持有 State，在绘制阶段读 value；否则整个背景每帧重组
     val angle = if (spin) {
         val transition = rememberInfiniteTransition(label = "ambient")
@@ -210,6 +222,7 @@ fun Modifier.fadeEdge(horizontal: Boolean): Modifier = this
 
 /**
  * 铺满的封面：左右滑切歌、双击收藏。播放时缓慢“呼吸”，暂停时略微缩小变暗。
+ * [visible] 为 false 时不启动呼吸动画，供横屏歌词淡出完成后停用不可见动画。
  */
 @Composable
 fun PlayerArt(
@@ -219,16 +232,17 @@ fun PlayerArt(
     horizontalFade: Boolean,
     onSkip: (Int) -> Unit,
     onDoubleTap: () -> Unit,
+    visible: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val reduceMotion = LocalAppearance.current.reduceMotion
-    val scope = rememberCoroutineScope()
-    val drag = remember { Animatable(0f) }
+    val drag = rememberSettlingOffsetState()
     val threshold = with(LocalDensity.current) { 88.dp.toPx() }
+    val currentThreshold by rememberUpdatedState(threshold)
     // pointerInput(Unit) 不会重启，回调要取最新的，否则双击收藏的是播放页刚打开时那首歌
     val currentSkip by rememberUpdatedState(onSkip)
     val currentDoubleTap by rememberUpdatedState(onDoubleTap)
-    val breathe = if (playing && !reduceMotion) {
+    val breathe = if (shouldBreathe(playing, visible, reduceMotion, cover)) {
         val transition = rememberInfiniteTransition(label = "breathe")
         transition.animateFloat(1f, 1.035f, infiniteRepeatable(tween(7_000), RepeatMode.Reverse), label = "breatheScale")
     } else {
@@ -244,15 +258,16 @@ fun PlayerArt(
             }
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
+                    onDragStart = { drag.begin() },
                     onDragEnd = {
-                        val value = drag.value
-                        if (abs(value) > threshold) currentSkip(if (value < 0) 1 else -1)
-                        scope.launch { drag.animateTo(0f) }
+                        val value = drag.offset
+                        if (abs(value) > currentThreshold) currentSkip(if (value < 0) 1 else -1)
+                        drag.settle()
                     },
-                    onDragCancel = { scope.launch { drag.animateTo(0f) } },
+                    onDragCancel = { drag.settle() },
                 ) { change, amount ->
                     change.consume()
-                    scope.launch { drag.snapTo(drag.value + amount * 0.5f) }
+                    drag.add(amount * 0.5f)
                 }
             }
             // 滑动和双击对读屏用户不可用，提供等价的自定义操作
@@ -275,8 +290,8 @@ fun PlayerArt(
                     val scale = (breathe?.value ?: 1f) * pausedScale.value
                     scaleX = scale
                     scaleY = scale
-                    translationX = drag.value
-                    alpha = 1f - (abs(drag.value) / (threshold * 4)).coerceIn(0f, 0.5f)
+                    translationX = drag.offset
+                    alpha = 1f - (abs(drag.offset) / (currentThreshold * 4)).coerceIn(0f, 0.5f)
                 },
         )
         Box(Modifier.fillMaxSize().graphicsLayer { alpha = dim.value }.background(Color.Black))
@@ -312,38 +327,48 @@ fun HeartBurst(trigger: Int, modifier: Modifier = Modifier) {
 
 private val BurstSpring = androidx.compose.animation.core.spring<Float>(dampingRatio = 0.6f, stiffness = 800f)
 
+/** 同步歌词拆行；无时间戳歌词按原文缓存，避免每次重组重新分列。 */
+internal fun ParsedLyrics.displayLines(): List<LyricLine> =
+    if (synced) lines else raw.lineSequence().filter { it.isNotBlank() }.map { LyricLine(-1, it) }.toList()
+
 /**
  * 同步歌词：当前行居中放大，点某一行跳到该处播放；手动滚动后 3 秒回到当前行。
+ * [active] 以 State 下传，只有读它的歌词行/自动滚动小组件会随当前行变化重组。
+ * [loading] 为 true 且没有可显示的同步歌词时显示加载态：既不会把尚未解析误报成“没有歌词”，
+ * 也不会把未同步原文里的时间戳当成歌词；已有上一份同步歌词时继续保留到新结果就绪。
  */
 @Composable
 fun LyricsList(
     lyrics: ParsedLyrics,
-    active: Int,
+    active: State<Int>,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
     center: Boolean = false,
     large: Boolean = false,
+    loading: Boolean = false,
 ) {
+    // 列表状态在空/加载分支之前创建：切换歌词时 LazyColumn 重建也能接回原滚动位置。
+    val list = rememberLazyListState()
+    if (loading && (lyrics.raw.isBlank() || !lyrics.synced)) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("正在加载歌词…", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
     if (lyrics.raw.isBlank()) {
         Box(modifier.fillMaxSize(), contentAlignment = if (center) Alignment.Center else Alignment.CenterStart) {
             Text("这首歌没有歌词", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
-    val lines: List<LyricLine> = if (lyrics.synced) lyrics.lines else lyrics.raw.lines().filter { it.isNotBlank() }.map { LyricLine(-1, it) }
+    val lines = remember(lyrics) { lyrics.displayLines() }
     val lyricKeys = remember(lines) { distinctKeys(lines) { it.timeMs.toString() } }
-    val list = rememberLazyListState()
     val dragged by list.interactionSource.collectIsDraggedAsState()
     var manualAt by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(dragged) { if (dragged) manualAt = System.currentTimeMillis() }
+    SideEffect(dragged) { if (dragged) manualAt = System.currentTimeMillis() }
     BoxWithConstraints(modifier) {
         val pad = maxHeight / 3
-        LaunchedEffect(active, manualAt) {
-            if (active < 0) return@LaunchedEffect
-            val since = System.currentTimeMillis() - manualAt
-            if (since < 3_000) delay(3_000 - since)
-            list.animateScrollToItem(active)
-        }
+        LyricsAutoScroll(active, list, manualAt)
         LazyColumn(
             state = list,
             modifier = Modifier.fillMaxSize(),
@@ -354,28 +379,61 @@ fun LyricsList(
                 key = { index, _ -> lyricKeys[index] },
                 contentType = { _, _ -> "lyric" },
             ) { index, line ->
-                val current = index == active
-                val near = abs(index - active) == 1
-                val weight = animateFloatAsState(if (current) 1f else if (near) 0.6f else 0.38f, label = "lyricAlpha")
-                Text(
-                    line.text,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .then(if (lyrics.synced && line.timeMs >= 0) Modifier.clickable(onClickLabel = "从这一句播放") { onSeek(line.timeMs) } else Modifier)
-                        .padding(horizontal = 8.dp, vertical = if (large) 10.dp else 8.dp)
-                        .graphicsLayer { alpha = weight.value },
-                    style = when {
-                        large && current -> MaterialTheme.typography.displaySmall
-                        large -> MaterialTheme.typography.headlineMedium
-                        current -> MaterialTheme.typography.headlineSmall
-                        else -> MaterialTheme.typography.titleLarge
-                    },
-                    fontWeight = if (current) FontWeight.Black else FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = if (center) TextAlign.Center else TextAlign.Start,
+                LyricRow(
+                    line = line,
+                    index = index,
+                    activeProvider = { active.value },
+                    synced = lyrics.synced,
+                    center = center,
+                    large = large,
+                    onSeek = onSeek,
                 )
             }
         }
     }
+}
+
+@Composable
+private fun LyricsAutoScroll(active: State<Int>, list: LazyListState, manualAt: Long) {
+    val activeIndex = active.value
+    LaunchedEffect(activeIndex, manualAt) {
+        if (activeIndex < 0) return@LaunchedEffect
+        val since = System.currentTimeMillis() - manualAt
+        if (since < 3_000) delay(3_000 - since)
+        list.animateScrollToItem(activeIndex)
+    }
+}
+
+@Composable
+private fun LyricRow(
+    line: LyricLine,
+    index: Int,
+    activeProvider: () -> Int,
+    synced: Boolean,
+    center: Boolean,
+    large: Boolean,
+    onSeek: (Long) -> Unit,
+) {
+    val active = activeProvider()
+    val current = index == active
+    val near = abs(index - active) == 1
+    val weight = animateFloatAsState(if (current) 1f else if (near) 0.6f else 0.38f, label = "lyricAlpha")
+    Text(
+        line.text,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .then(if (synced && line.timeMs >= 0) Modifier.clickable(onClickLabel = "从这一句播放") { onSeek(line.timeMs) } else Modifier)
+            .padding(horizontal = 8.dp, vertical = if (large) 10.dp else 8.dp)
+            .graphicsLayer { alpha = weight.value },
+        style = when {
+            large && current -> MaterialTheme.typography.displaySmall
+            large -> MaterialTheme.typography.headlineMedium
+            current -> MaterialTheme.typography.headlineSmall
+            else -> MaterialTheme.typography.titleLarge
+        },
+        fontWeight = if (current) FontWeight.Black else FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface,
+        textAlign = if (center) TextAlign.Center else TextAlign.Start,
+    )
 }

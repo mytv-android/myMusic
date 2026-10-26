@@ -20,12 +20,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Add
@@ -229,7 +227,7 @@ fun LocalPlaylistScreen(
             }
         }
         if (entries.isEmpty() && playlist != null) {
-            item(key = "empty") {
+            item(key = "empty", contentType = "empty") {
                 EmptyState(
                     icon = Icons.Filled.Search,
                     title = "歌单还是空的",
@@ -242,7 +240,7 @@ fun LocalPlaylistScreen(
     }
     val headerExtras: LazyListScope.() -> Unit = {
         if (conflict) {
-            item(key = "conflict") {
+            item(key = "conflict", contentType = "card") {
                 ListRow(
                     title = "这个歌单有同步冲突",
                     index = 0,
@@ -256,7 +254,7 @@ fun LocalPlaylistScreen(
             }
         }
         if (editing) {
-            item(key = "editNote") {
+            item(key = "editNote", contentType = "note") {
                 Text(
                     if (window.isTv) "用行尾的上移、下移按钮调整顺序，左侧按钮移除。修改自动保存到本机。"
                     else "用上下箭头调整顺序（键盘 Alt + ↑↓），点左侧按钮移除。修改自动保存到本机。",
@@ -319,7 +317,7 @@ fun LocalPlaylistScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(SegmentGap),
                 ) {
-                    item(key = "head") {
+                    item(key = "head", contentType = "header") {
                         if (editing) {
                             Column(Modifier.padding(bottom = 8.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -338,7 +336,7 @@ fun LocalPlaylistScreen(
                     }
                     headerExtras()
                     trackList()
-                    if (editing) item(key = "delete") { deleteButton() }
+                    if (editing) item(key = "delete", contentType = "delete") { deleteButton() }
                 }
             }
             window.twoPane -> PageScaffold(
@@ -351,7 +349,7 @@ fun LocalPlaylistScreen(
                     padding,
                     if (window.isTv) 320.dp else 340.dp,
                     left = {
-                        item(key = "left") {
+                        item(key = "left", contentType = "left") {
                             Column {
                                 if (editing) {
                                     nameField()
@@ -403,7 +401,7 @@ fun LocalPlaylistScreen(
                     contentPadding = padding.withGutter(window.gutter),
                     verticalArrangement = Arrangement.spacedBy(SegmentGap),
                 ) {
-                    item(key = "head") {
+                    item(key = "head", contentType = "header") {
                         if (editing) {
                             Column(Modifier.padding(bottom = 4.dp)) { nameField() }
                         } else {
@@ -415,7 +413,7 @@ fun LocalPlaylistScreen(
                     }
                     headerExtras()
                     trackList()
-                    if (editing) item(key = "delete") { deleteButton() }
+                    if (editing) item(key = "delete", contentType = "delete") { deleteButton() }
                 }
             }
         }
@@ -643,7 +641,7 @@ private fun EditTrackRow(
 
 /** 添加歌曲：在默认浏览来源中搜索。手机是底部面板，平板 / 电视是侧边面板。 */
 @Composable
-private fun AddTracksSheet(
+internal fun AddTracksSheet(
     search: LibrarySearchUiState,
     existing: Set<String>,
     onSearch: (String) -> Unit,
@@ -652,6 +650,8 @@ private fun AddTracksSheet(
 ) {
     var query by rememberSaveable { mutableStateOf(search.query) }
     val field = remember { FocusRequester() }
+    // 平台搜索结果同一 key 可能重复，按出现顺序加序号；输入框留在惰性列表外层
+    val resultKeys = remember(search.results) { distinctKeys(search.results) { it.key } }
     TvDefaultFocus(field)
     AdaptiveSheet(onDismiss = onDismiss, title = "添加歌曲", subtitle = "在默认浏览来源中搜索") {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
@@ -668,27 +668,38 @@ private fun AddTracksSheet(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onSearch(query) }),
             )
-            Column(
+            // 有界高度让 LazyColumn 可以在 ModalBottomSheet / 侧边面板里测量；
+            // 不要依赖 intrinsic height（惰性布局不支持 intrinsic 测量）
+            LazyColumn(
                 Modifier
                     .fillMaxWidth()
                     .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState())
                     .padding(top = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(SegmentGap),
             ) {
                 when {
-                    search.loading -> {
-                        AppLoading(text = "正在搜索…")
-                        SkeletonRows(3)
+                    search.loading -> item(key = "loading", contentType = "loading") {
+                        Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
+                            AppLoading(text = "正在搜索…")
+                            SkeletonRows(3)
+                        }
                     }
-                    search.error.isNotBlank() -> ErrorBlock(search.error) { onSearch(query) }
-                    search.query.isNotBlank() && search.results.isEmpty() -> EmptyState(
-                        icon = Icons.Filled.SearchOff,
-                        title = "没有找到",
-                        message = "试试歌曲名加歌手。",
-                    )
+                    search.error.isNotBlank() -> item(key = "error", contentType = "error") {
+                        ErrorBlock(search.error) { onSearch(query) }
+                    }
+                    search.query.isNotBlank() && search.results.isEmpty() -> item(key = "empty", contentType = "empty") {
+                        EmptyState(
+                            icon = Icons.Filled.SearchOff,
+                            title = "没有找到",
+                            message = "试试歌曲名加歌手。",
+                        )
+                    }
                 }
-                search.results.forEachIndexed { index, song ->
+                itemsIndexed(
+                    search.results,
+                    key = { index, _ -> "result:${resultKeys[index]}" },
+                    contentType = { _, _ -> "result" },
+                ) { index, song ->
                     val added = song.key in existing
                     SongRow(
                         title = song.title,

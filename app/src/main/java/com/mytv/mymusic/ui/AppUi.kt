@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -62,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -147,6 +150,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun mergeAlternative(track: CanonicalTrack, source: TrackSource) = model.mergeAlternative(track, source)
 
     fun play(song: Song, queue: List<Song>) = model.play(song, queue)
+    fun playSavedSongs(records: List<com.mytv.mymusic.data.SavedSong>) = model.playSavedSongs(records)
     fun playTrack(track: CanonicalTrack, queue: List<CanonicalTrack>) = model.playTrack(track, queue)
     fun transport(action: String) = model.transport(action)
     fun seek(position: Long) = model.seek(position)
@@ -186,6 +190,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun setContrast(value: Float) = model.setContrast(value)
     fun setAmoled(value: Boolean) = model.setAmoled(value)
     fun setBlurMode(value: com.mytv.mymusic.ui.theme.BlurMode) = model.setBlurMode(value)
+    fun setLyricsBackground(value: com.mytv.mymusic.data.LyricsBackgroundMode) = model.setLyricsBackground(value)
     fun startSleepTimer(minutes: Int) = model.startSleepTimer(minutes)
     fun sleepAfterCurrent() = model.sleepAfterCurrent()
     fun cancelSleepTimer() = model.cancelSleepTimer()
@@ -532,8 +537,8 @@ fun TrackActionsSheet(
                 if (playlists.isEmpty()) {
                     Text("还没有自建歌单，请先在“我的”中新建。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    playlists.forEachIndexed { index, playlist ->
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    itemsIndexed(playlists, key = { _, playlist -> playlist.id }, contentType = { _, _ -> "playlistChoice" }) { index, playlist ->
                         com.mytv.mymusic.ui.components.ListRow(
                             title = playlist.name,
                             index = index,
@@ -586,7 +591,7 @@ private fun QuickAction(
  */
 @Composable
 fun MergeDialog(track: CanonicalTrack, candidates: List<CanonicalTrack>, onMerge: (CanonicalTrack) -> Unit, onDismiss: () -> Unit) {
-    var selected by remember { mutableStateOf(candidates.firstOrNull()?.id) }
+    var selected by rememberSaveable(track.id) { mutableStateOf(candidates.firstOrNull()?.id) }
     val confirmFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     val tv = com.mytv.mymusic.ui.components.LocalAppWindow.current.isTv
     androidx.compose.runtime.LaunchedEffect(tv) { if (tv) runCatching { confirmFocus.requestFocus() } }
@@ -604,11 +609,11 @@ fun MergeDialog(track: CanonicalTrack, candidates: List<CanonicalTrack>, onMerge
                 if (candidates.isEmpty()) {
                     Text("没有其他可合并的曲目", style = MaterialTheme.typography.bodyMedium)
                 }
-                Column(
-                    Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                LazyColumn(
+                    Modifier.width(360.dp).heightIn(max = 360.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    candidates.forEachIndexed { index, target ->
+                    itemsIndexed(candidates, key = { _, target -> target.id }, contentType = { _, _ -> "mergeChoice" }) { index, target ->
                         val on = selected == target.id
                         com.mytv.mymusic.ui.components.ListRow(
                             title = target.title,

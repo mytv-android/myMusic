@@ -36,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,6 +87,7 @@ fun AboutScreen(
     onLicenses: () -> Unit,
     onPrivacy: () -> Unit,
     embedded: Boolean = false,
+    progress: () -> Float = { update.progress },
 ) {
     val openUri = rememberOpenUri()
     val clipboard = LocalClipboard.current
@@ -121,17 +123,17 @@ fun AboutScreen(
     }
 
     SettingsPage(SettingsSection.About, embedded, onBack, subtitle = "版本 ${update.currentVersionName.ifBlank { "1.0" }}（构建 ${update.currentVersionCode}）") {
-        item(key = "head") { AppHeader(update) }
+        item(key = "head", contentType = "appHeader") { AppHeader(update.currentVersionName, update.currentVersionCode) }
         if (showCard && info != null) {
-            item(key = "update") {
-                UpdateCard(update, actions, onLater = {
+            item(key = "update", contentType = "updateCard") {
+                UpdateCard(update, actions, progress, onLater = {
                     actions.skipUpdate()
                     revealSkipped = false
                 })
             }
         }
         if (info == null && update.error.isNotBlank() && !isChecking) {
-            item(key = "error") {
+            item(key = "error", contentType = "error") {
                 Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     ErrorBlock("检查更新失败：${update.error}", onRetry = ::check)
                     TextButton(onClick = actions::openReleasePage, modifier = Modifier.tvFocusRing(CircleShape)) {
@@ -140,7 +142,7 @@ fun AboutScreen(
                 }
             }
         }
-        item(key = "rows") {
+        item(key = "rows", contentType = "settingsGroup") {
             SegmentedGroup(Modifier.padding(top = 12.dp)) {
                 ListRow(
                     title = "检查更新",
@@ -209,13 +211,13 @@ fun AboutScreen(
                 )
             }
         }
-        item(key = "links") { LinksCard(openUri) }
-        item(key = "note") {
+        item(key = "links", contentType = "linksCard") { LinksCard(openUri) }
+        item(key = "note", contentType = "infoNote") {
             Box(Modifier.padding(top = 16.dp)) {
                 InfoNote("Cookie、播放记录和下载文件只保存在本机。同步仅使用你选择的 Gist / Gitee 账号，写入自建歌单数据；应用没有集中式服务器。")
             }
         }
-        item(key = "footer") {
+        item(key = "footer", contentType = "footer") {
             Text(
                 "平台层 music-lib / 7cc4467b\n学习项目，请遵守各音乐平台服务条款。",
                 Modifier.fillMaxWidth().padding(top = 16.dp),
@@ -315,7 +317,7 @@ private fun LinkQrCell(
 }
 
 @Composable
-private fun AppHeader(update: UpdateUiState) {
+private fun AppHeader(versionName: String, versionCode: Long) {
     Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
@@ -333,7 +335,7 @@ private fun AppHeader(update: UpdateUiState) {
         }
         Text("myMusic", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.headlineSmall)
         Text(
-            "版本 ${update.currentVersionName.ifBlank { "1.0" }}（构建 ${update.currentVersionCode}） · AGPL-3.0",
+            "版本 ${versionName.ifBlank { "1.0" }}（构建 $versionCode） · AGPL-3.0",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -343,13 +345,17 @@ private fun AppHeader(update: UpdateUiState) {
 /** 新版本卡片：更新说明、下载进度、校验和安装都在这里；安装需要用户在系统对话框确认。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun UpdateCard(update: UpdateUiState, actions: MusicActions, onLater: () -> Unit) {
+private fun UpdateCard(update: UpdateUiState, actions: MusicActions, progress: () -> Float, onLater: () -> Unit) {
     val info = update.info ?: return
     val scheme = MaterialTheme.colorScheme
     val content = scheme.onTertiaryContainer
     val downloading = update.phase == UpdatePhase.Downloading || update.phase == UpdatePhase.Verifying
     val ready = update.phase == UpdatePhase.Ready
     val primaryColors = ButtonDefaults.buttonColors(containerColor = scheme.tertiary, contentColor = scheme.onTertiary)
+    val zone = ZoneId.systemDefault()
+    val releaseSummary = remember(info.size, info.publishedAt, zone) {
+        "${formatSize(info.size)} · ${formatDate(info.publishedAt, zone)}"
+    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -360,7 +366,7 @@ private fun UpdateCard(update: UpdateUiState, actions: MusicActions, onLater: ()
     ) {
         Text("发现新版本 ${info.versionName}（构建 ${info.versionCode}）", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = content)
         Text(
-            "${formatSize(info.size)} · ${formatDate(info.publishedAt)}",
+            releaseSummary,
             style = MaterialTheme.typography.bodyMedium,
             color = content.copy(alpha = 0.85f),
         )
@@ -372,18 +378,7 @@ private fun UpdateCard(update: UpdateUiState, actions: MusicActions, onLater: ()
             }
         }
         if (downloading || ready) {
-            LinearWavyProgressIndicator(
-                progress = { if (update.phase == UpdatePhase.Downloading) update.progress else 1f },
-                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-                color = content,
-                trackColor = content.copy(alpha = 0.2f),
-            )
-            Text(
-                "${update.phaseLabel.ifBlank { if (ready) "已下载" else "正在下载" }} ${(update.progress * 100).toInt()}% · 下载后校验 SHA-256 和签名",
-                Modifier.padding(top = 6.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = content.copy(alpha = 0.85f),
-            )
+            UpdateDownloadProgress(update.phase, update.phaseLabel, progress, content)
         } else {
             Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Filled.Verified, null, Modifier.size(18.dp), tint = content)
@@ -435,7 +430,31 @@ private fun UpdateCard(update: UpdateUiState, actions: MusicActions, onLater: ()
     }
 }
 
-private fun formatDate(value: String): String = runCatching {
-    val instant = Instant.parse(value)
-    DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault()).format(instant)
+private fun formatDate(value: String, zone: ZoneId): String = runCatching {
+    DateTimeFormatter.ISO_LOCAL_DATE.withZone(zone).format(Instant.parse(value))
 }.getOrDefault(value)
+
+/** 只有进度绘制和百分比文字观察下载数值，版本说明与按钮不跟着刷新。 */
+@Composable
+private fun UpdateDownloadProgress(phase: UpdatePhase, label: String, progress: () -> Float, color: Color) {
+    LinearWavyProgressIndicator(
+        progress = { if (phase == UpdatePhase.Downloading) progress() else 1f },
+        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+        color = color,
+        trackColor = color.copy(alpha = 0.2f),
+    )
+    UpdateProgressLabel(phase, label, progress, color)
+}
+
+@Composable
+private fun UpdateProgressLabel(phase: UpdatePhase, label: String, progress: () -> Float, color: Color) {
+    val percent by remember(phase, progress) {
+        derivedStateOf { if (phase == UpdatePhase.Downloading) (progress().coerceIn(0f, 1f) * 100).toInt() else 100 }
+    }
+    Text(
+        "${label.ifBlank { if (phase == UpdatePhase.Ready) "已下载" else "正在下载" }} $percent% · 下载后校验 SHA-256 和签名",
+        Modifier.padding(top = 6.dp),
+        style = MaterialTheme.typography.bodyMedium,
+        color = color.copy(alpha = 0.85f),
+    )
+}

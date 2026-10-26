@@ -64,7 +64,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -173,10 +173,10 @@ private fun PhoneCharts(
             val other = sources.firstOrNull { it.id != charts.providerId }
             val featuredSongs = charts.featuredSongs
             LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
-                item(key = "sources") { ProviderChips(sources, charts.providerId, actions::selectChartSource) }
+                item(key = "sources", contentType = "sources") { ProviderChips(sources, charts.providerId, actions::selectChartSource) }
                 when {
-                    empty && charts.loading -> item(key = "skeleton") { ChartsSkeleton(window.isTablet) }
-                    empty && charts.error.isNotBlank() -> item(key = "error") {
+                    empty && charts.loading -> item(key = "skeleton", contentType = "skeleton") { ChartsSkeleton(window.isTablet) }
+                    empty && charts.error.isNotBlank() -> item(key = "error", contentType = "error") {
                         DiscoverErrorState(
                             title = "榜单没有加载出来",
                             message = "${charts.providerName}：${charts.error}\n可能是网络问题，也可能是平台接口暂时不可用。",
@@ -185,7 +185,7 @@ private fun PhoneCharts(
                             onSecondary = other?.let { { actions.selectChartSource(it.id) } },
                         )
                     }
-                    empty -> item(key = "empty") {
+                    empty -> item(key = "empty", contentType = "empty") {
                         EmptyState(
                             icon = Icons.Filled.Storefront,
                             title = if (charts.supported) "暂时没有榜单内容" else "这个平台没有提供排行榜",
@@ -196,14 +196,14 @@ private fun PhoneCharts(
                     }
                     else -> {
                         if (!charts.supported) {
-                            item(key = "note") {
+                            item(key = "note", contentType = "note") {
                                 Box(Modifier.padding(horizontal = gutter, vertical = 4.dp)) {
                                     InfoNote("这个平台没有排行榜，下面只显示平台热歌。", "amber")
                                 }
                             }
                         }
                         if (carousel.isNotEmpty()) {
-                            item(key = "carousel") {
+                            item(key = "carousel", contentType = "carousel") {
                                 ChartCarousel(
                                     charts = carousel,
                                     provider = charts.providerName,
@@ -215,7 +215,7 @@ private fun PhoneCharts(
                         }
                         val hasFeatured = featured != null && featuredSongs.isNotEmpty()
                         if (wide && (hasFeatured || more.isNotEmpty())) {
-                            item(key = "two") {
+                            item(key = "two", contentType = "twoPane") {
                                 Row(
                                     Modifier.padding(horizontal = gutter),
                                     horizontalArrangement = Arrangement.spacedBy(28.dp),
@@ -239,14 +239,14 @@ private fun PhoneCharts(
                             }
                         } else {
                             if (hasFeatured) {
-                                item(key = "featured") {
+                                item(key = "featured", contentType = "featured") {
                                     Column(Modifier.padding(horizontal = gutter)) {
                                         FeaturedChart(featured!!, featuredSongs, playingKey, actions, onMore)
                                     }
                                 }
                             }
                             if (more.isNotEmpty()) {
-                                item(key = "moreLabel") { SectionLabel("更多榜单", Modifier.padding(horizontal = gutter)) }
+                                item(key = "moreLabel", contentType = "label") { SectionLabel("更多榜单", Modifier.padding(horizontal = gutter)) }
                                 items(
                                     moreRows,
                                     key = { row -> "charts:${row.first().id}" },
@@ -263,7 +263,7 @@ private fun PhoneCharts(
                             }
                         }
                         if (charts.hotSongs.isNotEmpty()) {
-                            item(key = "hot") {
+                            item(key = "hot", contentType = "hot") {
                                 Column(Modifier.padding(horizontal = gutter)) {
                                     SectionLabel("平台热歌") {
                                         Text(
@@ -291,13 +291,13 @@ private fun PhoneCharts(
                             }
                         }
                         if (charts.error.isNotBlank()) {
-                            item(key = "partial") {
+                            item(key = "partial", contentType = "partial") {
                                 Box(Modifier.padding(horizontal = gutter, vertical = 12.dp)) {
                                     ErrorBlock("部分内容没有加载出来：${charts.error}", actions::retryCharts)
                                 }
                             }
                         }
-                        if (charts.loading) item(key = "more-loading") { AppLoading() }
+                        if (charts.loading) item(key = "more-loading", contentType = "loading") { AppLoading() }
                     }
                 }
             }
@@ -523,7 +523,7 @@ private fun ChartsSkeleton(large: Boolean) {
 // ---------------- 电视 ----------------
 
 /** Hero 展示的对象：榜单、歌单或单曲。按键行为随类型不同，Hero 只负责展示。 */
-private class TvHeroItem(
+internal class TvHeroItem(
     val key: String,
     val cover: String,
     val title: String,
@@ -546,56 +546,31 @@ private fun TvCharts(
     history: List<Song>,
 ) {
     val provider = charts.providerName
-    val chartItems = charts.charts.map { chart ->
-        TvHeroItem(
-            key = "chart:${chart.id}",
-            cover = chart.cover,
-            title = chart.name,
-            meta = listOf(provider, chart.updateFrequency, "${chart.trackCount} 首".takeIf { chart.trackCount > 0 })
-                .filterNotNull().filter { it.isNotBlank() }.joinToString(" · "),
-            description = chart.description.ifBlank { "按你的音源策略播放，失败时自动换源。" },
-            playLabel = "播放全部",
-            onPlay = { actions.playChart(chart) },
-            secondaryLabel = "查看榜单",
-            onSecondary = { actions.openChart(chart) },
-            onClick = { actions.openChart(chart) },
-            arch = true,
-        )
+    // Hero 行只按真实数据缓存；焦点变化不再重建文字、回调和列表。
+    val chartItems = remember(charts.charts, provider, actions) {
+        buildChartHeroItems(charts.charts, provider, actions)
     }
-    val playlistItems = recommended.map { playlist ->
-        TvHeroItem(
-            key = "pl:${playlist.source}:${playlist.id}",
-            cover = playlist.cover,
-            title = playlist.name,
-            meta = listOf("歌单", formatPlayCount(playlist.playCount).takeIf { it.isNotBlank() }?.let { "$it 次播放" }, playlist.creator)
-                .filterNotNull().filter { it.isNotBlank() }.joinToString(" · "),
-            description = playlist.description.ifBlank { "来自歌单页的推荐。" },
-            playLabel = "播放全部",
-            onPlay = { actions.playPlaylist(playlist) },
-            secondaryLabel = "打开歌单",
-            onSecondary = { actions.openPlaylist(playlist) },
-            onClick = { actions.openPlaylist(playlist) },
-        )
+    val playlistItems = remember(recommended, actions) {
+        buildPlaylistHeroItems(recommended, actions)
     }
-    fun songItems(prefix: String, songs: List<Song>, meta: String) = songs.mapIndexed { index, song ->
-        TvHeroItem(
-            key = "$prefix:${song.key}:$index",
-            cover = song.cover,
-            title = song.title,
-            meta = listOf(meta, song.subtitle).filter { it.isNotBlank() }.joinToString(" · "),
-            description = "确定键播放；也可以先选择从哪个平台播放。",
-            playLabel = "播放",
-            onPlay = { actions.play(song, songs) },
-            secondaryLabel = "选择音源",
-            onSecondary = { actions.openSourceForSong(song, songs) },
-            onClick = { actions.play(song, songs) },
-        )
+    val hotItems = remember(charts.hotSongs, provider, actions) {
+        buildSongHeroItems("hot", charts.hotSongs, "$provider 热歌", actions)
     }
-    val hotItems = songItems("hot", charts.hotSongs, "$provider 热歌")
-    val historyItems = songItems("history", history, "最近播放")
+    val historyItems = remember(history, actions) {
+        buildSongHeroItems("history", history, "最近播放", actions)
+    }
 
-    var focused by remember(charts.providerId) { mutableStateOf<TvHeroItem?>(null) }
-    val hero = focused ?: chartItems.firstOrNull() ?: hotItems.firstOrNull()
+    val focusedKey = remember(charts.providerId) { mutableStateOf<String?>(null) }
+    val onHeroFocused: (TvHeroItem) -> Unit = remember(focusedKey) { { item -> focusedKey.value = item.key } }
+    // 只保存 key，按最新列表重新 lookup：刷新后仍指向同一个榜单但使用新数据和回调，不会留旧对象。
+    val hero = remember(focusedKey.value, chartItems, playlistItems, hotItems, historyItems) {
+        findFocusedHero(
+            focusedKey = focusedKey.value,
+            groups = listOf(chartItems, playlistItems, hotItems, historyItems),
+            fallbackGroups = listOf(chartItems, hotItems),
+            keyOf = { it.key },
+        )
+    }
     val playFocus = remember { FocusRequester() }
     val empty = charts.charts.isEmpty() && charts.hotSongs.isEmpty()
     // 按 Hero 是否真的显示来请求：刷新时 focused 还在但整页换成骨架，焦点已丢，加载完要重新给
@@ -628,18 +603,18 @@ private fun TvCharts(
             else -> {
                 TvHero(hero, actions, playFocus)
                 LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 48.dp)) {
-                    if (chartItems.isNotEmpty()) item(key = "charts") { TvCardRow("热门榜单", chartItems) { focused = it } }
-                    if (playlistItems.isNotEmpty()) item(key = "rec") { TvCardRow("为你推荐", playlistItems) { focused = it } }
-                    if (hotItems.isNotEmpty()) item(key = "hot") { TvCardRow("平台热歌", hotItems) { focused = it } }
-                    if (historyItems.isNotEmpty()) item(key = "history") { TvCardRow("最近播放", historyItems) { focused = it } }
+                    if (chartItems.isNotEmpty()) item(key = "charts", contentType = "chartRow") { TvCardRow("热门榜单", chartItems, onHeroFocused) }
+                    if (playlistItems.isNotEmpty()) item(key = "rec", contentType = "playlistRow") { TvCardRow("为你推荐", playlistItems, onHeroFocused) }
+                    if (hotItems.isNotEmpty()) item(key = "hot", contentType = "songRow") { TvCardRow("平台热歌", hotItems, onHeroFocused) }
+                    if (historyItems.isNotEmpty()) item(key = "history", contentType = "songRow") { TvCardRow("最近播放", historyItems, onHeroFocused) }
                     if (charts.error.isNotBlank()) {
-                        item(key = "partial") {
+                        item(key = "partial", contentType = "partial") {
                             Box(Modifier.padding(horizontal = gutter, vertical = 8.dp)) {
                                 ErrorBlock("部分内容没有加载出来：${charts.error}", actions::retryCharts)
                             }
                         }
                     }
-                    item(key = "sources") {
+                    item(key = "sources", contentType = "sources") {
                         Column(Modifier.padding(top = 12.dp)) {
                             Row(Modifier.padding(horizontal = gutter), verticalAlignment = Alignment.CenterVertically) {
                                 Text("榜单来源", Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -654,6 +629,21 @@ private fun TvCharts(
             }
         }
     }
+}
+
+/**
+ * 仅用于 androidTest 的隔离电视榜单：直接挂 [TvCharts]，外部提供数据，并用 LocalAppWindow 切到电视。
+ * 可验证焦点 key 在数据刷新后仍按最新列表 lookup，以及焦点移动不会重建 Hero 列表。
+ */
+@Composable
+internal fun TvChartsTestHost(
+    charts: ChartsUiState,
+    actions: MusicActions,
+    sources: List<ProviderInfo> = emptyList(),
+    recommended: List<Playlist> = emptyList(),
+    history: List<Song> = emptyList(),
+) {
+    TvCharts(charts, sources, actions, recommended, history)
 }
 
 @Composable
@@ -679,20 +669,26 @@ private fun TvHero(item: TvHeroItem, actions: MusicActions, playFocus: FocusRequ
             }
         }
         Box(
-            Modifier.matchParentSize().drawBehind {
-                drawRect(
-                    Brush.horizontalGradient(
-                        0f to surface,
-                        0.34f to surface,
-                        0.72f to tint.value.copy(alpha = 0.55f),
-                        1f to tint.value.copy(alpha = 0f),
-                    ),
-                )
-            },
-        )
-        Box(
-            Modifier.matchParentSize().drawBehind {
-                drawRect(Brush.verticalGradient(0.55f to surface.copy(alpha = 0f), 1f to surface))
+            Modifier.matchParentSize().drawWithCache {
+                // 保留原来的单层颜色插值；拆成两层 SrcOver 会改变过渡带透明度。
+                // 动画色只在绘制阶段读取，停止变化后复用渐变和 shader。
+                var lastTint = Color.Unspecified
+                var horizontal: Brush? = null
+                val bottomFade = Brush.verticalGradient(0.55f to Color.Transparent, 1f to surface)
+                onDrawBehind {
+                    val color = tint.value
+                    if (color != lastTint || horizontal == null) {
+                        horizontal = Brush.horizontalGradient(
+                            0f to surface,
+                            0.34f to surface,
+                            0.72f to color.copy(alpha = 0.55f),
+                            1f to color.copy(alpha = 0f),
+                        )
+                        lastTint = color
+                    }
+                    drawRect(horizontal!!)
+                    drawRect(bottomFade)
+                }
             },
         )
         Column(Modifier.padding(start = gutter, end = gutter, top = 40.dp).widthIn(max = 560.dp)) {
@@ -725,6 +721,64 @@ private fun TvHero(item: TvHeroItem, actions: MusicActions, playFocus: FocusRequ
             }
         }
     }
+}
+
+/** 电视 Hero 的缓存准备入口：榜单列表只随数据和 actions 重建，焦点变化不会重跑。 */
+internal fun buildChartHeroItems(charts: List<TopList>, provider: String, actions: MusicActions): List<TvHeroItem> =
+    charts.map { chart ->
+        TvHeroItem(
+            key = "chart:${chart.id}",
+            cover = chart.cover,
+            title = chart.name,
+            meta = listOf(provider, chart.updateFrequency, "${chart.trackCount} 首".takeIf { chart.trackCount > 0 })
+                .filterNotNull().filter { it.isNotBlank() }.joinToString(" · "),
+            description = chart.description.ifBlank { "按你的音源策略播放，失败时自动换源。" },
+            playLabel = "播放全部",
+            onPlay = { actions.playChart(chart) },
+            secondaryLabel = "查看榜单",
+            onSecondary = { actions.openChart(chart) },
+            onClick = { actions.openChart(chart) },
+            arch = true,
+        )
+    }
+
+/** 电视 Hero 的推荐歌单缓存准备入口。 */
+internal fun buildPlaylistHeroItems(recommended: List<Playlist>, actions: MusicActions): List<TvHeroItem> =
+    recommended.map { playlist ->
+        TvHeroItem(
+            key = "pl:${playlist.source}:${playlist.id}",
+            cover = playlist.cover,
+            title = playlist.name,
+            meta = listOf("歌单", formatPlayCount(playlist.playCount).takeIf { it.isNotBlank() }?.let { "$it 次播放" }, playlist.creator)
+                .filterNotNull().filter { it.isNotBlank() }.joinToString(" · "),
+            description = playlist.description.ifBlank { "来自歌单页的推荐。" },
+            playLabel = "播放全部",
+            onPlay = { actions.playPlaylist(playlist) },
+            secondaryLabel = "打开歌单",
+            onSecondary = { actions.openPlaylist(playlist) },
+            onClick = { actions.openPlaylist(playlist) },
+        )
+    }
+
+/** 电视 Hero 的单曲缓存准备入口（热歌与最近播放共用）。 */
+internal fun buildSongHeroItems(
+    prefix: String,
+    songs: List<Song>,
+    meta: String,
+    actions: MusicActions,
+): List<TvHeroItem> = songs.mapIndexed { index, song ->
+    TvHeroItem(
+        key = "$prefix:${song.key}:$index",
+        cover = song.cover,
+        title = song.title,
+        meta = listOf(meta, song.subtitle).filter { it.isNotBlank() }.joinToString(" · "),
+        description = "确定键播放；也可以先选择从哪个平台播放。",
+        playLabel = "播放",
+        onPlay = { actions.play(song, songs) },
+        secondaryLabel = "选择音源",
+        onSecondary = { actions.openSourceForSong(song, songs) },
+        onClick = { actions.play(song, songs) },
+    )
 }
 
 @Composable

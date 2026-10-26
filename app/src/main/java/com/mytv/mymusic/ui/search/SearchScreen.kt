@@ -93,10 +93,13 @@ import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -126,6 +129,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mytv.mymusic.aggregate.AggregationSettings
 import com.mytv.mymusic.aggregate.Availability
 import com.mytv.mymusic.aggregate.CanonicalCollection
 import com.mytv.mymusic.aggregate.CanonicalTrack
@@ -149,7 +153,6 @@ import com.mytv.mymusic.ui.components.AppLoading
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
-import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.PlatformBadges
 import com.mytv.mymusic.ui.components.PlayButtonSize
@@ -172,23 +175,88 @@ private val UrlPattern = Regex("""https?://\S+""", RegexOption.IGNORE_CASE)
 private val TwoPaneLeft = 320.dp
 private val TvLeft = 300.dp
 
-/** 搜索页各部分共用的数据和回调。 */
+/**
+ * 搜索页共用的稳定依赖。每个字段单独用 State 暴露：输入、结果和播放行各自只订阅自己的字段，
+ * 整包 SearchUiState/MusicUiState 变化不会让所有接收者失去跳过机会。
+ */
 private class SearchCtx(
-    val state: MusicUiState,
-    val search: SearchUiState,
+    val query: State<String>,
+    val submittedQuery: State<String>,
+    val kind: State<SearchKind>,
+    val groups: State<List<CanonicalTrack>>,
+    val collections: State<List<CanonicalCollection>>,
+    val providerStates: State<Map<String, ProviderSearchState>>,
+    val collectionProviderStates: State<Map<String, ProviderSearchState>>,
+    val aggregateStatus: State<SearchStatus>,
+    val collectionStatus: State<SearchStatus>,
+    val loading: State<Boolean>,
+    val appLoading: State<Boolean>,
+    val hasMore: State<Boolean>,
+    val error: State<String>,
+    val history: State<List<String>>,
+    val providers: State<List<ProviderInfo>>,
+    val aggregation: State<AggregationSettings>,
+    val cookies: State<Map<String, String>>,
+    val playing: State<Boolean>,
+    val currentTrackId: State<String?>,
+    val favoriteKeys: State<Set<String>>,
+    val playlists: State<List<LocalPlaylistSummary>>,
     val actions: MusicActions,
-    val favoriteKeys: Set<String>,
-    val playlists: List<LocalPlaylistSummary>,
     val openSettings: () -> Unit,
     val submit: (String) -> Unit,
     val removeHistory: (String) -> Unit,
     val clearHistory: () -> Unit,
     val openActions: (CanonicalTrack) -> Unit,
 ) {
-    fun play(track: CanonicalTrack) = actions.playTrack(track, search.aggregateGroups)
-    fun isCurrent(track: CanonicalTrack) = state.currentTrack?.id == track.id
-    fun openSource(track: CanonicalTrack) = actions.openSource(track, search.aggregateGroups)
+    val landing: Boolean get() = submittedQuery.value.isBlank()
+    val hasQuery: Boolean get() = submittedQuery.value.isNotBlank()
+
+    fun play(track: CanonicalTrack) = actions.playTrack(track, groups.value)
+    fun isCurrent(track: CanonicalTrack) = currentTrackId.value == track.id
+    fun openSource(track: CanonicalTrack) = actions.openSource(track, groups.value)
 }
+
+/** 由稳定的 State 引用构造 SearchCtx；页面和 UI 测试入口共用，避免两套字段列表漂移。 */
+private fun buildSearchCtx(
+    actions: MusicActions,
+    appState: State<MusicUiState>,
+    searchState: State<SearchUiState>,
+    favoritesState: State<List<SavedSong>>,
+    playlistsState: State<List<LocalPlaylistSummary>>,
+    openSettings: () -> Unit,
+    submit: (String) -> Unit,
+    removeHistory: (String) -> Unit,
+    clearHistory: () -> Unit,
+    openActions: (CanonicalTrack) -> Unit,
+): SearchCtx = SearchCtx(
+    query = derivedStateOf { searchState.value.query },
+    submittedQuery = derivedStateOf { searchState.value.submittedQuery },
+    kind = derivedStateOf { searchState.value.kind },
+    groups = derivedStateOf { searchState.value.aggregateGroups },
+    collections = derivedStateOf { searchState.value.aggregateCollections },
+    providerStates = derivedStateOf { searchState.value.providerStates },
+    collectionProviderStates = derivedStateOf { searchState.value.collectionProviderStates },
+    aggregateStatus = derivedStateOf { searchState.value.aggregateStatus },
+    collectionStatus = derivedStateOf { searchState.value.collectionStatus },
+    loading = derivedStateOf { searchState.value.loading },
+    appLoading = derivedStateOf { appState.value.loading },
+    hasMore = derivedStateOf { searchState.value.hasMore },
+    error = derivedStateOf { searchState.value.error },
+    history = derivedStateOf { appState.value.searchHistory },
+    providers = derivedStateOf { appState.value.providers },
+    aggregation = derivedStateOf { appState.value.aggregation },
+    cookies = derivedStateOf { appState.value.cookies },
+    playing = derivedStateOf { appState.value.playing },
+    currentTrackId = derivedStateOf { appState.value.currentTrack?.id },
+    favoriteKeys = derivedStateOf { favoritesState.value.mapTo(HashSet()) { it.key } },
+    playlists = derivedStateOf { playlistsState.value },
+    actions = actions,
+    openSettings = openSettings,
+    submit = submit,
+    removeHistory = removeHistory,
+    clearHistory = clearHistory,
+    openActions = openActions,
+)
 
 /**
  * 搜索：只在提交时请求。未提交或正在改关键词时显示“输入中”（最近搜索、链接解析、联想），
@@ -208,80 +276,92 @@ fun SearchScreen(
     val focusManager = LocalFocusManager.current
     val snackbar = LocalAppSnackbar.current
     val scope = rememberCoroutineScope()
-    var editing by rememberSaveable { mutableStateOf(false) }
-    var actionTrack by remember { mutableStateOf<CanonicalTrack?>(null) }
-    val showHome = search.landing || editing
+    val editing = rememberSaveable { mutableStateOf(false) }
+    val actionTrack = remember { mutableStateOf<CanonicalTrack?>(null) }
+    val showHome = search.landing || editing.value
 
-    // 清除 / 删除搜索记录可撤销：撤销时按原顺序写回快照
-    fun undoable(message: String, apply: () -> Unit) {
-        val snapshot = state.searchHistory
-        apply()
-        scope.launch {
-            snackbar.currentSnackbarData?.dismiss()
-            val result = snackbar.showSnackbar(message, actionLabel = "撤销", duration = SnackbarDuration.Short)
-            if (result == SnackbarResult.ActionPerformed) actions.restoreHistory(snapshot)
-        }
-    }
+    // 状态参数每次重组都会换新对象；先转成稳定的 State，派生字段和 SearchCtx 只在 actions 变化时重建。
+    val appState = rememberUpdatedState(state)
+    val searchState = rememberUpdatedState(search)
+    val favoritesState = rememberUpdatedState(favorites)
+    val playlistsState = rememberUpdatedState(playlists)
+    val settingsTarget = rememberUpdatedState(onOpenSearchSettings)
+    val keyboardState = rememberUpdatedState(keyboard)
+    val focusManagerState = rememberUpdatedState(focusManager)
+    val snackbarState = rememberUpdatedState(snackbar)
 
-    val favoriteKeys = remember(favorites) { favorites.mapTo(HashSet()) { it.key } }
-    val ctx = SearchCtx(
-        state = state,
-        search = search,
-        actions = actions,
-        favoriteKeys = favoriteKeys,
-        playlists = playlists,
-        openSettings = onOpenSearchSettings,
-        submit = { raw ->
-            val text = raw.trim()
-            if (text.isNotEmpty()) {
-                keyboard?.hide()
-                focusManager.clearFocus()
-                if (actions.isLink(text)) {
-                    // 链接直接解析成歌单 / 专辑 / 单曲，不进入搜索结果
-                    actions.setSearchQuery(text)
-                    actions.openLink(text)
-                } else {
-                    actions.submitSearch(text)
-                    editing = false
-                }
+    val ctx = remember(actions, scope) {
+        // 清除 / 删除搜索记录可撤销：撤销时按原顺序写回快照
+        fun undoable(message: String, apply: () -> Unit) {
+            val snapshot = appState.value.searchHistory
+            apply()
+            scope.launch {
+                val current = snackbarState.value
+                current.currentSnackbarData?.dismiss()
+                val result = current.showSnackbar(message, actionLabel = "撤销", duration = SnackbarDuration.Short)
+                if (result == SnackbarResult.ActionPerformed) actions.restoreHistory(snapshot)
             }
-        },
-        removeHistory = { item -> undoable("已删除“$item”") { actions.removeHistory(item) } },
-        clearHistory = { undoable("已清除搜索记录") { actions.clearHistory() } },
-        openActions = { actionTrack = it },
-    )
+        }
+        buildSearchCtx(
+            actions = actions,
+            appState = appState,
+            searchState = searchState,
+            favoritesState = favoritesState,
+            playlistsState = playlistsState,
+            openSettings = { settingsTarget.value() },
+            submit = { raw ->
+                val text = raw.trim()
+                if (text.isNotEmpty()) {
+                    keyboardState.value?.hide()
+                    focusManagerState.value.clearFocus()
+                    if (actions.isLink(text)) {
+                        // 链接直接解析成歌单 / 专辑 / 单曲，不进入搜索结果
+                        actions.setSearchQuery(text)
+                        actions.openLink(text)
+                    } else {
+                        actions.submitSearch(text)
+                        editing.value = false
+                    }
+                }
+            },
+            removeHistory = { item -> undoable("已删除“$item”") { actions.removeHistory(item) } },
+            clearHistory = { undoable("已清除搜索记录") { actions.clearHistory() } },
+            openActions = { actionTrack.value = it },
+        )
+    }
+    val onEdit: (Boolean) -> Unit = remember(editing) { { editing.value = it } }
 
-    BackHandler(enabled = editing && !search.landing) {
-        editing = false
+    BackHandler(enabled = editing.value && !ctx.landing) {
+        editing.value = false
         focusManager.clearFocus()
     }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         if (window.isTv) {
-            TvSearch(ctx, showHome, onEdit = { editing = it })
+            TvSearch(ctx, showHome, onEdit = onEdit)
         } else {
-            TouchSearch(ctx, showHome, editing, onEdit = { editing = it })
+            TouchSearch(ctx, showHome, editing.value, onEdit = onEdit)
         }
     }
 
-    actionTrack?.let { track ->
-        val song = preferredSong(track, state.cookies) ?: return@let
-        val favorite = favoriteSong(track, ctx.favoriteKeys)
+    actionTrack.value?.let { track ->
+        val song = preferredSong(track, ctx.cookies.value) ?: return@let
+        val favorite = favoriteSong(track, ctx.favoriteKeys.value)
         TrackActionsSheet(
             song = song,
             favorite = favorite != null,
-            playlists = playlists,
+            playlists = ctx.playlists.value,
             onToggleFavorite = { actions.favorite(favorite ?: song) },
             onDownload = { actions.download(song) },
             onAddToPlaylist = { id -> actions.addSongToPlaylist(id, song) },
             onOpenSource = {
-                actionTrack = null
+                actionTrack.value = null
                 ctx.openSource(track)
             },
             onRemoveFromPlaylist = null,
-            onDismiss = { actionTrack = null },
+            onDismiss = { actionTrack.value = null },
             onMerge = {
-                actionTrack = null
+                actionTrack.value = null
                 actions.openMerge(track)
             },
         )
@@ -293,15 +373,15 @@ fun SearchScreen(
 @Composable
 private fun TouchSearch(ctx: SearchCtx, showHome: Boolean, editing: Boolean, onEdit: (Boolean) -> Unit) {
     val window = LocalAppWindow.current
-    val search = ctx.search
+    val landing = ctx.submittedQuery.value.isBlank()
     val focusManager = LocalFocusManager.current
     val fieldFocus = remember { FocusRequester() }
     // 平板有结果时，输入中改成搜索框下方的 Docked search view，叠在结果上
-    val docked = window.isTablet && editing && !search.landing
+    val docked = window.isTablet && editing && !landing
     val narrow = if (window.isPhone) Modifier.fillMaxWidth() else Modifier.widthIn(max = 640.dp).fillMaxWidth()
 
     LaunchedEffect(Unit) {
-        if (search.landing) {
+        if (landing) {
             withFrameNanos { }
             runCatching { fieldFocus.requestFocus() }
         }
@@ -316,11 +396,11 @@ private fun TouchSearch(ctx: SearchCtx, showHome: Boolean, editing: Boolean, onE
                 .padding(top = 12.dp, bottom = 4.dp),
         ) {
             SearchField(
-                value = search.query,
+                value = ctx.query.value,
                 onValueChange = ctx.actions::setSearchQuery,
-                onSubmit = { ctx.submit(search.query) },
+                onSubmit = { ctx.submit(ctx.query.value) },
                 onVoiceResult = { text -> ctx.submit(text) },
-                onClear = if (search.query.isNotEmpty() || search.hasQuery) {
+                onClear = if (ctx.query.value.isNotEmpty() || ctx.hasQuery) {
                     {
                         ctx.actions.clearSearch()
                         onEdit(false)
@@ -329,7 +409,7 @@ private fun TouchSearch(ctx: SearchCtx, showHome: Boolean, editing: Boolean, onE
                 } else {
                     null
                 },
-                onBack = if (editing && !search.landing) {
+                onBack = if (editing && !landing) {
                     {
                         onEdit(false)
                         focusManager.clearFocus()
@@ -338,7 +418,7 @@ private fun TouchSearch(ctx: SearchCtx, showHome: Boolean, editing: Boolean, onE
                     null
                 },
                 focusRequester = fieldFocus,
-                onFocused = { if (!search.landing) onEdit(true) },
+                onFocused = { if (!landing) onEdit(true) },
                 modifier = narrow,
             )
             if (!docked) {
@@ -351,7 +431,7 @@ private fun TouchSearch(ctx: SearchCtx, showHome: Boolean, editing: Boolean, onE
             val listWidth = maxWidth - window.gutter * 2
             when {
                 showHome && !docked -> HomePage(ctx, narrow)
-                search.kind == SearchKind.Song && twoPane -> SongResultsTwoPane(ctx, listWidth - TwoPaneLeft - 24.dp)
+                ctx.kind.value == SearchKind.Song && twoPane -> SongResultsTwoPane(ctx, listWidth - TwoPaneLeft - 24.dp)
                 else -> ResultsList(ctx, listWidth)
             }
             if (docked) {
@@ -444,7 +524,7 @@ private fun SearchField(
 private fun KindToggle(ctx: SearchCtx, modifier: Modifier = Modifier) {
     ConnectedToggleGroup(
         options = SearchKinds,
-        selected = ctx.search.kind,
+        selected = ctx.kind.value,
         onSelect = ctx.actions::setSearchKind,
         label = { it.label },
         modifier = modifier,
@@ -507,21 +587,21 @@ private fun DockedPanel(ctx: SearchCtx, onDismiss: () -> Unit) {
 private fun HomeContent(ctx: SearchCtx, modifier: Modifier, readClipboard: Boolean, big: Boolean = false) {
     val clip = rememberClipboardLink(readClipboard, ctx.actions::isLink)
     var dismissedClip by rememberSaveable { mutableStateOf("") }
-    val query = ctx.search.query.trim()
+    val query = ctx.query.value.trim()
     val typedLink = query.takeIf { it.isNotEmpty() && ctx.actions.isLink(it) }
     Column(modifier) {
         when {
             typedLink != null -> LinkCard(
                 title = linkPlatform(typedLink).let { if (it.isBlank()) "解析这个链接" else "解析$it 链接" },
                 url = extractUrl(typedLink),
-                busy = ctx.state.loading,
+                busy = ctx.appLoading.value,
                 onParse = { ctx.actions.openLink(typedLink) },
                 onDismiss = null,
             )
             clip.isNotEmpty() && clip != dismissedClip -> LinkCard(
                 title = linkPlatform(clip).let { if (it.isBlank()) "剪贴板里有一个平台链接" else "剪贴板里有一个$it 链接" },
                 url = extractUrl(clip),
-                busy = ctx.state.loading,
+                busy = ctx.appLoading.value,
                 onParse = {
                     ctx.actions.setSearchQuery(clip)
                     ctx.actions.openLink(clip)
@@ -592,7 +672,7 @@ private fun LinkCard(title: String, url: String, busy: Boolean, onParse: () -> U
 /** 联想：只用本机搜索记录匹配，不额外请求平台。 */
 @Composable
 private fun Suggestions(ctx: SearchCtx, query: String) {
-    val matches = ctx.state.searchHistory
+    val matches = ctx.history.value
         .filter { it != query && it.contains(query, ignoreCase = true) }
         .take(5)
     val rows = listOf(query) + matches
@@ -632,7 +712,7 @@ private fun Suggestions(ctx: SearchCtx, query: String) {
 
 @Composable
 private fun HistorySection(ctx: SearchCtx, big: Boolean) {
-    val history = ctx.state.searchHistory
+    val history = ctx.history.value
     SectionLabel("最近搜索") {
         if (history.isNotEmpty()) {
             TextButton(onClick = ctx.clearHistory, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
@@ -688,7 +768,7 @@ private fun HistoryChip(text: String, big: Boolean, onClick: () -> Unit, onRemov
 
 @Composable
 private fun PlatformsNote(ctx: SearchCtx) {
-    val providers = kindProviders(ctx.state, SearchKind.Song)
+    val providers = kindProviders(ctx.providers.value, ctx.aggregation.value, SearchKind.Song)
     Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(start = 4.dp)) {
             Text(
@@ -719,6 +799,11 @@ private fun PlatformsNote(ctx: SearchCtx) {
 @Composable
 private fun ResultsList(ctx: SearchCtx, rowWidth: Dp) {
     val window = LocalAppWindow.current
+    // 在调用惰性 DSL 的组合层按结果缓存，列表内容重建时不再重复 drop / 去重。
+    val groups = ctx.groups.value
+    val collections = ctx.collections.value
+    val songResults = remember(groups) { buildSongResultsCache(groups) }
+    val collectionKeys = remember(collections) { collectionRowKeys(collections) }
     var altExpanded by rememberSaveable { mutableStateOf(false) }
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -729,13 +814,13 @@ private fun ResultsList(ctx: SearchCtx, rowWidth: Dp) {
             bottom = LocalOverlayPadding.current.calculateBottomPadding() + 24.dp,
         ),
     ) {
-        if (ctx.search.kind == SearchKind.Song) {
-            songItems(ctx, rowWidth, bestInline = true, altExpanded = altExpanded, onToggleAlt = { altExpanded = !altExpanded })
-            if (window.isPhone && !ctx.search.loading && ctx.state.searchHistory.isNotEmpty()) {
-                item("history") { Column { HistorySection(ctx, big = false) } }
+        if (ctx.kind.value == SearchKind.Song) {
+            songItems(ctx, songResults, rowWidth, bestInline = true, altExpanded = altExpanded, onToggleAlt = { altExpanded = !altExpanded })
+            if (window.isPhone && !ctx.loading.value && ctx.history.value.isNotEmpty()) {
+                item("history", contentType = "history") { Column { HistorySection(ctx, big = false) } }
             }
         } else {
-            collectionItems(ctx)
+            collectionItems(ctx, collectionKeys)
         }
     }
 }
@@ -745,9 +830,10 @@ private fun ResultsList(ctx: SearchCtx, rowWidth: Dp) {
 private fun SongResultsTwoPane(ctx: SearchCtx, rowWidth: Dp) {
     val window = LocalAppWindow.current
     val bottom = LocalOverlayPadding.current.calculateBottomPadding() + 24.dp
-    val groups = ctx.search.aggregateGroups
+    val groups = ctx.groups.value
+    val results = remember(groups) { buildSongResultsCache(groups) }
     var altExpanded by rememberSaveable { mutableStateOf(false) }
-    val showSkeleton = rememberDelayed(groups.isEmpty() && ctx.search.loading)
+    val showSkeleton = rememberDelayed(groups.isEmpty() && ctx.loading.value)
     Row(Modifier.fillMaxSize().padding(horizontal = window.gutter), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
         if (groups.isNotEmpty() || showSkeleton) {
             Column(
@@ -764,7 +850,7 @@ private fun SongResultsTwoPane(ctx: SearchCtx, rowWidth: Dp) {
             Modifier.weight(1f).fillMaxHeight(),
             contentPadding = PaddingValues(top = 4.dp, bottom = bottom),
         ) {
-            songItems(ctx, rowWidth, bestInline = false, altExpanded = altExpanded, onToggleAlt = { altExpanded = !altExpanded })
+            songItems(ctx, results, rowWidth, bestInline = false, altExpanded = altExpanded, onToggleAlt = { altExpanded = !altExpanded })
         }
     }
 }
@@ -775,6 +861,7 @@ private fun SongResultsTwoPane(ctx: SearchCtx, rowWidth: Dp) {
  */
 private fun LazyListScope.songItems(
     ctx: SearchCtx,
+    results: SongResultsCache,
     rowWidth: Dp,
     bestInline: Boolean,
     altExpanded: Boolean,
@@ -783,62 +870,60 @@ private fun LazyListScope.songItems(
     firstFocus: FocusRequester? = null,
     stateFocus: FocusRequester? = null,
 ) {
-    val search = ctx.search
-    val groups = search.aggregateGroups
-    if (statusInList) item("status") { StatusArea(ctx) }
+    val groups = results.groups
+    if (statusInList) item("status", contentType = "status") { StatusArea(ctx) }
     if (groups.isEmpty()) {
-        if (search.loading) {
-            item("skeleton") { LoadingSkeleton(withBest = bestInline) }
+        if (ctx.loading.value) {
+            item("skeleton", contentType = "skeleton") { LoadingSkeleton(withBest = bestInline) }
         } else {
-            item("empty") { SongEmptyState(ctx, stateFocus) }
+            item("empty", contentType = "empty") { SongEmptyState(ctx, stateFocus) }
         }
         return
     }
     if (bestInline) {
-        item("best") { BestMatchCard(ctx, groups.first(), vertical = false, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)) }
+        item("best", contentType = "best") {
+            BestMatchCard(ctx, groups.first(), vertical = false, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+        }
     }
-    val rows = groups.drop(1)
-    val rowKeys = distinctKeys(rows) { it.id }
     itemsIndexed(
-        rows,
-        key = { index, _ -> rowKeys[index] },
+        results.rows,
+        key = { index, _ -> results.rowKeys[index] },
         contentType = { _, _ -> "song" },
     ) { index, track ->
         SearchSongRow(
             ctx,
             track,
             index,
-            rows.size,
+            results.rows.size,
             rowWidth,
             Modifier
                 .padding(top = if (index == 0) 0.dp else SegmentGap)
                 .then(if (index == 0 && firstFocus != null) Modifier.focusRequester(firstFocus) else Modifier),
         )
     }
-    if (search.hasMore) item("more") { LoadMore(ctx) }
-    val alternatives = groups.flatMap { track -> track.alternatives.map { track to it } }
-        .distinctBy { (_, source) -> source.song.key }
+    if (ctx.hasMore.value) item("more", contentType = "more") { LoadMore(ctx) }
+    val alternatives = results.alternatives
     if (alternatives.isNotEmpty()) {
-        item("alt-head") { AlternativesHeader(alternatives.size, altExpanded, onToggleAlt) }
+        item("alt-head", contentType = "altHead") { AlternativesHeader(alternatives.size, altExpanded, onToggleAlt) }
         if (altExpanded) {
             itemsIndexed(
                 alternatives,
-                key = { _, pair -> "alt:${pair.second.song.key}" },
+                key = { index, _ -> results.alternativeKeys[index] },
                 contentType = { _, _ -> "alt" },
-            ) { index, (track, source) ->
+            ) { index, row ->
                 SongRow(
-                    title = source.song.title,
-                    subtitle = listOf(source.song.artist, source.providerName, source.qualityLabel)
+                    title = row.source.song.title,
+                    subtitle = listOf(row.source.song.artist, row.source.providerName, row.source.qualityLabel)
                         .filter { it.isNotBlank() }
                         .joinToString(" · "),
-                    cover = source.song.cover,
+                    cover = row.source.song.cover,
                     index = index,
                     count = alternatives.size,
-                    onClick = { ctx.actions.playAlternative(track, source) },
+                    onClick = { ctx.actions.playAlternative(row.track, row.source) },
                     modifier = Modifier.padding(top = if (index == 0) 0.dp else SegmentGap),
                     trailing = {
                         TextButton(
-                            onClick = { ctx.actions.mergeAlternative(track, source) },
+                            onClick = { ctx.actions.mergeAlternative(row.track, row.source) },
                             modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
                         ) { Text("合并") }
                     },
@@ -894,7 +979,7 @@ private fun SearchSongRow(
     modifier: Modifier = Modifier,
 ) {
     val window = LocalAppWindow.current
-    val cookies = ctx.state.cookies
+    val cookies = ctx.cookies.value
     var menuOpen by remember { mutableStateOf(false) }
     val wide = rowWidth >= 560.dp
     val inlineMax = if (rowWidth >= 420.dp) 4 else 3
@@ -953,8 +1038,8 @@ private fun MoreActionButton(
 
 @Composable
 private fun TrackMenu(ctx: SearchCtx, track: CanonicalTrack, expanded: Boolean, onDismiss: () -> Unit) {
-    val song = preferredSong(track, ctx.state.cookies) ?: return
-    val favorite = favoriteSong(track, ctx.favoriteKeys)
+    val song = preferredSong(track, ctx.cookies.value) ?: return
+    val favorite = favoriteSong(track, ctx.favoriteKeys.value)
     var pickPlaylist by remember(expanded) { mutableStateOf(false) }
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, shape = RoundedCornerShape(20.dp)) {
         if (!pickPlaylist) {
@@ -967,7 +1052,7 @@ private fun TrackMenu(ctx: SearchCtx, track: CanonicalTrack, expanded: Boolean, 
                 text = { Text("加入歌单") },
                 leadingIcon = { Icon(Icons.Filled.LibraryAdd, null) },
                 trailingIcon = { Icon(Icons.Filled.ChevronRight, null) },
-                enabled = ctx.playlists.isNotEmpty(),
+                enabled = ctx.playlists.value.isNotEmpty(),
                 onClick = { pickPlaylist = true },
             )
             MenuItem("下载", Icons.Filled.Download) { onDismiss(); ctx.actions.download(song) }
@@ -977,7 +1062,7 @@ private fun TrackMenu(ctx: SearchCtx, track: CanonicalTrack, expanded: Boolean, 
         } else {
             MenuItem("返回", Icons.AutoMirrored.Filled.ArrowBack) { pickPlaylist = false }
             HorizontalDivider()
-            ctx.playlists.forEach { playlist ->
+            ctx.playlists.value.forEach { playlist ->
                 DropdownMenuItem(
                     text = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     trailingIcon = { Text("${playlist.trackCount} 首", style = MaterialTheme.typography.labelMedium) },
@@ -1030,7 +1115,7 @@ private fun BestMatchCard(
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onPrimaryContainer) {
             val playButton = @Composable {
                 PlayPauseButton(
-                    playing = isCurrent && ctx.state.playing,
+                    playing = isCurrent && ctx.playing.value,
                     onClick = play,
                     size = if (vertical) PlayButtonSize.Medium else PlayButtonSize.Small,
                 )
@@ -1047,7 +1132,7 @@ private fun BestMatchCard(
                     )
                     Spacer(Modifier.height(14.dp))
                     BestText(track, large = true)
-                    PlatformBadges(track, ctx.state.cookies, max = 5, modifier = Modifier.padding(top = 10.dp))
+                    PlatformBadges(track, ctx.cookies.value, max = 5, modifier = Modifier.padding(top = 10.dp))
                     Row(
                         Modifier.fillMaxWidth().padding(top = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
@@ -1066,7 +1151,7 @@ private fun BestMatchCard(
                     Cover(track.cover, track.title, 96.dp, corner = 28.dp)
                     Column(Modifier.weight(1f)) {
                         BestText(track, large = false)
-                        PlatformBadges(track, ctx.state.cookies, max = 3, modifier = Modifier.padding(top = 8.dp))
+                        PlatformBadges(track, ctx.cookies.value, max = 3, modifier = Modifier.padding(top = 8.dp))
                     }
                     Column(
                         Modifier.height(96.dp),
@@ -1106,13 +1191,13 @@ private fun BestText(track: CanonicalTrack, large: Boolean) {
 private fun LoadMore(ctx: SearchCtx) {
     Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
         // 电视加载中也保留按钮（searchMore 自己会忽略重复点按）：换成指示器会把遥控器焦点一起移除
-        if (ctx.search.loading && !LocalAppWindow.current.isTv) {
+        if (ctx.loading.value && !LocalAppWindow.current.isTv) {
             LoadingIndicator(Modifier.size(48.dp))
         } else {
             FilledTonalButton(
                 onClick = ctx.actions::searchMore,
                 modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp)),
-            ) { Text(if (ctx.search.loading) "正在加载…" else "加载更多") }
+            ) { Text(if (ctx.loading.value) "正在加载…" else "加载更多") }
         }
     }
 }
@@ -1127,24 +1212,31 @@ private class ProviderSummary(val lines: List<ProviderLine>) {
     val failed get() = lines.mapNotNull { it.state }.filter { it.status in FailedStatuses }
 }
 
-private fun kindProviders(state: MusicUiState, kind: SearchKind): List<ProviderInfo> {
-    val supports = state.providers.filter {
+private fun kindProviders(
+    providers: List<ProviderInfo>,
+    aggregation: AggregationSettings,
+    kind: SearchKind,
+): List<ProviderInfo> {
+    val supports = providers.filter {
         when (kind) {
             SearchKind.Album -> it.searchAlbum
             SearchKind.Playlist -> it.searchPlaylist
             else -> it.search
         }
     }
-    val enabled = state.aggregation.enabledOrDefault(supports.map { it.id })
+    val enabled = aggregation.enabledOrDefault(supports.map { it.id })
     return supports.filter { it.id in enabled }
 }
 
-private fun summarize(ctx: SearchCtx): ProviderSummary {
-    val kind = ctx.search.kind
-    val states = if (kind == SearchKind.Song) ctx.search.providerStates else ctx.search.collectionProviderStates
-    val providers = kindProviders(ctx.state, kind)
-    val lines = providers.map { ProviderLine(it.name, states[it.id]) } +
-        states.values.filter { s -> providers.none { it.id == s.providerId } }.map { ProviderLine(it.providerName, it) }
+private fun summarize(
+    kind: SearchKind,
+    states: Map<String, ProviderSearchState>,
+    providers: List<ProviderInfo>,
+    aggregation: AggregationSettings,
+): ProviderSummary {
+    val enabledProviders = kindProviders(providers, aggregation, kind)
+    val lines = enabledProviders.map { ProviderLine(it.name, states[it.id]) } +
+        states.values.filter { s -> enabledProviders.none { it.id == s.providerId } }.map { ProviderLine(it.providerName, it) }
     return ProviderSummary(lines)
 }
 
@@ -1166,16 +1258,18 @@ private fun failedText(failed: List<ProviderSearchState>, kind: SearchKind): Str
 /** 结果上方：进行中 / 全部返回时是状态条；有平台失败且已结束时换成“只重试失败的”提示。 */
 @Composable
 private fun StatusArea(ctx: SearchCtx, retryFocus: FocusRequester? = null, beforeRetry: () -> Unit = {}) {
-    val search = ctx.search
-    val summary = summarize(ctx)
-    if (summary.total == 0 && !search.loading) return
-    val song = search.kind == SearchKind.Song
-    val hasResults = if (song) search.aggregateGroups.isNotEmpty() else search.aggregateCollections.isNotEmpty()
+    val kind = ctx.kind.value
+    val loading = ctx.loading.value
+    val states = if (kind == SearchKind.Song) ctx.providerStates.value else ctx.collectionProviderStates.value
+    val summary = summarize(kind, states, ctx.providers.value, ctx.aggregation.value)
+    if (summary.total == 0 && !loading) return
+    val song = kind == SearchKind.Song
+    val hasResults = if (song) ctx.groups.value.isNotEmpty() else ctx.collections.value.isNotEmpty()
     val allFailed = summary.failed.isNotEmpty() && summary.failed.size >= summary.lines.count { it.state != null }
-    if (!search.loading && summary.failed.isNotEmpty() && (hasResults || !allFailed)) {
+    if (!loading && summary.failed.isNotEmpty() && (hasResults || !allFailed)) {
         PartialFailureCard(ctx, summary.failed, retryFocus, beforeRetry)
     } else {
-        StatusStrip(summary, search.loading, search.kind)
+        StatusStrip(summary, loading, kind)
     }
 }
 
@@ -1279,7 +1373,7 @@ private fun PartialFailureCard(
     retryFocus: FocusRequester?,
     beforeRetry: () -> Unit,
 ) {
-    val song = ctx.search.kind == SearchKind.Song
+    val song = ctx.kind.value == SearchKind.Song
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.errorContainer,
@@ -1289,7 +1383,7 @@ private fun PartialFailureCard(
         Column(Modifier.padding(16.dp)) {
             Text("${failed.size} 个平台没有返回结果", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                "${failedText(failed, ctx.search.kind)}。空结果不代表全网没有。",
+                "${failedText(failed, ctx.kind.value)}。空结果不代表全网没有。",
                 Modifier.padding(top = 2.dp),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -1303,7 +1397,7 @@ private fun PartialFailureCard(
                         beforeRetry()
                         ctx.actions.retryFailedSearch()
                     },
-                    enabled = !ctx.search.loading,
+                    enabled = !ctx.loading.value,
                     modifier = Modifier
                         .heightIn(min = 48.dp)
                         .then(if (retryFocus != null) Modifier.focusRequester(retryFocus) else Modifier)
@@ -1393,20 +1487,25 @@ private fun BestSkeleton(vertical: Boolean) {
 
 @Composable
 private fun SongEmptyState(ctx: SearchCtx, focus: FocusRequester?) {
-    val search = ctx.search
-    val failed = summarize(ctx).failed
-    val retry = { ctx.actions.submitSearch(search.submittedQuery) }
+    val failed = summarize(
+        SearchKind.Song,
+        ctx.providerStates.value,
+        ctx.providers.value,
+        ctx.aggregation.value,
+    ).failed
+    val retry = { ctx.actions.submitSearch(ctx.submittedQuery.value) }
+    val error = ctx.error.value
     when {
-        search.error.isNotBlank() -> StateBlock(
+        error.isNotBlank() -> StateBlock(
             icon = Icons.Filled.CloudOff,
             title = "这次没能搜索",
-            message = search.error,
+            message = error,
             error = true,
             primary = "检查聚合平台" to ctx.openSettings,
             secondary = "重试" to retry,
             focus = focus,
         )
-        search.aggregateStatus == SearchStatus.Failed -> StateBlock(
+        ctx.aggregateStatus.value == SearchStatus.Failed -> StateBlock(
             icon = Icons.Filled.WifiOff,
             title = "平台都没有返回结果",
             message = buildString {
@@ -1418,7 +1517,7 @@ private fun SongEmptyState(ctx: SearchCtx, focus: FocusRequester?) {
             secondary = "检查聚合平台" to ctx.openSettings,
             focus = focus,
         )
-        search.aggregateStatus == SearchStatus.Empty -> StateBlock(
+        ctx.aggregateStatus.value == SearchStatus.Empty -> StateBlock(
             icon = Icons.Filled.SearchOff,
             title = "没有找到这首歌",
             message = if (failed.isNotEmpty()) {
@@ -1436,20 +1535,21 @@ private fun SongEmptyState(ctx: SearchCtx, focus: FocusRequester?) {
 
 @Composable
 private fun CollectionEmptyState(ctx: SearchCtx, focus: FocusRequester?) {
-    val search = ctx.search
-    val label = if (search.kind == SearchKind.Album) "专辑" else "歌单"
-    val retry = { ctx.actions.submitSearch(search.submittedQuery) }
+    val kind = ctx.kind.value
+    val label = if (kind == SearchKind.Album) "专辑" else "歌单"
+    val retry = { ctx.actions.submitSearch(ctx.submittedQuery.value) }
+    val error = ctx.error.value
     when {
-        search.error.isNotBlank() -> StateBlock(
+        error.isNotBlank() -> StateBlock(
             icon = Icons.Filled.CloudOff,
             title = "这次没能搜索$label",
-            message = search.error,
+            message = error,
             error = true,
             primary = "检查聚合平台" to ctx.openSettings,
             secondary = "重试" to retry,
             focus = focus,
         )
-        search.collectionStatus == SearchStatus.Failed -> StateBlock(
+        ctx.collectionStatus.value == SearchStatus.Failed -> StateBlock(
             icon = Icons.Filled.WifiOff,
             title = "平台都没有返回$label",
             message = "可能是网络问题，也可能是平台接口暂时不可用。",
@@ -1458,7 +1558,7 @@ private fun CollectionEmptyState(ctx: SearchCtx, focus: FocusRequester?) {
             secondary = "检查聚合平台" to ctx.openSettings,
             focus = focus,
         )
-        search.collectionStatus == SearchStatus.Empty -> StateBlock(
+        ctx.collectionStatus.value == SearchStatus.Empty -> StateBlock(
             icon = Icons.Filled.SearchOff,
             title = "没有找到相关$label",
             message = "换一个关键词，或检查参与聚合的平台。",
@@ -1543,21 +1643,19 @@ private fun StateBlock(
 
 /* ---------------- 歌单 / 专辑结果 ---------------- */
 
-private fun LazyListScope.collectionItems(ctx: SearchCtx, stateFocus: FocusRequester? = null) {
-    val search = ctx.search
-    val items = search.aggregateCollections
-    item("status") { StatusArea(ctx) }
+private fun LazyListScope.collectionItems(ctx: SearchCtx, keys: List<String>, stateFocus: FocusRequester? = null) {
+    val items = ctx.collections.value
+    item("status", contentType = "status") { StatusArea(ctx) }
     if (items.isEmpty()) {
-        if (search.loading) {
-            item("skeleton") {
+        if (ctx.loading.value) {
+            item("skeleton", contentType = "skeleton") {
                 if (rememberDelayed(true)) SkeletonRows(6) else Spacer(Modifier.height(1.dp))
             }
         } else {
-            item("empty") { CollectionEmptyState(ctx, stateFocus) }
+            item("empty", contentType = "empty") { CollectionEmptyState(ctx, stateFocus) }
         }
         return
     }
-    val keys = distinctKeys(items) { it.id }
     itemsIndexed(
         items,
         key = { index, _ -> keys[index] },
@@ -1565,7 +1663,7 @@ private fun LazyListScope.collectionItems(ctx: SearchCtx, stateFocus: FocusReque
     ) { index, item ->
         CollectionRow(ctx, item, index, items.size, Modifier.padding(top = if (index == 0) 4.dp else SegmentGap))
     }
-    item("note") { CollectionNote(search.kind) }
+    item("note", contentType = "note") { CollectionNote(ctx.kind.value) }
 }
 
 @Composable
@@ -1586,7 +1684,7 @@ private fun CollectionNote(kind: SearchKind) {
 @Composable
 private fun CollectionRow(ctx: SearchCtx, item: CanonicalCollection, index: Int, count: Int, modifier: Modifier = Modifier) {
     val window = LocalAppWindow.current
-    val album = ctx.search.kind == SearchKind.Album
+    val album = ctx.kind.value == SearchKind.Album
     val shape = segmentShape(index, count)
     val first = item.sources.firstOrNull()
     Row(
@@ -1638,7 +1736,7 @@ private fun CollectionSources(ctx: SearchCtx, item: CanonicalCollection, modifie
 /** 平台按钮：平台名 + 该平台版本的曲目数，点按打开这个平台的版本。 */
 @Composable
 private fun SourcePill(ctx: SearchCtx, source: CollectionSource, focusRequester: FocusRequester? = null) {
-    val album = ctx.search.kind == SearchKind.Album
+    val album = ctx.kind.value == SearchKind.Album
     val shape = RoundedCornerShape(8.dp)
     val count = source.playlist.trackCount
     Surface(
@@ -1672,7 +1770,7 @@ private fun TvSearch(ctx: SearchCtx, showHome: Boolean, onEdit: (Boolean) -> Uni
     BoxWithConstraints(Modifier.fillMaxSize().padding(start = 28.dp, end = window.gutter, top = 32.dp)) {
         when {
             showHome -> TvSearchHome(ctx)
-            ctx.search.kind == SearchKind.Song -> TvSongResults(ctx, onEdit, rowWidth = maxWidth - TvLeft - 32.dp)
+            ctx.kind.value == SearchKind.Song -> TvSongResults(ctx, onEdit, rowWidth = maxWidth - TvLeft - 32.dp)
             else -> TvCollectionResults(ctx, onEdit)
         }
     }
@@ -1687,7 +1785,7 @@ private fun TvSearchHome(ctx: SearchCtx) {
         withFrameNanos { }
         runCatching { firstKey.requestFocus() }
     }
-    val query = ctx.search.query
+    val query = ctx.query.value
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
         Column(
             Modifier
@@ -1827,23 +1925,24 @@ private fun TvQueryBar(query: String, onClick: () -> Unit, modifier: Modifier = 
 /** 电视单曲结果：左栏搜索词和最佳匹配，右栏结果；默认焦点在第一条结果。 */
 @Composable
 private fun TvSongResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit, rowWidth: Dp) {
-    val search = ctx.search
-    val groups = search.aggregateGroups
+    val groups = ctx.groups.value
+    val results = remember(groups) { buildSongResultsCache(groups) }
+    val submittedQuery = ctx.submittedQuery.value
     val target = remember { FocusRequester() }
     val bestFocus = remember { FocusRequester() }
     var altExpanded by rememberSaveable { mutableStateOf(false) }
     var focusedQuery by rememberSaveable { mutableStateOf("") }
-    val ready = groups.isNotEmpty() || !search.loading
-    LaunchedEffect(search.submittedQuery, ready) {
+    val ready = groups.isNotEmpty() || !ctx.loading.value
+    LaunchedEffect(submittedQuery, ready) {
         // 重试 / 重新搜索时结果整块换成骨架，原来的焦点跟着没了，加载完要重新给
         if (!ready) focusedQuery = ""
-        if (ready && focusedQuery != search.submittedQuery) {
+        if (ready && focusedQuery != submittedQuery) {
             withFrameNanos { }
             runCatching { target.requestFocus() }
-            focusedQuery = search.submittedQuery
+            focusedQuery = submittedQuery
         }
     }
-    val showSkeleton = rememberDelayed(groups.isEmpty() && search.loading)
+    val showSkeleton = rememberDelayed(groups.isEmpty() && ctx.loading.value)
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
         Column(
             Modifier
@@ -1852,7 +1951,7 @@ private fun TvSongResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit, rowWidth: D
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 48.dp),
         ) {
-            TvQueryBar(search.submittedQuery, onClick = { onEdit(true) }, modifier = Modifier.fillMaxWidth())
+            TvQueryBar(submittedQuery, onClick = { onEdit(true) }, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(16.dp))
             when {
                 groups.isNotEmpty() -> BestMatchCard(
@@ -1871,9 +1970,10 @@ private fun TvSongResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit, rowWidth: D
             Modifier.weight(1f).fillMaxHeight(),
             contentPadding = PaddingValues(top = 4.dp, bottom = 48.dp, start = 4.dp, end = 4.dp),
         ) {
-            item("kinds") { KindToggle(ctx, Modifier.widthIn(max = 420.dp).fillMaxWidth().padding(bottom = 12.dp)) }
+            item("kinds", contentType = "kinds") { KindToggle(ctx, Modifier.widthIn(max = 420.dp).fillMaxWidth().padding(bottom = 12.dp)) }
             songItems(
                 ctx,
+                results,
                 rowWidth,
                 bestInline = false,
                 altExpanded = altExpanded,
@@ -1889,14 +1989,18 @@ private fun TvSongResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit, rowWidth: D
 /** 电视专辑 / 歌单结果：横向卡片行，焦点所在卡片的平台显示在下方。 */
 @Composable
 private fun TvCollectionResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit) {
-    val search = ctx.search
-    val items = search.aggregateCollections
+    val items = ctx.collections.value
+    // key 表按数据缓存；焦点 ID 只保存 key，详情由独立的子组合读取，焦点移动不重建列表。
+    val keys = remember(items) { collectionRowKeys(items) }
     val target = remember { FocusRequester() }
     var focusedQuery by rememberSaveable { mutableStateOf("") }
-    var focusedId by remember { mutableStateOf("") }
-    val ready = items.isNotEmpty() || !search.loading
-    LaunchedEffect(search.submittedQuery, search.kind, ready) {
-        val key = "${search.kind}:${search.submittedQuery}"
+    val focusedId = remember { mutableStateOf("") }
+    val submittedQuery = ctx.submittedQuery.value
+    val kind = ctx.kind.value
+    val loading = ctx.loading.value
+    val ready = items.isNotEmpty() || !loading
+    LaunchedEffect(submittedQuery, kind, ready) {
+        val key = "$kind:$submittedQuery"
         // 重新搜索会先清空结果，焦点跟着没了，加载完要重新给
         if (!ready) focusedQuery = ""
         if (ready && focusedQuery != key) {
@@ -1905,24 +2009,22 @@ private fun TvCollectionResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit) {
             focusedQuery = key
         }
     }
-    val album = search.kind == SearchKind.Album
+    val album = kind == SearchKind.Album
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 48.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            TvQueryBar(search.submittedQuery, onClick = { onEdit(true) }, modifier = Modifier.weight(1f))
+            TvQueryBar(submittedQuery, onClick = { onEdit(true) }, modifier = Modifier.weight(1f))
             KindToggle(ctx, Modifier.width(360.dp))
         }
         Spacer(Modifier.height(8.dp))
         StatusArea(ctx)
         when {
-            items.isEmpty() && search.loading -> if (rememberDelayed(true)) {
+            items.isEmpty() && loading -> if (rememberDelayed(true)) {
                 Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                     repeat(6) { Skeleton(Modifier.size(160.dp), RoundedCornerShape(20.dp)) }
                 }
             }
             items.isEmpty() -> CollectionEmptyState(ctx, target)
             else -> {
-                val focused = items.find { it.id == focusedId } ?: items.first()
-                val keys = distinctKeys(items) { it.id }
                 LazyRow(
                     contentPadding = PaddingValues(vertical = 20.dp, horizontal = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
@@ -1935,24 +2037,37 @@ private fun TvCollectionResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit) {
                         TvCollectionCard(
                             item,
                             album,
-                            onFocused = { focusedId = item.id },
+                            onFocused = { focusedId.value = item.id },
                             onOpen = { item.sources.firstOrNull()?.let { ctx.actions.openPlaylist(it.playlist, album) } },
                             modifier = if (index == 0) Modifier.focusRequester(target) else Modifier,
                         )
                     }
                 }
-                Text(
-                    "${focused.name} · ${collectionSubtitle(focused)}，可在这些平台打开：",
-                    Modifier.padding(start = 4.dp, bottom = 8.dp),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    focused.sources.forEach { source -> SourcePill(ctx, source) }
-                }
-                CollectionNote(search.kind)
+                TvFocusedCollection(ctx, items, focusedId)
+                CollectionNote(kind)
             }
         }
+    }
+}
+
+/** 焦点详情单独组合：只订阅 focusedId，焦点移动不重建外层列表和 key 表。 */
+@Composable
+private fun TvFocusedCollection(
+    ctx: SearchCtx,
+    items: List<CanonicalCollection>,
+    focusedId: State<String>,
+) {
+    val focused = remember(items, focusedId.value) {
+        items.firstOrNull { it.id == focusedId.value } ?: items.first()
+    }
+    Text(
+        "${focused.name} · ${collectionSubtitle(focused)}，可在这些平台打开：",
+        Modifier.padding(start = 4.dp, bottom = 8.dp),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        focused.sources.forEach { source -> SourcePill(ctx, source) }
     }
 }
 
@@ -1992,6 +2107,42 @@ private fun TvCollectionCard(
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+/* ======================== UI 测试入口 ======================== */
+
+/**
+ * 仅用于 androidTest 的隔离结果区：不依赖导航、输入框、键盘和 Snackbar。
+ * 测试可在外部更新 [search] / [state] 来验证结果刷新时稳定 key、其他版本展开状态与焦点保持。
+ */
+@Composable
+internal fun SearchResultsTestHost(
+    state: MusicUiState,
+    search: SearchUiState,
+    actions: MusicActions,
+    favorites: List<SavedSong> = emptyList(),
+    playlists: List<LocalPlaylistSummary> = emptyList(),
+    rowWidth: Dp = 640.dp,
+) {
+    val appState = rememberUpdatedState(state)
+    val searchState = rememberUpdatedState(search)
+    val favoritesState = rememberUpdatedState(favorites)
+    val playlistsState = rememberUpdatedState(playlists)
+    val ctx = remember(actions) {
+        buildSearchCtx(
+            actions = actions,
+            appState = appState,
+            searchState = searchState,
+            favoritesState = favoritesState,
+            playlistsState = playlistsState,
+            openSettings = {},
+            submit = {},
+            removeHistory = {},
+            clearHistory = {},
+            openActions = {},
+        )
+    }
+    ResultsList(ctx, rowWidth)
 }
 
 /* ======================== 工具 ======================== */

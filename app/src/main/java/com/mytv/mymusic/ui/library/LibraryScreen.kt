@@ -80,6 +80,7 @@ import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -108,6 +109,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.SavedSong
+import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.sync.SyncStatus
 import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.data.sync.SyncUiState
@@ -139,10 +141,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
+import java.time.LocalDate
+import java.time.ZoneId
 
 /** “我的”页面的跳转。设置入口只在手机上出现（平板和电视在导航栏底部）。 */
 class LibraryNav(
@@ -240,20 +240,21 @@ private fun PhoneLibrary(
                 contentPadding = padding.withGutter(horizontal = window.gutter, extraBottom = if (phone) 88.dp else 0.dp),
                 verticalArrangement = Arrangement.spacedBy(SegmentGap),
             ) {
-                item(key = "bento") {
+                item(key = "bento", contentType = "bento") {
                     LibraryBento(
                         stats = stats,
                         onFavorites = nav.openFavorites,
+                        // 解码和播放都交给 VM 的后台任务，回调里不做全量 JSON 解析
                         onPlayFavorites = favorites.takeIf { it.isNotEmpty() }?.let { list ->
-                            { val songs = list.map { it.song() }; actions.play(songs.first(), songs) }
+                            { actions.playSavedSongs(list) }
                         },
                         onHistory = nav.openHistory,
                         onDownloads = nav.openDownloads,
                         tileHeight = if (phone) 100.dp else 112.dp,
                     )
                 }
-                item(key = "sync") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
-                item(key = "plHead") {
+                item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
+                item(key = "plHead", contentType = "section") {
                     SectionLabel("自建歌单", trailing = { CountTag("${playlists.size} 个") })
                 }
                 playlistItems(playlists, covers, sync, conflictIds, settled, null, onOpen = nav.openPlaylist, onCreate = menu.onCreate)
@@ -285,7 +286,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playlistItems(
     onCreate: () -> Unit,
 ) {
     if (playlists.isEmpty()) {
-        item(key = "plEmpty") {
+        item(key = "plEmpty", contentType = "empty") {
             if (!settled) {
                 SkeletonRows(3)
             } else {
@@ -334,8 +335,9 @@ private fun TabletLibrary(
 ) {
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = selectedId?.takeIf { id -> playlists.any { it.id == id } } ?: playlists.firstOrNull()?.id
-    // 默认选中的第一项要记住：歌单按修改时间排序，同步改动别的歌单时右栏不该跟着跳
-    LaunchedEffect(selected) { if (selected != null && selected != selectedId) selectedId = selected }
+    // 默认选中的第一项要记住：歌单按修改时间排序，同步改动别的歌单时右栏不该跟着跳。
+    // 这只是同步的状态修正，没有挂起或绘制时序依赖，用带 key 的 SideEffect。
+    SideEffect(selected) { if (selected != null && selected != selectedId) selectedId = selected }
     val settled = rememberSettled()
     val conflictIds = sync.conflicts.map { it.playlistId }.toSet()
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -346,7 +348,7 @@ private fun TabletLibrary(
             contentPadding = PaddingValues(start = 24.dp, end = 16.dp, top = top + 28.dp, bottom = bottom + 24.dp),
             verticalArrangement = Arrangement.spacedBy(SegmentGap),
         ) {
-            item(key = "head") {
+            item(key = "head", contentType = "header") {
                 Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("我的", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
@@ -359,12 +361,12 @@ private fun TabletLibrary(
                     SyncCloudButton(sync, nav.openSync)
                 }
             }
-            item(key = "bento") {
+            item(key = "bento", contentType = "bento") {
                 LibraryBento(
                     stats = stats,
                     onFavorites = nav.openFavorites,
                     onPlayFavorites = favorites.takeIf { it.isNotEmpty() }?.let { list ->
-                        { val songs = list.map { it.song() }; actions.play(songs.first(), songs) }
+                        { actions.playSavedSongs(list) }
                     },
                     onHistory = nav.openHistory,
                     onDownloads = nav.openDownloads,
@@ -372,8 +374,8 @@ private fun TabletLibrary(
                     compact = true,
                 )
             }
-            item(key = "sync") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
-            item(key = "plHead") {
+            item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
+            item(key = "plHead", contentType = "section") {
                 SectionLabel("自建歌单", trailing = { NewPlaylistSplitButton(menu) })
             }
             playlistItems(playlists, covers, sync, conflictIds, settled, selected, onOpen = { selectedId = it }, onCreate = menu.onCreate)
@@ -420,6 +422,10 @@ private fun TvLibrary(
     val first = remember { FocusRequester() }
     var newOpen by remember { mutableStateOf(false) }
     val conflictIds = sync.conflicts.map { it.playlistId }.toSet()
+    // 最近播放的 payload 解码放在页面层：惰性项被回收再进入时不会重做
+    val recent by produceState(initialValue = emptyList<Song>(), history) {
+        value = withContext(Dispatchers.IO) { history.take(24).map { it.song() } }
+    }
     TvDefaultFocus(first)
     PageScaffold(
         title = "我的",
@@ -431,7 +437,7 @@ private fun TvLibrary(
             contentPadding = padding,
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            item(key = "tiles") {
+            item(key = "tiles", contentType = "bento") {
                 Row(
                     Modifier.padding(horizontal = window.gutter, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
@@ -471,9 +477,9 @@ private fun TvLibrary(
                     }
                 }
             }
-            item(key = "playlists") {
+            item(key = "playlists", contentType = "row") {
                 TvRow("自建歌单") {
-                    item(key = "new") {
+                    item(key = "new", contentType = "card") {
                         TvNewCard(onClick = { newOpen = true })
                     }
                     items(playlists, key = { it.id }, contentType = { "playlist" }) { playlist ->
@@ -487,17 +493,14 @@ private fun TvLibrary(
                 }
             }
             if (history.isNotEmpty()) {
-                item(key = "recent") {
-                    val songs by produceState(initialValue = emptyList<com.mytv.mymusic.data.Song>(), history) {
-                        value = withContext(Dispatchers.IO) { history.take(24).map { it.song() } }
-                    }
+                item(key = "recent", contentType = "row") {
                     TvRow("最近播放") {
-                        items(songs, key = { "recent:${it.key}" }, contentType = { "song" }) { song ->
+                        items(recent, key = { "recent:${it.key}" }, contentType = { "song" }) { song ->
                             TvCard(
                                 title = song.title,
                                 subtitle = song.artist,
                                 playing = state.current?.key == song.key,
-                                onClick = { actions.play(song, songs) },
+                                onClick = { actions.play(song, recent) },
                                 art = { Cover(song.cover, song.title, 150.dp, corner = 20.dp) },
                             )
                         }
@@ -665,11 +668,14 @@ internal fun rememberLibraryStats(
     history: List<SavedSong>,
     downloads: List<DownloadRecord>,
 ): LibraryStats {
-    // 文件大小要走磁盘；放在组合里同步做会让下载进度每次更新都卡主线程
-    val downloadBytes by produceState(initialValue = 0L, downloads) {
+    // 文件大小要走磁盘；放在组合里同步做会让下载进度每次更新都卡主线程。
+    // 只以“已完成记录的路径”为 key：其他字段变化不重读磁盘，完成状态变化才重读。
+    val donePaths = remember(downloads) {
+        downloads.filter { it.state == DOWNLOAD_DONE }.map { it.path }
+    }
+    val downloadBytes by produceState(initialValue = 0L, donePaths) {
         value = withContext(Dispatchers.IO) {
-            downloads.filter { it.state == DOWNLOAD_DONE }
-                .sumOf { record -> runCatching { File(record.path).length() }.getOrDefault(0L) }
+            donePaths.sumOf { path -> runCatching { File(path).length() }.getOrDefault(0L) }
         }
     }
     return remember(favorites, history, downloads, downloadBytes) {
@@ -1166,24 +1172,14 @@ internal fun PaddingValues.withGutter(horizontal: Dp, extraBottom: Dp = 0.dp): P
 
 internal const val DOWNLOAD_DONE = "已完成"
 
-internal fun startOfToday(): Long = Calendar.getInstance().apply {
-    set(Calendar.HOUR_OF_DAY, 0)
-    set(Calendar.MINUTE, 0)
-    set(Calendar.SECOND, 0)
-    set(Calendar.MILLISECOND, 0)
-}.timeInMillis
-
-private val DayLabelFormat = SimpleDateFormat("M 月 d 日", Locale.getDefault())
-private val TimeLabelFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-
-internal fun dayLabel(millis: Long): String {
-    val today = startOfToday()
-    val day = 24L * 60 * 60 * 1000
-    return when {
-        millis >= today -> "今天"
-        millis >= today - day -> "昨天"
-        else -> DayLabelFormat.format(Date(millis))
-    }
+internal fun startOfToday(): Long {
+    val zone = ZoneId.systemDefault()
+    return LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
 }
 
-internal fun timeLabel(millis: Long): String = TimeLabelFormat.format(Date(millis))
+/** 单条记录的日期文案；批量分组请用 [prepareHistory]，那里 today 只算一次。 */
+internal fun dayLabel(millis: Long): String =
+    LibraryDates.dayLabel(millis, LibraryDates.today())
+
+/** 时间标签使用线程安全的 DateTimeFormatter，可在后台与主线程共用。 */
+internal fun timeLabel(millis: Long): String = LibraryDates.timeLabel(millis)

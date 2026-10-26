@@ -169,10 +169,11 @@ private fun PhonePlaylists(
             val categoryRows = remember(playlists.categoryPlaylists, columns) {
                 playlists.categoryPlaylists.chunked(columns)
             }
+            val groups = remember(playlists.categories) { categoryGroups(playlists.categories) }
             LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = padding) {
-                item(key = "sources") { ProviderChips(sources, playlists.providerId, actions::selectPlaylistSource) }
+                item(key = "sources", contentType = "sources") { ProviderChips(sources, playlists.providerId, actions::selectPlaylistSource) }
                 if (!window.isTablet && playlists.canCategorize) {
-                    item(key = "mode") {
+                    item(key = "mode", contentType = "mode") {
                         ModeToggle(
                             playlists.mode,
                             actions::setPlaylistMode,
@@ -181,7 +182,7 @@ private fun PhonePlaylists(
                     }
                 }
                 if (categoryMode) {
-                    categoryContent(playlists, actions, columns, gutter, categoryEnd, categoryRows)
+                    categoryContent(playlists, actions, columns, gutter, categoryEnd, categoryRows, groups)
                 } else {
                     recommendContent(playlists, sources, actions, columns, gutter, recommendRows, featureHeight = if (window.isTablet) 220.dp else 176.dp)
                 }
@@ -224,7 +225,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.recommendContent(
     val other = sources.firstOrNull { it.id != playlists.providerId }
     val items = playlists.recommendations
     when {
-        !playlists.canRecommend -> item(key = "unsupported") {
+        !playlists.canRecommend -> item(key = "unsupported", contentType = "unsupported") {
             EmptyState(
                 icon = Icons.AutoMirrored.Filled.QueueMusic,
                 title = "这个平台没有推荐歌单",
@@ -236,14 +237,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.recommendContent(
                 },
             )
         }
-        items.isEmpty() && playlists.recommendationsLoading -> item(key = "skeleton") {
+        items.isEmpty() && playlists.recommendationsLoading -> item(key = "skeleton", contentType = "skeleton") {
             Column(Modifier.padding(horizontal = gutter)) {
                 Skeleton(Modifier.padding(top = 20.dp).fillMaxWidth().height(featureHeight), RoundedCornerShape(28.dp))
                 AppLoading(contained = true)
                 SkeletonCardGrid(columns)
             }
         }
-        items.isEmpty() && playlists.recommendationsError.isNotBlank() -> item(key = "error") {
+        items.isEmpty() && playlists.recommendationsError.isNotBlank() -> item(key = "error", contentType = "error") {
             DiscoverErrorState(
                 title = "推荐歌单没有加载出来",
                 message = "${playlists.providerName}：${playlists.recommendationsError}",
@@ -252,7 +253,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.recommendContent(
                 onSecondary = other?.let { { actions.selectPlaylistSource(it.id) } },
             )
         }
-        items.isEmpty() -> item(key = "empty") {
+        items.isEmpty() -> item(key = "empty", contentType = "empty") {
             EmptyState(
                 icon = Icons.AutoMirrored.Filled.QueueMusic,
                 title = "这个平台暂时没有推荐歌单",
@@ -263,17 +264,17 @@ private fun androidx.compose.foundation.lazy.LazyListScope.recommendContent(
         }
         else -> {
             val lead = items.first()
-            item(key = "leadLabel") {
+            item(key = "leadLabel", contentType = "label") {
                 SectionLabel("编辑推荐", Modifier.padding(horizontal = gutter)) {
                     TextButton(onClick = actions::refreshPlaylists, modifier = Modifier.heightIn(min = 48.dp)) { Text("换一批") }
                 }
             }
-            item(key = "lead") {
+            item(key = "lead", contentType = "lead") {
                 FeaturePlaylist(lead, featureHeight, { actions.openPlaylist(lead) }, Modifier.padding(horizontal = gutter))
             }
             val rest = items.drop(1)
             if (rest.isNotEmpty()) {
-                item(key = "restLabel") { SectionLabel("为你推荐", Modifier.padding(horizontal = gutter)) }
+                item(key = "restLabel", contentType = "label") { SectionLabel("为你推荐", Modifier.padding(horizontal = gutter)) }
                 items(
                     restRows,
                     key = { row -> "rest:${row.first().id}" },
@@ -283,7 +284,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.recommendContent(
                 }
             }
             if (playlists.recommendationsError.isNotBlank()) {
-                item(key = "partial") {
+                item(key = "partial", contentType = "partial") {
                     Box(Modifier.padding(horizontal = gutter, vertical = 8.dp)) {
                         ErrorBlock(playlists.recommendationsError, actions::refreshPlaylists)
                     }
@@ -301,24 +302,24 @@ private fun androidx.compose.foundation.lazy.LazyListScope.categoryContent(
     gutter: Dp,
     end: Boolean,
     rows: List<List<Playlist>>,
+    groups: List<String>,
 ) {
     if (playlists.categories.isEmpty() && playlists.categoriesLoading) {
-        item(key = "chipSkeleton") {
+        item(key = "chipSkeleton", contentType = "skeleton") {
             Row(Modifier.padding(horizontal = gutter, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 repeat(5) { Skeleton(Modifier.width(64.dp).height(32.dp), RoundedCornerShape(8.dp)) }
             }
         }
     }
     if (playlists.categoriesError.isNotBlank()) {
-        item(key = "categoriesError") {
+        item(key = "categoriesError", contentType = "error") {
             Box(Modifier.padding(horizontal = gutter, vertical = 8.dp)) {
                 ErrorBlock("分类列表没有加载出来：${playlists.categoriesError}", actions::refreshPlaylists)
             }
         }
     }
     if (playlists.categories.isNotEmpty()) {
-        val groups = categoryGroups(playlists.categories)
-        item(key = "groups") {
+        item(key = "groups", contentType = "groups") {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = gutter, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -328,11 +329,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.categoryContent(
                 }
             }
         }
-        item(key = "categories") {
+        item(key = "categories", contentType = "categories") {
             CategoryChips(playlists, actions, Modifier.padding(horizontal = gutter))
         }
     }
-    item(key = "categoryHead") {
+    item(key = "categoryHead", contentType = "head") {
         val selected = playlists.categories.find { it.id == playlists.selectedCategoryId }
         SectionLabel(playlists.selectedCategoryName.ifBlank { "全部歌单" }, Modifier.padding(horizontal = gutter)) {
             if (selected != null && selected.count > 0) {
@@ -342,17 +343,17 @@ private fun androidx.compose.foundation.lazy.LazyListScope.categoryContent(
     }
     val list = playlists.categoryPlaylists
     when {
-        list.isEmpty() && (playlists.categoryLoading || !playlists.categoryOpen) -> item(key = "gridSkeleton") {
+        list.isEmpty() && (playlists.categoryLoading || !playlists.categoryOpen) -> item(key = "gridSkeleton", contentType = "skeleton") {
             SkeletonCardGrid(columns, rows = 2, modifier = Modifier.padding(horizontal = gutter))
         }
-        list.isEmpty() && playlists.categoryError.isNotBlank() -> item(key = "gridError") {
+        list.isEmpty() && playlists.categoryError.isNotBlank() -> item(key = "gridError", contentType = "error") {
             DiscoverErrorState(
                 title = "这个分类没有加载出来",
                 message = playlists.categoryError,
                 onRetry = actions::loadMoreCategory,
             )
         }
-        list.isEmpty() -> item(key = "gridEmpty") {
+        list.isEmpty() -> item(key = "gridEmpty", contentType = "empty") {
             EmptyState(
                 icon = Icons.Filled.Category,
                 title = "这个分类下还没有歌单",
@@ -367,7 +368,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.categoryContent(
             ) { row ->
                 PlaylistGridRow(row, columns, actions, Modifier.padding(horizontal = gutter).padding(bottom = 16.dp))
             }
-            item(key = "footer") {
+            item(key = "footer", contentType = "footer") {
                 Box(Modifier.fillMaxWidth().padding(horizontal = gutter), contentAlignment = Alignment.Center) {
                     when {
                         playlists.categoryLoading -> AppLoading(contained = true, text = "正在加载第 ${playlists.categoryPage + 1} 页")
@@ -388,16 +389,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.categoryContent(
     }
 }
 
-private fun categoryGroups(categories: List<PlaylistCategory>): List<String> =
-    listOf("全部") + categories.map { it.group }.filter { it.isNotBlank() && it != "全部" }.distinct()
-
 /** 分类 chip：手机上默认只展示前 12 个，避免把网格挤到第二屏。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CategoryChips(playlists: PlaylistsUiState, actions: MusicActions, modifier: Modifier = Modifier) {
     var expanded by rememberSaveable(playlists.providerId, playlists.categoryGroup) { mutableStateOf(false) }
-    val visible = playlists.categories.filter {
-        playlists.categoryGroup == "全部" || it.group == playlists.categoryGroup || it.group.isBlank()
+    val visible = remember(playlists.categories, playlists.categoryGroup) {
+        visibleCategories(playlists.categories, playlists.categoryGroup)
     }
     val limit = if (LocalAppWindow.current.isPhone) 12 else 24
     val shown = if (expanded) visible else visible.take(limit)
@@ -558,7 +556,7 @@ private fun TvRecommendations(playlists: PlaylistsUiState, sources: List<Provide
             val lead = items.first()
             val rows = remember(items) { items.drop(1).chunked(10) }
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 12.dp, bottom = 48.dp)) {
-                item(key = "lead") {
+                item(key = "lead", contentType = "lead") {
                     FeaturePlaylist(
                         lead,
                         150.dp,
@@ -600,7 +598,7 @@ private fun TvRecommendations(playlists: PlaylistsUiState, sources: List<Provide
                     }
                 }
                 if (playlists.recommendationsError.isNotBlank()) {
-                    item(key = "partial") {
+                    item(key = "partial", contentType = "partial") {
                         Box(Modifier.padding(horizontal = gutter, vertical = 8.dp)) {
                             ErrorBlock(playlists.recommendationsError, actions::refreshPlaylists)
                         }
@@ -626,10 +624,10 @@ private fun TvCategories(playlists: PlaylistsUiState, actions: MusicActions) {
     Row(Modifier.fillMaxSize().padding(start = gutter, end = gutter, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
         LazyColumn(Modifier.width(280.dp).fillMaxHeight(), state = listState, contentPadding = PaddingValues(bottom = 48.dp)) {
             if (playlists.categories.isEmpty() && playlists.categoriesLoading) {
-                item(key = "loading") { AppLoading(text = "正在读取分类…") }
+                item(key = "loading", contentType = "loading") { AppLoading(text = "正在读取分类…") }
             }
             if (playlists.categoriesError.isNotBlank()) {
-                item(key = "error") { ErrorBlock("分类列表没有加载出来", actions::refreshPlaylists) }
+                item(key = "error", contentType = "error") { ErrorBlock("分类列表没有加载出来", actions::refreshPlaylists) }
             }
             itemsIndexed(
                 entries,
@@ -701,7 +699,7 @@ private fun androidx.compose.foundation.layout.RowScope.TvCategoryGrid(playlists
                         PlaylistCard(playlist, actions)
                     }
                     if (playlists.categoryError.isNotBlank()) {
-                        item(key = "pageError", span = { GridItemSpan(maxLineSpan) }) {
+                        item(key = "pageError", contentType = "error", span = { GridItemSpan(maxLineSpan) }) {
                             ErrorBlock("第 ${playlists.categoryPage} 页没有加载出来：${playlists.categoryError}", actions::retryCategory)
                         }
                     }

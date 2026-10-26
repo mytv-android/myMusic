@@ -45,6 +45,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,9 +107,28 @@ fun TabletNavRail(selected: String, onSelect: (String) -> Unit, onSettings: () -
 /** 底部播放条高度（不含系统导航栏），Snackbar 要让开这么多。 */
 val BottomPlayerBarHeight = 88.dp
 
-/** 840–1199dp：底部播放条，把右侧空间还给内容。 */
+/**
+ * 840–1199dp：底部播放条，把右侧空间还给内容。
+ * [visible] 为 false 时只保留同高占位，不读取进度、不保留波浪/时间观察。
+ */
 @Composable
-fun BottomPlayerBar(state: MusicUiState, position: State<Long>, actions: MusicActions, onOpenQueue: () -> Unit) {
+fun BottomPlayerBar(
+    state: MusicUiState,
+    position: State<Long>,
+    actions: MusicActions,
+    onOpenQueue: () -> Unit,
+    visible: Boolean = true,
+) {
+    if (!visible) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .height(BottomPlayerBarHeight),
+        )
+        return
+    }
     val song = state.current ?: return
     val blur = LocalBlurPolicy.current.enabled
     val container = MaterialTheme.colorScheme.surfaceContainer
@@ -159,7 +179,10 @@ fun BottomPlayerBar(state: MusicUiState, position: State<Long>, actions: MusicAc
     }
 }
 
-/** ≥1200dp：右侧常驻 380dp 播放窗格，使用播放页的深色 Vibrant 配色。 */
+/**
+ * ≥1200dp：右侧常驻 380dp 播放窗格，使用播放页的深色 Vibrant 配色。
+ * [visible] 为 false 时只保留同宽占位，不读取进度、不保留波浪/字体/倒计时观察。
+ */
 @Composable
 fun NowPlayingPane(
     state: MusicUiState,
@@ -169,7 +192,25 @@ fun NowPlayingPane(
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
     sleep: SleepTimerState,
+    visible: Boolean = true,
 ) {
+    // 滚动状态放在提前返回之前：窗格隐藏再出现时仍停在原来的位置。
+    val scrollState = rememberScrollState()
+    if (!visible) {
+        // 占位也使用播放页深色主题，但仍提前返回，不组合进度、队列等动态内容。
+        // 占位没有可聚焦节点，这里也不主动 requestFocus，窗格恢复时不会抢走页面焦点。
+        PlayerTheme {
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .width(380.dp)
+                    .statusBarsPadding()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .navigationBarsPadding(),
+            )
+        }
+        return
+    }
     PlayerTheme {
         Box(
             Modifier
@@ -204,9 +245,9 @@ fun NowPlayingPane(
                 }
                 return@Box
             }
-            val favorite = favorites.any { it.key == song.key }
+            val favorite = remember(favorites, song.key) { favorites.any { it.key == song.key } }
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp),
+                Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 24.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 CoverBox(
@@ -269,15 +310,17 @@ fun NowPlayingPane(
                     IconButton(onClick = actions::openPlayer) { Icon(Icons.Filled.OpenInFull, "全屏播放", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
                 val index = state.queue.indexOfFirst { it.key == song.key }
-                val upcoming = if (index >= 0) state.queue.drop(index + 1).take(5) else emptyList()
-                if (upcoming.isNotEmpty()) {
+                val upcomingStart = index + 1
+                val upcomingEnd = (upcomingStart + 5).coerceAtMost(state.queue.size)
+                if (index >= 0 && upcomingStart < upcomingEnd) {
                     Text("接下来播放", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    upcoming.forEachIndexed { offset, next ->
+                    for (queueIndex in upcomingStart until upcomingEnd) {
+                        val next = state.queue[queueIndex]
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .clickable { actions.playQueueIndex(index + 1 + offset) }
+                                .clickable { actions.playQueueIndex(queueIndex) }
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -35,6 +35,7 @@ import com.mytv.mymusic.data.AppSettings
 import com.mytv.mymusic.data.CanonicalSourceEntity
 import com.mytv.mymusic.data.CanonicalTrackEntity
 import com.mytv.mymusic.data.DownloadRecord
+import com.mytv.mymusic.data.LyricsBackgroundMode
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.PlaylistEntity
@@ -102,6 +103,7 @@ data class MusicUiState(
     val playlistsSource: String = "",
     val theme: String = "system",
     val appearance: Appearance = Appearance(),
+    val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
     val coverSeed: Int = 0,
     val sleepFade: Boolean = true,
     val cacheLimitMb: Int = 512,
@@ -191,6 +193,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val syncState = app.sync.state
     val syncEvents = app.sync.events
     val updateState = app.update.state
+    // 下载进度独立读取，版本、按钮和设置摘要不随每个进度更新重组。
+    val updateDetails = updateState.map { it.copy(progress = 0f) }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), updateState.value.copy(progress = 0f))
     val equalizerState = app.equalizer.state
     val sleepTimer = app.sleepTimer.state
 
@@ -238,6 +244,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             playlistsSource = settings.playlistsSource,
             theme = settings.theme,
             appearance = settings.toAppearance(),
+            lyricsBackground = settings.lyricsBackground,
             sleepFade = settings.sleepFade,
             cacheLimitMb = settings.cacheLimitMb.takeIf { it > 0 } ?: app.defaultCacheLimitMb(),
             reduceMotion = settings.reduceMotion,
@@ -1440,6 +1447,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun playSavedSongs(records: List<SavedSong>) = viewModelScope.launch {
+        if (records.isEmpty()) return@launch
+        val songs = withContext(Dispatchers.Default) { records.map { it.song(json) } }
+        songs.firstOrNull()?.let { play(it, songs) }
+    }
+
     fun toggleFavorite(song: Song) = viewModelScope.launch {
         if (favorites.value.any { it.key == song.key }) app.database.dao().remove("favorite", song.key)
         else remember("favorite", song)
@@ -2225,6 +2238,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun cancelSleepTimer() = app.sleepTimer.cancel()
     fun setSleepFade(value: Boolean) = viewModelScope.launch { app.settings.sleepFade(value) }
     fun setReduceMotion(value: Boolean) = viewModelScope.launch { app.settings.reduceMotion(value) }
+    fun setLyricsBackground(value: LyricsBackgroundMode) = viewModelScope.launch { app.settings.lyricsBackground(value) }
     fun setShowBottomNav(value: Boolean) = viewModelScope.launch { app.settings.showBottomNav(value) }
 
     fun toggleAggregateProvider(id: String) = viewModelScope.launch {
@@ -2285,11 +2299,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         message("已清除播放缓存")
     }
 
-    fun mediaCacheSize(): Long = runCatching {
-        val sodaCache = File(app.cacheDir, SodaProvider.SODA_CACHE_DIR)
-            .listFiles()?.sumOf { it.length() } ?: 0L
-        app.mediaCache.cacheSpace + sodaCache
-    }.getOrDefault(0L)
+    suspend fun mediaCacheSize(): Long = withContext(Dispatchers.IO) {
+        runCatching {
+            val sodaCache = File(app.cacheDir, SodaProvider.SODA_CACHE_DIR)
+                .listFiles()?.sumOf { it.length() } ?: 0L
+            app.mediaCache.cacheSpace + sodaCache
+        }.getOrDefault(0L)
+    }
 
     fun setCacheLimit(mb: Int) = viewModelScope.launch { app.settings.cacheLimitMb(mb) }
 
@@ -2553,8 +2569,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
 private const val AUTO_MATCH_TIMEOUT_MS = 8_000L
 
-fun SavedSong.song(json: Json = Json { ignoreUnknownKeys = true }) = json.decodeFromString<Song>(payload)
-fun DownloadRecord.song(json: Json = Json { ignoreUnknownKeys = true }) = json.decodeFromString<Song>(payload)
+private val SavedSongJson = Json { ignoreUnknownKeys = true }
+
+fun SavedSong.song(json: Json = SavedSongJson) = json.decodeFromString<Song>(payload)
+fun DownloadRecord.song(json: Json = SavedSongJson) = json.decodeFromString<Song>(payload)
 
 private fun AppSettings.toAppearance() = Appearance(
     theme = theme,

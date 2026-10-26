@@ -12,6 +12,22 @@ import org.junit.Test
  */
 class QrCodeTest {
     @Test
+    fun optimizedPenaltyPreservesExistingMatrices() {
+        val fixtures = mapOf(
+            "https://github.com/mytv-android/myMusic" to "6fb0dd06e73e64d5c3fbcca1e9138f6a71ff6237e05f985ec64d993b197098b8",
+            "https://t.me/mytv_android_channel" to "c14e23b309043963578e82f21d12f92b53e285af48046d33435d259fad62c465",
+            ("https://example.test/login?token=" + "abcdefghij".repeat(120)) to "e4de7fe3374d58396dab258a701414814fa68bb78060d6a5b3cd008292ca8814",
+        )
+        fixtures.forEach { (text, expected) ->
+            val matrix = requireNotNull(QrEncoder.encode(text))
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            matrix.forEach { row -> row.forEach { digest.update(if (it) 1.toByte() else 0.toByte()) } }
+            val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            assertEquals(expected, actual)
+        }
+    }
+
+    @Test
     fun encodesAboutLinks() {
         val links = listOf(
             "https://github.com/mytv-android/myMusic",

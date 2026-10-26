@@ -218,6 +218,7 @@ class UpdateRepository(
                 val total = info.size.takeIf { it > 0 } ?: body.contentLength()
                 val digest = MessageDigest.getInstance("SHA-256")
                 var copied = 0L
+                val progressGate = DownloadProgressGate()
                 val buffer = ByteArray(64 * 1024)
                 target.outputStream().use { output ->
                     body.byteStream().use { input ->
@@ -227,7 +228,7 @@ class UpdateRepository(
                             output.write(buffer, 0, read)
                             digest.update(buffer, 0, read)
                             copied += read
-                            if (total > 0) {
+                            if (total > 0 && progressGate.shouldEmit(System.nanoTime(), complete = copied >= total)) {
                                 _state.update { it.copy(progress = (copied.toFloat() / total).coerceIn(0f, 1f)) }
                             }
                         }

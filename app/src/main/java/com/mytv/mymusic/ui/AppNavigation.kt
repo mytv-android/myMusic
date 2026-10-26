@@ -271,11 +271,11 @@ fun MyMusicApp(model: MusicViewModel) {
                         }
                     }
                     if (window.showBottomPlayerBar && state.current != null) {
-                        BottomPlayerBar(state, position, actions, onOpenQueue = { queueOpen = true })
+                        BottomPlayerBar(state, position, actions, onOpenQueue = { queueOpen = true }, visible = !playerVisible)
                     }
                 }
                 if (window.showNowPlayingPane) {
-                    NowPlayingPane(state, position, favorites, actions, onOpenQueue = { queueOpen = true }, onOpenTimer = { timerOpen = true }, sleep = sleep)
+                    NowPlayingPane(state, position, favorites, actions, onOpenQueue = { queueOpen = true }, onOpenTimer = { timerOpen = true }, sleep = sleep, visible = !playerVisible)
                 }
             }
             AnimatedVisibility(
@@ -325,11 +325,14 @@ fun MyMusicApp(model: MusicViewModel) {
             if (playerVisible) PlayerTheme { SourcePickerSheet(state, actions) } else SourcePickerSheet(state, actions)
         }
         state.mergeTrack?.let { track ->
+            val candidates = remember(search.aggregateGroups, state.canonicalQueue, track.id) {
+                (search.aggregateGroups + state.canonicalQueue)
+                    .distinctBy { it.id }
+                    .filterNot { it.id == track.id }
+            }
             MergeDialog(
                 track = track,
-                candidates = (search.aggregateGroups + state.canonicalQueue)
-                    .distinctBy { it.id }
-                    .filterNot { it.id == track.id },
+                candidates = candidates,
                 onMerge = { target -> actions.mergeTo(target) },
                 onDismiss = actions::closeMerge,
             )

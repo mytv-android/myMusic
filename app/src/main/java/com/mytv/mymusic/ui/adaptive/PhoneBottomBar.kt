@@ -2,7 +2,6 @@ package com.mytv.mymusic.ui.adaptive
 
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -33,8 +32,9 @@ import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,10 +58,10 @@ import com.mytv.mymusic.ui.TopTab
 import com.mytv.mymusic.ui.components.PlayButtonSize
 import com.mytv.mymusic.ui.components.PlayPauseButton
 import com.mytv.mymusic.ui.components.ProgressRing
+import com.mytv.mymusic.ui.components.rememberSettlingOffsetState
 import com.mytv.mymusic.ui.components.sharedNowPlayingCover
 import com.mytv.mymusic.ui.theme.LocalBlurPolicy
 import com.mytv.mymusic.ui.theme.frosted
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -119,9 +119,11 @@ fun PhoneBottomBar(
 @Composable
 fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions, onOpenQueue: () -> Unit, modifier: Modifier = Modifier) {
     val song = state.current ?: return
-    val scope = rememberCoroutineScope()
-    val drag = remember { Animatable(0f) }
+    val drag = rememberSettlingOffsetState()
     val threshold = with(LocalDensity.current) { 72.dp.toPx() }
+    // 手势协程不随重组重启，阈值和回调都从最新状态读取
+    val currentThreshold by rememberUpdatedState(threshold)
+    val currentActions by rememberUpdatedState(actions)
     val blur = LocalBlurPolicy.current.enabled
     val container = MaterialTheme.colorScheme.secondaryContainer
     val shape = RoundedCornerShape(20.dp)
@@ -130,7 +132,7 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
         modifier
             .fillMaxWidth()
             .height(MiniHeight)
-            .offset { IntOffset(drag.value.roundToInt(), 0) }
+            .offset { IntOffset(drag.offset.roundToInt(), 0) }
             .shadow(8.dp, shape, ambientColor = Color.Black.copy(alpha = 0.3f), spotColor = Color.Black.copy(alpha = 0.3f))
             .clip(shape)
             .frosted(if (blur) container.copy(alpha = 0.82f) else container, shape)
@@ -142,22 +144,23 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
             )
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
+                    onDragStart = { drag.begin() },
                     onDragEnd = {
-                        val value = drag.value
-                        if (abs(value) > threshold) actions.transport(if (value < 0) "next" else "previous")
-                        scope.launch { drag.animateTo(0f) }
+                        val value = drag.offset
+                        if (abs(value) > currentThreshold) currentActions.transport(if (value < 0) "next" else "previous")
+                        drag.settle()
                     },
-                    onDragCancel = { scope.launch { drag.animateTo(0f) } },
+                    onDragCancel = { drag.settle() },
                 ) { change, amount ->
                     change.consume()
-                    scope.launch { drag.snapTo(drag.value + amount * 0.6f) }
+                    drag.add(amount * 0.6f)
                 }
             }
             .pointerInput(Unit) {
                 var total = 0f
                 detectVerticalDragGestures(
                     onDragStart = { total = 0f },
-                    onDragEnd = { if (total < -threshold / 2) actions.openPlayer() },
+                    onDragEnd = { if (total < -currentThreshold / 2) currentActions.openPlayer() },
                 ) { change, amount ->
                     change.consume()
                     total += amount
@@ -207,6 +210,10 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
 /** 只有这圈进度环读播放进度，迷你播放器其余部分不跟着每 500ms 重组。 */
 @Composable
 private fun MiniProgress(position: State<Long>, duration: Long, playing: Boolean) {
-    val fraction = if (duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f
-    ProgressRing(fraction, playing, size = 52.dp)
+    // 不在这里读 position.value：进度 provider 由进度环在绘制阶段调用
+    ProgressRing(
+        fraction = { if (duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f },
+        playing = playing,
+        size = 52.dp,
+    )
 }

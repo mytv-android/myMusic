@@ -122,6 +122,9 @@ fun FavoritesScreen(
         }
     }
     val songs = remember(shown) { shown.map { it.second } }
+    // 摘要按输入缓存：不在每次重组时重新遍历收藏或计算已下载数量
+    val latest = remember(favorites) { favorites.maxOfOrNull { it.updatedAt } ?: 0L }
+    val downloadedCount = remember(all, downloaded) { all.count { it.second.key in downloaded } }
     val unfavorite: (SavedSong, Song) -> Unit = { saved, song ->
         actions.favorite(song)
         undo.show("已取消收藏“${song.title}”") { actions.restoreSaved(listOf(saved)) }
@@ -129,10 +132,10 @@ fun FavoritesScreen(
     TvDefaultFocus(playFocus, favorites.isEmpty())
 
     val head: LazyListScope.() -> Unit = {
-        item(key = "hero") {
-            FavoritesHero(all.size, favorites.maxOfOrNull { it.updatedAt } ?: 0L, all.count { it.second.key in downloaded })
+        item(key = "hero", contentType = "hero") {
+            FavoritesHero(favorites.size, latest, downloadedCount)
         }
-        item(key = "buttons") {
+        item(key = "buttons", contentType = "actions") {
             PlayShuffleRow(
                 enabled = songs.isNotEmpty(),
                 onPlay = { actions.play(songs.first(), songs) },
@@ -140,13 +143,13 @@ fun FavoritesScreen(
                 playModifier = Modifier.focusRequester(playFocus),
             )
         }
-        item(key = "filters") {
+        item(key = "filters", contentType = "filters") {
             FilterRow(FavFilter.entries, filter, { it.label }) { filter = it }
         }
     }
     val list: LazyListScope.() -> Unit = {
         if (shown.isEmpty() && favorites.isNotEmpty()) {
-            item(key = "noMatch") {
+            item(key = "noMatch", contentType = "empty") {
                 Text(
                     "没有符合“${filter.label}”的歌曲",
                     Modifier.padding(vertical = 24.dp, horizontal = 4.dp),
@@ -198,7 +201,7 @@ fun FavoritesScreen(
                     verticalArrangement = Arrangement.spacedBy(SegmentGap),
                 ) {
                     head()
-                    item(key = "gap") { Spacer(Modifier.height(8.dp)) }
+                    item(key = "gap", contentType = "spacer") { Spacer(Modifier.height(8.dp)) }
                     list()
                 }
             }
@@ -263,15 +266,16 @@ fun HistoryScreen(
     val settled = rememberSettled()
     val firstRow = remember { FocusRequester() }
     var actionSong by remember { mutableStateOf<Song?>(null) }
-    val songs by produceState(initialValue = emptyList<Pair<SavedSong, Song>>(), history) {
-        value = withContext(Dispatchers.IO) { history.map { it to it.song() } }
+    // 解码、日期分组和 today 计算都在既有后台流程里完成；列表重组不再重新分组
+    val prepared by produceState(initialValue = HistoryPrepared.Empty, history) {
+        value = withContext(Dispatchers.IO) { prepareHistory(history) }
     }
-    val queue = remember(songs) { songs.map { it.second } }
-    val groups = remember(songs) { songs.groupBy { dayLabel(it.first.updatedAt) }.toList() }
+    val groups = prepared.groups
+    val queue = prepared.queue
     TvDefaultFocus(firstRow, history.isEmpty())
 
     fun LazyListScope.group(label: String, items: List<Pair<SavedSong, Song>>, focusFirst: Boolean) {
-        item(key = "day:$label") { DayLabel(label) }
+        item(key = "day:$label", contentType = "header") { DayLabel(label) }
         itemsIndexed(
             items,
             key = { _, it -> "hist:${it.first.key}" },
@@ -298,7 +302,7 @@ fun HistoryScreen(
         }
     }
     val note: LazyListScope.() -> Unit = {
-        item(key = "note") {
+        item(key = "note", contentType = "note") {
             Text(
                 "只保存在本机，不会上传或同步。",
                 Modifier.padding(start = 4.dp, bottom = 4.dp),
@@ -341,12 +345,12 @@ fun HistoryScreen(
                     if (window.isTv) 420.dp else 400.dp,
                     left = {
                         note()
-                        groups.firstOrNull()?.let { (label, items) -> group(label, items, focusFirst = true) }
+                        groups.firstOrNull()?.let { group(it.label, it.items, focusFirst = true) }
                     },
                     right = {
                         if (groups.size <= 1) {
-                            item(key = "older") { DayLabel("更早") }
-                            item(key = "olderEmpty") {
+                            item(key = "older", contentType = "header") { DayLabel("更早") }
+                            item(key = "olderEmpty", contentType = "empty") {
                                 Text(
                                     "更早的记录会显示在这里。",
                                     Modifier.padding(start = 4.dp),
@@ -355,7 +359,7 @@ fun HistoryScreen(
                                 )
                             }
                         }
-                        groups.drop(1).forEach { (label, items) -> group(label, items, focusFirst = false) }
+                        groups.drop(1).forEach { group(it.label, it.items, focusFirst = false) }
                     },
                 )
                 else -> LazyColumn(
@@ -364,7 +368,7 @@ fun HistoryScreen(
                     verticalArrangement = Arrangement.spacedBy(SegmentGap),
                 ) {
                     note()
-                    groups.forEachIndexed { index, (label, items) -> group(label, items, focusFirst = index == 0) }
+                    groups.forEachIndexed { index, day -> group(day.label, day.items, focusFirst = index == 0) }
                 }
             }
         }
@@ -403,29 +407,34 @@ fun DownloadsScreen(
     val settled = rememberSettled()
     val firstRow = remember { FocusRequester() }
     var deleting by remember { mutableStateOf<DownloadRecord?>(null) }
-    // 文件大小、是否存在、剩余空间都要走磁盘：放到 IO 线程，别在组合里同步取
-    val items by produceState(initialValue = emptyList<DownloadItem>(), downloads) {
+    // 后台一次发布完整快照，避免新文件统计和旧解码列表交叉组合。
+    // 已完成路径不变时复用文件探测；每次下载记录变化仍刷新剩余空间。
+    val prepared by produceState(DownloadSnapshot(), downloads, context) {
+        val previous = value
         value = withContext(Dispatchers.IO) {
-            downloads.map { record ->
-                val file = File(record.path)
-                DownloadItem(record, record.song(), file.length(), record.state == DOWNLOAD_DONE && !file.exists())
-            }
+            prepareDownloads(
+                downloads,
+                previous,
+                readDisk = { path ->
+                    val file = File(path)
+                    DownloadDiskStat(file.length(), file.exists())
+                },
+                readFreeBytes = {
+                    runCatching { (context.getExternalFilesDir("music") ?: context.filesDir).usableSpace }.getOrDefault(0L)
+                },
+            )
         }
     }
-    val done = items.filter { it.record.state == DOWNLOAD_DONE }
-    val active = items.filter { it.record.state != DOWNLOAD_DONE }
-    val freeBytes by produceState(initialValue = 0L, downloads) {
-        value = withContext(Dispatchers.IO) {
-            runCatching { (context.getExternalFilesDir("music") ?: context.filesDir).usableSpace }.getOrDefault(0L)
-        }
-    }
-    val doneBytes = done.sumOf { it.size }
+    val done = prepared.sections.done
+    val active = prepared.sections.active
+    val freeBytes = prepared.freeBytes
+    val doneBytes = prepared.sections.doneBytes
     TvDefaultFocus(firstRow, done.isEmpty())
 
     val summary: LazyListScope.() -> Unit = {
-        item(key = "usage") { StorageCard(done.size, doneBytes, cacheBytes, freeBytes) }
+        item(key = "usage", contentType = "usage") { StorageCard(done.size, doneBytes, cacheBytes, freeBytes) }
         if (active.isNotEmpty()) {
-            item(key = "activeHead") { DayLabel("正在下载") }
+            item(key = "activeHead", contentType = "header") { DayLabel("正在下载") }
             itemsIndexed(active, key = { _, it -> "active:${it.record.key}" }, contentType = { _, _ -> "download" }) { index, item ->
                 SongRow(
                     title = item.song.title,
@@ -440,9 +449,9 @@ fun DownloadsScreen(
         }
     }
     val doneList: LazyListScope.() -> Unit = {
-        item(key = "doneHead") { DayLabel("已下载") }
+        item(key = "doneHead", contentType = "header") { DayLabel("已下载") }
         if (done.isEmpty()) {
-            item(key = "doneEmpty") {
+            item(key = "doneEmpty", contentType = "empty") {
                 Text(
                     "下载完成的歌曲会出现在这里。",
                     Modifier.padding(start = 4.dp),
@@ -516,7 +525,55 @@ fun DownloadsScreen(
     }
 }
 
-private class DownloadItem(val record: DownloadRecord, val song: Song, val size: Long, val missing: Boolean)
+internal class DownloadSnapshot(
+    val donePaths: List<String> = emptyList(),
+    val disk: Map<String, DownloadDiskStat> = emptyMap(),
+    val sections: DownloadSections = DownloadSections(emptyList(), emptyList()),
+    val freeBytes: Long = 0L,
+)
+
+/** 在后台准备同一批记录的解码、磁盘与分组结果，整体发布给界面。 */
+internal fun prepareDownloads(
+    records: List<DownloadRecord>,
+    previous: DownloadSnapshot,
+    readDisk: (String) -> DownloadDiskStat,
+    readFreeBytes: () -> Long,
+): DownloadSnapshot {
+    val decoded = records.map { it to it.song() }
+    val paths = records.filter { it.state == DOWNLOAD_DONE }.map { it.path }
+    val disk = if (paths == previous.donePaths) previous.disk else paths.associateWith(readDisk)
+    return DownloadSnapshot(paths, disk, prepareDownloadSections(decoded, disk), readFreeBytes())
+}
+
+/** 已完成下载文件的一次磁盘探测结果。 */
+internal class DownloadDiskStat(val size: Long, val exists: Boolean)
+
+internal class DownloadItem(val record: DownloadRecord, val song: Song, val size: Long, val missing: Boolean)
+
+internal class DownloadSections(val done: List<DownloadItem>, val active: List<DownloadItem>) {
+    val doneBytes: Long = done.sumOf { it.size }
+}
+
+/**
+ * 下载页的展示数据。解码列表和磁盘结果分开传入：磁盘结果只随已完成路径变化，
+ * 纯 payload 变化不会触发文件重读。纯函数，便于单元测试。
+ */
+internal fun prepareDownloadSections(
+    decoded: List<Pair<DownloadRecord, Song>>,
+    disk: Map<String, DownloadDiskStat>,
+): DownloadSections {
+    val done = ArrayList<DownloadItem>()
+    val active = ArrayList<DownloadItem>()
+    decoded.forEach { (record, song) ->
+        if (record.state == DOWNLOAD_DONE) {
+            val stat = disk[record.path]
+            done += DownloadItem(record, song, stat?.size ?: 0L, stat?.exists == false)
+        } else {
+            active += DownloadItem(record, song, 0L, false)
+        }
+    }
+    return DownloadSections(done, active)
+}
 
 /** 占用条：下载、播放缓存、剩余空间三段，图例用文字标出数值。 */
 @OptIn(ExperimentalLayoutApi::class)
