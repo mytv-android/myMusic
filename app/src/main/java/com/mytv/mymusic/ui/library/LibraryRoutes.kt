@@ -10,6 +10,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.mytv.mymusic.ui.AppNav
+import com.mytv.mymusic.ui.TvExitBackHandler
 
 /**
  * 我的：本机音乐库、喜欢 / 最近 / 下载、自建歌单和同步。
@@ -17,6 +18,7 @@ import com.mytv.mymusic.ui.AppNav
  */
 fun NavGraphBuilder.libraryRoutes(app: AppNav) {
     composable("library") {
+        TvExitBackHandler()
         val state by app.model.state.collectAsState()
         val favorites by app.model.favorites.collectAsState()
         val history by app.model.history.collectAsState()

@@ -72,6 +72,7 @@ import com.mytv.mymusic.ui.theme.ColorSource
 import com.mytv.mymusic.ui.theme.CoverSeedRepository
 import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.SchemeStyle
+import com.mytv.mymusic.ui.theme.isTelevision
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
@@ -2536,6 +2537,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** 进入同步、音乐库或平台账号页面时拉取一次，避免两台设备停在不同版本。 */
     fun syncIfStaleOnScreen() {
         app.sync.syncIfStaleOnScreen()
+    }
+
+    /** 电视上离开应用即暂停播放，避免回到桌面后还在响；手机和平板保留后台播放。 */
+    fun onAppBackgrounded() {
+        val tv = getApplication<Application>().isTelevision() || settingsState.value.layoutMode == LayoutMode.Tv.name
+        if (tv) controller?.takeIf { it.playWhenReady }?.pause()
     }
 
     fun diagnostics(): String {

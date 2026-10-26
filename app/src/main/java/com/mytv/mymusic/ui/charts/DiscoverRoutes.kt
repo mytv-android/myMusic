@@ -8,6 +8,7 @@ import androidx.navigation.compose.composable
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.AppNav
 import com.mytv.mymusic.ui.CollectionScreen
+import com.mytv.mymusic.ui.TvExitBackHandler
 import com.mytv.mymusic.ui.playlists.PlaylistsScreen
 import com.mytv.mymusic.ui.song
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,7 @@ import kotlinx.coroutines.withContext
 /** 发现：榜单、歌单，以及两者共用的榜单 / 歌单 / 专辑详情页。 */
 fun NavGraphBuilder.discoverRoutes(app: AppNav) {
     composable("charts") {
+        TvExitBackHandler()
         val state by app.model.state.collectAsState()
         val charts by app.model.chartsState.collectAsState()
         val favorites by app.model.favorites.collectAsState()
@@ -39,6 +41,7 @@ fun NavGraphBuilder.discoverRoutes(app: AppNav) {
         )
     }
     composable("playlists") {
+        TvExitBackHandler()
         val state by app.model.state.collectAsState()
         val playlists by app.model.playlistsState.collectAsState()
         val categoryEnd by app.model.categoryEnd.collectAsState()

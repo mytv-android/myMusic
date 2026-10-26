@@ -1,7 +1,11 @@
 package com.mytv.mymusic.ui
 
+import android.app.Activity
+import android.os.SystemClock
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -48,6 +52,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -84,6 +89,8 @@ import com.mytv.mymusic.ui.theme.PlayerTheme
 import com.mytv.mymusic.ui.tv.TvNavRail
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+
+private const val EXIT_BACK_WINDOW_MS = 2_000L
 
 /** 顶层入口。设置不再占一格：手机在“我的”右上角，平板和电视在导航栏底部。 */
 enum class TopTab(val route: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
@@ -336,6 +343,31 @@ fun MyMusicApp(model: MusicViewModel) {
                 onMerge = { target -> actions.mergeTo(target) },
                 onDismiss = actions::closeMerge,
             )
+        }
+    }
+}
+
+/**
+ * 电视顶层入口的返回键：第一次提示，2 秒内再按退出。
+ * 放在各入口路由里，页面自己的返回处理（编辑、菜单、播放页）比它晚注册，仍然优先。
+ */
+@Composable
+fun TvExitBackHandler() {
+    if (!LocalAppWindow.current.isTv) return
+    val context = LocalContext.current
+    val snackbar = LocalAppSnackbar.current
+    val scope = rememberCoroutineScope()
+    var lastBackAt by remember { mutableStateOf(0L) }
+    BackHandler {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastBackAt in 1L..EXIT_BACK_WINDOW_MS) {
+            (context as? Activity)?.finish()
+        } else {
+            lastBackAt = now
+            scope.launch {
+                snackbar.currentSnackbarData?.dismiss()
+                snackbar.showSnackbar("再按一次返回键退出应用")
+            }
         }
     }
 }

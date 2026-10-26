@@ -13,6 +13,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mytv.mymusic.ui.MusicViewModel
 import com.mytv.mymusic.ui.MyMusicApp
@@ -59,6 +60,14 @@ class MainActivity : ComponentActivity() {
             ) {
                 MyMusicApp(model)
             }
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // 电视通常不当背景音乐播放器：失去前台就暂停；旋转等重建不算离开
+        if (!isChangingConfigurations) {
+            ViewModelProvider(this)[MusicViewModel::class.java].onAppBackgrounded()
         }
     }
 }
