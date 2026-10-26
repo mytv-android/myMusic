@@ -165,7 +165,9 @@ import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvCardFocus
 import com.mytv.mymusic.ui.components.tvFocusRing
+import com.mytv.mymusic.ui.linkProviderId
 import com.mytv.mymusic.ui.providerMark
+import com.mytv.mymusic.ui.providerName
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -2168,16 +2170,8 @@ private fun favoriteSong(track: CanonicalTrack, favoriteKeys: Set<String>): Song
 
 private fun extractUrl(text: String): String = UrlPattern.find(text)?.value ?: text
 
+/** 展示用：链接域名翻译成平台显示名，认不出返回空串。 */
 private fun linkPlatform(text: String): String {
-    val lower = text.lowercase()
-    return when {
-        "163.com" in lower || "163cn.tv" in lower -> "网易云音乐"
-        "qq.com" in lower -> "QQ 音乐"
-        "kugou" in lower -> "酷狗音乐"
-        "kuwo" in lower -> "酷我音乐"
-        "migu" in lower -> "咪咕音乐"
-        "bilibili" in lower || "b23.tv" in lower -> "Bilibili"
-        "apple.com" in lower -> "Apple Music"
-        else -> ""
-    }
+    val id = linkProviderId(text)
+    return if (id.isBlank()) "" else providerName(emptyList(), id)
 }

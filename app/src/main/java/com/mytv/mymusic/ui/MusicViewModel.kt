@@ -1252,38 +1252,54 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (value.isBlank()) return
         viewModelScope.launch {
             base.value = base.value.copy(loading = true, error = "")
-            val providerId = settingsState.value.provider
-            val playlist = runCatching { app.repository.parsePlaylist(providerId, cookieFor(providerId), value) }.getOrNull()
-            val album = if (playlist == null) {
-                runCatching { app.repository.parseAlbum(providerId, cookieFor(providerId), value) }.getOrNull()
-            } else {
-                null
-            }
-            val result = playlist ?: album
-            if (result != null) {
-                val kind = if (playlist != null) CollectionKind.Playlist else CollectionKind.Album
-                val source = result.item.source.ifBlank { providerId }
-                _collection.value = CollectionUiState(
-                    kind = kind,
-                    id = result.item.id,
-                    title = result.item.name,
-                    subtitle = listOf(result.item.creator, "${result.songs.size} 首").filter { it.isNotBlank() }.joinToString(" / "),
-                    cover = result.item.cover,
-                    source = source,
-                    sourceName = providerName(source),
-                    songs = result.songs,
-                )
-                _events.tryEmit(UiEvent.OpenCollection(result.item.name))
-            } else {
-                val song = runCatching { app.repository.parseSong(providerId, cookieFor(providerId), value) }.getOrNull()
-                if (song != null) {
-                    play(song, listOf(song))
-                } else {
-                    base.value = base.value.copy(error = "没有识别到这个链接")
+            try {
+                for (providerId in linkParseCandidates(value)) {
+                    val cookie = cookieFor(providerId)
+                    val playlist = runCatching { app.repository.parsePlaylist(providerId, cookie, value) }.getOrNull()
+                    val album = if (playlist == null) {
+                        runCatching { app.repository.parseAlbum(providerId, cookie, value) }.getOrNull()
+                    } else {
+                        null
+                    }
+                    val result = playlist ?: album
+                    if (result != null) {
+                        val kind = if (playlist != null) CollectionKind.Playlist else CollectionKind.Album
+                        val source = result.item.source.ifBlank { providerId }
+                        _collection.value = CollectionUiState(
+                            kind = kind,
+                            id = result.item.id,
+                            title = result.item.name,
+                            subtitle = listOf(result.item.creator, "${result.songs.size} 首").filter { it.isNotBlank() }.joinToString(" / "),
+                            cover = result.item.cover,
+                            source = source,
+                            sourceName = providerName(source),
+                            songs = result.songs,
+                        )
+                        _events.tryEmit(UiEvent.OpenCollection(result.item.name))
+                        return@launch
+                    }
+                    val song = runCatching { app.repository.parseSong(providerId, cookie, value) }.getOrNull()
+                    if (song != null) {
+                        play(song, listOf(song))
+                        return@launch
+                    }
                 }
+                base.value = base.value.copy(error = "没有识别到这个链接")
+            } finally {
+                base.value = base.value.copy(loading = false)
             }
-            base.value = base.value.copy(loading = false)
         }
+    }
+
+    // 链接属于哪个平台由域名决定，不跟默认平台走；识别不出或解析失败时，按默认平台、其余可解析平台兜底
+    private fun linkParseCandidates(link: String): List<String> {
+        val candidates = mutableListOf<String>()
+        linkProviderId(link).takeIf { it.isNotBlank() }?.let(candidates::add)
+        settingsState.value.provider.takeIf { it.isNotBlank() && it !in candidates }?.let(candidates::add)
+        base.value.providers
+            .filter { it.parsePlaylist || it.parseAlbum || it.parseSong }
+            .forEach { if (it.id !in candidates) candidates.add(it.id) }
+        return candidates
     }
 
     // ---------- library ----------
@@ -2629,3 +2645,22 @@ private fun AppSettings.toAppearance() = Appearance(
     reduceMotion = reduceMotion,
     lastSeed = lastSeed,
 )
+
+/** 从分享链接的域名猜所属平台，返回 provider id，猜不出返回空串。 */
+internal fun linkProviderId(link: String): String {
+    val lower = link.lowercase()
+    return when {
+        "163.com" in lower || "163cn.tv" in lower -> "netease"
+        "5sing" in lower -> "fivesing"
+        "qq.com" in lower -> "qq"
+        "kugou" in lower -> "kugou"
+        "kuwo" in lower -> "kuwo"
+        "migu" in lower -> "migu"
+        "bilibili" in lower || "b23.tv" in lower -> "bilibili"
+        "apple.com" in lower -> "apple"
+        "joox" in lower -> "joox"
+        "91q.com" in lower -> "qianqian"
+        "qishui.com" in lower -> "soda"
+        else -> ""
+    }
+}

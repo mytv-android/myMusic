@@ -712,6 +712,9 @@ fun providerName(providers: List<com.mytv.mymusic.data.ProviderInfo>, id: String
         "apple" -> "Apple Music"
         "soda" -> "汽水音乐"
         "bilibili" -> "Bilibili"
+        "joox" -> "JOOX"
+        "fivesing" -> "5sing"
+        "qianqian" -> "千千音乐"
         "local" -> "本地"
         else -> id
     }
