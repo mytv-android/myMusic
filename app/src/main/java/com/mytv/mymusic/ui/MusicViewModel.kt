@@ -2495,10 +2495,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun installUpdate() {
         val file = updateState.value.file ?: return
-        when (app.update.install(file)) {
-            com.mytv.mymusic.data.update.InstallResult.Launched -> Unit
-            com.mytv.mymusic.data.update.InstallResult.NeedsPermission -> app.update.openInstallPermissionSettings()
-            com.mytv.mymusic.data.update.InstallResult.Failed -> Unit
+        viewModelScope.launch {
+            when (app.update.install(file)) {
+                com.mytv.mymusic.data.update.InstallResult.Launched -> Unit
+                com.mytv.mymusic.data.update.InstallResult.NeedsPermission -> app.update.openInstallPermissionSettings()
+                com.mytv.mymusic.data.update.InstallResult.Failed -> Unit
+            }
         }
     }
 

@@ -1,10 +1,18 @@
 package com.mytv.mymusic.data.update
 
+import android.app.PendingIntent
+import android.content.ActivityNotFoundException
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.IntentSender
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.mytv.mymusic.data.SettingsStore
 import com.mytv.mymusic.data.sync.sha256
@@ -90,6 +98,8 @@ class UpdateRepository(
 
     @Volatile
     private var cancelRequested = false
+
+    private var installResultReceiver: BroadcastReceiver? = null
 
     init {
         val info = currentPackageInfo()
@@ -345,22 +355,152 @@ class UpdateRepository(
         signaturesOf(context.packageManager.getPackageInfo(context.packageName, flags))
     }.getOrDefault(emptySet())
 
-    fun install(file: File): InstallResult {
+    /**
+     * 唤起系统安装器。小米电视等部分 ROM 没有为 content:// 的 ACTION_VIEW 注册安装器，
+     * startActivity 会直接抛 ActivityNotFoundException，因此按
+     * ACTION_VIEW → ACTION_INSTALL_PACKAGE → PackageInstaller 会话依次尝试，
+     * 全部不可用时把更新包导出到外部目录并提示手动安装。
+     */
+    suspend fun install(file: File): InstallResult {
         if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
             _state.update { it.copy(permissionRequired = true, error = "请先允许本应用安装未知来源的应用") }
             return InstallResult.NeedsPermission
         }
-        return runCatching {
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            val intent = Intent(Intent.ACTION_VIEW)
-                .setDataAndType(uri, "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
-            InstallResult.Launched
-        }.getOrElse {
-            _state.update { state -> state.copy(error = "无法打开系统安装器：${it.message}") }
-            InstallResult.Failed
+        val uri = runCatching {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        }.onFailure {
+            Log.w(TAG, "无法生成更新包的 content URI", it)
+        }.getOrNull()
+        if (uri != null) {
+            if (startInstallerActivity(Intent.ACTION_VIEW, uri)) return InstallResult.Launched
+            if (startInstallerActivity(Intent.ACTION_INSTALL_PACKAGE, uri)) return InstallResult.Launched
         }
+        if (withContext(Dispatchers.IO) { commitInstallSession(file) }) return InstallResult.Launched
+        val savedPath = withContext(Dispatchers.IO) { exportApkForManualInstall(file) }
+        val tip = if (savedPath != null) {
+            "系统没有可用的安装器，更新包已保存到 $savedPath，请用文件管理器安装"
+        } else {
+            "系统没有可用的安装器，请通过应用市场或 U 盘安装更新包"
+        }
+        _state.update { state -> state.copy(error = tip) }
+        return InstallResult.Failed
+    }
+
+    /** 用隐式 Action 唤起系统安装器；没有任何 Activity 能承接时返回 false。 */
+    private fun startInstallerActivity(action: String, apkUri: Uri): Boolean = try {
+        val intent = Intent(action)
+            .addCategory(Intent.CATEGORY_DEFAULT)
+            .setDataAndType(apkUri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        true
+    } catch (error: ActivityNotFoundException) {
+        Log.w(TAG, "$action 没有可响应的系统安装器", error)
+        false
+    } catch (error: Exception) {
+        Log.w(TAG, "$action 唤起安装器失败", error)
+        false
+    }
+
+    /**
+     * 走系统 PackageInstaller 会话安装，不依赖安装器 Activity 的 IntentFilter：
+     * 即使 ROM 没注册 ACTION_VIEW 安装入口，也能由系统安装服务接管。
+     */
+    private fun commitInstallSession(file: File): Boolean {
+        val installer = context.packageManager.packageInstaller
+        var sessionId = -1
+        return try {
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            sessionId = installer.createSession(params)
+            installer.openSession(sessionId).use { session ->
+                file.inputStream().use { input ->
+                    session.openWrite("myMusic.apk", 0, file.length()).use { output ->
+                        input.copyTo(output)
+                        // 写完后必须写透，否则系统读到的是不完整的包；minSdk 23 没有 Session.fsync（API 24）
+                        output.flush()
+                    }
+                }
+                registerInstallResultReceiver()
+                session.commit(installResultSender(sessionId))
+            }
+            true
+        } catch (error: Exception) {
+            Log.w(TAG, "PackageInstaller 会话安装失败", error)
+            if (sessionId >= 0) {
+                runCatching { installer.abandonSession(sessionId) }
+            }
+            false
+        }
+    }
+
+    private fun installResultSender(sessionId: Int): IntentSender {
+        val intent = Intent(INSTALL_RESULT_ACTION).setPackage(context.packageName)
+        var flags = PendingIntent.FLAG_UPDATE_CURRENT
+        if (Build.VERSION.SDK_INT >= 31) {
+            // 系统安装服务要把结果写回这个 Intent，必须可变
+            flags = flags or PendingIntent.FLAG_MUTABLE
+        }
+        return PendingIntent.getBroadcast(context, sessionId, intent, flags).intentSender
+    }
+
+    private fun registerInstallResultReceiver() {
+        if (installResultReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context, intent: Intent) {
+                val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+                if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                    // 部分 ROM 把安装确认界面交给调用方拉起；最终结果仍会回到这里，先不注销
+                    confirmIntentOf(intent)?.let { confirm ->
+                        confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        runCatching { receiverContext.startActivity(confirm) }
+                            .onFailure { Log.w(TAG, "拉起安装确认界面失败", it) }
+                    }
+                    return
+                }
+                unregisterInstallResultReceiver()
+                val detail = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+                if (status == PackageInstaller.STATUS_SUCCESS) {
+                    _state.update { it.copy(error = "", message = "更新包已安装") }
+                } else {
+                    _state.update {
+                        it.copy(error = "安装失败${if (detail.isNullOrBlank()) "" else "：$detail"}")
+                    }
+                }
+            }
+        }
+        installResultReceiver = receiver
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(INSTALL_RESULT_ACTION),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
+
+    private fun unregisterInstallResultReceiver() {
+        val receiver = installResultReceiver ?: return
+        installResultReceiver = null
+        runCatching { context.unregisterReceiver(receiver) }
+            .onFailure { Log.w(TAG, "注销安装结果监听失败", it) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun confirmIntentOf(intent: Intent): Intent? =
+        if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+        } else {
+            intent.getParcelableExtra(Intent.EXTRA_INTENT)
+        }
+
+    /** 把更新包复制到外部目录供文件管理器安装，返回路径；失败返回 null。 */
+    private fun exportApkForManualInstall(file: File): String? = try {
+        val directory = context.getExternalFilesDir(null) ?: context.filesDir
+        val target = File(directory, file.name)
+        file.copyTo(target, overwrite = true)
+        target.absolutePath
+    } catch (error: Exception) {
+        Log.w(TAG, "导出更新包失败", error)
+        null
     }
 
     fun openInstallPermissionSettings() {
@@ -397,6 +537,8 @@ class UpdateRepository(
     }
 
     companion object {
+        private const val TAG = "UpdateRepository"
+        private const val INSTALL_RESULT_ACTION = "com.mytv.mymusic.action.INSTALL_RESULT"
         const val MANIFEST_URL = "https://github.com/mytv-android/myMusic/releases/latest/download/update.json"
         const val RELEASES_URL = "https://github.com/mytv-android/myMusic/releases"
     }
