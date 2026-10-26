@@ -263,6 +263,28 @@ class SyncMergeTest {
     }
 
     @Test
+    fun snapshotJsonRoundTripsFavoritesAndCookies() {
+        val snapshot = snapshot().copy(
+            favorites = listOf(
+                favorite("netease:1"),
+                favorite("qq:9", addedAt = "2026-10-21T01:00:00Z", deletedAt = "2026-10-21T01:00:00Z"),
+            ),
+            cookies = listOf(
+                cookie("netease"),
+                cookie("kugou", updatedAt = "2026-10-21T01:00:00Z", deletedAt = "2026-10-21T01:00:00Z", value = ""),
+            ),
+        )
+
+        val decoded = SyncJson.decode(SyncJson.encode(snapshot))
+
+        assertEquals(2, decoded.favorites.size)
+        assertEquals("netease:1", decoded.favorites.first { it.deletedAt == null }.key)
+        assertEquals("2026-10-21T01:00:00Z", decoded.favorites.first { it.key == "qq:9" }.deletedAt)
+        assertEquals("session=netease", decoded.cookies.first { it.provider == "netease" }.value)
+        assertEquals("2026-10-21T01:00:00Z", decoded.cookies.first { it.provider == "kugou" }.deletedAt)
+    }
+
+    @Test
     fun versionOneFileStillDecodes() {
         val raw = """
             {"schema":"mymusic.library","version":1,"deviceId":"device-a",
