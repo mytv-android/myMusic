@@ -1291,7 +1291,7 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
     private fun compactBase64(value: String): String =
         value.filterNot { it == ' ' || it == '\n' || it == '\r' || it == '\t' }
 
-    private fun convertKuwoNewLyric(raw: String): String {
+    internal fun convertKuwoNewLyric(raw: String): String {
         val lines = raw.split(Regex("[\\r\\n]+")).filter { it.isNotEmpty() }
         val out = mutableListOf<String>()
         var index = 0
@@ -1320,7 +1320,7 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
             }
 
             val timestamp = "[${match.groupValues[1]}:${match.groupValues[2]}.${match.groupValues[3]}]"
-            out += timestamp + text
+            out += timestamp + kuwoVerbatimPayload(payload, kuwoLineStartMs(match))
 
             var roma = ""
             var translation = ""
@@ -1341,6 +1341,34 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
             index++
         }
         return out.joinToString("\n").trimEnd('\n')
+    }
+
+    private fun kuwoLineStartMs(match: MatchResult): Long {
+        val minutes = match.groupValues[1].toLongOrNull() ?: 0L
+        val seconds = match.groupValues[2].toLongOrNull() ?: 0L
+        val millis = match.groupValues[3].toLongOrNull() ?: 0L
+        return minutes * 60_000 + seconds * 1_000 + millis
+    }
+
+    /** 酷我逐字载荷 `<词起,词时>词` 转 `<mm:ss.SSS>` 增强 LRC；没有词标签时退回纯文本。 */
+    private fun kuwoVerbatimPayload(payload: String, lineStartMs: Long): String {
+        val matches = KUWO_NEW_LYRIC_WORD.findAll(payload).toList()
+        if (matches.isEmpty()) return kuwoNewLyricPayloadText(payload)
+        val builder = StringBuilder()
+        for (match in matches) {
+            val wordStart = match.groupValues[1].toLongOrNull() ?: 0L
+            val wordText = match.groupValues[3]
+            if (wordText.isEmpty()) continue
+            // 时间轴有绝对毫秒和相对行首两种写法：早于行首的按相对处理
+            val start = if (wordStart >= lineStartMs) wordStart else lineStartMs + wordStart
+            builder.append('<').append(formatKuwoWordTime(start)).append('>').append(wordText)
+        }
+        return if (builder.isEmpty()) kuwoNewLyricPayloadText(payload) else builder.toString()
+    }
+
+    private fun formatKuwoWordTime(milliseconds: Long): String {
+        val ms = milliseconds.coerceAtLeast(0)
+        return String.format(Locale.ROOT, "%02d:%02d.%03d", ms / 60_000, (ms % 60_000) / 1_000, ms % 1_000)
     }
 
     private fun kuwoNewLyricPayloadText(payload: String): String {

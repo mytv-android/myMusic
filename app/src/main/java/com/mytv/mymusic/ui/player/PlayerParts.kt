@@ -17,9 +17,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -50,15 +52,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -71,6 +76,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -346,6 +352,8 @@ fun LyricsList(
     center: Boolean = false,
     large: Boolean = false,
     loading: Boolean = false,
+    position: State<Long>? = null,
+    playing: Boolean = false,
 ) {
     // 列表状态在空/加载分支之前创建：切换歌词时 LazyColumn 重建也能接回原滚动位置。
     val list = rememberLazyListState()
@@ -386,6 +394,8 @@ fun LyricsList(
                     synced = lyrics.synced,
                     center = center,
                     large = large,
+                    position = position,
+                    playing = playing,
                     onSeek = onSeek,
                 )
             }
@@ -412,28 +422,100 @@ private fun LyricRow(
     synced: Boolean,
     center: Boolean,
     large: Boolean,
+    position: State<Long>?,
+    playing: Boolean,
     onSeek: (Long) -> Unit,
 ) {
     val active = activeProvider()
     val current = index == active
     val near = abs(index - active) == 1
     val weight = animateFloatAsState(if (current) 1f else if (near) 0.6f else 0.38f, label = "lyricAlpha")
-    Text(
-        line.text,
+    val style = when {
+        large && current -> MaterialTheme.typography.displaySmall
+        large -> MaterialTheme.typography.headlineMedium
+        current -> MaterialTheme.typography.headlineSmall
+        else -> MaterialTheme.typography.titleLarge
+    }
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .then(if (synced && line.timeMs >= 0) Modifier.clickable(onClickLabel = "从这一句播放") { onSeek(line.timeMs) } else Modifier)
             .padding(horizontal = 8.dp, vertical = if (large) 10.dp else 8.dp)
             .graphicsLayer { alpha = weight.value },
-        style = when {
-            large && current -> MaterialTheme.typography.displaySmall
-            large -> MaterialTheme.typography.headlineMedium
-            current -> MaterialTheme.typography.headlineSmall
-            else -> MaterialTheme.typography.titleLarge
-        },
-        fontWeight = if (current) FontWeight.Black else FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurface,
-        textAlign = if (center) TextAlign.Center else TextAlign.Start,
-    )
+    ) {
+        // 逐字数据只用于当前行：其他行保持整行文本，避免列表里出现成倍的字级节点
+        if (current && synced && line.words.isNotEmpty() && position != null) {
+            KaraokeLine(line, position, playing, center, style)
+        } else {
+            Text(
+                line.text,
+                modifier = Modifier.fillMaxWidth(),
+                style = style,
+                fontWeight = if (current) FontWeight.Black else FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = if (center) TextAlign.Center else TextAlign.Start,
+            )
+        }
+    }
+}
+
+/**
+ * 逐字卡拉OK行：底层暗字、上层亮字按各字起止时间裁剪。播放进度 500ms 才刷新一次，
+ * 播放中用帧时钟在两次校准之间线性外推；时间只在 draw 阶段读取，逐帧变化不触发列表重组。
+ */
+@Composable
+private fun KaraokeLine(
+    line: LyricLine,
+    position: State<Long>,
+    playing: Boolean,
+    center: Boolean,
+    style: TextStyle,
+) {
+    val now = remember { mutableLongStateOf(0L) }
+    LaunchedEffect(position.value, playing) {
+        if (!playing) {
+            now.longValue = position.value
+            return@LaunchedEffect
+        }
+        val base = position.value
+        val startNanos = withFrameNanos { it }
+        while (true) {
+            withFrameNanos { frameNanos -> now.longValue = base + (frameNanos - startNanos) / 1_000_000 }
+        }
+    }
+    val sung = MaterialTheme.colorScheme.onSurface
+    val unsung = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+    val words = line.words
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(0.dp, if (center) Alignment.CenterHorizontally else Alignment.Start),
+    ) {
+        for ((wordIndex, word) in words.withIndex()) {
+            // 与整行文本一致：首行首字去前导空格、末字去尾随空格，居中时不受不可见空格影响
+            val text = word.text
+                .let { if (wordIndex == 0) it.trimStart() else it }
+                .let { if (wordIndex == words.lastIndex) it.trimEnd() else it }
+            Box {
+                Text(text, style = style, fontWeight = FontWeight.Black, color = unsung)
+                Text(
+                    text,
+                    style = style,
+                    fontWeight = FontWeight.Black,
+                    color = sung,
+                    modifier = Modifier
+                        .matchParentSize()
+                        .drawWithContent {
+                            val progress = ((now.longValue - word.startMs).toFloat() /
+                                (word.endMs - word.startMs).coerceAtLeast(1L)).coerceIn(0f, 1f)
+                            if (progress > 0f) {
+                                clipRect(0f, 0f, size.width * progress, size.height) {
+                                    this@drawWithContent.drawContent()
+                                }
+                            }
+                        },
+                )
+            }
+        }
+    }
 }

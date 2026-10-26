@@ -24,6 +24,7 @@ import kotlinx.serialization.json.putJsonObject
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 private val NETEASE_INFO = ProviderInfo(
@@ -125,10 +126,11 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         val response = weapiPost(LYRIC_API, body, cookie)
         val data = json.decodeFromString<NeteaseLyricResponse>(response.body)
         if (data.code != 0 && data.code != 200) throw IllegalStateException("netease lyric api error: ${data.code}")
+        // 优先逐字 YRC，转换不出有效行再退回普通 LRC
+        val yrc = convertYrcToLrc(data.yrc.lyric)
+        if (yrc.isNotBlank()) return yrc
         val lrc = data.lrc.lyric.trim()
         if (lrc.isNotBlank()) return lrc
-        val yrc = data.yrc.lyric.trim()
-        if (yrc.isNotBlank()) return yrc
         val translated = data.tlyric.lyric.trim()
         if (translated.isNotBlank()) return translated
         throw IllegalStateException("lyric is empty or not found")
@@ -981,6 +983,40 @@ private data class NeteaseDownloadData(
 )
 
 @Serializable
+// 网易逐字歌词（YRC）：行 `[行起毫秒,行时长毫秒]`，词 `(词起毫秒,词时长毫秒,0)词`，
+// 时间轴均为绝对毫秒。行/词格式与 QQ QRC 同源，移植自 third_party/music-lib lyrics.ParseYRC。
+private val NETEASE_YRC_LINE = Regex("""^\[(\d+),(\d+)](.*)$""")
+private val NETEASE_YRC_WORD = Regex("""(?:\[\d+,\d+])?\((\d+),(\d+)(?:,\d+)?\)([^(\[]*)""")
+
+/** YRC 转成带 `<mm:ss.SSS>` 逐字标签的增强 LRC；没有可识别的行时返回空串，由调用方回退普通 LRC。 */
+internal fun convertYrcToLrc(raw: String): String {
+    if (raw.isBlank()) return ""
+    val builder = StringBuilder()
+    raw.split('\n').forEach { rawLine ->
+        val line = rawLine.trim()
+        val match = NETEASE_YRC_LINE.find(line) ?: return@forEach
+        val start = match.groupValues[1].toIntOrNull() ?: 0
+        val content = match.groupValues[3]
+        builder.append('[').append(formatYrcTime(start)).append(']')
+        var words = 0
+        for (wordMatch in NETEASE_YRC_WORD.findAll(content)) {
+            val wordStart = wordMatch.groupValues[1].toIntOrNull() ?: 0
+            val text = wordMatch.groupValues[3]
+            if (text.isEmpty()) continue
+            builder.append('<').append(formatYrcTime(wordStart)).append('>').append(text)
+            words++
+        }
+        if (words == 0 && content.isNotBlank()) builder.append(content.trim())
+        builder.append('\n')
+    }
+    return builder.toString().trimEnd('\n')
+}
+
+private fun formatYrcTime(milliseconds: Int): String {
+    val ms = milliseconds.coerceAtLeast(0)
+    return String.format(Locale.ROOT, "%02d:%02d.%03d", ms / 60000, (ms % 60000) / 1000, ms % 1000)
+}
+
 private data class NeteaseLyricResponse(
     val code: Int = 0,
     val lrc: NeteaseLyric = NeteaseLyric(),

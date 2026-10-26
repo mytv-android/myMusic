@@ -2104,22 +2104,43 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return info.duration + 5 < fullDurationSeconds
     }
 
-    private fun parseSodaLyric(raw: String): String {
+    internal fun parseSodaLyric(raw: String): String {
         val builder = StringBuilder()
         raw.split("\n").forEach { rawLine ->
             val line = rawLine.trim()
             if (line.isEmpty()) return@forEach
             val match = SODA_LYRIC_LINE.find(line) ?: return@forEach
             val startTime = match.groupValues[1].toIntOrNull() ?: 0
-            val content = SODA_LYRIC_WORD.replace(match.groupValues[3], "")
+            val content = match.groupValues[3]
             val minutes = startTime / 60000
             val seconds = (startTime % 60000) / 1000
             val millis = (startTime % 1000) / 10
             builder.append(
-                "[%02d:%02d.%02d]%s\n".format(Locale.ROOT, minutes, seconds, millis, content)
+                "[%02d:%02d.%02d]%s\n".format(Locale.ROOT, minutes, seconds, millis, sodaVerbatimContent(content, startTime))
             )
         }
         return builder.toString()
+    }
+
+    /** 汽水逐字载荷 `<词起,词时[,0]>词` 转 `<mm:ss.SSS>` 增强 LRC；没有词标签时退回剥掉标签的纯文本。 */
+    private fun sodaVerbatimContent(content: String, lineStartMs: Int): String {
+        val matches = SODA_LYRIC_WORD_TAG.findAll(content).toList()
+        if (matches.isEmpty()) return SODA_LYRIC_WORD.replace(content, "")
+        val builder = StringBuilder()
+        for (match in matches) {
+            val wordStart = match.groupValues[1].toIntOrNull() ?: 0
+            val wordText = match.groupValues[3]
+            if (wordText.isEmpty()) continue
+            // 与酷我一致：早于行首的时间按相对行首处理
+            val start = if (wordStart >= lineStartMs) wordStart else lineStartMs + wordStart
+            builder.append('<').append(formatSodaWordTime(start)).append('>').append(wordText)
+        }
+        return if (builder.isEmpty()) SODA_LYRIC_WORD.replace(content, "") else builder.toString()
+    }
+
+    private fun formatSodaWordTime(milliseconds: Int): String {
+        val ms = milliseconds.coerceAtLeast(0)
+        return String.format(Locale.ROOT, "%02d:%02d.%03d", ms / 60000, (ms % 60000) / 1000, ms % 1000)
     }
 
     // ---------------------------------------------------------------------
@@ -2378,6 +2399,7 @@ private val SODA_STREAM_CLIENT: OkHttpClient by lazy {
 
 private val SODA_LYRIC_LINE = Regex("^\\[(\\d+),(\\d+)\\](.*)")
 private val SODA_LYRIC_WORD = Regex("<[^>]+>")
+private val SODA_LYRIC_WORD_TAG = Regex("""<(\d+),(\d+)(?:,\d+)?>([^<]*)""")
 
 private data class SodaCategoryTag(val id: Int, val name: String, val group: String)
 

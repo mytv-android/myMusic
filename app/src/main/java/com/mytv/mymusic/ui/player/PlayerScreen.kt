@@ -407,7 +407,7 @@ private fun PhoneLyrics(
             }
             FavoriteButton(song, favorite, actions)
         }
-        LyricsList(lyrics, active, actions::seek, Modifier.weight(1f).padding(horizontal = 18.dp), loading = lyricsLoading)
+        LyricsList(lyrics, active, actions::seek, Modifier.weight(1f).padding(horizontal = 18.dp), loading = lyricsLoading, position = position, playing = playing)
         PhoneLyricsChrome(position, duration, playing, actions, idle, chrome, onSkip)
     }
 }
@@ -508,6 +508,8 @@ private fun WidePlayer(
                 Modifier.weight(1f).padding(vertical = 8.dp),
                 large = lyricsMode,
                 loading = lyricsLoading,
+                position = position,
+                playing = playing,
             )
             WavySeekBar(position, duration, playing, actions::seek)
             Controls(playing, actions, Modifier.fillMaxWidth().padding(top = 6.dp))
@@ -590,7 +592,7 @@ private fun TvPlayer(
                     Notice(notice)
                 }
             }
-            LyricsList(lyrics, active, actions::seek, Modifier.weight(1f).padding(top = 16.dp), large = true, loading = lyricsLoading)
+            LyricsList(lyrics, active, actions::seek, Modifier.weight(1f).padding(top = 16.dp), large = true, loading = lyricsLoading, position = position, playing = playing)
         }
     }
     // 环境模式下控制条只是淡出，不移出组合：焦点留在播放键上，按任意键先唤醒

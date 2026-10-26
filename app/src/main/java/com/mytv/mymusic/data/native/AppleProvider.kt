@@ -80,7 +80,8 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             mapOf("include" to "lyrics", "extend" to "extendedAssetUrls"),
         )
         val resource = json.decodeFromString<AppleResourceResponse>(body).data.firstOrNull() ?: return ""
-        return resource.relationships.lyrics.data.firstOrNull()?.attributes?.ttml.orEmpty()
+        val ttml = resource.relationships.lyrics.data.firstOrNull()?.attributes?.ttml.orEmpty()
+        return convertTtmlToLrc(ttml)
     }
 
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
@@ -665,6 +666,76 @@ private data class AppleTrackRelationship(
 
 @Serializable
 private data class AppleLyricsRelationship(val data: List<AppleLyricData> = emptyList())
+
+// Apple Music TTML 歌词：行 `<p begin="..">..</p>`，逐字 `<span begin="..">词</span>`；
+// 时间为 HH:MM:SS.mmm / MM:SS.mmm / 秒.mmm（可带 s 后缀）。
+private val TTML_LINE = Regex("""<p\b[^>]*\bbegin="([^"]+)"[^>]*>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL)
+private val TTML_WORD = Regex("""<span\b[^>]*\bbegin="([^"]+)"[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
+private val TTML_ENTITY = Regex("""&(amp|lt|gt|quot|apos|#39|#x27);""")
+
+/**
+ * TTML 转增强 LRC：带 span 的行输出 `<mm:ss.SSS>` 逐字标签，无 span 的行退回整行时间戳。
+ * 找不到任何歌词行（空串或非 TTML）时原样返回，由上层按纯文本展示。
+ */
+internal fun convertTtmlToLrc(ttml: String): String {
+    if (ttml.isBlank()) return ttml
+    val builder = StringBuilder()
+    for (lineMatch in TTML_LINE.findAll(ttml)) {
+        val lineStart = parseTtmlTime(lineMatch.groupValues[1])
+        if (lineStart < 0) continue
+        val content = lineMatch.groupValues[2]
+        val wordMatches = TTML_WORD.findAll(content).toList()
+        if (wordMatches.isEmpty()) {
+            val text = decodeTtmlEntities(TTML_WORD.replace(content, "").replace(Regex("""<[^>]+>"""), "")).trim()
+            if (text.isEmpty()) continue
+            builder.append('[').append(formatTtmlTime(lineStart)).append(']').append(text).append('\n')
+            continue
+        }
+        builder.append('[').append(formatTtmlTime(lineStart)).append(']')
+        var words = 0
+        for (wordMatch in wordMatches) {
+            val wordText = decodeTtmlEntities(wordMatch.groupValues[2]).trim()
+            if (wordText.isEmpty()) continue
+            var wordStart = parseTtmlTime(wordMatch.groupValues[1])
+            if (wordStart < 0) wordStart = lineStart
+            builder.append('<').append(formatTtmlTime(wordStart)).append('>').append(wordText)
+            words++
+        }
+        if (words == 0) continue
+        builder.append('\n')
+    }
+    if (builder.isEmpty()) return ttml
+    return builder.toString().trimEnd('\n')
+}
+
+private fun parseTtmlTime(value: String): Long {
+    val cleaned = value.trim().removeSuffix("s")
+    if (cleaned.isEmpty()) return -1
+    var seconds = 0.0
+    var multiplier = 1.0
+    for (part in cleaned.split(':').asReversed()) {
+        val parsed = part.toDoubleOrNull() ?: return -1
+        seconds += parsed * multiplier
+        multiplier *= 60.0
+    }
+    return (seconds * 1000).toLong()
+}
+
+private fun formatTtmlTime(milliseconds: Long): String {
+    val ms = milliseconds.coerceAtLeast(0)
+    return String.format(Locale.ROOT, "%02d:%02d.%03d", ms / 60_000, (ms % 60_000) / 1_000, ms % 1_000)
+}
+
+/** 单遍解码 TTML 常见实体，避免 `&amp;lt;` 这类嵌套写法被二次还原。 */
+private fun decodeTtmlEntities(text: String): String = TTML_ENTITY.replace(text) { match ->
+    when (match.groupValues[1]) {
+        "amp" -> "&"
+        "lt" -> "<"
+        "gt" -> ">"
+        "quot" -> "\""
+        else -> "'"
+    }
+}
 
 @Serializable
 private data class AppleLyricData(val attributes: AppleLyricAttributes = AppleLyricAttributes())
