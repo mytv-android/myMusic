@@ -174,7 +174,7 @@ fun SyncCenterScreen(
                     index = 0,
                     count = 2,
                     icon = Icons.Filled.Sync,
-                    summary = "歌单修改后在后台调度，回到前台超过 15 分钟也会检查",
+                    summary = "歌单、收藏或 Cookie 修改后约 1 秒自动推送；进入相关页面或回到前台也会检查云端",
                 )
             }
             item(key = "wifi", contentType = "switch") {
