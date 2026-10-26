@@ -39,6 +39,17 @@ object TrackNormalizer {
     private val coverWord = Regex("""(?i)\bcover\b|翻唱|女声版|男声版|童声版|钢琴版|吉他版|piano\s*version|guitar\s*version""")
     private val demoWord = Regex("""(?i)\bdemo\b|小样""")
 
+    /**
+     * 重编曲、重录或人声/速度变体：与录音室原版是不同的音频，不能当同一首歌合并。
+     * 例如酷我、咪咕把 "Faded (Restrung)" 挂在 "Faded" 下时，时长只差几秒，只有这里能区分。
+     */
+    private val alternateWord = Regex(
+        """(?i)\brestrung\b|\bstripped\b|\bsped\s*up\b|\bslowed\b|\bnightcore\b|\b8d\b|\btv\s*size\b|""" +
+            """\breprise\b|\bre-?record(?:ed|ing)?\b|\borchestr(a|al)\b|\bacap+p?ella\b|\bmusic\s*box\b|\blullaby\b|""" +
+            """\bradio\s*edit\b|\bbass\s*boost(ed)?\b|\breverb\b|""" +
+            """加速版|减速版|慢速版|升调版|降调版|合唱版|对唱版|男版|女版"""
+    )
+
     fun normalize(song: Song, providerId: String = song.source): NormalizedTrack {
         val rawTitle = song.name.trim().ifBlank { "未命名歌曲" }
         val rawArtist = song.artist.trim()
@@ -98,6 +109,7 @@ object TrackNormalizer {
             acousticWord.containsMatchIn(text) -> VersionKind.Acoustic
             coverWord.containsMatchIn(text) -> VersionKind.Cover
             demoWord.containsMatchIn(text) -> VersionKind.Demo
+            alternateWord.containsMatchIn(text) -> VersionKind.Alternate
             else -> VersionKind.Studio
         }
     }

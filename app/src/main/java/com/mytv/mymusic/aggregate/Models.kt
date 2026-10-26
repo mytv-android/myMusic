@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 import java.util.Locale
 
 @Serializable
-enum class VersionKind { Studio, Live, Remix, Instrumental, Acoustic, Cover, Demo, Unknown }
+enum class VersionKind { Studio, Live, Remix, Instrumental, Acoustic, Cover, Demo, Alternate, Unknown }
 
 @Serializable
 enum class Availability { Playable, VipOnly, PreviewOnly, Unavailable, Unknown }

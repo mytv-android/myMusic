@@ -163,6 +163,48 @@ class TrackMatcherTest {
     }
 
     @Test
+    fun arrangementVariantIsNotMerged() {
+        // 酷我、咪咕把 "Faded (Restrung)" 当作 "Faded" 返回，时长只差几秒
+        val groups = TrackMatcher.group(
+            mapOf(
+                "netease" to listOf(song("Faded", "Alan Walker", "Faded", 212)),
+                "kuwo" to listOf(song("Faded (Restrung)", "Alan Walker", "Faded", 215, source = "kuwo")),
+                "migu" to listOf(song("Faded (Restrung)", "Alan Walker", "Faded", 217, source = "migu")),
+            ),
+            names,
+            cookies,
+            0.92f,
+            priority,
+        )
+        assertEquals(2, groups.size)
+        val studio = groups.first { group -> group.title == "Faded" }
+        assertTrue(studio.sources.none { it.song.name.contains("Restrung") })
+    }
+
+    @Test
+    fun remasterIsStillTheSameRecording() {
+        val groups = TrackMatcher.group(
+            mapOf(
+                "netease" to listOf(song("Faded", "Alan Walker", "Faded", 212)),
+                "kugou" to listOf(song("Faded (Remastered 2016)", "Alan Walker", "Faded", 213, source = "kugou")),
+            ),
+            names,
+            cookies,
+            0.92f,
+            priority,
+        )
+        assertEquals(1, groups.size)
+    }
+
+    @Test
+    fun detectsArrangementMarkers() {
+        assertEquals(VersionKind.Alternate, TrackNormalizer.detectVersion("Faded (Restrung)"))
+        assertEquals(VersionKind.Alternate, TrackNormalizer.detectVersion("Blinding Lights (Sped Up)"))
+        assertEquals(VersionKind.Alternate, TrackNormalizer.detectVersion("起风了 (降调版)"))
+        assertEquals(VersionKind.Studio, TrackNormalizer.detectVersion("Faded (Remastered 2016)"))
+    }
+
+    @Test
     fun singleSourceCanonicalTrackIsUsable() {
         val track = TrackMatcher.singleSource(song("晴天", "周杰伦", "叶惠美"), "网易云音乐", "netease")
         assertEquals("晴天", track.title)
