@@ -28,6 +28,7 @@ class CoverSeedRepository(private val context: Context, private val imageLoader:
             .data(url)
             .size(128)
             .allowHardware(false)
+            .memoryCacheKey(coverColorCacheKey(url))
             .build()
         val result = imageLoader.execute(request) as? SuccessResult ?: return null
         val seed = withContext(Dispatchers.Default) {
@@ -37,3 +38,9 @@ class CoverSeedRepository(private val context: Context, private val imageLoader:
         return seed
     }
 }
+
+/**
+ * 取色用的 128px 软件位图的内存缓存键。和大封面共用地址做键时两者互相顶掉（谁后加载谁留下），
+ * 播放页背景取光团颜色时也用这个键，直接复用这里刚解码的那张。
+ */
+internal fun coverColorCacheKey(url: String): String = "$url#color"

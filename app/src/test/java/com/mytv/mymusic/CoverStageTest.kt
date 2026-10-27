@@ -1,6 +1,7 @@
 package com.mytv.mymusic
 
 import androidx.compose.material3.MaterialShapes
+import androidx.graphics.shapes.Cubic
 import androidx.graphics.shapes.Morph
 import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.ui.player.CoverShapeSession
@@ -18,6 +19,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 import kotlin.math.sqrt
 import kotlin.random.Random
 
@@ -83,19 +85,66 @@ class CoverStageTest {
     }
 
     @Test
-    fun everyShapeMorphsToAndFromThePausedSquareAndTheCircle() {
+    fun everyMorphStartsAndEndsOnItsShapesAndStaysInTheFrameWhenOvershooting() {
         val paused = PausedCoverPolygon
         val circle = MaterialShapes.Circle
         RandomCoverShapes.forEach { choice ->
             val shape = coverPolygon(choice)
             assertSame("按选项缓存", shape, coverPolygon(choice))
-            listOf(Morph(paused, shape), Morph(shape, paused), Morph(shape, circle), Morph(circle, shape)).forEach { morph ->
-                listOf(-0.08f, 0f, 0.5f, 1f, 1.08f).forEach { assertTrue(morph.asCubics(it).isNotEmpty()) }
+            for ((from, to) in listOf(paused to shape, shape to paused, shape to circle, circle to shape)) {
+                val morph = Morph(from, to)
+                // 两端和起止形状的轮廓重合：暂停、继续、收成小圆的开头和结尾都不会跳一下
+                assertSameOutline(choice.name, from.cubics, morph.asCubics(0f))
+                assertSameOutline(choice.name, to.cubics, morph.asCubics(1f))
+                for (progress in listOf(-0.08f, 0.5f, 1.08f)) {
+                    val cubics = morph.asCubics(progress)
+                    // 首尾相接，填充路径没有缺口
+                    cubics.zipWithNext().forEach { (a, b) -> assertNear(choice.name, a.anchor1X, a.anchor1Y, b.anchor0X, b.anchor0Y) }
+                    assertNear(choice.name, cubics.last().anchor1X, cubics.last().anchor1Y, cubics.first().anchor0X, cubics.first().anchor0Y)
+                    // 弹簧过冲时外推的那一点不会冲出画框（遮罩外框是两倍大，这里留足余量）
+                    samples(cubics, 4).forEach { (x, y) ->
+                        assertTrue("$choice at $progress: ($x, $y)", x in -0.1f..1.1f && y in -0.1f..1.1f)
+                    }
+                }
             }
         }
         // 刚打开播放页时起点和终点是同一个形状
-        assertTrue(Morph(paused, paused).asCubics(1f).isNotEmpty())
+        assertSameOutline("paused", paused.cubics, Morph(paused, paused).asCubics(1f))
     }
+
+    /** [actual] 的轮廓和 [expected] 重合：双向取样点到对方折线的最远距离都小于 0.002（单位是封面边长，大封面上不到 2px）。 */
+    private fun assertSameOutline(name: String, expected: List<Cubic>, actual: List<Cubic>) {
+        val a = samples(expected, 32)
+        val b = samples(actual, 32)
+        val ab = farthest(a, b)
+        val ba = farthest(b, a)
+        assertTrue("$name: outline differs $ab $ba", ab < 0.002f && ba < 0.002f)
+    }
+
+    /** [points] 里离 [line]（按顺序连成的折线）最远的那个点的距离。 */
+    private fun farthest(points: List<Pair<Float, Float>>, line: List<Pair<Float, Float>>): Float = points.maxOf { (x, y) ->
+        line.zipWithNext().minOf { (p, q) ->
+            val dx = q.first - p.first
+            val dy = q.second - p.second
+            val t = (((x - p.first) * dx + (y - p.second) * dy) / (dx * dx + dy * dy).coerceAtLeast(1e-12f)).coerceIn(0f, 1f)
+            val ex = p.first + t * dx - x
+            val ey = p.second + t * dy - y
+            sqrt(ex * ex + ey * ey)
+        }
+    }
+
+    private fun samples(cubics: List<Cubic>, perCubic: Int): List<Pair<Float, Float>> = cubics.flatMap { c ->
+        (0..perCubic).map { i ->
+            val t = i / perCubic.toFloat()
+            val u = 1 - t
+            val x = u * u * u * c.anchor0X + 3 * u * u * t * c.control0X + 3 * u * t * t * c.control1X + t * t * t * c.anchor1X
+            val y = u * u * u * c.anchor0Y + 3 * u * u * t * c.control0Y + 3 * u * t * t * c.control1Y + t * t * t * c.anchor1Y
+            x to y
+        }
+    }
+
+    private fun assertNear(name: String, x: Float, y: Float, u: Float, v: Float) =
+        assertTrue("$name: gap at ($x, $y) vs ($u, $v)", abs(x - u) < 1e-3f && abs(y - v) < 1e-3f)
 
     @Test
     fun morphPlanFollowsTheCurrentLegOrStartsFromWhereItIsHeading() {

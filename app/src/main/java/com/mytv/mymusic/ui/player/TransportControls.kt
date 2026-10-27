@@ -2,6 +2,8 @@ package com.mytv.mymusic.ui.player
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -40,14 +42,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusEventModifierNode
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.FocusState
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -57,10 +71,13 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import com.mytv.mymusic.playback.SleepTimerState
+import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.tvFocusRing
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
@@ -91,8 +108,8 @@ data class TransportGroupSize(
         /** 手机歌词页底部的小号：高 56，52 / 88 / 52。 */
         val Compact = TransportGroupSize(56.dp, 52.dp, 88.dp, 26.dp, 32.dp, pressGrow = 12.dp)
 
-        /** 电视控制条：232×64。 */
-        val Tv = TransportGroupSize(64.dp, 64.dp, 96.dp, 28.dp, 32.dp, pressGrow = 14.dp)
+        /** 电视控制条：236×56，64 / 100 / 64（按设计稿；控制条分两行，按钮组压到 56 高给进度条让出一行）。 */
+        val Tv = TransportGroupSize(56.dp, 64.dp, 100.dp, 26.dp, 32.dp, pressGrow = 14.dp)
     }
 }
 
@@ -156,6 +173,7 @@ fun TransportButtonGroup(
                 content = MaterialTheme.colorScheme.onPrimary,
                 interaction = playSource,
                 focusScale = 1.06f,
+                accentFocus = true,
                 modifier = Modifier
                     .then(if (playFocusRequester != null) Modifier.focusRequester(playFocusRequester) else Modifier)
                     .semantics {
@@ -198,8 +216,9 @@ fun TransportButtonGroup(
         val placeables = listOf(lead, middle, trail).mapIndexed { i, w -> measurables[i].measure(Constraints.fixed(w.coerceAtLeast(0), height)) }
         layout(total, height) {
             var x = 0
-            placeables.forEach {
-                it.place(x, 0)
+            placeables.forEachIndexed { i, it ->
+                // 播放段的电视焦点环画在裁切外、还放大 1.06 倍，会伸进两侧的间距里；摆在上层，不被后摆的“下一首”盖住
+                it.place(x, 0, zIndex = if (i == 1) 1f else 0f)
                 x += it.width + g
             }
         }
@@ -229,16 +248,18 @@ private fun GroupSegment(
     interaction: MutableInteractionSource,
     modifier: Modifier,
     focusScale: Float = 1.04f,
+    accentFocus: Boolean = false,
     icon: @Composable () -> Unit,
 ) {
     Surface(
         onClick = onClick,
         modifier = modifier
+            // 焦点环放在裁切图层外面：放在里面时放大被裁掉、描边也只剩内侧一半
+            .then(if (accentFocus) Modifier.tvAccentFocusRing(focusShape, focusScale) else Modifier.tvFocusRing(focusShape, focusScale))
             .graphicsLayer {
                 this.shape = shape()
                 clip = true
             }
-            .tvFocusRing(focusShape, focusScale)
             .semantics { role = Role.Button },
         shape = RectangleShape,
         color = container,
@@ -246,6 +267,89 @@ private fun GroupSegment(
         interactionSource = interaction,
     ) {
         Box(contentAlignment = Alignment.Center) { icon() }
+    }
+}
+
+/**
+ * 电视上主色按钮（播放键）的焦点：主色描边画在主色按钮上看不出来，按设计稿先留一圈 3dp 底色缝，
+ * 外面再画 3dp onSurface 描边，同时放大 [scale] 倍。非电视为空操作；缩放只在绘制阶段读，不触发组合和布局。
+ */
+@Composable
+private fun Modifier.tvAccentFocusRing(shape: Shape, scale: Float): Modifier {
+    if (!LocalAppWindow.current.isTv) return this
+    return this then AccentFocusElement(
+        shape = shape,
+        scale = scale,
+        gap = MaterialTheme.colorScheme.surface,
+        ring = MaterialTheme.colorScheme.onSurface,
+        spec = MaterialTheme.motionScheme.fastSpatialSpec(),
+    )
+}
+
+private data class AccentFocusElement(
+    val shape: Shape,
+    val scale: Float,
+    val gap: Color,
+    val ring: Color,
+    val spec: AnimationSpec<Float>,
+) : ModifierNodeElement<AccentFocusNode>() {
+    override fun create() = AccentFocusNode(shape, scale, gap, ring, spec)
+
+    override fun update(node: AccentFocusNode) {
+        node.shape = shape
+        node.targetScale = scale
+        node.gap = gap
+        node.ring = ring
+        node.spec = spec
+    }
+}
+
+private class AccentFocusNode(
+    var shape: Shape,
+    var targetScale: Float,
+    var gap: Color,
+    var ring: Color,
+    var spec: AnimationSpec<Float>,
+) : Modifier.Node(), FocusEventModifierNode, DrawModifierNode {
+    private val animated = Animatable(1f)
+    private var focused = false
+
+    // 两圈轮廓只随尺寸、形状、密度变化；放大动画的每一帧直接复用
+    private var inner: Outline? = null
+    private var outer: Outline? = null
+    private var stroke: Stroke? = null
+    private var cachedShape: Shape? = null
+    private var cachedSize = Size.Zero
+    private var cachedDensity = Float.NaN
+    private var cachedDirection: LayoutDirection? = null
+
+    override fun onFocusEvent(focusState: FocusState) {
+        val now = focusState.isFocused || focusState.hasFocus
+        if (now == focused) return
+        focused = now
+        coroutineScope.launch { animated.animateTo(if (now) targetScale else 1f, spec) }
+        invalidateDraw()
+    }
+
+    override fun ContentDrawScope.draw() {
+        val current = animated.value
+        scale(current, current) {
+            this@draw.drawContent()
+            if (!focused) return@scale
+            val width = 3.dp.toPx()
+            if (inner == null || cachedShape != shape || cachedSize != size || cachedDensity != density || cachedDirection != layoutDirection) {
+                // 描边以轮廓为中线：底色缝的中线在外扩半个线宽处，onSurface 环再往外一个线宽
+                inner = shape.createOutline(Size(size.width + width, size.height + width), layoutDirection, this)
+                outer = shape.createOutline(Size(size.width + width * 3, size.height + width * 3), layoutDirection, this)
+                stroke = Stroke(width)
+                cachedShape = shape
+                cachedSize = size
+                cachedDensity = density
+                cachedDirection = layoutDirection
+            }
+            translate(-width / 2, -width / 2) { drawOutline(inner!!, gap, style = stroke!!) }
+            translate(-width * 1.5f, -width * 1.5f) { drawOutline(outer!!, ring, style = stroke!!) }
+        }
     }
 }
 
@@ -299,38 +403,12 @@ fun ToolbarIconButton(
 }
 
 /**
- * “歌词”项：开着歌词页时带底色。[label] 为 true 时开启后展开成图标 + “歌词”的胶囊（平板专注歌词），
- * 否则只是 16dp 圆角的选中底（手机歌词页）。读屏文案沿用“全屏歌词 / 退出全屏歌词”。
+ * “歌词”项：开着歌词页（手机歌词页、平板专注歌词）时是 16dp 圆角的选中底，点了退出。
+ * 读屏文案沿用“全屏歌词 / 退出全屏歌词”。
  */
 @Composable
-fun ToolbarLyricsButton(on: Boolean, onToggle: (Boolean) -> Unit, modifier: Modifier = Modifier, label: Boolean = true) {
-    if (!on || !label) {
-        ToolbarIconButton(Icons.Filled.Lyrics, if (on) "退出全屏歌词" else "全屏歌词", { onToggle(!on) }, modifier, selected = on)
-        return
-    }
-    Surface(
-        onClick = { onToggle(false) },
-        modifier = modifier
-            .height(48.dp)
-            .tvFocusRing(CircleShape)
-            .semantics {
-                contentDescription = "退出全屏歌词"
-                role = Role.Button
-            },
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-    ) {
-        Row(
-            Modifier.padding(start = 12.dp, end = 16.dp).clearAndSetSemantics {},
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(Icons.Filled.Lyrics, null)
-            Text("歌词", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
+fun ToolbarLyricsButton(on: Boolean, onToggle: (Boolean) -> Unit, modifier: Modifier = Modifier) =
+    ToolbarIconButton(Icons.Filled.Lyrics, if (on) "退出全屏歌词" else "全屏歌词", { onToggle(!on) }, modifier, selected = on)
 
 /**
  * “定时”项：定时开着时展开成剩余时间（primary 色、等宽数字）或“本首结束”。

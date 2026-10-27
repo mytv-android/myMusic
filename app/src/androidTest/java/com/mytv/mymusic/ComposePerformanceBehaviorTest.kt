@@ -58,8 +58,10 @@ import com.mytv.mymusic.ui.components.DeviceKind
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.WavySeekBar
+import com.mytv.mymusic.data.CoverShapeChoice
+import com.mytv.mymusic.ui.player.CoverStage
 import com.mytv.mymusic.ui.player.LyricsList
-import com.mytv.mymusic.ui.player.PlayerArt
+import com.mytv.mymusic.ui.player.LyricsSizing
 import com.mytv.mymusic.ui.settings.QrCodeImage
 import com.mytv.mymusic.ui.theme.Appearance
 import com.mytv.mymusic.ui.theme.LocalAppearance
@@ -162,13 +164,59 @@ class ComposePerformanceBehaviorTest {
         compose.setContent {
             TestTheme {
                 Box(Modifier.size(350.dp, 440.dp)) {
-                    LyricsList(lyrics, active, { sought = it })
+                    LyricsList(lyrics, active, { sought = it }, sizing = LyricsSizing.PhoneLyrics)
                 }
             }
         }
         compose.runOnIdle { active.intValue = 20 }
         compose.onNodeWithText("lyric-20").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(20_000L, sought) }
+    }
+
+    @Test
+    fun karaokeLineIsReadOnceAndStillSeeksOnClick() {
+        // 逐字行每个字是暗字、亮字两层 Text：读屏只该看到整行一个描述，外层行的点按跳转还在
+        val lyrics = LyricsParser.parse(listOf("[00:01.00]<00:01.00>晴<00:01.40>天<00:01.80>的<00:02.20>歌", "[00:05.00]下一句").joinToString("\n"))
+        val active = mutableIntStateOf(0)
+        val position = mutableLongStateOf(1_500L)
+        var sought = -1L
+        compose.setContent {
+            TestTheme {
+                Box(Modifier.size(350.dp, 440.dp)) {
+                    LyricsList(lyrics, active, { sought = it }, position = position, sizing = LyricsSizing.PhoneLyrics)
+                }
+            }
+        }
+        // 读屏看到的是合并后的树（被清掉的子节点不报给无障碍服务）：逐字的 Text 一个都不剩，整行只有一个带点按的节点
+        compose.onAllNodesWithText("晴", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithText("天", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithContentDescription("晴天的歌").assertCountEquals(1)
+        compose.onNode(hasContentDescription("晴天的歌") and hasClickAction()).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(1_000L, sought) }
+    }
+
+    @Test
+    fun coverOutlineTurnsWhilePlayingEvenWithoutACover() {
+        // 设计稿：播放时轮廓 40 秒一圈；没有封面图时转的是首字占位的轮廓
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            TestTheme {
+                CompositionLocalProvider(LocalAppearance provides Appearance(reduceMotion = false)) {
+                    CoverStage(
+                        cover = "", title = "spin", trackKey = "spin", playing = true, shapeChoice = CoverShapeChoice.Cookie12,
+                        halo = false, modifier = Modifier.size(200.dp),
+                    )
+                }
+            }
+        }
+        compose.mainClock.advanceTimeBy(2_000)
+        val cover = compose.onNodeWithContentDescription("spin 的封面")
+        val before = cover.captureToImage().toPixelMap()
+        compose.mainClock.advanceTimeBy(3_000)
+        val after = cover.captureToImage().toPixelMap()
+        var changed = 0
+        for (y in 0 until before.height step 2) for (x in 0 until before.width step 2) if (before[x, y] != after[x, y]) changed++
+        assertTrue("outline should have turned, $changed px changed", changed > 50)
     }
 
     @Test
@@ -179,8 +227,8 @@ class ComposePerformanceBehaviorTest {
         compose.setContent {
             TestTheme {
                 val current = version.value
-                PlayerArt(
-                    cover = "", title = "gesture", playing = false, horizontalFade = false,
+                CoverStage(
+                    cover = "", title = "gesture", trackKey = "gesture", playing = false, shapeChoice = CoverShapeChoice.Cookie12,
                     onSkip = { skipped = "$current:$it" }, onDoubleTap = { favorites++ },
                     modifier = Modifier.size(340.dp),
                 )

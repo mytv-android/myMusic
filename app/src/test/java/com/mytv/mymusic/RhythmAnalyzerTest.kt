@@ -57,13 +57,63 @@ class RhythmAnalyzerTest {
         }
         assertNotNull("PCM fed through TeeAudioProcessor's sink must produce an onset", detected)
         assertTrue("a 110 Hz tone onset is also a bass kick", detected!!.kick)
+        assertTrue("a published kick advances the count", detected.kickCount >= 1)
         assertTrue(detected.loudness > 0f)
 
         analyzer.setActive(false)
-        assertEquals(RhythmFrame(), analyzer.frames.value)
+        val stopped = analyzer.frames.value
+        // 停止只清掉信号，鼓点序号保持不变：界面不会把重置当成一次新鼓点
+        assertEquals(RhythmFrame(kickCount = stopped.kickCount), stopped)
+        assertTrue(stopped.kickCount >= detected.kickCount)
         analyzer.audioBufferSink.handleBuffer(pcm16(samplesPerFrame, sampleRate, tone = true))
         delay(80)
-        assertEquals(RhythmFrame(), analyzer.frames.value)
+        assertEquals(stopped, analyzer.frames.value)
+    }
+
+    @Test
+    fun kickCountOnlyMovesForwardAcrossResetsAndGenerations() = runBlocking {
+        val analyzer = RhythmAnalyzer()
+        val sampleRate = 44_100
+        analyzer.audioBufferSink.flush(sampleRate, 1, C.ENCODING_PCM_16BIT)
+        analyzer.setActive(true)
+        assertEquals(0, analyzer.frames.value.kickCount)
+
+        val first = kickAfterSilence(analyzer, sampleRate, after = 0)
+        assertTrue(first.kick)
+
+        // 切歌：新的一代重新学增益，序号接着上一首往后数
+        analyzer.reset()
+        val reset = analyzer.frames.value
+        assertEquals(RhythmFrame(kickCount = reset.kickCount), reset)
+        assertTrue(reset.kickCount >= first.kickCount)
+
+        val second = kickAfterSilence(analyzer, sampleRate, after = reset.kickCount)
+        assertTrue(second.kickCount > reset.kickCount)
+
+        // 格式变化（flush）同样只换代，不清零
+        analyzer.audioBufferSink.flush(sampleRate, 1, C.ENCODING_PCM_16BIT)
+        assertTrue(analyzer.frames.value.kickCount >= second.kickCount)
+        analyzer.setActive(false)
+    }
+
+    /** 先喂一段静音让起拍检测攒够历史，再喂 110 Hz 的音，等到序号超过 [after]。 */
+    private suspend fun kickAfterSilence(analyzer: RhythmAnalyzer, sampleRate: Int, after: Int): RhythmFrame {
+        val samplesPerFrame = sampleRate / 30
+        repeat(14) {
+            analyzer.audioBufferSink.handleBuffer(pcm16(samplesPerFrame, sampleRate, tone = false))
+            delay(60)
+        }
+        assertEquals("silence never advances the count", after, analyzer.frames.value.kickCount)
+        var kicked: RhythmFrame? = null
+        for (attempt in 0 until 4) {
+            analyzer.audioBufferSink.handleBuffer(pcm16(samplesPerFrame, sampleRate, tone = true))
+            kicked = withTimeoutOrNull(500) { analyzer.frames.first { it.kickCount > after } }
+            if (kicked != null) break
+            analyzer.audioBufferSink.handleBuffer(pcm16(samplesPerFrame, sampleRate, tone = false))
+            delay(60)
+        }
+        assertNotNull("a bass onset must advance the kick count", kicked)
+        return kicked!!
     }
 
     private fun pcm16(frameCount: Int, sampleRate: Int, tone: Boolean): ByteBuffer {

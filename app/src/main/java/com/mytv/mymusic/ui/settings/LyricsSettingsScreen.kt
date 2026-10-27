@@ -210,6 +210,7 @@ private fun CoverShapePicker(
 /**
  * 单个选项：形状预览 + 名字。选中时外面 4dp 处画一圈 2.5dp 主色描边，右上角挂对勾。
  * 内边距（左右 7dp、上下 8dp）刚好容下描边和对勾，电视焦点环画在整个选项外面，和选中描边分得开。
+ * 对勾往右上探出 4dp：再多就会被选项 20dp 的圆角裁掉一角（6dp 时约裁 2dp），加大内边距又会让电视一行排不下 7 个。
  */
 @Composable
 private fun CoverShapeOption(
@@ -249,7 +250,7 @@ private fun CoverShapeOption(
                 Box(
                     Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 6.dp, y = (-6).dp)
+                        .offset(x = BadgeOverhang, y = -BadgeOverhang)
                         .size(20.dp)
                         .clip(CircleShape)
                         .background(scheme.primary),
@@ -292,3 +293,5 @@ private fun ShapePreview(choice: CoverShapeChoice, cover: ImageRequest?) {
         }
     }
 }
+
+private val BadgeOverhang = 4.dp

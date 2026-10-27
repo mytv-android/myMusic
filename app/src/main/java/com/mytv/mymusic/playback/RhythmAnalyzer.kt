@@ -42,6 +42,9 @@ class RhythmAnalyzer {
 
     private val generation = AtomicInteger()
     private val frameLock = Any()
+
+    // Guarded by frameLock. Never cleared on reset, so the UI never sees the count move and mistake a reset for a kick.
+    private var kickCount = 0
     private val queued = AtomicBoolean(false)
     private var executor: ExecutorService? = null
 
@@ -70,7 +73,7 @@ class RhythmAnalyzer {
     fun reset() {
         synchronized(frameLock) {
             generation.incrementAndGet()
-            _frames.value = RhythmFrame()
+            _frames.value = RhythmFrame(kickCount = kickCount)
         }
     }
 
@@ -148,7 +151,11 @@ class RhythmAnalyzer {
                     lastAnalysisAtNs = now
                     val result = analysis.analyzePcm(analysisInput, rate, dtMs)
                     synchronized(frameLock) {
-                        if (active && generation.get() == currentGeneration) _frames.value = result
+                        // Stale-generation results are dropped without being counted.
+                        if (active && generation.get() == currentGeneration) {
+                            if (result.kick) kickCount++
+                            _frames.value = result.copy(kickCount = kickCount)
+                        }
                     }
                 } finally {
                     queued.set(false)

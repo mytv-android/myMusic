@@ -31,7 +31,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
@@ -39,11 +38,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
@@ -57,8 +54,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.Cubic
 import androidx.graphics.shapes.Morph
@@ -66,17 +61,17 @@ import androidx.graphics.shapes.MutableCubic
 import androidx.graphics.shapes.RoundedPolygon
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import coil3.size.Precision
 import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.ui.CoverBox
+import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.rememberSettlingOffsetState
 import com.mytv.mymusic.ui.components.sharedNowPlayingCover
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 
@@ -85,14 +80,15 @@ import kotlin.random.Random
  *
  * - 形状：[shapeChoice] 为“随机”时每首歌抽一种（[PlayerCoverShapes]，关掉再开不换）；固定时始终用那一种。
  *   暂停变成圆角方形看全图（慢速空间弹簧），切歌形变到新形状；固定模式切歌形状不变，只交叉淡入封面图。
- * - 旋转：播放时外轮廓 40 秒一圈，画面本身保持正向；暂停时停下并随形变转回正向。减少动画时不转、形变直接切换。
+ * - 旋转：播放时外轮廓 40 秒一圈（没有封面图时转的是首字占位的轮廓），画面本身保持正向；暂停时停下并随形变转回正向。
+ *   减少动画时不转、形变直接切换。电视上旋转和背景共用 30 帧节拍（[TvFrameGate]）。
  * - [collapsed]：收成圆形（手机歌词页左上角的小封面），光晕淡出，手势和读屏描述交给调用方。
  *
  * 形变和旋转都只在绘制阶段读：遮罩路径按 Morph 进度缓存，旋转是画布变换，逐帧不触发重组和布局。
  * 尺寸由 [modifier] 决定（正方形）；光晕画在边界外，父布局不要裁剪。
  *
  * @param trackKey 歌曲 key：随机形状按它记忆，封面图按 [cover] 地址交叉淡入。
- * @param pulse 律动信号；光晕随低频变亮。没有背景律动时传 null。
+ * @param pulse 律动信号；光晕随低频慢包络变亮。没有背景律动时传 null。
  * @param onSkip 横滑切歌（-1 上一首，1 下一首）；null 时不响应横滑。
  * @param onDoubleTap 双击（收藏）；null 时不响应双击。
  * @param sharedElement 是否参与迷你播放器 ↔ 播放页的共享封面转场（只有手机播放页需要）。
@@ -112,7 +108,8 @@ fun CoverStage(
     onDoubleTap: (() -> Unit)? = null,
     sharedElement: Boolean = false,
 ) {
-    val reduceMotion = LocalAppearance.current.reduceMotion
+    // 和背景一样把系统“移除动画”当成减少动画：旋转是自己跑的帧循环，不受动画时长缩放影响
+    val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
     val motion = MaterialTheme.motionScheme
     val songShape = remember(shapeChoice, trackKey) { PlayerCoverShapes.resolve(shapeChoice, trackKey) }
     val target = when {
@@ -134,15 +131,19 @@ fun CoverStage(
         }
         stage.morphTo(target, spec)
     }
-    val spin = !collapsed && ambientSpinEnabled(playing, reduceMotion, cover)
-    LaunchedEffect(stage, spin, reduceMotion) {
+    val spin = !collapsed && ambientSpinEnabled(playing, reduceMotion)
+    val tv = LocalAppWindow.current.isTv
+    LaunchedEffect(stage, spin, reduceMotion, tv) {
         when {
             spin -> {
                 var last = withFrameNanos { it }
                 while (true) {
                     withFrameNanos { now ->
-                        stage.angle = advanceSpin(stage.angle, now - last)
-                        last = now
+                        // 按真实间隔累加角度：电视上隔一帧才转一次，转速不变
+                        if (!tv || TvFrameGate.due(now)) {
+                            stage.angle = advanceSpin(stage.angle, now - last)
+                            last = now
+                        }
                     }
                 }
             }
@@ -160,7 +161,6 @@ fun CoverStage(
     val currentDoubleTap by rememberUpdatedState(onDoubleTap)
     val gestures = !collapsed && (onSkip != null || onDoubleTap != null)
     val haloAlpha = animateFloatAsState(if (collapsed || !halo) 0f else 1f, motion.defaultEffectsSpec(), label = "halo")
-    val outline = remember(stage) { CoverStageShape(stage) }
 
     Box(
         modifier
@@ -213,7 +213,9 @@ fun CoverStage(
         Box(
             Modifier
                 .fillMaxSize()
-                .then(if (sharedElement) Modifier.sharedNowPlayingCover(outline) else Modifier)
+                // 共享封面不另加浮层裁切：下面的遮罩是内容的一部分，飞行途中的画面本身就按此刻的形状和角度裁好了。
+                // （按形状另给 OverlayClip 时，打开播放页的整段飞行里封面都画不出来）
+                .then(if (sharedElement) Modifier.sharedNowPlayingCover(RectangleShape) else Modifier)
                 .graphicsLayer {
                     translationX = drag.offset
                     alpha = 1f - (abs(drag.offset) / (currentThreshold * 4)).coerceIn(0f, 0.5f)
@@ -258,13 +260,13 @@ private fun CoverImage(cover: String, title: String) {
     val swap = remember { CoverImageSwap(cover) }
     val fade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     val scope = rememberCoroutineScope()
-    LaunchedEffect(cover) { swap.show(cover) }
     val reveal: () -> Unit = {
         scope.launch {
             swap.fade.animateTo(1f, fade)
             swap.dropPrevious()
         }
     }
+    LaunchedEffect(cover) { swap.show(cover) }
     CoverBox(url = "", key = title, modifier = Modifier.fillMaxSize(), shape = RectangleShape, fontSize = 96f)
     // 两张图按地址 key：旧图从“当前”挪到“上一张”时保留已加载的画面，不会闪一下空白
     for (url in listOfNotNull(swap.previous, swap.current)) {
@@ -295,14 +297,29 @@ private class CoverImageSwap(initial: String) {
 
     suspend fun show(url: String) {
         if (url == current) return
-        previous = current.takeIf { it.isNotBlank() }
-        current = url
-        if (url.isBlank()) {
+        when {
             // 没有新封面就直接露出占位，不等加载回调
-            fade.snapTo(1f)
-            previous = null
-        } else {
-            fade.snapTo(0f)
+            url.isBlank() -> {
+                previous = null
+                current = url
+                fade.snapTo(1f)
+            }
+            // 切回还垫在底下、完整显示着的那张：它已加载完，不会再有加载回调，直接露出来
+            url == previous -> {
+                previous = null
+                current = url
+                fade.snapTo(1f)
+            }
+            // 当前这张还没淡入完（连切几首）：保留底下那张，只换掉当前，不闪占位也不跳出半路的封面
+            previous != null -> {
+                current = url
+                fade.snapTo(0f)
+            }
+            else -> {
+                previous = current.takeIf { it.isNotBlank() }
+                current = url
+                fade.snapTo(0f)
+            }
         }
     }
 
@@ -312,7 +329,7 @@ private class CoverImageSwap(initial: String) {
 }
 
 /**
- * 封面后的光晕：同一张图放大到 1.03 倍（原型的内缩 4% 再放大 1.12），饱和度 1.4，透明度 0.62，律动时随低频变亮。
+ * 封面后的光晕：同一张图放大到 1.03 倍（原型的内缩 4% 再放大 1.12），饱和度 1.4，透明度 0.62，律动时随低频慢包络变亮。
  * 节点按 1/[HALO_DOWNSCALE] 布局再用图层放大：Android 12+ 用 RenderEffect 模糊，模糊只在小图层上做；
  * 更低版本没有模糊，改用 24px 的小图放大，再用径向渐变把边缘渐隐成圆形，本身就足够柔和。
  */
@@ -328,7 +345,14 @@ private fun CoverHalo(
     val context = LocalContext.current
     val blur = Build.VERSION.SDK_INT >= 31
     val request = remember(context, cover, blur) {
-        ImageRequest.Builder(context).data(cover).size(if (blur) HALO_BLUR_PX else HALO_TINY_PX).build()
+        // AsyncImage 默认按 INEXACT 取图，会直接复用内存里同地址的大封面，低版本上光晕就成了一张清楚的放大封面；
+        // 固定成 EXACT 并单独占一个缓存键，既拿到真正的小图，也不把大封面从缓存里挤掉
+        ImageRequest.Builder(context)
+            .data(cover)
+            .size(if (blur) HALO_BLUR_PX else HALO_TINY_PX)
+            .precision(Precision.EXACT)
+            .memoryCacheKey("$cover#halo")
+            .build()
     }
     val saturate = remember { ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(HALO_SATURATION) }) }
     Box(
@@ -343,7 +367,7 @@ private fun CoverHalo(
                         scaleX = HALO_DOWNSCALE
                         scaleY = HALO_DOWNSCALE
                         translationX = offset()
-                        val bright = pulse?.let { FlowIntensity.of(it.intensity).cover * it.bass } ?: 0f
+                        val bright = pulse?.let { FlowIntensity.of(it.intensity).cover * it.swell } ?: 0f
                         val dragFade = 1f - (abs(offset()) / fadeDistance()).coerceIn(0f, 0.5f)
                         alpha = ((HALO_ALPHA + bright) * visible.value * dragFade).coerceIn(0f, 1f)
                     }
@@ -397,15 +421,6 @@ private fun CoverHalo(
                 Modifier.fillMaxSize()
             },
         )
-    }
-}
-
-/** 共享封面转场时，浮层按封面此刻的形状和旋转裁切。 */
-private class CoverStageShape(private val stage: CoverStageState) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
-        val path = Path()
-        stage.morph.fillPath(stage.drawProgress, path, MutableCubic(), size.width, size.height, stage.angle)
-        return Outline.Generic(path)
     }
 }
 
@@ -486,33 +501,19 @@ internal fun planMorph(
     }
 }
 
-/** Morph 的轮廓写进 [path]（单位坐标放大到宽高），可选绕中心转 [degrees] 度；复用 [scratch]，不分配。 */
-internal fun Morph.fillPath(
-    progress: Float,
-    path: Path,
-    scratch: MutableCubic,
-    width: Float,
-    height: Float,
-    degrees: Float = 0f,
-) {
+/** Morph 的轮廓写进 [path]，单位坐标放大到宽高；复用 [scratch]。旋转在画布上做，路径只随形变重建。 */
+internal fun Morph.fillPath(progress: Float, path: Path, scratch: MutableCubic, width: Float, height: Float) {
     path.rewind()
-    val radians = Math.toRadians(degrees.toDouble())
-    val cos = cos(radians).toFloat()
-    val sin = sin(radians).toFloat()
-    val cx = width / 2f
-    val cy = height / 2f
-    fun x(ux: Float, uy: Float) = cx + (ux * width - cx) * cos - (uy * height - cy) * sin
-    fun y(ux: Float, uy: Float) = cy + (ux * width - cx) * sin + (uy * height - cy) * cos
     var first = true
     forEachCubic(progress, scratch) { c ->
         if (first) {
-            path.moveTo(x(c.anchor0X, c.anchor0Y), y(c.anchor0X, c.anchor0Y))
+            path.moveTo(c.anchor0X * width, c.anchor0Y * height)
             first = false
         }
         path.cubicTo(
-            x(c.control0X, c.control0Y), y(c.control0X, c.control0Y),
-            x(c.control1X, c.control1Y), y(c.control1X, c.control1Y),
-            x(c.anchor1X, c.anchor1Y), y(c.anchor1X, c.anchor1Y),
+            c.control0X * width, c.control0Y * height,
+            c.control1X * width, c.control1Y * height,
+            c.anchor1X * width, c.anchor1Y * height,
         )
     }
     path.close()

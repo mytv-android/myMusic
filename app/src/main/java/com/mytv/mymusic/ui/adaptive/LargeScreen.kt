@@ -1,7 +1,10 @@
 package com.mytv.mymusic.ui.adaptive
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,10 +48,13 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -56,19 +62,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.aggregate.PlaybackMode
+import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.data.SavedSong
+import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.Cover
-import com.mytv.mymusic.ui.CoverBox
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.TopTab
-import com.mytv.mymusic.ui.components.MorphIconButton
 import com.mytv.mymusic.ui.components.PlayButtonSize
 import com.mytv.mymusic.ui.components.PlayPauseButton
 import com.mytv.mymusic.ui.components.SourceChip
 import com.mytv.mymusic.ui.components.WavySeekBar
 import com.mytv.mymusic.ui.components.tvFocusRing
+import com.mytv.mymusic.ui.player.CoverStage
+import com.mytv.mymusic.ui.player.TransportButtonGroup
+import com.mytv.mymusic.ui.player.TransportGroupSize
 import com.mytv.mymusic.ui.player.sleepLabel
 import com.mytv.mymusic.ui.theme.LocalBlurPolicy
 import com.mytv.mymusic.ui.theme.PlayerTheme
@@ -250,18 +259,7 @@ fun NowPlayingPane(
                 Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 24.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                CoverBox(
-                    song.cover,
-                    song.title,
-                    Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .clickable(onClick = actions::openPlayer)
-                        // 封面图本身不读，可点的封面要有名字
-                        .semantics { contentDescription = "打开播放页" },
-                    RoundedCornerShape(28.dp),
-                    fontSize = 96f,
-                )
+                PaneCover(song, state.playing, state.coverShape, actions::openPlayer)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -293,15 +291,15 @@ fun NowPlayingPane(
                     )
                 }
                 WavySeekBar(position, state.duration, state.playing, actions::seek)
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    MorphIconButton(Icons.Filled.SkipPrevious, "上一首", { actions.transport("previous") }, size = 64.dp, iconSize = 30.dp)
-                    PlayPauseButton(state.playing, { actions.transport("play") }, size = PlayButtonSize.Large)
-                    MorphIconButton(Icons.Filled.SkipNext, "下一首", { actions.transport("next") }, size = 64.dp, iconSize = 30.dp)
-                }
+                // 和播放页同一个连接按钮组，用小号
+                TransportButtonGroup(
+                    playing = state.playing,
+                    onPrevious = { actions.transport("previous") },
+                    onPlayPause = { actions.transport("play") },
+                    onNext = { actions.transport("next") },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    size = TransportGroupSize.Compact,
+                )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     IconButton(onClick = onOpenTimer) {
                         Icon(Icons.Filled.Bedtime, if (sleep.active) "定时关闭：${sleepLabel(sleep)}" else "定时关闭", tint = if (sleep.active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -334,6 +332,47 @@ fun NowPlayingPane(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 窗格封面：和播放页同一个形状封面（同一首歌同一种形状，播放时轮廓慢转，暂停变圆角方形），不带光晕和手势：
+ * 光晕会被窗格的滚动区域裁出硬边。整块点开播放页，按下时略微缩小；读屏只读“打开播放页”。
+ */
+@Composable
+private fun PaneCover(song: Song, playing: Boolean, shape: CoverShapeChoice, onOpen: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val press = animateFloatAsState(if (pressed) 0.96f else 1f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "paneCoverPress")
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            // 形状封面不是矩形，矩形水波纹不合适，按压反馈交给缩放
+            .clickable(interactionSource = interaction, indication = null, onClick = onOpen)
+            // 封面图本身不读，可点的封面要有名字
+            .semantics { contentDescription = "打开播放页" },
+    ) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .graphicsLayer {
+                    scaleX = press.value
+                    scaleY = press.value
+                }
+                // 封面舞台自带“某某的封面”描述，这里统一读外层的“打开播放页”
+                .clearAndSetSemantics {},
+        ) {
+            CoverStage(
+                cover = song.cover,
+                title = song.title,
+                trackKey = song.key,
+                playing = playing,
+                shapeChoice = shape,
+                modifier = Modifier.fillMaxSize(),
+                halo = false,
+            )
         }
     }
 }

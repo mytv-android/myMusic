@@ -40,6 +40,27 @@ class PhoneStageLayoutTest {
     }
 
     @Test
+    fun withoutSyncedLyricsThePreviewSpaceIsGivenBack() {
+        fun at(bottom: Int, preview: Int) =
+            phoneStageSlots(top = 52, bottom = bottom, meta = 62, preview = preview, coverMax = 280, coverMin = 200, ideal = ideal, min = min)
+        // 空间有富余：封面不变，整组少了 56 的预览后重新居中，往下挪一半
+        val tallWith = at(900, 56)
+        val tallWithout = at(900, 0)
+        assertEquals(tallWith.cover, tallWithout.cover)
+        assertEquals(28, tallWithout.coverTop - tallWith.coverTop)
+        assertEquals(tallWithout.metaTop + 62 + ideal[2], tallWithout.previewTop)
+        // 空间紧时让出来的高度先还给间距、再还给封面；收放过渡的中间值也单调
+        val tight = 52 + 62 + 56 + 200 + min.sum()
+        var previous = 0
+        for (preview in 56 downTo 0 step 8) {
+            val cover = at(tight, preview).cover
+            assertTrue("preview=$preview cover=$cover", cover >= previous)
+            previous = cover
+        }
+        assertEquals(256, at(tight, 0).cover)
+    }
+
+    @Test
     fun theCoverShrinksButNotBelowItsMinimum() {
         val twoLineTitle = slots(bottom = 52 + 99 + 56 + 280 + min.sum() - 30, meta = 99)
         assertEquals(250, twoLineTitle.cover)

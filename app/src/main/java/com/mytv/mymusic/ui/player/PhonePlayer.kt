@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.clickable
@@ -34,6 +35,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -67,13 +69,16 @@ import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.components.WavySeekBar
 import com.mytv.mymusic.ui.theme.LocalAppearance
+import kotlin.math.roundToInt
 
 /**
  * 手机播放页：顶栏（收起、音源胶囊、更多）→ 形状封面 → 标题 → 两行歌词 → 波浪进度 → 连接按钮组 → 浮动工具栏。
- * 歌词页里封面沿空间弹簧缩到左上角并形变成圆；空闲 4 秒后顶栏、按钮组、工具栏淡出，歌词扩成三行，进度变成细线。
+ * 没有同步歌词时两行歌词那块不占位（收起有过渡）。
+ * 歌词页里封面沿空间弹簧缩到左上角并形变成圆；空闲 4 秒后顶栏、按钮组、工具栏淡出，歌词扩成三行，进度变成细线，
+ * 淡出的进度条拉平、两行预览的逐字填色停住，看不见的动画不再逐帧跑。
  *
- * 重组边界：空闲状态只在各个小组件里读（拦截点按），淡出透明度、歌词页过渡进度只在图层和摆放阶段读；
- * 播放页主体只随播放 / 暂停、切歌、进出歌词页这类低频变化重组。
+ * 重组边界：空闲状态只在各个小组件里读（拦截点按、停动画），淡出透明度、歌词页过渡进度只在图层和摆放阶段读；
+ * 播放页主体只随播放 / 暂停、切歌、进出歌词页、歌词有无这类低频变化重组。
  */
 @Composable
 internal fun PhonePlayer(
@@ -118,7 +123,17 @@ internal fun PhonePlayer(
     val lyricsAlpha = remember(pageFade) { { pageFade.value } }
     val chromeAlpha = remember(pageFade, chrome) { { chrome.value * (1f - pageFade.value) } }
     val waveScale = remember(pulse) { { pulseWaveScale(pulse) } }
-    val policy = remember(coverMove) { PhoneStagePolicy(coverMove) }
+    // 没有同步歌词时两行预览不占位。解析中 lyrics 还是上一份结果，占位保持不变，结果出来只变一次；
+    // 刚打开播放页就在解析时先按有歌词留着，绝大多数歌都有，免得打开后再撑开一次
+    val previewHeld = remember { booleanArrayOf(lyrics.synced || lyricsLoading) }
+    if (!lyricsLoading) previewHeld[0] = lyrics.synced
+    val previewSpace = animateFloatAsState(
+        if (previewHeld[0]) 1f else 0f,
+        if (reduceMotion) snap() else motion.defaultSpatialSpec(),
+        label = "previewSpace",
+    )
+    val coverOnTop = rememberUpdatedState(lyricsMode)
+    val policy = remember(coverMove, previewSpace, coverOnTop) { PhoneStagePolicy(coverMove, previewSpace, coverOnTop) }
 
     Layout(
         contents = listOf<@Composable () -> Unit>(
@@ -313,12 +328,14 @@ private fun PhoneLyricsPreview(
             .clipToBounds()
             .graphicsLayer { this.alpha = alpha() },
     ) {
+        // 空闲时预览淡出、换成三行歌词：这里的逐字填色停住，不再空跑帧循环。只有这个小块随空闲状态重组
+        val awake = !idle.idle
         Box(Modifier.fillMaxSize().clickable(onClickLabel = "打开全屏歌词", onClick = onOpen)) {
             val index = active.value
             val line = lyrics.lines.getOrNull(index) ?: return@Box
             val next = lyrics.lines.getOrNull(index + 1)?.text.orEmpty()
             Column {
-                CurrentLyric(line, position, playing, MaterialTheme.typography.bodyLarge.merge(PreviewCurrentStyle))
+                CurrentLyric(line, position, playing && awake, MaterialTheme.typography.bodyLarge.merge(PreviewCurrentStyle))
                 if (next.isNotBlank()) {
                     Text(
                         next,
@@ -363,7 +380,7 @@ private fun PhoneIdleLyrics(
 @Composable
 private fun CurrentLyric(line: LyricLine, position: State<Long>, playing: Boolean, style: TextStyle) {
     if (line.words.isNotEmpty()) {
-        KaraokeLine(line, position, playing, center = false, style = style)
+        KaraokeLine(line, position, playing, style)
     } else {
         Text(line.text, style = style, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
@@ -409,11 +426,13 @@ private fun PhoneControls(
     onOpenSource: () -> Unit,
 ) {
     IdleGuard(idle, blocked, Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha() }) {
+        // 空闲时整块淡出：进度条按暂停拉平，波浪不在看不见的地方继续动。只有这一块随空闲状态重组
+        val awake = !idle.idle
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             WavySeekBar(
                 position,
                 duration,
-                playing,
+                playing && awake,
                 actions::seek,
                 Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                 amplitudeScale = waveScale,
@@ -516,10 +535,12 @@ private fun PhoneLyricsPage(
             loading = lyricsLoading,
             position = position,
             playing = playing,
+            sizing = LyricsSizing.PhoneLyrics,
         )
         IdleGuard(idle, false, Modifier.padding(start = 20.dp, end = 16.dp, bottom = 8.dp).graphicsLayer { this.alpha = chrome.value }) {
+            val awake = !idle.idle
             Column {
-                WavySeekBar(position, duration, playing, actions::seek, Modifier.padding(start = 4.dp, end = 8.dp), amplitudeScale = waveScale)
+                WavySeekBar(position, duration, playing && awake, actions::seek, Modifier.padding(start = 4.dp, end = 8.dp), amplitudeScale = waveScale)
                 Row(
                     Modifier.fillMaxWidth().padding(top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -533,7 +554,7 @@ private fun PhoneLyricsPage(
                         size = TransportGroupSize.Compact,
                     )
                     PlayerToolbar {
-                        ToolbarLyricsButton(on = true, onToggle = onLyricsMode, label = false)
+                        ToolbarLyricsButton(on = true, onToggle = onLyricsMode)
                         ToolbarQueueButton(onOpenQueue)
                     }
                 }
@@ -543,11 +564,17 @@ private fun PhoneLyricsPage(
 }
 
 /**
- * 手机播放页的摆放：顶栏贴顶，控件区贴底，中间按 [phoneStageSlots] 分给封面、标题和歌词预览。
+ * 手机播放页的摆放：顶栏贴顶，控件区贴底，中间按 [phoneStageSlots] 分给封面、标题和歌词预览；
+ * 预览的占位按 [previewSpace]（0..1）收放，只在收放的那一下逐帧重新测量。
  * 歌词页时封面图层以左上角为原点缩放平移到 [LyricsCoverSize] 的小圆处；进度只在图层里读，不重新测量。
  * 歌词页稳定后默认界面已移出组合，封面仍按最后一次的默认位置算起点，回到默认页时没有跳变。
+ * 封面最先摆放，光晕垫在标题、收藏和顶栏下面；[coverOnTop]（要进歌词页）时提到最上层，小圆封面盖在歌词页上。
  */
-private class PhoneStagePolicy(private val coverMove: State<Float>) : MultiContentMeasurePolicy {
+private class PhoneStagePolicy(
+    private val coverMove: State<Float>,
+    private val previewSpace: State<Float>,
+    private val coverOnTop: State<Boolean>,
+) : MultiContentMeasurePolicy {
     private var lastCover = 0
     private var lastCoverX = 0
     private var lastCoverY = 0
@@ -562,7 +589,7 @@ private class PhoneStagePolicy(private val coverMove: State<Float>) : MultiConte
         val inner = (width - side * 2).coerceAtLeast(0)
         val top = measurables[SlotTop].firstOrNull()?.measure(full)
         val meta = measurables[SlotMeta].firstOrNull()?.measure(Constraints.fixedWidth((width - 40.dp.roundToPx()).coerceAtLeast(0)))
-        val previewBudget = PreviewHeight.roundToPx()
+        val previewBudget = (PreviewHeight.toPx() * previewSpace.value).roundToInt()
         val preview = measurables[SlotPreview].firstOrNull()?.measure(Constraints(maxWidth = inner, maxHeight = previewBudget))
         val controls = measurables[SlotControls].firstOrNull()?.measure(Constraints(minWidth = width, maxWidth = width, maxHeight = height))
         val bottomMargin = 8.dp.roundToPx()
@@ -610,16 +637,9 @@ private class PhoneStagePolicy(private val coverMove: State<Float>) : MultiConte
         val anchorX = LyricsCoverStart.toPx()
         val anchorY = LyricsCoverTop.toPx()
         return layout(width, height) {
-            top?.place(0, 0)
-            meta?.place(side, metaY)
-            preview?.place(side, previewY)
-            controls?.place(0, controlsY)
-            idleLyrics?.place(side, previewY)
-            thin?.place(side, thinY)
-            notice?.let { it.place((width - it.width) / 2, controlsY - it.height - 6.dp.roundToPx()) }
-            lyricsPage?.place(0, 0)
-            // 最后摆放：歌词页里小圆封面在最上层
-            cover.placeWithLayer(coverX, coverY) {
+            // 最先摆放：光晕画在封面边界外（1.7 倍），压在歌名、收藏和顶栏上会让字发灰（Android 12 以下约 25%）。
+            // 进歌词页时（含收起途中）提到最上层，小圆封面盖在歌词页上；回封面时一开始就放回下面，光晕淡入时已在字下
+            cover.placeWithLayer(coverX, coverY, zIndex = if (coverOnTop.value) 1f else 0f) {
                 val t = coverMove.value
                 transformOrigin = TransformOrigin(0f, 0f)
                 val scale = lerp(1f, miniSize / coverSize.coerceAtLeast(1), t)
@@ -628,6 +648,14 @@ private class PhoneStagePolicy(private val coverMove: State<Float>) : MultiConte
                 translationX = (anchorX - coverX) * t
                 translationY = (anchorY - coverY) * t
             }
+            top?.place(0, 0)
+            meta?.place(side, metaY)
+            preview?.place(side, previewY)
+            controls?.place(0, controlsY)
+            idleLyrics?.place(side, previewY)
+            thin?.place(side, thinY)
+            notice?.let { it.place((width - it.width) / 2, controlsY - it.height - 6.dp.roundToPx()) }
+            lyricsPage?.place(0, 0)
         }
     }
 }
@@ -637,7 +665,7 @@ internal class PhoneStageSlots(val cover: Int, val coverTop: Int, val metaTop: I
 
 /**
  * 手机播放页中段的竖向分配（像素）：[top] 是顶栏底边，[bottom] 是控件区顶边，[meta] 是标题区实际高度，
- * [preview] 是给两行歌词预留的高度（不论这首有没有同步歌词都留，封面大小才不会随歌词有无变化）。
+ * [preview] 是给两行歌词预留的高度（没有同步歌词时为 0，收放过渡中是中间值；空间富余时封面大小不变，只是整组重新居中）。
  * 先保证封面 [coverMax]，空间不够时先把四段间距（顶栏→封面、封面→标题、标题→歌词、歌词→控件）从理想值压向最小值，
  * 还不够才缩封面，最小 [coverMin]；空间有富余时平分到封面上方和控件上方，让中间这组居中。
  */

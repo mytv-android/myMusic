@@ -1,14 +1,22 @@
 package com.mytv.mymusic
 
+import com.mytv.mymusic.ui.player.LyricEdge
+import com.mytv.mymusic.ui.player.LyricFadeBottom
+import com.mytv.mymusic.ui.player.LyricFadeTop
 import com.mytv.mymusic.ui.player.LyricsSizing
 import com.mytv.mymusic.ui.player.anchorScrollStep
 import com.mytv.mymusic.ui.player.lyricAlpha
 import com.mytv.mymusic.ui.player.lyricAnchorError
 import com.mytv.mymusic.ui.player.lyricBlurDp
 import com.mytv.mymusic.ui.player.lyricDistance
+import com.mytv.mymusic.ui.player.lyricEdgeLocalY
+import com.mytv.mymusic.ui.player.lyricEdgeOf
+import com.mytv.mymusic.ui.player.lyricLayerScale
+import com.mytv.mymusic.ui.player.lyricLayoutSp
 import com.mytv.mymusic.ui.player.lyricSlotHeight
-import com.mytv.mymusic.ui.player.lyricTextWidth
+import com.mytv.mymusic.ui.player.lyricVisualSp
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -23,14 +31,6 @@ class LyricsEmphasisTest {
         assertEquals(36f, LyricsSizing.TvAmbient.currentSp, 0.5f)
         listOf(LyricsSizing.PhoneLyrics, LyricsSizing.Tablet, LyricsSizing.TabletFocus, LyricsSizing.Tv, LyricsSizing.TvAmbient)
             .forEach { assertTrue(it.toString(), it.anchor in 0.42f..0.46f) }
-    }
-
-    @Test
-    fun legacyPresetsKeepTheOldTypographySizes() {
-        assertEquals(22f, LyricsSizing.Standard.baseSp, 0.001f)
-        assertEquals(24f, LyricsSizing.Standard.currentSp, 0.001f)
-        assertEquals(28f, LyricsSizing.Large.baseSp, 0.001f)
-        assertEquals(36f, LyricsSizing.Large.currentSp, 0.001f)
     }
 
     @Test
@@ -65,20 +65,90 @@ class LyricsEmphasisTest {
     }
 
     @Test
-    fun textWrapsAtTheGrownWidthAndNarrowsWhileShrinkingPreset() {
-        assertEquals(800, lyricTextWidth(1000, 1.25f, 1f))
-        // 预设变大（旧字号更小）不需要收窄
-        assertEquals(800, lyricTextWidth(1000, 1.25f, 0.8f))
-        // 预设变小时旧字号还在放大，按比例再收窄，缩放后不超出列宽
-        val width = lyricTextWidth(1000, 1.25f, 1.2f)
-        assertEquals(666, width)
-        assertTrue(width * 1.25f * 1.2f <= 1000f)
+    fun rowsLayOutAtTheGrownSizeAndOnlyShrink() {
+        val presets = listOf(
+            LyricsSizing.PhoneLyrics, LyricsSizing.Tablet, LyricsSizing.TabletFocus, LyricsSizing.Tv, LyricsSizing.TvAmbient,
+        )
+        for (sizing in presets) {
+            val layout = lyricLayoutSp(sizing.currentSp, sizing.currentSp)
+            // 当前行图层不缩放（API 23–27 上放大的文字会糊），其他行缩到 1/grow，视觉字号还是常规字号
+            assertEquals(sizing.toString(), 1f, lyricLayerScale(lyricVisualSp(sizing.baseSp, sizing.grow, 1f), layout), 1e-6f)
+            assertEquals(sizing.toString(), 1f / sizing.grow, lyricLayerScale(lyricVisualSp(sizing.baseSp, sizing.grow, 0f), layout), 1e-6f)
+            assertEquals(sizing.currentSp, lyricVisualSp(sizing.baseSp, sizing.grow, 1f), 1e-4f)
+            // 放大过程单调、连续，弹簧过冲也不会放大到 1 倍以上
+            var previous = 0f
+            for (k in 0..24) {
+                val scale = lyricLayerScale(lyricVisualSp(sizing.baseSp, sizing.grow, k / 20f), layout)
+                assertTrue(scale >= previous && scale <= 1f)
+                previous = scale
+            }
+        }
+    }
+
+    @Test
+    fun shrinkingPresetKeepsTheLargerLayoutSizeUntilTheTransitionEnds() {
+        val pairs = listOf(
+            LyricsSizing.TabletFocus to LyricsSizing.Tablet,
+            LyricsSizing.TvAmbient to LyricsSizing.Tv,
+            LyricsSizing.Tablet to LyricsSizing.PhoneLyrics,
+            LyricsSizing.Tablet to LyricsSizing.TabletFocus,
+            LyricsSizing.Tv to LyricsSizing.TvAmbient,
+        )
+        for ((from, to) in pairs) {
+            // 过渡开始时保留的是旧排版字号
+            val layout = lyricLayoutSp(from.currentSp, to.currentSp)
+            assertEquals(maxOf(from.currentSp, to.currentSp), layout, 0f)
+            for (k in 0..20) {
+                val t = k / 20f
+                val base = from.baseSp + (to.baseSp - from.baseSp) * t
+                val grow = from.grow + (to.grow - from.grow) * t
+                for (lift in listOf(0f, 0.5f, 1f)) {
+                    val visual = lyricVisualSp(base, grow, lift)
+                    assertTrue("$from -> $to at $t never needs to enlarge", visual <= layout + 1e-4f)
+                    assertEquals(visual / layout, lyricLayerScale(visual, layout), 1e-6f)
+                }
+            }
+        }
+        // 过渡结束后换成新字号，当前行回到 1 倍
+        val settled = lyricLayoutSp(LyricsSizing.Tablet.currentSp, LyricsSizing.Tablet.currentSp)
+        assertEquals(1f, lyricLayerScale(LyricsSizing.Tablet.currentSp, settled), 1e-6f)
+    }
+
+    @Test
+    fun onlyRowsTouchingTheFadeZonesGetAnEdgeMask() {
+        // 视口 1000px：顶上 0–140 淡入，底下 800–1000 淡出
+        assertNull(lyricEdgeOf(itemTop = 140, itemSize = 60, viewport = 1000))
+        assertNull(lyricEdgeOf(itemTop = 700, itemSize = 100, viewport = 1000))
+        assertEquals(LyricEdge(center = 160f, viewport = 1000f), lyricEdgeOf(itemTop = 130, itemSize = 60, viewport = 1000))
+        assertEquals(LyricEdge(center = 760f, viewport = 1000f), lyricEdgeOf(itemTop = 710, itemSize = 100, viewport = 1000))
+        // 半截在视口外的行也要擦，否则会被视口边缘硬切
+        assertEquals(LyricEdge(center = 0f, viewport = 1000f), lyricEdgeOf(itemTop = -30, itemSize = 60, viewport = 1000))
+        assertNull(lyricEdgeOf(itemTop = 0, itemSize = 60, viewport = 0))
+    }
+
+    @Test
+    fun edgeMaskLinesUpWithTheWholeColumnMaskWhateverTheRowScale() {
+        // 行占位中心在视口 100px 处、图层高 54px：不缩放时视口顶边在图层本地 -73，底边在 927
+        val edge = LyricEdge(center = 100f, viewport = 1000f)
+        assertEquals(-73f, lyricEdgeLocalY(0f, edge, 1f, 54f), 1e-4f)
+        assertEquals(927f, lyricEdgeLocalY(1000f, edge, 1f, 54f), 1e-4f)
+        // 缩到 1/1.36 时以图层中心为原点：视口里的一段距离在本地坐标里放大 1.36 倍，图层中心仍对着占位中心
+        val scale = 1f / 1.36f
+        assertEquals(27f, lyricEdgeLocalY(100f, edge, scale, 54f), 1e-4f)
+        assertEquals(27f - 100f * 1.36f, lyricEdgeLocalY(0f, edge, scale, 54f), 1e-3f)
+        // 视口里 14% 处（遮罩完全不透明的起点）映射回去仍落在同一条视口高度上
+        val local = lyricEdgeLocalY(140f, edge, scale, 54f)
+        assertEquals(140f, edge.center + (local - 27f) * scale, 1e-3f)
+        assertEquals(0.14f, LyricFadeTop, 0f)
+        assertEquals(0.8f, LyricFadeBottom, 0f)
     }
 
     @Test
     fun slotReservesScaledHeightPlusGap() {
         assertEquals(76, lyricSlotHeight(40, 1f, 36f))
         assertEquals(90, lyricSlotHeight(40, 1.35f, 36f))
+        // 按放大字号排版的 54px 行缩到 1/1.35，占位和原来按常规字号排版的 40px 行一样
+        assertEquals(76, lyricSlotHeight(54, 1f / 1.35f, 36f))
     }
 
     @Test

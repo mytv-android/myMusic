@@ -23,8 +23,13 @@ data class RhythmFrame(
     val beat: Boolean = false,
     /** 整个分析窗口的 RMS 响度，-42 dBFS → 0、-8 dBFS → 1；逐帧原始值，平滑交给界面。 */
     val loudness: Float = 0f,
-    /** 只看 0–690 Hz 的起拍：镲片和人声咬字不算鼓点，驱动背景的是它而不是全频的 [beat]。 */
+    /** 只看 0–690 Hz 的起拍：镲片和人声咬字不算鼓点。只表示这一帧分析出了鼓点，界面按 [kickCount] 判断。 */
     val kick: Boolean = false,
+    /**
+     * 到这一帧为止发布过的鼓点数，只增不减，由 [RhythmAnalyzer] 填写。StateFlow 会合并来不及收的帧，
+     * 主线程卡顿超过一个分析帧时单帧的 [kick] 会丢；按序号前进判断就不会漏。重置和切代时保持不变。
+     */
+    val kickCount: Int = 0,
 )
 
 class RhythmAnalysis {

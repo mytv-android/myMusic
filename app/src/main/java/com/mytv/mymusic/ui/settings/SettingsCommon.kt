@@ -65,7 +65,7 @@ internal enum class SettingsSection(
 ) {
     Appearance("settings/appearance", "外观", "布局、主题、配色来源、风格与对比度", Icons.Filled.Palette, IconTone.Primary),
     // 原来叫“歌词”；枚举名和路由保持不变，旧的深链接和保存的选中项继续有效
-    Lyrics("settings/lyrics", "播放页", "封面形状、歌词背景与律动", Icons.Filled.PlayCircle, IconTone.Primary),
+    Lyrics("settings/lyrics", "播放页", "封面形状、歌词背景、律动强度", Icons.Filled.PlayCircle, IconTone.Primary),
     Playback("settings/playback", "播放与换源", "换源模式、平台优先级与匹配", Icons.Filled.SwapHoriz, IconTone.Primary),
     Equalizer("settings/equalizer", "均衡器", "本机播放音效，不影响下载文件", Icons.Filled.GraphicEq, IconTone.Primary),
     Search("settings/search", "搜索与浏览", "聚合平台与默认浏览来源", Icons.Filled.Search, IconTone.Primary),

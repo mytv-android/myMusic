@@ -59,7 +59,7 @@ private fun Modifier.animatedWidth(width: State<Dp>): Modifier = layout { measur
     layout(w, placeable.height) { placeable.place(0, 0) }
 }
 
-/** 播放键尺寸。Hero 是播放页的 128×96 宽按钮；播放时圆角变小（方），暂停时是满圆。 */
+/** 播放键尺寸。播放时圆角变小（方），暂停时是满圆。 */
 enum class PlayButtonSize(
     val width: Dp,
     val height: Dp,
@@ -70,8 +70,6 @@ enum class PlayButtonSize(
     Mini(34.dp, 34.dp, 20.dp, 10.dp, 30.dp),
     Small(40.dp, 40.dp, 22.dp, 12.dp, 36.dp),
     Medium(56.dp, 56.dp, 28.dp, 16.dp, 50.dp),
-    Large(96.dp, 80.dp, 36.dp, 24.dp, 84.dp),
-    Hero(128.dp, 96.dp, 44.dp, 28.dp, 112.dp),
 }
 
 /**
@@ -129,43 +127,6 @@ fun PlayPauseButton(
                 )
             }
         }
-    }
-}
-
-/** 播放页的上一首 / 下一首：半透明圆形，按下时横向拉宽、圆角变小。 */
-@Composable
-fun MorphIconButton(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    size: Dp = 72.dp,
-    iconSize: Dp = 34.dp,
-    containerColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f),
-    contentColor: Color = MaterialTheme.colorScheme.onSurface,
-) {
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Dp>()
-    val width = animateDpAsState(if (pressed) size * 1.28f else size, spatial, label = "skipWidth")
-    val corner = animateDpAsState(if (pressed) 16.dp else size / 2, spatial, label = "skipCorner")
-    Surface(
-        onClick = onClick,
-        modifier = modifier
-            .height(size)
-            .animatedWidth(width)
-            .graphicsLayer {
-                shape = RoundedCornerShape(corner.value)
-                clip = true
-            }
-            .tvFocusRing(RoundedCornerShape(size / 2))
-            .semantics { this.contentDescription = contentDescription },
-        shape = RectangleShape,
-        color = containerColor,
-        contentColor = contentColor,
-        interactionSource = interaction,
-    ) {
-        Box(contentAlignment = Alignment.Center) { Icon(icon, null, Modifier.size(iconSize)) }
     }
 }
 

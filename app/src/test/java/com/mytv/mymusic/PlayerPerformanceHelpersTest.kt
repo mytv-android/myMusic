@@ -6,7 +6,6 @@ import com.mytv.mymusic.ui.components.SettlingOffsetState
 import com.mytv.mymusic.ui.components.spokenPositionBucket
 import com.mytv.mymusic.ui.player.ambientSpinEnabled
 import com.mytv.mymusic.ui.player.displayLines
-import com.mytv.mymusic.ui.player.shouldBreathe
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runCurrent
@@ -28,14 +27,11 @@ class PlayerPerformanceHelpersTest {
     }
 
     @Test
-    fun breatheRequiresVisiblePlayingMotionAndCover() {
-        assertTrue(shouldBreathe(playing = true, visible = true, reduceMotion = false, cover = "https://cover"))
-        assertFalse(shouldBreathe(playing = true, visible = false, reduceMotion = false, cover = "https://cover"))
-        assertFalse(shouldBreathe(playing = true, visible = true, reduceMotion = true, cover = "https://cover"))
-        assertFalse(shouldBreathe(playing = true, visible = true, reduceMotion = false, cover = ""))
-        assertFalse(shouldBreathe(playing = false, visible = true, reduceMotion = false, cover = "https://cover"))
-        assertFalse(ambientSpinEnabled(playing = true, reduceMotion = false, cover = ""))
-        assertTrue(ambientSpinEnabled(playing = true, reduceMotion = false, cover = "https://cover"))
+    fun coverSpinsWheneverPlayingWithMotionEvenWithoutACover() {
+        assertTrue(ambientSpinEnabled(playing = true, reduceMotion = false))
+        assertFalse(ambientSpinEnabled(playing = false, reduceMotion = false))
+        assertFalse(ambientSpinEnabled(playing = true, reduceMotion = true))
+        assertFalse(ambientSpinEnabled(playing = false, reduceMotion = true))
     }
 
     @Test

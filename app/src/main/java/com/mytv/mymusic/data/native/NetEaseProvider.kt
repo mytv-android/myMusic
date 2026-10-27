@@ -982,7 +982,6 @@ private data class NeteaseDownloadData(
     val type: String = "",
 )
 
-@Serializable
 // 网易逐字歌词（YRC）：行 `[行起毫秒,行时长毫秒]`，词 `(词起毫秒,词时长毫秒,0)词`，
 // 时间轴均为绝对毫秒。行/词格式与 QQ QRC 同源，移植自 third_party/music-lib lyrics.ParseYRC。
 private val NETEASE_YRC_LINE = Regex("""^\[(\d+),(\d+)](.*)$""")
@@ -1017,6 +1016,7 @@ private fun formatYrcTime(milliseconds: Int): String {
     return String.format(Locale.ROOT, "%02d:%02d.%03d", ms / 60000, (ms % 60000) / 1000, ms % 1000)
 }
 
+@Serializable
 private data class NeteaseLyricResponse(
     val code: Int = 0,
     val lrc: NeteaseLyric = NeteaseLyric(),

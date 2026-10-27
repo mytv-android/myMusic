@@ -302,6 +302,7 @@ fun MyMusicApp(model: MusicViewModel) {
                         onClose = actions::closePlayer,
                         onOpenQueue = { queueOpen = true },
                         onOpenTimer = { timerOpen = true },
+                        sheetOpen = queueOpen || timerOpen,
                     )
                 }
                 }

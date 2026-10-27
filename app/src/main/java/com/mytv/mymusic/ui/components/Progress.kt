@@ -68,7 +68,8 @@ import com.mytv.mymusic.ui.theme.LocalAppearance
 /**
  * 波浪进度条：播放时有波浪，暂停或减少动画时拉平。可拖动、可点按跳转；电视上左右键快退快进 10 秒。
  * 进度只在动画/绘制 lambda 中读取；时间文字按秒降频，无障碍语义按 10 秒播报。
- * [amplitudeScale] 是波幅倍数（0..1，律动时随低频起伏），只在指示器的绘制阶段读。
+ * [amplitudeScale] 是波幅倍数（0..1），只在指示器的绘制阶段读。指示器把波幅变化做成 500ms 补间、补间途中不接新值，
+ * 所以这里只适合给变化比 500ms 慢的值（播放页给的是低频慢包络）；逐帧变化的值只会被随机抽样。
  */
 @Composable
 fun WavySeekBar(
@@ -150,6 +151,7 @@ fun WavySeekBar(
                 modifier = Modifier.fillMaxWidth(),
                 color = color,
                 trackColor = trackColor,
+                // 这个值的变化按 500ms 补间过去，见上面 amplitudeScale 的说明
                 amplitude = { if (playing && !dragging && !reduceMotion) amplitudeScale().coerceIn(0f, 1f) else 0f },
             )
         }

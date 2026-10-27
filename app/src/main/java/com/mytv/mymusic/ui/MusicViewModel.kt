@@ -60,6 +60,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1920,8 +1921,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         base.value = base.value.copy(deepLink = "")
     }
 
-    private fun loadLyrics(song: Song) = viewModelScope.launch {
-        base.value = base.value.copy(lyrics = runCatching { app.repository.lyrics(song, cookieFor(song.source)) }.getOrDefault(""))
+    private var lyricsJob: Job? = null
+
+    private fun loadLyrics(song: Song) {
+        // 快速切歌时上一首的请求可能比新歌晚返回，只保留最新一次
+        lyricsJob?.cancel()
+        lyricsJob = viewModelScope.launch {
+            val lyrics = runCatching { app.repository.lyrics(song, cookieFor(song.source)) }.getOrDefault("")
+            // runCatching 会吞掉取消异常，被取消的旧请求在这里停下，不再写回
+            if (!isActive) return@launch
+            // 请求完成后再读 base：先取 base.value 再挂起会把请求期间更新的当前歌曲、播放状态写回旧值
+            base.value = base.value.copy(lyrics = lyrics)
+        }
     }
 
     private fun canonicalForSong(song: Song): CanonicalTrack {
@@ -2098,28 +2109,55 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         String.format(Locale.ROOT, "%02d:%02d", position / 60_000, (position / 1000) % 60)
 
     private val playerListener = object : Player.Listener {
+        // 队列里还没解析的歌（空地址）的解析任务；同一首只解析一次
+        private var resolving: Job? = null
+        private var resolvingIndex = -1
+
+        // 连续跳过的放不了的歌数，整个队列都试过一遍就停下；跳过时的提示要留到下一首解析完
+        private var unplayableSkips = 0
+        private var skipNotice: String? = null
+
+        // 换上地址后又收到空地址留下的“文件不存在”时只重新准备一次，避免真坏的地址来回重试
+        private var staleErrorRetried = -1
+
         override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
             val index = controller?.currentMediaItemIndex ?: return
             val song = base.value.queue.getOrNull(index) ?: return
             val track = base.value.canonicalQueue.getOrNull(index)
             val source = track?.sources?.find { it.song.key == song.key }
             base.value = base.value.copy(currentTrack = track, currentSource = source)
+            staleErrorRetried = -1
             if (song.url.isNotBlank()) {
+                skipNotice = null
+                unplayableSkips = 0
                 loadLyrics(song)
                 return
             }
             if (track == null) return
-            viewModelScope.launch {
+            resolveQueueItem(index, track)
+        }
+
+        /**
+         * 解析队列里还没有地址的这一首。播放器里它是空地址，切过来时多半已经因为打开 "" 报错停下，
+         * 所以换上解析出的地址后要重新准备；解析不出来就提示原因并跳到下一首，不停在一首放不了的歌上。
+         */
+        private fun resolveQueueItem(index: Int, track: CanonicalTrack) {
+            if (resolvingIndex == index && resolving?.isActive == true) return
+            resolvingIndex = index
+            resolving = viewModelScope.launch {
                 val local = localFileFor(track)
                 if (local != null) {
                     val resolved = local.first.song.copy(url = Uri.fromFile(local.second).toString())
                     controller?.replaceMediaItem(index, mediaItem(resolved))
+                    prepareIfStopped()
+                    unplayableSkips = 0
                     base.value = base.value.copy(
                         queue = base.value.queue.mapIndexed { i, queued -> if (i == index) resolved else queued },
                         current = resolved,
                         currentSource = local.first,
-                        playbackNotice = "",
+                        playbackNotice = skipNotice.orEmpty(),
                     )
+                    skipNotice = null
                     remember("history", historySong(resolved))
                     loadLyrics(resolved)
                     return@launch
@@ -2128,13 +2166,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val result = resolvePlayable(track, pinned)
                 val resolution = result.resolution as? Resolution.Ready
                 if (resolution == null) {
-                    base.value = base.value.copy(playbackNotice = noSourceMessage(result.track, result.resolution))
+                    skipUnplayable(index, track.title, noSourceMessage(result.track, result.resolution))
                     return@launch
                 }
                 val resolved = resolution.source.song.copy(url = resolution.url)
                 val currentIndex = controller?.currentMediaItemIndex ?: return@launch
                 if (currentIndex != index) return@launch
                 controller?.replaceMediaItem(index, mediaItem(resolved))
+                prepareIfStopped()
+                unplayableSkips = 0
                 base.value = base.value.copy(
                     queue = base.value.queue.mapIndexed { i, queued -> if (i == index) resolved else queued },
                     canonicalQueue = base.value.canonicalQueue.mapIndexed { i, queued -> if (i == index) result.track else queued },
@@ -2144,19 +2184,67 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     playbackNotice = when {
                         result.autoMatched -> "原音源不可用，已自动匹配到${resolution.source.providerName}"
                         resolution.isPreview -> "当前为试听片段"
-                        else -> ""
+                        else -> skipNotice.orEmpty()
                     },
                 )
+                skipNotice = null
                 rememberCanonical(result.track)
                 remember("history", historySong(resolved))
                 loadLyrics(resolved)
             }
         }
 
+        /** 播放器因为空地址报错停在 IDLE 时，换好地址后重新准备；playWhenReady 还在，准备好就接着放。 */
+        private fun prepareIfStopped() {
+            val player = controller ?: return
+            if (player.playbackState == Player.STATE_IDLE) player.prepare()
+        }
+
+        /**
+         * 第 [index] 首解析不出来：还停在它上面就用播放提示说明原因并跳到下一首；没有下一首，或连着跳过了整个队列 /
+         * [MAX_UNPLAYABLE_SKIPS] 首（多半是断网或账号问题，再跳也是白跑），就暂停只留提示。用户已经切走时只提示，不再动播放器。
+         */
+        private fun skipUnplayable(index: Int, title: String, message: String) {
+            val player = controller
+            if (player == null || player.currentMediaItemIndex != index) {
+                base.value = base.value.copy(playbackNotice = message)
+                return
+            }
+            unplayableSkips++
+            if (!player.hasNextMediaItem() || unplayableSkips >= minOf(base.value.queue.size, MAX_UNPLAYABLE_SKIPS)) {
+                unplayableSkips = 0
+                skipNotice = null
+                player.pause()
+                base.value = base.value.copy(playbackNotice = message)
+                return
+            }
+            val notice = "已跳过《$title》：$message"
+            skipNotice = notice
+            base.value = base.value.copy(playbackNotice = notice)
+            player.seekToNextMediaItem()
+            // 下一首已经有地址就直接重新准备；还是空地址的等它切歌解析完再准备，不让播放器再去打开 ""
+            if (base.value.queue.getOrNull(player.currentMediaItemIndex)?.url?.isNotBlank() == true) prepareIfStopped()
+        }
+
         override fun onPlayerError(error: PlaybackException) {
             if (failoverInProgress) return
             val index = controller?.currentMediaItemIndex ?: return
             val track = base.value.canonicalQueue.getOrNull(index) ?: return
+            // 还没解析的歌在播放器里是空地址，打开 "" 只会报“文件不存在”：这不是音源坏了，不能走换源、把它的音源排除掉。
+            // 正在解析就等它（解析完会重新准备）；没在解析（比如停在这首上又按了播放）就重新解析。
+            // 解析恰好赶在这个报错之前换好了地址（地址缓存命中）时，报错来自换掉的空地址，重新准备一次即可
+            val queued = base.value.queue.getOrNull(index)
+            if (queued != null && queued.url.isBlank()) {
+                resolveQueueItem(index, track)
+                return
+            }
+            if (queued != null && queued.url.startsWith("http") && staleErrorRetried != index &&
+                error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND
+            ) {
+                staleErrorRetried = index
+                controller?.prepare()
+                return
+            }
             val failedSource = base.value.currentSource ?: track.sources.find { it.song.key == base.value.current?.key }
             val position = controller?.currentPosition ?: 0L
             failoverInProgress = true
@@ -2626,6 +2714,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 }
 
 private const val AUTO_MATCH_TIMEOUT_MS = 8_000L
+private const val MAX_UNPLAYABLE_SKIPS = 10
 
 private val SavedSongJson = Json { ignoreUnknownKeys = true }
 
