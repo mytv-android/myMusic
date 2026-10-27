@@ -22,6 +22,9 @@ val userKeystore = project.file(
 )
 val hasReleaseKeystore = userKeystore.exists() || localKeystore.exists()
 
+// 安装包命名：软件名+版本号（与 myDV 一致）
+val appVersionName = "1.0"
+
 android {
     namespace = "com.mytv.mymusic"
     compileSdk = libs.versions.compileSdk.get().toInt()
@@ -31,7 +34,7 @@ android {
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
-        versionName = "1.0"
+        versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         ndk.abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
@@ -77,6 +80,16 @@ android {
     }
     buildFeatures { compose = true }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+}
+
+// 安装包命名为 软件名-版本号.apk（与 myDV 一致）。
+// 应用内更新按 .apk 后缀取资源，改名不影响；下载落地文件名同样是 myMusic-<versionName>.apk
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("myMusic-$appVersionName.apk")
+        }
+    }
 }
 
 dependencies {
