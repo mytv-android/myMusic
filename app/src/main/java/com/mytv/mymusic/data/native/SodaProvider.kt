@@ -127,6 +127,17 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         )
     }
 
+    override suspend fun accountInfo(cookie: String): AccountInfo? {
+        if (cookie.isBlank()) return null
+        val me = runCatching { fetchPcMe(cookie) }.getOrNull() ?: return null
+        val nickname = firstNonEmpty(me.myInfo.nickname, me.myInfo.publicName)
+        if (nickname.isBlank()) return null
+        return AccountInfo(
+            nickname = nickname,
+            avatar = buildImageUrl(me.myInfo.avatar, ""),
+        )
+    }
+
     private fun findCachedFile(trackId: String, workDir: File): File? {
         val dir = File(workDir, SODA_CACHE_DIR)
         if (!dir.isDirectory) return null

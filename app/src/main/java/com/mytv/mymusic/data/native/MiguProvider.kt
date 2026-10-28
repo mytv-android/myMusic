@@ -8,6 +8,10 @@ import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.Locale
 
@@ -108,6 +112,64 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
             lastMessage = response.data.dialogInfo.text.ifBlank { response.info }.ifBlank { "empty download url" }
         }
         throw IllegalStateException(lastMessage.ifBlank { "migu returned no download quality" })
+    }
+
+    override suspend fun accountInfo(cookie: String): AccountInfo? {
+        if (cookie.isBlank()) return null
+        val jar = parseCookie(cookie)
+        var nickname = decodeCookieField(jar["migu_music_nickname"])
+        var avatar = normalizeMiguAvatar(jar["migu_music_avatar"])
+        if (nickname.isBlank()) {
+            val info = runCatching { fetchMiguUserInfo(cookie) }.getOrNull()
+            nickname = info?.first.orEmpty()
+            avatar = avatar.ifBlank { info?.second.orEmpty() }
+        }
+        if (nickname.isBlank()) return null
+        val platinum = jar["migu_music_platinum"].orEmpty() == "1"
+        return AccountInfo(
+            nickname = nickname,
+            avatar = avatar,
+            detail = if (platinum) "白金会员" else "",
+        )
+    }
+
+    private suspend fun fetchMiguUserInfo(cookie: String): Pair<String, String>? {
+        val body = miguGet(
+            "https://music.migu.cn/v3/api/user/getUserInfo",
+            mapOf("_" to System.currentTimeMillis().toString()),
+            cookie,
+            USER_AGENT,
+            "https://music.migu.cn/",
+        )
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        if (root["success"]?.jsonPrimitive?.content != "true") return null
+        val user = ((root["data"] as? JsonObject)?.get("user") as? JsonObject) ?: return null
+        val nickname = user["nickname"]?.jsonPrimitive?.content.orEmpty()
+        val avatar = (user["avatar"] as? JsonObject)?.get("midAvatar")?.jsonPrimitive?.content.orEmpty()
+        return nickname to normalizeMiguAvatar(avatar)
+    }
+
+    private fun parseCookie(cookie: String): Map<String, String> = buildMap {
+        for (part in cookie.split(';')) {
+            val trimmed = part.trim()
+            val index = trimmed.indexOf('=')
+            if (index <= 0) continue
+            put(trimmed.substring(0, index).trim(), trimmed.substring(index + 1).trim())
+        }
+    }
+
+    private fun decodeCookieField(value: String?): String {
+        var text = value.orEmpty().trim()
+        repeat(2) {
+            text = runCatching { URLDecoder.decode(text, "UTF-8") }.getOrDefault(text)
+        }
+        return text
+    }
+
+    private fun normalizeMiguAvatar(value: String?): String {
+        var url = decodeCookieField(value)
+        if (url.startsWith("//")) url = "https:$url"
+        return url
     }
 
     override suspend fun lyrics(cookie: String, song: Song): String {

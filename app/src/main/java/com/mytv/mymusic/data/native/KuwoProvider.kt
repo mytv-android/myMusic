@@ -114,6 +114,69 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         return fetchAudioUrl(cookie, rid)
     }
 
+    /**
+     * 酷我没有扫码登录，只能从粘贴的 App Cookie 里取 uid/token；
+     * 取不到就保持“已登录”，不影响换源。
+     */
+    override suspend fun accountInfo(cookie: String): AccountInfo? {
+        if (cookie.isBlank()) return null
+        val jar = parseCookie(cookie)
+        val uid = firstNonEmpty(jar["uid"].orEmpty(), jar["userid"].orEmpty(), jar["user_id"].orEmpty())
+            .takeIf { value -> value.isNotEmpty() && value.all { it.isDigit() } } ?: return null
+        val token = firstNonEmpty(jar["token"].orEmpty(), jar["usertoken"].orEmpty())
+        if (token.isEmpty()) return null
+        val url = "https://bd-api.kuwo.cn/api/ucenter/users/pub/$uid" +
+            "?fromUid=$uid&uid=$uid&token=${urlEncode(token)}"
+        val headers = mapOf(
+            "channel" to "appstore",
+            "plat" to "ip",
+            "net" to "wifi",
+            "brand" to "iPhone13,2",
+            "api-ver" to "application/json",
+            "svrver" to "11",
+            "ver" to "3.5.2",
+            "devid" to firstNonEmpty(jar["devid"].orEmpty(), randomHex(16)),
+            "qimei36" to firstNonEmpty(jar["qimei36"].orEmpty(), randomHex(36)),
+        )
+        val body = runCatching {
+            NativeHttp.get(
+                url,
+                headers = headers,
+                cookie = cookie,
+                randomIp = true,
+                userAgent = "Dart/2.19 (dart:io)",
+            )
+        }.getOrNull() ?: return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        if (root["code"].kuwoInt() != 200) return null
+        val data = root["data"] as? JsonObject ?: return null
+        val user = data["userInfo"] as? JsonObject ?: return null
+        val nickname = user["nickname"].kuwoString()
+        if (nickname.isBlank()) return null
+        val isVip = (data["payInfo"] as? JsonObject)?.get("isVip")?.kuwoInt() == 1
+        return AccountInfo(
+            nickname = nickname,
+            avatar = normalizeKuwoImageUrl(user["headImg"].kuwoString()),
+            detail = if (isVip) "VIP会员" else "",
+        )
+    }
+
+    private fun parseCookie(cookie: String): Map<String, String> = buildMap {
+        for (part in cookie.split(';')) {
+            val trimmed = part.trim()
+            val index = trimmed.indexOf('=')
+            if (index <= 0) continue
+            put(trimmed.substring(0, index).trim(), trimmed.substring(index + 1).trim())
+        }
+    }
+
+    private fun randomHex(length: Int): String {
+        val chars = "0123456789abcdef"
+        return buildString(length) {
+            repeat(length) { append(chars[Random.nextInt(chars.length)]) }
+        }
+    }
+
     override suspend fun lyrics(cookie: String, song: Song): String {
         if (song.source != "kuwo") throw IllegalArgumentException("source mismatch")
         val rid = song.extra["rid"]?.takeIf { it.isNotEmpty() } ?: song.id

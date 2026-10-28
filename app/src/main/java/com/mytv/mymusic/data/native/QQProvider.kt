@@ -17,6 +17,8 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -171,6 +173,80 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             }
         }
         throw IllegalStateException("no valid download url found or vip required")
+    }
+
+    override suspend fun accountInfo(cookie: String): AccountInfo? {
+        if (cookie.isBlank()) return null
+        val uin = normalizeQqUin(cookie)
+        if (uin.isBlank()) return null
+        val musicKey = firstNonEmpty(cookieValue(cookie, "qm_keyst"), cookieValue(cookie, "qqmusic_key"))
+        val loginType = firstNonEmpty(
+            cookieValue(cookie, "tmeLoginType"),
+            if (musicKey.startsWith("W_X")) "1" else "2",
+        ).toIntOrNull() ?: 2
+        val comm = buildJsonObject {
+            put("ct", 11)
+            put("cv", 14090008)
+            put("v", 14090008)
+            put("chid", "10003505")
+            put("os_ver", "15")
+            put("phonetype", "24122RKC7C")
+            put("tmeAppID", "qqmusic")
+            put("nettype", "NETWORK_WIFI")
+            put("udid", "0")
+            put("OpenUDID", "0")
+            put("QIMEI36", "0")
+            put("uin", uin)
+            put("qq", uin)
+            if (musicKey.isNotBlank()) put("authst", musicKey)
+            put("tmeLoginType", loginType)
+        }
+
+        suspend fun request(module: String, method: String): JsonObject? {
+            val body = buildJsonObject {
+                put("comm", comm)
+                putJsonObject("request") {
+                    put("module", module)
+                    put("method", method)
+                    putJsonObject("param") {}
+                }
+            }
+            val response = runCatching {
+                NativeHttp.postJson(
+                    QQ_MUSICU_API,
+                    body.toString(),
+                    headers = mapOf("Referer" to "https://y.qq.com"),
+                    cookie = cookie,
+                    randomIp = true,
+                    userAgent = "QQMusic 14090008(android 15)",
+                )
+            }.getOrNull() ?: return null
+            val root = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrNull() ?: return null
+            if (root.mapInt("code") != 0) return null
+            val request = root["request"] as? JsonObject ?: return null
+            if (request.mapInt("code") != 0) return null
+            return request["data"] as? JsonObject
+        }
+
+        val info = request("music.UserInfo.userInfoServer", "GetLoginUserInfo")
+            ?.let { (it["info"] as? JsonObject) ?: it } ?: return null
+        val nickname = firstNonEmpty(
+            info.mapString("nick"),
+            info.mapString("nickname"),
+            info.mapString("name"),
+        )
+        if (nickname.isBlank()) return null
+        val avatar = firstNonEmpty(
+            info.mapString("logo"),
+            info.mapString("headpic"),
+            info.mapString("avatarUrl"),
+        )
+        val vip = request("VipLogin.VipLoginInter", "vip_login_base")
+        return AccountInfo(
+            nickname = nickname,
+            avatar = normalizeCover(avatar),
+            detail = qqMembershipLabel(vip).orEmpty(),
+        )
     }
 
     override suspend fun lyrics(cookie: String, song: Song): String {
@@ -2151,6 +2227,36 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         )
         val HEX_UPPER = "0123456789ABCDEF".toCharArray()
     }
+}
+
+/**
+ * 会员产品与等级：svip/超级会员，vip/豪华绿钻；identity.level 或 userinfo.music_level 是会员等级。
+ */
+internal fun qqMembershipLabel(data: JsonObject?): String? {
+    data ?: return null
+    val identity = data["identity"] as? JsonObject
+    fun number(source: JsonObject?, key: String): Int =
+        source?.get(key)?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+    val svip = listOf(
+        number(data, "svip"),
+        number(identity, "svip"),
+        number(identity, "HugeVip"),
+        number(identity, "huge_vip"),
+    ).any { it > 0 }
+    val vip = listOf(
+        number(identity, "vip"),
+        number(identity, "ExpVip"),
+        number(identity, "exp_vip"),
+        number(identity, "GroupVipFlag"),
+        number(identity, "CPLoverFlag"),
+        number(identity, "ChildVip"),
+    ).any { it > 0 }
+    if (!svip && !vip) return null
+    val level = number(identity, "level").takeIf { it > 0 }
+        ?: number(data["userinfo"] as? JsonObject, "music_level").takeIf { it > 0 }
+        ?: 0
+    val name = if (svip) "超级会员" else "豪华绿钻"
+    return if (level > 0) "$name V$level" else name
 }
 
 @Serializable

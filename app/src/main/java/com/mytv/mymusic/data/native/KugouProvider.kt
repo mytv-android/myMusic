@@ -26,6 +26,7 @@ import java.net.URI
 import java.net.URLEncoder
 import java.security.KeyFactory
 import java.security.SecureRandom
+import java.security.interfaces.RSAPublicKey
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 import java.util.Locale
@@ -622,6 +623,121 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         cookies["userid"] = userID
         runCatching { registerLoginDevice(cookies) }
         return QRCheckResult(status = "success", message = message, cookie = joinCookies(cookies))
+    }
+
+    override suspend fun accountInfo(cookie: String): AccountInfo? {
+        if (cookie.isBlank()) return null
+        val cookieMap = parseKugouCookie(cookie)
+        val token = cookieMap["token"].orEmpty().trim()
+        val userid = cookieMap["userid"].orEmpty().trim()
+        val mid = firstNonEmpty(
+            cookieMap["KUGOU_API_MID"].orEmpty(),
+            cookieMap["kg_mid"].orEmpty(),
+            cookieMap["mid"].orEmpty(),
+        )
+        if (token.isEmpty() || userid.isEmpty() || userid == "0" || mid.isEmpty()) return null
+        val dfid = firstNonEmpty(
+            cookieMap["dfid"].orEmpty(),
+            cookieMap["KUGOU_API_DFID"].orEmpty(),
+            cookieMap["kg_dfid"].orEmpty(),
+            "-",
+        )
+
+        val clienttimeSeconds = System.currentTimeMillis() / 1000
+        val p = rsaRawHex(
+            buildJsonObject {
+                put("token", token)
+                put("clienttime", clienttimeSeconds)
+            }.toString(),
+        )
+        val bodyData = buildJsonObject {
+            put("visit_time", clienttimeSeconds)
+            put("usertype", 1)
+            put("p", p)
+            put("userid", userid.toLongOrNull() ?: 0L)
+        }.toString()
+        val params = mutableMapOf(
+            "dfid" to dfid,
+            "mid" to mid,
+            "uuid" to "-",
+            "appid" to KUGOU_LITE_APP_ID,
+            "clientver" to KUGOU_LITE_VER,
+            "clienttime" to clienttimeSeconds.toString(),
+            "token" to token,
+            "userid" to userid,
+            "plat" to "1",
+        )
+        val body = runCatching {
+            NativeHttp.postJson(
+                buildAndroidUrl("https://gateway.kugou.com/v3/get_my_info", params, bodyData),
+                bodyData,
+                headers = androidHeaders(dfid, mid, clienttimeSeconds.toString(), "usercenter.kugou.com"),
+                cookie = cookie,
+                randomIp = true,
+                userAgent = KUGOU_ANDROID_UA,
+            ).body
+        }.getOrNull() ?: return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        val data = root["data"] as? JsonObject ?: root
+        val nickname = firstNonEmpty(
+            data.findString("nickname", "username", "user_name", "nick_name"),
+            root.findString("nickname", "username", "user_name", "nick_name"),
+        )
+        if (nickname.isBlank()) return null
+        val avatar = firstNonEmpty(
+            data.findString("pic", "user_pic", "userpic", "avatar"),
+            root.findString("pic", "user_pic", "userpic", "avatar"),
+        ).replaceFirst("http://", "https://")
+
+        val vipData = runCatching { fetchUnionVip(cookie, token, userid, mid, dfid) }.getOrNull()
+        val vipType = maxOf(
+            data.findInt("vip_type", "vipType", "is_vip"),
+            vipData?.findInt("vip_type", "vipType", "is_vip") ?: 0,
+        )
+        val userType = maxOf(
+            data.findInt("user_type", "userType"),
+            vipData?.findInt("user_type", "userType") ?: 0,
+        )
+        val products = (vipData?.get("busi_vip") as? JsonArray).orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .associate { product ->
+                product.findString("product_type") to product.findInt("is_vip", "vip_type")
+            }
+        return AccountInfo(
+            nickname = nickname,
+            avatar = avatar,
+            detail = kugouMembershipLabel(vipType, userType, products).orEmpty(),
+        )
+    }
+
+    private suspend fun fetchUnionVip(
+        cookie: String,
+        token: String,
+        userid: String,
+        mid: String,
+        dfid: String,
+    ): JsonObject? {
+        val clienttime = nowSeconds()
+        val params = mutableMapOf(
+            "dfid" to dfid,
+            "mid" to mid,
+            "uuid" to "-",
+            "appid" to KUGOU_LITE_APP_ID,
+            "clientver" to KUGOU_LITE_VER,
+            "clienttime" to clienttime,
+            "token" to token,
+            "userid" to userid,
+            "busi_type" to "concept",
+        )
+        val body = NativeHttp.get(
+            buildAndroidUrl("https://kugouvip.kugou.com/v1/get_union_vip", params, ""),
+            headers = androidHeaders(dfid, mid, clienttime),
+            cookie = cookie,
+            randomIp = true,
+            userAgent = KUGOU_ANDROID_UA,
+        )
+        val root = json.parseToJsonElement(body).jsonObject
+        return root["data"] as? JsonObject
     }
 
     // ---- song info / download ----
@@ -1918,6 +2034,14 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         return NativeCrypto.bytesToHex(cipher.doFinal(payload.toByteArray(Charsets.UTF_8)), upper = true)
     }
 
+    /** 酷狗用户信息接口的 p 参数：零填充后直接做 RSA 幂运算（不是 PKCS#1 填充）。 */
+    private fun rsaRawHex(payload: String): String {
+        val der = Base64.getDecoder().decode(KUGOU_LITE_PUBLIC_KEY)
+        val key = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(der)) as RSAPublicKey
+        val value = BigInteger(1, payload.toByteArray(Charsets.UTF_8))
+        return value.modPow(key.publicExponent, key.modulus).toString(16).padStart(256, '0').uppercase(Locale.ROOT)
+    }
+
     private fun decodeKrc(content: String): String {
         val decoded = Base64.getDecoder().decode(content)
         if (decoded.size < 4) throw IllegalStateException("krc content too short")
@@ -2499,6 +2623,19 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         val KUGOU_HTML_ENTITY_REGEX = Regex("""&(#x?[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);""")
         val WHITESPACE_REGEX = Regex("""\s+""")
     }
+}
+
+/**
+ * 酷狗会员产品：user_type 的 16 位是超级VIP，vip_type=6 是豪华VIP，
+ * busi_vip 里的 svip/tvip 分别是概念VIP/畅听VIP（签到等活动发的会员）。
+ */
+internal fun kugouMembershipLabel(vipType: Int, userType: Int, products: Map<String, Int>): String? {
+    if (userType and 16 != 0) return "超级VIP"
+    if (vipType == 6) return "豪华VIP"
+    if ((products["svip"] ?: 0) > 0) return "概念VIP"
+    if ((products["tvip"] ?: 0) > 0) return "畅听VIP"
+    if (vipType > 0 || products.values.any { it > 0 }) return "VIP"
+    return null
 }
 
 // ---- response DTOs ----
