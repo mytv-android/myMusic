@@ -192,6 +192,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun setBrowseStyle(value: com.mytv.mymusic.ui.theme.SchemeStyle) = model.setBrowseStyle(value)
     fun setPlayerStyle(value: com.mytv.mymusic.ui.theme.SchemeStyle) = model.setPlayerStyle(value)
     fun setContrast(value: Float) = model.setContrast(value)
+    fun setFontScale(value: com.mytv.mymusic.ui.theme.FontScale) = model.setFontScale(value)
     fun setAmoled(value: Boolean) = model.setAmoled(value)
     fun setBlurMode(value: com.mytv.mymusic.ui.theme.BlurMode) = model.setBlurMode(value)
     fun setLyricsBackground(value: com.mytv.mymusic.data.LyricsBackgroundMode) = model.setLyricsBackground(value)

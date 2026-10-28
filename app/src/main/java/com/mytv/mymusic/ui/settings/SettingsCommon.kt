@@ -63,7 +63,7 @@ internal enum class SettingsSection(
     val icon: ImageVector,
     val tone: IconTone,
 ) {
-    Appearance("settings/appearance", "外观", "布局、主题、配色来源、风格与对比度", Icons.Filled.Palette, IconTone.Primary),
+    Appearance("settings/appearance", "外观", "布局、文字大小、主题、配色与对比度", Icons.Filled.Palette, IconTone.Primary),
     // 原来叫“歌词”；枚举名和路由保持不变，旧的深链接和保存的选中项继续有效
     Lyrics("settings/lyrics", "播放页", "封面形状、歌词背景、律动强度", Icons.Filled.PlayCircle, IconTone.Primary),
     Playback("settings/playback", "播放与换源", "换源模式、平台优先级与匹配", Icons.Filled.SwapHoriz, IconTone.Primary),

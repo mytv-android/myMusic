@@ -73,6 +73,7 @@ import com.mytv.mymusic.ui.theme.Appearance
 import com.mytv.mymusic.ui.theme.BlurMode
 import com.mytv.mymusic.ui.theme.ColorSource
 import com.mytv.mymusic.ui.theme.CoverSeedRepository
+import com.mytv.mymusic.ui.theme.FontScale
 import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.SchemeStyle
 import com.mytv.mymusic.ui.theme.isTelevision
@@ -2477,6 +2478,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setBrowseStyle(value: SchemeStyle) = viewModelScope.launch { app.settings.browseStyle(value.name) }
     fun setPlayerStyle(value: SchemeStyle) = viewModelScope.launch { app.settings.playerStyle(value.name) }
     fun setContrast(value: Float) = viewModelScope.launch { app.settings.contrast(value) }
+    fun setFontScale(value: FontScale) = viewModelScope.launch { app.settings.fontScale(value.scale) }
     fun setAmoled(value: Boolean) = viewModelScope.launch { app.settings.amoled(value) }
     fun setBlurMode(value: BlurMode) = viewModelScope.launch { app.settings.blurMode(value.name) }
 
@@ -2864,6 +2866,7 @@ private fun AppSettings.toAppearance() = Appearance(
     browseStyle = SchemeStyle.entries.find { it.name == browseStyle } ?: SchemeStyle.TonalSpot,
     playerStyle = SchemeStyle.entries.find { it.name == playerStyle } ?: SchemeStyle.Vibrant,
     contrast = contrast,
+    fontScale = FontScale.of(fontScale),
     amoled = amoled,
     blur = BlurMode.entries.find { it.name == blurMode } ?: BlurMode.Auto,
     reduceMotion = reduceMotion,

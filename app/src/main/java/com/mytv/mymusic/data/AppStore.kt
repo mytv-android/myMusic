@@ -86,6 +86,7 @@ class SettingsStore(private val context: Context) {
     private val browseStyleKey = stringPreferencesKey("browse_style")
     private val playerStyleKey = stringPreferencesKey("player_style")
     private val contrastKey = floatPreferencesKey("contrast")
+    private val fontScaleKey = floatPreferencesKey("font_scale")
     private val amoledKey = booleanPreferencesKey("amoled")
     private val blurModeKey = stringPreferencesKey("blur_mode")
     private val lastSeedKey = intPreferencesKey("last_seed")
@@ -138,6 +139,7 @@ class SettingsStore(private val context: Context) {
             browseStyle = values[browseStyleKey] ?: "TonalSpot",
             playerStyle = values[playerStyleKey] ?: "Vibrant",
             contrast = values[contrastKey] ?: 0f,
+            fontScale = values[fontScaleKey] ?: 1f,
             amoled = values[amoledKey] ?: false,
             blurMode = values[blurModeKey] ?: "Auto",
             lastSeed = values[lastSeedKey] ?: 0,
@@ -159,6 +161,7 @@ class SettingsStore(private val context: Context) {
     suspend fun browseStyle(value: String) = context.dataStore.edit { it[browseStyleKey] = value }
     suspend fun playerStyle(value: String) = context.dataStore.edit { it[playerStyleKey] = value }
     suspend fun contrast(value: Float) = context.dataStore.edit { it[contrastKey] = value }
+    suspend fun fontScale(value: Float) = context.dataStore.edit { it[fontScaleKey] = value }
     suspend fun amoled(value: Boolean) = context.dataStore.edit { it[amoledKey] = value }
     suspend fun blurMode(value: String) = context.dataStore.edit { it[blurModeKey] = value }
     suspend fun lyricsBackground(value: LyricsBackgroundMode) = context.dataStore.edit { it[lyricsBackgroundKey] = value.name }
@@ -299,6 +302,8 @@ data class AppSettings(
     val browseStyle: String = "TonalSpot",
     val playerStyle: String = "Vibrant",
     val contrast: Float = 0f,
+    /** 界面文字缩放倍数（1 为标准），见 Appearance.fontScale。 */
+    val fontScale: Float = 1f,
     val amoled: Boolean = false,
     val blurMode: String = "Auto",
     val lastSeed: Int = 0,

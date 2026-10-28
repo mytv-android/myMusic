@@ -63,6 +63,7 @@ import com.mytv.mymusic.ui.formatBytes
 import com.mytv.mymusic.ui.player.label
 import com.mytv.mymusic.ui.providerName
 import com.mytv.mymusic.ui.relativeTime
+import com.mytv.mymusic.ui.theme.FontScale
 import com.mytv.mymusic.ui.theme.LayoutMode
 
 /** 设置列表每项下方显示的当前值，以及“关于”上的新版本标记。 */
@@ -91,8 +92,11 @@ internal fun settingsOverview(
     val version = "版本 ${update.currentVersionName.ifBlank { "1.0" }}（构建 ${update.currentVersionCode}）"
     return SettingsOverview(
         values = mapOf(
-            SettingsSection.Appearance to "${appearance.colorSource.label} · ${appearance.browseStyle.label} · ${themeLabel(appearance.theme)}" +
-                if (appearance.layout != LayoutMode.Auto) " · ${appearance.layout.label}" else "",
+            SettingsSection.Appearance to buildString {
+                append("${appearance.colorSource.label} · ${appearance.browseStyle.label} · ${themeLabel(appearance.theme)}")
+                if (appearance.layout != LayoutMode.Auto) append(" · ${appearance.layout.label}")
+                if (appearance.fontScale != FontScale.Standard) append(" · ${appearance.fontScale.label}字号")
+            },
             SettingsSection.Lyrics to "封面${state.coverShape.label} · 背景${state.lyricsBackground.label}",
             SettingsSection.Playback to playbackModeSummary(state.aggregation.playbackMode) +
                 if (state.aggregation.matchStrictness == MatchStrictness.Strict) " · 严格匹配" else "",

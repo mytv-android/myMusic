@@ -139,6 +139,7 @@ import com.mytv.mymusic.ui.theme.BlurMode
 import com.mytv.mymusic.ui.theme.BrandSeed
 import com.mytv.mymusic.ui.theme.ColorSource
 import com.mytv.mymusic.ui.theme.CustomSeedSwatches
+import com.mytv.mymusic.ui.theme.FontScale
 import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import com.mytv.mymusic.ui.theme.SchemeStyle
@@ -173,6 +174,22 @@ fun AppearanceSettingsScreen(state: MusicUiState, actions: MusicActions, onBack:
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 LayoutModeChips(appearance.layout) { actions.setLayoutMode(it) }
                 SettingsNote(layoutModeHint(appearance.layout))
+            }
+        }
+        item(key = "fontHead", contentType = "sectionHeader") { SectionLabel("文字大小") }
+        item(key = "fontScale", contentType = "fontScaleOptions") {
+            Column {
+                ConnectedToggleGroup(
+                    options = FontScale.entries,
+                    selected = appearance.fontScale,
+                    onSelect = { actions.setFontScale(it) },
+                    label = { it.label },
+                    modifier = groupWidth,
+                )
+                SettingsNote(
+                    if (tv) "电视三米开外看着调，调到看得清为止。只放大文字，卡片和列表会跟着长高。"
+                    else "只放大界面文字和歌词，间距、图标尺寸不变。",
+                )
             }
         }
         // 电视固定深色，不提供浅色主题

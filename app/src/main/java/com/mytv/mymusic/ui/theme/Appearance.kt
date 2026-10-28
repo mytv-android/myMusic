@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import com.materialkolor.PaletteStyle
+import kotlin.math.abs
 
 /** 品牌松绿，封面取色失败、没有壁纸取色时的兜底种子色。 */
 val BrandSeed = Color(0xFF006B5F)
@@ -36,6 +37,22 @@ enum class LayoutMode(val label: String) {
     Tv("电视横屏"),
 }
 
+/**
+ * 界面文字大小：把 [scale] 乘到系统字号上，只放大文字，dp 尺寸不变。
+ * 电视三米开外看不清小字时往上调；列表和卡片会随着文字变高。
+ */
+enum class FontScale(val label: String, val scale: Float) {
+    Standard("标准", 1f),
+    Large("大", 1.15f),
+    Larger("更大", 1.3f),
+    Largest("特大", 1.5f),
+    ;
+
+    companion object {
+        fun of(scale: Float): FontScale = entries.minByOrNull { abs(it.scale - scale) } ?: Standard
+    }
+}
+
 /** 外观设置的完整快照，主题层只读这一个对象。 */
 @Immutable
 data class Appearance(
@@ -46,6 +63,7 @@ data class Appearance(
     val browseStyle: SchemeStyle = SchemeStyle.TonalSpot,
     val playerStyle: SchemeStyle = SchemeStyle.Vibrant,
     val contrast: Float = 0f,
+    val fontScale: FontScale = FontScale.Standard,
     val amoled: Boolean = false,
     val blur: BlurMode = BlurMode.Auto,
     val reduceMotion: Boolean = false,

@@ -17,6 +17,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
@@ -93,6 +95,15 @@ private const val COLOR_TRANSITION_MS = 450
 @Composable
 fun MyMusicTheme(appearance: Appearance, coverSeed: Color?, content: @Composable () -> Unit) {
     val context = LocalContext.current
+    val density = LocalDensity.current
+    // 文字大小：只放大 sp（字号、行高），dp 尺寸不变，效果和系统字号一致
+    val scaledDensity = remember(density, appearance.fontScale) {
+        if (appearance.fontScale == FontScale.Standard) {
+            density
+        } else {
+            Density(density.density, density.fontScale * appearance.fontScale.scale)
+        }
+    }
     // 电视固定深色：客厅环境暗，浅色界面刺眼
     val physicalTv = remember(context) { context.isTelevision() }
     val tv = physicalTv || appearance.layout == LayoutMode.Tv
@@ -113,6 +124,7 @@ fun MyMusicTheme(appearance: Appearance, coverSeed: Color?, content: @Composable
     )
     CompositionLocalProvider(
         LocalAppearance provides appearance,
+        LocalDensity provides scaledDensity,
         LocalSeedColor provides seed,
         LocalBlurPolicy provides rememberBlurPolicy(appearance.blur, tv),
     ) {
