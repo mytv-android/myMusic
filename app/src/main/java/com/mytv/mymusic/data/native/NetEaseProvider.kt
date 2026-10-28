@@ -49,6 +49,12 @@ private val NETEASE_INFO = ProviderInfo(
     hotSongs = true,
 )
 
+/** 分享文本里的链接；取到后去掉紧跟在链接后的中文/英文标点。 */
+private val NETEASE_URL_PATTERN = Regex("""https?://\S+""", RegexOption.IGNORE_CASE)
+private val NETEASE_URL_TRAILING = charArrayOf(
+    ')', '）', ']', '】', '》', '」', '』', '"', '\'', ',', '，', '。', '、', ';', '；', '!', '！', '?', '？',
+)
+
 class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     private val json = NativeHttp.json
     private val urlCache = ConcurrentHashMap<String, CachedUrl>()
@@ -665,8 +671,14 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     private fun preferredLevels(song: Song): List<String> =
         neteaseLevelCandidates(song.extra["netease_level"] ?: song.extra["level"] ?: "")
 
-    private fun parseNeteaseLink(link: String): Pair<NeteaseLinkKind, String>? {
-        val candidates = mutableListOf(link)
+    internal fun parseNeteaseLink(link: String): Pair<NeteaseLinkKind, String>? {
+        val candidates = mutableListOf<String>()
+        // 分享文本（“分享单曲《…》: https://… （来自网易云音乐）”）里先取出其中的链接
+        NETEASE_URL_PATTERN.find(link)?.value
+            ?.trimEnd(*NETEASE_URL_TRAILING)
+            ?.takeIf { it.isNotBlank() && it != link }
+            ?.let(candidates::add)
+        candidates += link
         runCatching {
             val uri = URI(link)
             val path = uri.path
@@ -693,16 +705,19 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             else -> null
         }
         var id = queryParam(uri, "id")
-        if (kind == null && segments.size >= 2) {
+        // 路径形式 /song/186016、/album/123、/playlist/456：末段就是 id，
+        // 与 kind 是否已由路径关键字命中无关
+        if (id.isBlank() && segments.size >= 2) {
             val last = segments.last()
-            if (last.all { it.isDigit() }) {
-                kind = when (segments[segments.size - 2]) {
-                    "song" -> NeteaseLinkKind.Song
-                    "album" -> NeteaseLinkKind.Album
-                    "playlist" -> NeteaseLinkKind.Playlist
-                    else -> null
-                }
-                if (kind != null) id = last
+            val byPath = when (segments[segments.size - 2]) {
+                "song" -> NeteaseLinkKind.Song
+                "album" -> NeteaseLinkKind.Album
+                "playlist" -> NeteaseLinkKind.Playlist
+                else -> null
+            }
+            if (byPath != null && last.all { it.isDigit() }) {
+                kind = byPath
+                id = last
             }
         }
         if (kind == null || id.isBlank() || !id.all { it.isDigit() }) return null
@@ -734,7 +749,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
 
     private data class CachedUrl(val url: String, val expiresAt: Long)
 
-    private enum class NeteaseLinkKind { Song, Album, Playlist }
+    internal enum class NeteaseLinkKind { Song, Album, Playlist }
 
     private companion object {
         const val REFERER = "http://music.163.com/"
