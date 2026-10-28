@@ -58,6 +58,7 @@ private val NETEASE_URL_TRAILING = charArrayOf(
 class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     private val json = NativeHttp.json
     private val urlCache = ConcurrentHashMap<String, CachedUrl>()
+    private val shortLinkCache = ConcurrentHashMap<String, String>()
 
     override val supportsSearchPagination: Boolean = true
 
@@ -77,7 +78,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     }
 
     override suspend fun parseSong(cookie: String, link: String): Song {
-        val parsed = parseNeteaseLink(link) ?: throw IllegalArgumentException("invalid netease link")
+        val parsed = parseNeteaseLink(resolveNeteaseLink(link)) ?: throw IllegalArgumentException("invalid netease link")
         if (parsed.first != NeteaseLinkKind.Song) throw IllegalArgumentException("invalid netease song link")
         val songs = fetchSongsBatch(cookie, listOf(parsed.second))
         val song = songs.firstOrNull() ?: throw IllegalStateException("netease song not found")
@@ -169,7 +170,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         fetchPlaylistDetailLimited(cookie, id, 0).second
 
     override suspend fun parsePlaylist(cookie: String, link: String): CollectionResult {
-        val parsed = parseNeteaseLink(link) ?: throw IllegalArgumentException("invalid netease link")
+        val parsed = parseNeteaseLink(resolveNeteaseLink(link)) ?: throw IllegalArgumentException("invalid netease link")
         if (parsed.first != NeteaseLinkKind.Playlist) throw IllegalArgumentException("invalid netease playlist link")
         val (playlist, songs) = fetchPlaylistDetailLimited(cookie, parsed.second, 0)
         return CollectionResult(playlist, songs)
@@ -227,7 +228,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         fetchAlbumDetail(cookie, id).second
 
     override suspend fun parseAlbum(cookie: String, link: String): CollectionResult {
-        val parsed = parseNeteaseLink(link) ?: throw IllegalArgumentException("invalid netease link")
+        val parsed = parseNeteaseLink(resolveNeteaseLink(link)) ?: throw IllegalArgumentException("invalid netease link")
         if (parsed.first != NeteaseLinkKind.Album) throw IllegalArgumentException("invalid netease album link")
         val (playlist, songs) = fetchAlbumDetail(cookie, parsed.second)
         return CollectionResult(playlist, songs)
@@ -671,6 +672,33 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     private fun preferredLevels(song: Song): List<String> =
         neteaseLevelCandidates(song.extra["netease_level"] ?: song.extra["level"] ?: "")
 
+    /** 分享文本里夹带链接时，取其中第一个链接；否则返回原链接。 */
+    private fun linkUrl(link: String): String =
+        NETEASE_URL_PATTERN.find(link)?.value?.trimEnd(*NETEASE_URL_TRAILING)?.takeIf { it.isNotBlank() }
+            ?: link.trim()
+
+    internal fun isNeteaseShortLink(link: String): Boolean {
+        val host = runCatching { URI(linkUrl(link)).host }.getOrNull()?.lowercase(Locale.ROOT).orEmpty()
+        return host == SHORT_LINK_HOST || host.endsWith(".$SHORT_LINK_HOST")
+    }
+
+    /**
+     * 163cn.tv 分享短链要先跟随一次跳转才能拿到真实地址；结果缓存，一次打开链接只请求一次。
+     * [fetchFinalUrl] 默认走网络，测试时注入假实现即可覆盖解析逻辑。
+     */
+    internal suspend fun resolveNeteaseLink(
+        link: String,
+        fetchFinalUrl: suspend (String) -> String = { NativeHttp.getResponse(it).finalUrl },
+    ): String {
+        val url = linkUrl(link)
+        if (!isNeteaseShortLink(url)) return link
+        shortLinkCache[url]?.let { return it }
+        val finalUrl = runCatching { fetchFinalUrl(url) }.getOrNull().orEmpty()
+        if (finalUrl.isBlank() || finalUrl == url) return link
+        shortLinkCache[url] = finalUrl
+        return finalUrl
+    }
+
     internal fun parseNeteaseLink(link: String): Pair<NeteaseLinkKind, String>? {
         val candidates = mutableListOf<String>()
         // 分享文本（“分享单曲《…》: https://… （来自网易云音乐）”）里先取出其中的链接
@@ -752,6 +780,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     internal enum class NeteaseLinkKind { Song, Album, Playlist }
 
     private companion object {
+        const val SHORT_LINK_HOST = "163cn.tv"
         const val REFERER = "http://music.163.com/"
         const val SEARCH_API = "http://music.163.com/api/linux/forward"
         const val DOWNLOAD_API = "http://music.163.com/weapi/song/enhance/player/url"

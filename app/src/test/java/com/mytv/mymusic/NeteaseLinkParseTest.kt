@@ -2,8 +2,11 @@ package com.mytv.mymusic
 
 import com.mytv.mymusic.data.native.NetEaseProvider
 import com.mytv.mymusic.data.native.NetEaseProvider.NeteaseLinkKind
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** 网易分享链接的各路形式：查询参数、#/ 路由、路径 id、移动端域名和分享文本。 */
@@ -50,5 +53,54 @@ class NeteaseLinkParseTest {
     fun rejectsUnrelatedText() {
         assertNull(provider.parseNeteaseLink("随便一段文字，没有链接"))
         assertNull(provider.parseNeteaseLink("https://music.163.com/"))
+    }
+
+    @Test
+    fun resolvesShortLinkAndCaches() = runBlocking {
+        var calls = 0
+        val fake: suspend (String) -> String = {
+            calls++
+            "https://music.163.com/song?id=186016"
+        }
+        val first = provider.resolveNeteaseLink("https://163cn.tv/xyz", fake)
+        val second = provider.resolveNeteaseLink("https://163cn.tv/xyz", fake)
+        assertEquals("https://music.163.com/song?id=186016", first)
+        assertEquals(first, second)
+        assertEquals(1, calls)
+        assertEquals(NeteaseLinkKind.Song to "186016", provider.parseNeteaseLink(first))
+    }
+
+    @Test
+    fun resolvesShortLinkInsideShareText() = runBlocking {
+        val link = provider.resolveNeteaseLink("分享单曲: https://163cn.tv/xyz (来自网易云音乐)") {
+            "https://music.163.com/song?id=186016"
+        }
+        assertEquals("https://music.163.com/song?id=186016", link)
+    }
+
+    @Test
+    fun nonShortLinkDoesNotTouchNetwork() = runBlocking {
+        var calls = 0
+        val link = provider.resolveNeteaseLink("https://music.163.com/song?id=186016") {
+            calls++
+            ""
+        }
+        assertEquals("https://music.163.com/song?id=186016", link)
+        assertEquals(0, calls)
+    }
+
+    @Test
+    fun failedResolutionKeepsOriginalLink() = runBlocking {
+        val link = provider.resolveNeteaseLink("https://163cn.tv/xyz") { "" }
+        assertEquals("https://163cn.tv/xyz", link)
+    }
+
+    @Test
+    fun detectsShortLinks() {
+        assertTrue(provider.isNeteaseShortLink("https://163cn.tv/abc123"))
+        assertTrue(provider.isNeteaseShortLink("https://www.163cn.tv/abc123"))
+        assertTrue(provider.isNeteaseShortLink("分享单曲: https://163cn.tv/abc123 (来自网易云音乐)"))
+        assertFalse(provider.isNeteaseShortLink("https://music.163.com/song?id=186016"))
+        assertFalse(provider.isNeteaseShortLink("随便一段文字"))
     }
 }

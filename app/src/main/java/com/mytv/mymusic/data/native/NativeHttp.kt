@@ -21,6 +21,8 @@ data class NativeResponse(
     val code: Int,
     /** 只有 binary 请求才填，例如登录二维码图片。 */
     val bytes: ByteArray = ByteArray(0),
+    /** 跟随跳转后的最终地址，用于短链还原；没有发生跳转时与请求地址相同。 */
+    val finalUrl: String = "",
 )
 
 object NativeHttp {
@@ -154,7 +156,9 @@ object NativeHttp {
                             }
                         }
                         if (continuation.isActive) {
-                            continuation.resume(NativeResponse(body, cookies, it.code, bytes))
+                            continuation.resume(
+                                NativeResponse(body, cookies, it.code, bytes, it.request.url.toString())
+                            )
                         }
                     }
                 }
