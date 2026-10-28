@@ -107,17 +107,24 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
      * 播放地址。加密流（带 play_auth）没法直接交给 ExoPlayer，先下载并按 CENC
      * 解密到缓存文件，返回本地 URI；明文流仍返回原始地址。
      */
-    override suspend fun playableUrl(cookie: String, song: Song, workDir: File): String {
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
         if (song.source.isNotEmpty() && song.source != SODA_SOURCE) {
             throw IllegalArgumentException("source mismatch")
         }
         val trackId = songTrackId(song)
         if (trackId.isEmpty()) throw IllegalStateException("track id is empty")
-        findCachedFile(trackId, workDir)?.let { return Uri.fromFile(it).toString() }
+        findCachedFile(trackId, workDir)?.let {
+            return PlayableStream(Uri.fromFile(it).toString(), ext = it.extension.lowercase(), bitrate = song.bitrate)
+        }
         val info = resolveDownloadInfo(cookie, trackId, null)
         if (info.url.trim().isEmpty()) throw IllegalStateException("player info url not found")
-        if (info.playAuth.trim().isEmpty()) return downloadInfoUrl(info)
-        return decryptToCache(trackId, info, workDir)
+        val url = if (info.playAuth.trim().isEmpty()) downloadInfoUrl(info) else decryptToCache(trackId, info, workDir)
+        return PlayableStream(
+            url = url,
+            ext = info.format.ifBlank { extensionFromUrl(url) }.ifBlank { song.ext },
+            bitrate = info.bitrate.takeIf { it > 0 } ?: song.bitrate,
+            level = info.quality,
+        )
     }
 
     private fun findCachedFile(trackId: String, workDir: File): File? {

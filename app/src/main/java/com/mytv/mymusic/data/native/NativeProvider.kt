@@ -9,11 +9,21 @@ import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 import java.io.File
+import java.net.URI
+import java.util.Locale
 
 data class SongSearchPage(
     val songs: List<Song>,
     val page: Int,
     val hasMore: Boolean,
+)
+
+/** 解析出的播放流：地址之外带回真实音质，界面上的音质标签用它而不是搜索结果的估算值。 */
+data class PlayableStream(
+    val url: String,
+    val ext: String = "",
+    val bitrate: Int = 0,
+    val level: String = "",
 )
 
 /** 已登录账号的资料，用于账号卡片；拿不到就只显示“已登录”。 */
@@ -39,8 +49,10 @@ interface NativeProvider {
      * 交给播放器的地址。默认沿用 downloadUrl；需要下载后解密的平台（汽水加密流）
      * 会先把明文写到 [workDir] 并返回本地文件 URI。
      */
-    suspend fun playableUrl(cookie: String, song: Song, workDir: File): String =
-        song.url.ifBlank { downloadUrl(cookie, song) }
+    suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+        val url = song.url.ifBlank { downloadUrl(cookie, song) }
+        return PlayableStream(url = url, ext = song.ext.ifBlank { extensionFromUrl(url) }, bitrate = song.bitrate)
+    }
 
     suspend fun lyrics(cookie: String, song: Song): String =
         throw UnsupportedOperationException("${info.name} 暂不支持歌词")
@@ -95,3 +107,17 @@ interface NativeProvider {
 }
 
 abstract class BaseNativeProvider(override val info: ProviderInfo) : NativeProvider
+
+private val AUDIO_EXTENSIONS = setOf("mp3", "flac", "m4a", "aac", "ogg", "opus", "wav")
+
+/** 从播放地址路径里取音频扩展名；取不到或不是已知格式就返回空串。 */
+internal fun extensionFromUrl(url: String): String {
+    if (url.startsWith("file:")) {
+        val name = runCatching { URI(url).path }.getOrNull().orEmpty().substringAfterLast('/')
+        return name.substringAfterLast('.', "").lowercase(Locale.ROOT).takeIf { it in AUDIO_EXTENSIONS }.orEmpty()
+    }
+    val path = runCatching { URI(url).path }.getOrNull().orEmpty()
+    return path.substringAfterLast('/').substringAfterLast('.', "").lowercase(Locale.ROOT)
+        .takeIf { it in AUDIO_EXTENSIONS }
+        .orEmpty()
+}

@@ -21,6 +21,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import java.io.File
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -86,25 +87,31 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         return if (url.isNotBlank()) song.copy(url = url) else song
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song): String = resolveStream(cookie, song).url
+
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+        val stream = resolveStream(cookie, song)
+        return PlayableStream(stream.url, stream.ext, stream.bitrate, stream.level)
+    }
+
+    private suspend fun resolveStream(cookie: String, song: Song): NeteaseStream {
         if (song.source != "netease") throw IllegalArgumentException("source mismatch")
         val songId = song.extra["song_id"]?.takeIf { it.isNotBlank() } ?: song.id
         val levels = preferredLevels(song)
         val cacheKey = "$songId:${levels.joinToString(",")}:${NativeCrypto.md5Hex(cookie)}"
         urlCache[cacheKey]?.let { cached ->
-            if (cached.expiresAt > System.currentTimeMillis()) return cached.url
+            if (cached.expiresAt > System.currentTimeMillis()) return cached.stream
             urlCache.remove(cacheKey)
         }
 
-        // eapi v1 对账号没有权限的档位会自动回退到可用档：登录的免费歌能拿到 hires，VIP 直接到母带。
+        // 从歌曲支持的最高档逐级下探：eapi v1 对无权限档位可能直接返回空地址，
+        // 只试两三档会从母带一路掉到 320k，把 VIP 的无损/Hi-Res 全跳过去。
         // 未登录不试 eapi——匿名请求只会回落到 128k，比 weapi 的 320k 差。
         if (cookie.isNotBlank()) {
             for (level in levels) {
-                val eapi = runCatching { getEapiDownloadUrl(cookie, songId, level) }.getOrNull()
-                if (!eapi.isNullOrBlank()) {
-                    urlCache[cacheKey] = CachedUrl(eapi, System.currentTimeMillis() + CACHE_TTL_MS)
-                    return eapi
-                }
+                val stream = runCatching { getEapiStream(cookie, songId, level) }.getOrNull() ?: continue
+                urlCache[cacheKey] = CachedUrl(stream, System.currentTimeMillis() + CACHE_TTL_MS)
+                return stream
             }
         }
 
@@ -114,11 +121,18 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
                 put("br", br)
             }
             val response = weapiPost(DOWNLOAD_API, body, cookie)
-            val url = runCatching { json.decodeFromString<NeteaseDownloadResponse>(response.body) }
-                .getOrNull()?.data?.firstOrNull()?.url.orEmpty()
+            val item = runCatching { json.decodeFromString<NeteaseDownloadResponse>(response.body) }
+                .getOrNull()?.data?.firstOrNull() ?: continue
+            val url = item.url
             if (url.isNotBlank()) {
-                urlCache[cacheKey] = CachedUrl(url, System.currentTimeMillis() + CACHE_TTL_MS)
-                return url
+                val stream = NeteaseStream(
+                    url = url,
+                    level = "",
+                    ext = item.type.lowercase(Locale.ROOT).ifBlank { extensionFromUrl(url) },
+                    bitrate = item.br / 1000,
+                )
+                urlCache[cacheKey] = CachedUrl(stream, System.currentTimeMillis() + CACHE_TTL_MS)
+                return stream
             }
         }
         throw IllegalStateException("download url not found (might be vip or copyright restricted)")
@@ -477,11 +491,24 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         val profile = data["profile"]?.jsonObject ?: return null
         val nickname = profile.string("nickname")
         if (nickname.isBlank()) return null
+        // vip/info 才能区分黑胶VIP/黑胶SVIP/音乐包并给出会员等级；profile.vipType 只作兜底
+        val vip = runCatching { vipInfo(cookie, profile.long("userId")) }.getOrNull()
         val detail = listOfNotNull(
-            neteaseVipLabel(profile.int("vipType")),
+            neteaseMembershipLabel(vip) ?: neteaseVipLabel(profile.int("vipType")),
             profile.int("level").takeIf { it > 0 }?.let { "Lv.$it" },
         ).joinToString(" · ")
         return AccountInfo(nickname = nickname, avatar = profile.string("avatarUrl"), detail = detail)
+    }
+
+    private suspend fun vipInfo(cookie: String, userId: Long): JsonObject? {
+        val body = buildJsonObject {
+            if (userId > 0) put("userId", userId.toString())
+            put("csrf_token", "")
+        }
+        val response = weapiPost(VIP_INFO_API, body, cookie)
+        val root = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrNull() ?: return null
+        if (root.int("code") != 200) return null
+        return root["data"] as? JsonObject
     }
 
     private suspend fun fetchPlaylistDetailLimited(
@@ -532,7 +559,10 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         }
         val response = weapiPost(DETAIL_API, body, cookie)
         val data = json.decodeFromString<NeteaseSongDetailResponse>(response.body)
+        // v3/song/detail 的音质权限在兄弟数组 privileges 里，不在 songs 内
+        val privileges = data.privileges.associateBy { it.id }
         return data.songs.map { item ->
+            val privilege = privileges[item.id] ?: item.privilege
             Song(
                 id = item.id.toString(),
                 name = item.name,
@@ -544,7 +574,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
                 link = "https://music.163.com/#/song?id=${item.id}",
                 extra = buildMap {
                     put("song_id", item.id.toString())
-                    val level = item.privilege.maxbrLevel.ifBlank { item.privilege.plLevel }.trim().lowercase()
+                    val level = privilege.bestLevel().trim().lowercase()
                     if (level.isNotBlank()) put("netease_level", level)
                 },
             )
@@ -618,13 +648,15 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         }
     }
 
-    private suspend fun getEapiDownloadUrl(cookie: String, songId: String, quality: String): String {
+    private suspend fun getEapiStream(cookie: String, songId: String, quality: String): NeteaseStream {
         val id = songId.toIntOrNull() ?: throw IllegalArgumentException("invalid song id: $songId")
         val header = """{"os":"pc","appver":"","osver":"","deviceId":"pyncm!","requestId":"12345678"}"""
         val payload = buildJsonObject {
             put("ids", buildJsonArray { add(JsonPrimitive(id)) })
             put("level", quality)
             put("encodeType", "flac")
+            // sky（沉浸环绕声）必须指定沉浸声类型，否则接口不返回地址
+            if (quality == "sky") put("immerseType", "c51")
             put("header", header)
         }.toString()
         val params = NativeCrypto.encryptEApi(DOWNLOAD_EAPI, payload)
@@ -635,10 +667,16 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             cookie = cookie,
             randomIp = true,
         )
-        val data = json.decodeFromString<NeteaseDownloadResponse>(response.body)
-        val url = data.data.firstOrNull()?.url.orEmpty()
+        val item = json.decodeFromString<NeteaseDownloadResponse>(response.body).data.firstOrNull()
+            ?: throw IllegalStateException("eapi download url not found")
+        val url = item.url
         if (url.isBlank()) throw IllegalStateException("eapi download url not found")
-        return url
+        return NeteaseStream(
+            url = url,
+            level = item.level.ifBlank { quality },
+            ext = item.type.lowercase(Locale.ROOT).ifBlank { extensionFromUrl(url) },
+            bitrate = item.br / 1000,
+        )
     }
 
     private fun songOf(item: NeteaseSearchSong): Song {
@@ -662,7 +700,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             link = "https://music.163.com/#/song?id=${item.id}",
             extra = buildMap {
                 put("song_id", item.id.toString())
-                val level = item.privilege.maxbrLevel.ifBlank { item.privilege.plLevel }.trim().lowercase()
+                val level = item.privilege.bestLevel().trim().lowercase()
                 if (level.isNotBlank()) put("netease_level", level)
             },
             isVip = item.fee != 0 || item.privilege.fee != 0,
@@ -775,7 +813,14 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     private fun JsonObject.long(key: String): Long =
         this[key]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
 
-    private data class CachedUrl(val url: String, val expiresAt: Long)
+    private data class NeteaseStream(
+        val url: String,
+        val level: String,
+        val ext: String,
+        val bitrate: Int,
+    )
+
+    private data class CachedUrl(val stream: NeteaseStream, val expiresAt: Long)
 
     internal enum class NeteaseLinkKind { Song, Album, Playlist }
 
@@ -792,6 +837,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         const val USER_PLAYLIST_API = "https://music.163.com/weapi/user/playlist"
         const val ALBUM_API = "https://music.163.com/weapi/v1/album/%s"
         const val USER_ACCOUNT_API = "https://music.163.com/weapi/nuser/account/get"
+        const val VIP_INFO_API = "https://music.163.com/weapi/music-vip-membership/front/vip/info"
         const val RECOMMENDED_API = "https://music.163.com/weapi/personalized/playlist"
         const val LYRIC_API = "https://music.163.com/weapi/song/lyric"
         const val TOP_LIST_API = "https://music.163.com/api/toplist"
@@ -808,20 +854,63 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
 internal val NETEASE_LEVEL_ORDER = listOf("jymaster", "sky", "jyeffect", "hires", "lossless", "exhigh")
 
 /**
- * 取流尝试的档位序列：从歌曲标注的最高档开始往下最多两档，再以 exhigh 兜底。
- * v1 接口对没有权限的档位会自动回退到账号可用档；档位缺省时从母带试起，免费歌也能拿到 hires。
+ * 取流尝试的档位序列：从歌曲标注的最高档开始逐级下探到 exhigh。
+ * 不能只试两三档：eapi v1 对无权限档位经常直接返回空地址，
+ * 一路下探才能让 VIP 拿到无损/Hi-Res，SVIP 拿到母带/沉浸环绕。
  */
 internal fun neteaseLevelCandidates(songLevel: String): List<String> {
-    val from = NETEASE_LEVEL_ORDER.indexOf(songLevel.trim().lowercase()).let { if (it >= 0) it else 0 }
-    return (NETEASE_LEVEL_ORDER.subList(from, NETEASE_LEVEL_ORDER.size).take(2) + "exhigh").distinct()
+    val start = when (songLevel.trim().lowercase()) {
+        "jymaster", "jm" -> 0
+        "sky", "sk" -> 1
+        "jyeffect", "je" -> 2
+        "hires", "hr" -> 3
+        "lossless", "sq", "cd" -> 4
+        "exhigh", "higher", "hq", "standard", "std" -> NETEASE_LEVEL_ORDER.lastIndex
+        else -> 0
+    }
+    return NETEASE_LEVEL_ORDER.subList(start, NETEASE_LEVEL_ORDER.size)
 }
 
+/**
+ * 会员产品与等级的兜底判断。vipType 是十进制位标记：
+ * 个位=音乐包，十位=黑胶VIP，百位=黑胶SVIP（如 10/11 是黑胶VIP，110 是黑胶SVIP）。
+ */
 internal fun neteaseVipLabel(vipType: Int): String? = when {
-    vipType == 12 -> "黑胶SVIP"
-    vipType == 11 -> "黑胶VIP"
-    vipType > 0 -> "会员"
-    else -> null
+    vipType <= 0 -> null
+    vipType / 100 % 10 > 0 -> "黑胶SVIP"
+    vipType / 10 % 10 > 0 -> "黑胶VIP"
+    else -> "会员"
 }
+
+/**
+ * 从 vip/info 的 data 里取会员产品与等级，例如“黑胶SVIP V7”“黑胶VIP V6”“音乐包 V3”。
+ * redplus 对应黑胶SVIP，associator 对应黑胶VIP，musicPackage 对应音乐包。
+ */
+internal fun neteaseMembershipLabel(vip: JsonObject?, now: Long = System.currentTimeMillis()): String? {
+    vip ?: return null
+    fun intField(key: String): Int = vip[key]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+    // 未开通的产品是 null，不能直接用 jsonObject 强转
+    fun packageOf(key: String): JsonObject? = vip[key] as? JsonObject
+    fun active(pkg: JsonObject?): Boolean {
+        pkg ?: return false
+        val code = pkg["vipCode"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        val expire = pkg["expireTime"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+        val level = pkg["vipLevel"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        return code > 0 && (expire > now || (expire == 0L && level > 0))
+    }
+    val redVipLevel = intField("redVipLevel")
+    val (name, level) = when {
+        active(packageOf("redplus")) -> "黑胶SVIP" to (packageOf("redplus")?.levelValue() ?: 0)
+        active(packageOf("associator")) -> "黑胶VIP" to (packageOf("associator")?.levelValue() ?: 0)
+        active(packageOf("musicPackage")) -> "音乐包" to (packageOf("musicPackage")?.levelValue() ?: 0)
+        else -> return null
+    }
+    val resolvedLevel = level.takeIf { it > 0 } ?: redVipLevel
+    return if (resolvedLevel > 0) "$name V$resolvedLevel" else name
+}
+
+private fun JsonObject.levelValue(): Int =
+    this["vipLevel"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
 
 @Serializable
 private data class NeteaseSearchResponse(val result: NeteaseSearchResult? = null)
@@ -859,12 +948,18 @@ private data class NeteaseAlbum(
 
 @Serializable
 private data class NeteasePrivilege(
+    val id: Long = 0,
     val fl: Int = 0,
     val pl: Int = 0,
     val fee: Int = 0,
-    val maxbrLevel: String = "",
-    val plLevel: String = "",
+    @SerialName("maxBrLevel") val maxbrLevel: String = "",
+    @SerialName("maxbrLevel") val maxbrLevelLegacy: String = "",
+    @SerialName("playMaxBrLevel") val playMaxBrLevel: String = "",
+    @SerialName("plLevel") val plLevel: String = "",
 )
+
+private fun NeteasePrivilege.bestLevel(): String =
+    maxbrLevel.ifBlank { maxbrLevelLegacy }.ifBlank { plLevel }
 
 @Serializable
 private data class NeteaseSize(val size: Long = 0)
@@ -898,7 +993,10 @@ private data class NeteaseSearchAlbum(
 )
 
 @Serializable
-private data class NeteaseSongDetailResponse(val songs: List<NeteaseDetailSong> = emptyList())
+private data class NeteaseSongDetailResponse(
+    val songs: List<NeteaseDetailSong> = emptyList(),
+    val privileges: List<NeteasePrivilege> = emptyList(),
+)
 
 @Serializable
 private data class NeteaseDetailSong(
@@ -1055,6 +1153,7 @@ private data class NeteaseDownloadData(
     val code: Int = 0,
     val br: Int = 0,
     val type: String = "",
+    val level: String = "",
 )
 
 // 网易逐字歌词（YRC）：行 `[行起毫秒,行时长毫秒]`，词 `(词起毫秒,词时长毫秒,0)词`，

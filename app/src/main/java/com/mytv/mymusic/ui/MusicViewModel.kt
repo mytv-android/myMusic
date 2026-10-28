@@ -1624,22 +1624,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun download(song: Song) = viewModelScope.launch {
         val appContext = getApplication<Application>()
         var failure: Throwable? = null
-        val url = runCatching {
-            app.repository.playableUrl(song, cookieFor(song.source), appContext.cacheDir)
+        val stream = runCatching {
+            app.repository.playableStream(song, cookieFor(song.source), appContext.cacheDir)
         }.onFailure {
             if (it is CancellationException) throw it
             failure = it
-        }.getOrDefault("")
+        }.getOrNull()
+        val url = stream?.url.orEmpty()
         if (url.isBlank()) {
             message(failure?.message?.takeIf { it.isNotBlank() } ?: "没有可下载的地址", error = true)
             return@launch
         }
         val directory = appContext.getExternalFilesDir("music") ?: appContext.filesDir
-        val extension = if (url.startsWith("file:")) {
-            Uri.parse(url).path?.let { File(it).extension }.orEmpty().ifBlank { song.ext.ifBlank { "mp3" } }
-        } else {
-            song.ext.ifBlank { "mp3" }
-        }
+        // 真实音质优先：无损流按 flac 存盘，不要再用搜索结果的 mp3 猜测
+        val extension = listOf(
+            stream?.ext.orEmpty(),
+            song.ext,
+            Uri.parse(url).path?.let { File(it).extension }.orEmpty(),
+        ).firstOrNull { it.isNotBlank() }?.lowercase() ?: "mp3"
         val safeName = "${song.name}-${song.artist}[${song.source}].$extension"
             .replace(Regex("[\\\\/:*?\"<>|]"), "_")
         val file = File(directory, safeName)

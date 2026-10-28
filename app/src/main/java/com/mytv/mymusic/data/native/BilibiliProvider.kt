@@ -682,9 +682,12 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         val response = runCatching { json.decodeFromString<BilibiliNavResponse>(body) }.getOrNull() ?: return null
         val data = response.data ?: return null
         if (response.code != 0 || !data.isLogin || data.uname.isBlank()) return null
+        val membership = data.vipLabel.ifBlank {
+            if (data.vipStatus == 1 && data.vipType > 0) "大会员" else ""
+        }
         val detail = listOfNotNull(
+            membership.takeIf { it.isNotBlank() },
             data.levelInfo.currentLevel.takeIf { it > 0 }?.let { "Lv.$it" },
-            if (data.vipStatus == 1 && data.vipType > 0) "大会员" else null,
         ).joinToString(" · ")
         return AccountInfo(nickname = data.uname, avatar = data.face, detail = detail)
     }
@@ -1033,8 +1036,9 @@ private data class BilibiliNavResponse(
 @Serializable
 private data class BilibiliNavData(
     val isLogin: Boolean = false,
-    val vipStatus: Int = 0,
-    val vipType: Int = 0,
+    @SerialName("vipStatus") val vipStatus: Int = 0,
+    @SerialName("vipType") val vipType: Int = 0,
+    @SerialName("vip_label") val vipLabel: String = "",
     val uname: String = "",
     val face: String = "",
     @SerialName("level_info") val levelInfo: BilibiliNavLevel = BilibiliNavLevel(),

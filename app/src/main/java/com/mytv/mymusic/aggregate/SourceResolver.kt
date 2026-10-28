@@ -1,6 +1,7 @@
 package com.mytv.mymusic.aggregate
 
 import com.mytv.mymusic.data.MusicRepository
+import com.mytv.mymusic.data.Song
 import kotlinx.coroutines.CancellationException
 import java.io.File
 import java.util.LinkedHashMap
@@ -11,7 +12,13 @@ class SourceResolver(
     private val settings: () -> AggregationSettings,
     private val workDir: () -> File,
 ) {
-    private data class CachedUrl(val url: String, val preview: Boolean, val at: Long)
+    private data class CachedUrl(
+        val url: String,
+        val preview: Boolean,
+        val at: Long,
+        val ext: String = "",
+        val bitrate: Int = 0,
+    )
 
     private val urlCache = object : LinkedHashMap<String, CachedUrl>(32, 0.75f, true) {}
     private val negativeCache = object : LinkedHashMap<String, Long>(32, 0.75f, true) {}
@@ -105,7 +112,8 @@ class SourceResolver(
             val now = System.currentTimeMillis()
             val cached = synchronized(lock) { urlCache[source.song.key] }
             if (cached != null && now - cached.at < URL_TTL_MS) {
-                return Resolution.Ready(source, cached.url, cached.preview, cached.at)
+                val cachedSource = source.withQuality(cached.ext, cached.bitrate)
+                return Resolution.Ready(cachedSource, cached.url, cached.preview, cached.at)
             }
             if (cached != null) synchronized(lock) { urlCache.remove(source.song.key) }
 
@@ -116,12 +124,13 @@ class SourceResolver(
             }
 
             var failure: Throwable? = null
-            val url = runCatching {
-                repository.playableUrl(source.song, cookie, workDir())
+            val stream = runCatching {
+                repository.playableStream(source.song, cookie, workDir())
             }.onFailure {
                 if (it is CancellationException) throw it
                 failure = it
-            }.getOrDefault("")
+            }.getOrNull()
+            val url = stream?.url.orEmpty()
             if (url.isBlank()) {
                 synchronized(lock) { negativeCache[source.song.key] = System.currentTimeMillis() }
                 val reason = failure?.message
@@ -132,12 +141,31 @@ class SourceResolver(
                 continue
             }
             val preview = source.isPreview || isPreviewSource(source.providerId, source.song)
-            synchronized(lock) { urlCache[source.song.key] = CachedUrl(url, preview, System.currentTimeMillis()) }
-            return Resolution.Ready(source, url, preview)
+            val resolvedSource = source.withQuality(stream?.ext.orEmpty(), stream?.bitrate ?: 0)
+            synchronized(lock) {
+                urlCache[source.song.key] = CachedUrl(
+                    url = url,
+                    preview = preview,
+                    at = System.currentTimeMillis(),
+                    ext = resolvedSource.song.ext,
+                    bitrate = resolvedSource.song.bitrate,
+                )
+            }
+            return Resolution.Ready(resolvedSource, url, preview)
         }
 
         val deepLink = track.sources.firstOrNull { it.song.link.isNotBlank() }?.song?.link.orEmpty()
         return Resolution.None(attempts, deepLink)
+    }
+
+    private fun TrackSource.withQuality(ext: String, bitrate: Int): TrackSource =
+        copy(song = song.withQuality(ext, bitrate))
+
+    private fun Song.withQuality(ext: String, bitrate: Int): Song {
+        val resolvedExt = ext.ifBlank { this.ext }
+        val resolvedBitrate = bitrate.takeIf { it > 0 } ?: this.bitrate
+        return if (resolvedExt == this.ext && resolvedBitrate == this.bitrate) this
+        else copy(ext = resolvedExt, bitrate = resolvedBitrate)
     }
 
     fun invalidate(source: TrackSource) {
