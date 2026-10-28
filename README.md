@@ -1,5 +1,7 @@
 # myMusic
 
+<p align="center"><img src="docs/images/banner.png" alt="myMusic" width="100%"/></p>
+
 myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机、平板和电视。界面使用 Jetpack Compose 与 Material 3；触摸、鼠标、键盘和遥控器使用同一套焦点与播放操作。
 
 音乐平台能力来自 [music-lib](https://github.com/guohuiyuan/music-lib)，当前纳入版本为 `7cc4467b4e300547edd5d3d5bf0eff1c21ffc2ec`。平台层已移植为 Kotlin 原生实现（`app/src/main/java/com/mytv/mymusic/data/native`），直接使用 OkHttp 与原生加密工具，不需要 GoMobile、AAR 或额外的后端服务；只有汽水音乐的会员整曲需要用户自备可选的签名器（见下文）。Go 源码保留在 `third_party/music-lib`，作为原生移植的参考与 AGPL-3.0 来源说明。
