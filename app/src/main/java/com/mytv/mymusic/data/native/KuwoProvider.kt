@@ -747,7 +747,8 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
 
     private suspend fun fetchAudioUrl(cookie: String, rid: String): String {
         val randomId = "C_APK_guanwang_${System.currentTimeMillis() * 1_000_000L + Random.nextLong(1_000_000L)}"
-        for (br in listOf("128kmp3", "320kmp3", "flac", "2000kflac")) {
+        // 从最高档往下试；反过来会永远命中 128k，登录也拿不到无损
+        for (br in listOf("2000kflac", "flac", "320kmp3", "128kmp3")) {
             val url = "$MOBI_API?" + query(
                 "f" to "web",
                 "source" to "kwplayercar_ar_6.0.0.9_B_jiakong_vh.apk",
