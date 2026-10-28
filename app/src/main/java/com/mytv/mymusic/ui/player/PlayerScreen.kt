@@ -112,7 +112,8 @@ fun PlayerScreen(
             backProgress = 0f
         }
     }
-    val idle = rememberIdleState(state.playing, holdAwake = sheetOpen || state.sourcePickerTrack != null)
+    // 暂停时也照样计时：控制栏几秒后淡出，确认键或点按唤醒
+    val idle = rememberIdleState(holdAwake = sheetOpen || state.sourcePickerTrack != null)
     val pulse = rememberBackdropPulse()
     val favorite = remember(favorites, song.key) { favorites.any { it.key == song.key } }
     // 解析放在后台；状态不随原文重建，切歌时先保留上一份结果，等新原文解析完成再替换。

@@ -95,7 +95,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** 控件 4 秒无操作后隐藏。任意按下或按键唤醒；电视上唤醒的那一下不触发按键动作。 */
+/** 控件 4 秒无操作后隐藏，播放和暂停一样。任意按下或按键唤醒；电视上唤醒的那一下不触发按键动作。 */
 @Stable
 class IdleState {
     var idle by mutableStateOf(false)
@@ -109,17 +109,18 @@ class IdleState {
 }
 
 /**
+ * 计时与是否在播放无关：暂停、播放失败时控制栏同样淡出，按确认键或点一下屏幕再调出。
  * [holdAwake] 为 true 时不进入空闲：播放页上开着队列、定时、换源这类面板时，面板是单独的窗口，里面的按键到不了
  * 播放页的唤醒逻辑；照样计时的话环境模式会在面板后面开始，焦点也被挪到看不见的占位上，关掉面板后回不到原来的按钮。
  */
 @Composable
-fun rememberIdleState(playing: Boolean, holdAwake: Boolean = false, timeoutMs: Long = 4_000L): IdleState {
+fun rememberIdleState(holdAwake: Boolean = false, timeoutMs: Long = 4_000L): IdleState {
     val state = remember { IdleState() }
     val screenReader = rememberScreenReaderOn()
-    LaunchedEffect(state.tick, playing, screenReader, holdAwake) {
+    LaunchedEffect(state.tick, screenReader, holdAwake) {
         state.idle = false
         // 读屏用户看不到控件淡入淡出，隐藏后焦点会落到看不见的地方，所以不进入空闲
-        if (playing && !screenReader && !holdAwake) {
+        if (!screenReader && !holdAwake) {
             delay(timeoutMs)
             state.idle = true
         }
