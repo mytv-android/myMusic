@@ -10,6 +10,7 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 
 - 项目主页：https://github.com/mytv-android/myMusic
 - Telegram 群组：https://t.me/mytv_android_channel
+- 配套工具：[易用TV助手](https://github.com/pangtugg/easytv-partner) 收录了 myMusic 及其他开源 TV 应用，可一键安装，并提供扫码遥控、文件传输、应用安装与更新等模块，方便在电视上集中管理和查看各应用的配置与使用教程，无需注册账号。
 
 两个入口在应用的 `设置 › 关于与更新` 里同样提供：手机上点按打开，电视上用手机扫页面上的二维码（二维码由本机编码器生成，不经过第三方图片服务）。
 
