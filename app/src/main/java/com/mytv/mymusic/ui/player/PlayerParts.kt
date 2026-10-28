@@ -64,6 +64,8 @@ import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -100,11 +102,19 @@ import kotlin.math.roundToInt
 class IdleState {
     var idle by mutableStateOf(false)
         internal set
+    /** 是否允许进入空闲；读屏开着时为 false，此时返回键也不该只收起控件。 */
+    var canAutoHide by mutableStateOf(true)
+        internal set
     internal var tick by mutableLongStateOf(0L)
 
     fun poke() {
         idle = false
         tick++
+    }
+
+    /** 返回键在控制栏亮着时的处理：只收起控件，不退出播放页。 */
+    fun sleep() {
+        if (canAutoHide) idle = true
     }
 }
 
@@ -120,6 +130,7 @@ fun rememberIdleState(holdAwake: Boolean = false, timeoutMs: Long = 4_000L): Idl
     LaunchedEffect(state.tick, screenReader, holdAwake) {
         state.idle = false
         // 读屏用户看不到控件淡入淡出，隐藏后焦点会落到看不见的地方，所以不进入空闲
+        state.canAutoHide = !screenReader
         if (!screenReader && !holdAwake) {
             delay(timeoutMs)
             state.idle = true
@@ -153,7 +164,9 @@ fun Modifier.wakeOnInput(idle: IdleState, consumeKeyWhenIdle: Boolean): Modifier
             }
         }
     }
-    .onPreviewKeyEvent {
+    .onPreviewKeyEvent { event ->
+        // 返回键留给播放页的返回处理：控制栏亮着时先收起，环境模式下才退出播放页
+        if (event.key == Key.Back) return@onPreviewKeyEvent false
         val wasIdle = idle.idle
         idle.poke()
         consumeKeyWhenIdle && wasIdle

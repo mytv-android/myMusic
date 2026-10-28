@@ -103,17 +103,24 @@ fun PlayerScreen(
     var burst by remember { mutableIntStateOf(0) }
     // 预测性返回：手势过程中播放页缩小、下移、圆角变大，松手才真正收起
     var backProgress by remember { mutableFloatStateOf(0f) }
+    // 暂停时也照样计时：控制栏几秒后淡出，按确认键或点按唤醒
+    val idle = rememberIdleState(holdAwake = sheetOpen || state.sourcePickerTrack != null)
     PredictiveBackHandler { events ->
+        // 电视上控制栏亮着时，返回键先收起控制栏；已经在环境模式下才退出播放页，和常见视频播放器一致
+        val hideControls = window.isTv && !lyricsMode && idle.canAutoHide &&
+            !idle.idle && state.sourcePickerTrack == null
         try {
-            events.collect { if (!lyricsMode) backProgress = it.progress }
-            if (lyricsMode) lyricsMode = false else onClose()
+            events.collect { if (!lyricsMode && !hideControls) backProgress = it.progress }
+            when {
+                hideControls -> idle.sleep()
+                lyricsMode -> lyricsMode = false
+                else -> onClose()
+            }
         } catch (_: CancellationException) {
         } finally {
             backProgress = 0f
         }
     }
-    // 暂停时也照样计时：控制栏几秒后淡出，确认键或点按唤醒
-    val idle = rememberIdleState(holdAwake = sheetOpen || state.sourcePickerTrack != null)
     val pulse = rememberBackdropPulse()
     val favorite = remember(favorites, song.key) { favorites.any { it.key == song.key } }
     // 解析放在后台；状态不随原文重建，切歌时先保留上一份结果，等新原文解析完成再替换。

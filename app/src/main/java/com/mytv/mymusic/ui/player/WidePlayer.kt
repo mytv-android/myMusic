@@ -173,21 +173,22 @@ internal fun WidePlayer(
                 { if (showDefault) WideMeta(song, favorite, actions, lyricsMode, defaultAlpha) },
                 {
                     if (showDefault && full) {
-                        WideGuard(null, lyricsMode, Modifier.graphicsLayer { alpha = defaultAlpha() }) {
+                        // 空闲时跟着控制栏一起淡出，否则底部进度条和按钮组会一直留在画面上
+                        WideGuard(idle, lyricsMode, Modifier.graphicsLayer { alpha = defaultChrome() }) {
                             SourcePill(song, sourceProvider, sourceDetail, playbackMode, onOpenSource)
                         }
                     }
                 },
                 {
                     if (showDefault) {
-                        WideGuard(null, lyricsMode, Modifier.graphicsLayer { alpha = defaultAlpha() }) {
+                        WideGuard(idle, lyricsMode, Modifier.graphicsLayer { alpha = defaultChrome() }) {
                             WavySeekBar(position, duration, playing, actions::seek, Modifier.fillMaxWidth(), amplitudeScale = waveScale)
                         }
                     }
                 },
                 {
                     if (showDefault) {
-                        WideGuard(null, lyricsMode, Modifier.graphicsLayer { alpha = defaultAlpha() }) {
+                        WideGuard(idle, lyricsMode, Modifier.graphicsLayer { alpha = defaultChrome() }) {
                             TransportButtonGroup(
                                 playing = playing,
                                 onPrevious = { actions.transport("previous") },
