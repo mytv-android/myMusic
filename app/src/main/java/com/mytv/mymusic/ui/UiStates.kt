@@ -69,6 +69,14 @@ data class SearchUiState(
 
 enum class CollectionKind { Chart, Playlist, Album }
 
+/** 登录平台的账号资料；资料接口拿不到时 detail 为空，界面只显示“已登录”。 */
+data class AccountProfile(
+    val providerId: String,
+    val nickname: String = "",
+    val avatar: String = "",
+    val detail: String = "",
+)
+
 data class CollectionUiState(
     val kind: CollectionKind = CollectionKind.Playlist,
     val id: String = "",

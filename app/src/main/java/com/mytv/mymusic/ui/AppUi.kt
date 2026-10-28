@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
@@ -168,7 +169,10 @@ class MusicActions(private val model: MusicViewModel) {
     fun renamePlaylist(id: String, name: String) = model.renamePlaylist(id, name)
     fun deletePlaylist(id: String) = model.deletePlaylist(id)
     fun addSongToPlaylist(id: String, song: Song) = model.addSongToPlaylist(id, song)
+    fun addSongsToPlaylist(id: String, songs: List<Song>) = model.addSongsToPlaylist(id, songs)
+    fun addSongsToNewPlaylist(name: String, songs: List<Song>) = model.addSongsToNewPlaylist(name, songs)
     fun removeEntry(id: String, position: Int) = model.removePlaylistEntry(id, position)
+    fun removeEntries(id: String, positions: List<Int>) = model.removePlaylistEntries(id, positions)
     fun moveEntry(id: String, position: Int, delta: Int) = model.movePlaylistEntry(id, position, delta)
     fun searchLibrary(query: String) = model.searchLibrarySongs(query)
     fun clearLibrarySearch() = model.clearLibrarySearch()
@@ -561,6 +565,71 @@ fun TrackActionsSheet(
 }
 
 private class SheetRow(val icon: ImageVector, val label: String, val danger: Boolean, val action: () -> Unit)
+
+/**
+ * 批量加入歌单：列出本地歌单，也可以新建一个并直接加入。
+ * 常规单曲入口在 TrackActionsSheet 里，这里只服务多选。
+ */
+@Composable
+fun PlaylistPickerSheet(
+    playlists: List<LocalPlaylistSummary>,
+    onPick: (String) -> Unit,
+    onCreate: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var creating by remember { mutableStateOf(false) }
+    var name by rememberSaveable { mutableStateOf("") }
+    com.mytv.mymusic.ui.components.AdaptiveSheet(
+        onDismiss = onDismiss,
+        title = if (creating) "新建歌单" else "加入歌单",
+        subtitle = if (creating) "" else "选中的歌曲会按原来的顺序加入",
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            if (creating) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    Modifier.fillMaxWidth().tvFocusRing(RoundedCornerShape(4.dp)),
+                    singleLine = true,
+                    placeholder = { Text("歌单名称") },
+                    trailingIcon = {
+                        TextButton(
+                            onClick = { onCreate(name.trim()); onDismiss() },
+                            enabled = name.isNotBlank(),
+                            modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+                        ) { Text("创建并加入") }
+                    },
+                )
+                TextButton(onClick = { creating = false }, modifier = Modifier.padding(top = 8.dp)) { Text("返回") }
+            } else {
+                val rows = playlists.size + 1
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    item(key = "new", contentType = "pickerNew") {
+                        com.mytv.mymusic.ui.components.ListRow(
+                            title = "新建歌单",
+                            index = 0,
+                            count = rows,
+                            onClick = { creating = true },
+                            icon = Icons.Filled.Add,
+                            showChevron = false,
+                        )
+                    }
+                    itemsIndexed(playlists, key = { _, playlist -> playlist.id }, contentType = { _, _ -> "pickerPlaylist" }) { index, playlist ->
+                        com.mytv.mymusic.ui.components.ListRow(
+                            title = playlist.name,
+                            index = index + 1,
+                            count = rows,
+                            onClick = { onPick(playlist.id); onDismiss() },
+                            icon = Icons.AutoMirrored.Filled.QueueMusic,
+                            value = "${playlist.trackCount} 首",
+                            showChevron = false,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun QuickAction(

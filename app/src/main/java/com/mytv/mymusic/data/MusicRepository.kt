@@ -1,5 +1,6 @@
 package com.mytv.mymusic.data
 
+import com.mytv.mymusic.data.native.AccountInfo
 import com.mytv.mymusic.data.native.NativeProvider
 import com.mytv.mymusic.data.native.NativeProviders
 import com.mytv.mymusic.data.native.SongSearchPage
@@ -78,6 +79,10 @@ class MusicRepository {
             ?: throw IllegalArgumentException("unknown login session: $sessionId")
         return provider.checkLogin(sessionId, key)
     }
+
+    /** 登录账号资料；失败或平台没实现时返回 null。 */
+    suspend fun accountInfo(provider: String, cookie: String): AccountInfo? =
+        runCatching { requireProvider(provider).accountInfo(cookie) }.getOrNull()
 
     private fun requireProvider(id: String): NativeProvider =
         NativeProviders.get(id) ?: throw IllegalArgumentException("unsupported provider: $id")

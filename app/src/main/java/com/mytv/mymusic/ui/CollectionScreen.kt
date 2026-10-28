@@ -33,9 +33,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -77,6 +80,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.aggregate.Availability
@@ -92,6 +96,8 @@ import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.PlatformBadge
 import com.mytv.mymusic.ui.components.PlayAllSplitButton
 import com.mytv.mymusic.ui.components.SegmentGap
+import com.mytv.mymusic.ui.components.SelectionBar
+import com.mytv.mymusic.ui.components.SelectionState
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.components.distinctKeys
@@ -152,13 +158,66 @@ fun CollectionScreen(
     }
     val tint = rememberCoverTint(collection.cover, actions)
     val onMore: (Song) -> Unit = remember(songs) { { song -> target = SongAction(song, songs) } }
+    val selection = remember { SelectionState() }
+    var pickerOpen by remember { mutableStateOf(false) }
+    BackHandler(enabled = selection.active) { selection.exit() }
+    // 多选期间的批量操作：歌保持列表里的顺序
+    val selectedSongs = { songs.filter { it.key in selection.selected } }
+    val selectionOps = CollectionSelectionOps(
+        count = selection.selected.size,
+        allSelected = songs.isNotEmpty() && selection.selected.containsAll(songs.map { it.key }),
+        onToggleAll = { selection.toggleAll(songs.map { it.key }) },
+        onPlay = {
+            val picked = selectedSongs()
+            if (picked.isNotEmpty()) actions.play(picked.first(), picked)
+        },
+        onAddTo = { pickerOpen = true },
+        onExit = { selection.exit() },
+    )
     val playingKey = state.current?.key
     if (LocalAppWindow.current.twoPane) {
-        TwoPaneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore)
+        TwoPaneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps)
     } else {
-        PhoneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore)
+        PhoneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps)
     }
     target?.let { SongActionsSheet(it, favorites, playlists, actions) { target = null } }
+    if (pickerOpen) {
+        PlaylistPickerSheet(
+            playlists = playlists,
+            onPick = { id ->
+                actions.addSongsToPlaylist(id, selectedSongs())
+                selection.exit()
+            },
+            onCreate = { name ->
+                actions.addSongsToNewPlaylist(name, selectedSongs())
+                selection.exit()
+            },
+            onDismiss = { pickerOpen = false },
+        )
+    }
+}
+
+/** 多选操作条的数据，三端布局共用。 */
+private data class CollectionSelectionOps(
+    val count: Int,
+    val allSelected: Boolean,
+    val onToggleAll: () -> Unit,
+    val onPlay: () -> Unit,
+    val onAddTo: () -> Unit,
+    val onExit: () -> Unit,
+)
+
+@Composable
+private fun SelectionBarFor(ops: CollectionSelectionOps, modifier: Modifier = Modifier) {
+    SelectionBar(
+        count = ops.count,
+        allSelected = ops.allSelected,
+        onToggleAll = ops.onToggleAll,
+        onPlay = ops.onPlay,
+        onAddTo = ops.onAddTo,
+        onExit = ops.onExit,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -171,6 +230,8 @@ private fun PhoneCollection(
     playingKey: String?,
     onBack: () -> Unit,
     onMore: (Song) -> Unit,
+    selection: SelectionState,
+    selectionOps: CollectionSelectionOps,
 ) {
     val gutter = LocalAppWindow.current.gutter
     val overlay = LocalOverlayPadding.current.calculateBottomPadding()
@@ -234,22 +295,27 @@ private fun PhoneCollection(
                     }
                 }
                 item(key = "actions", contentType = "actions") {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = gutter).padding(bottom = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        PlayAllSplitButton(
-                            onPlayAll = ops.playAll,
-                            onShuffle = ops.shuffle,
-                            onQueue = ops.queue,
-                            onSave = ops.save,
-                            label = playLabel(collection),
-                        )
-                        SaveToggle(ops, saved)
+                    if (selection.active) {
+                        SelectionBarFor(selectionOps, Modifier.padding(horizontal = gutter).padding(bottom = 16.dp))
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = gutter).padding(bottom = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            PlayAllSplitButton(
+                                onPlayAll = ops.playAll,
+                                onShuffle = ops.shuffle,
+                                onQueue = ops.queue,
+                                onSave = ops.save,
+                                label = playLabel(collection),
+                            )
+                            SaveToggle(ops, saved)
+                            MultiSelectToggle(selection)
+                        }
                     }
                 }
-                collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = gutter)
+                collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = gutter, selection = selection)
             }
         }
     }
@@ -266,6 +332,8 @@ private fun TwoPaneCollection(
     playingKey: String?,
     onBack: () -> Unit,
     onMore: (Song) -> Unit,
+    selection: SelectionState,
+    selectionOps: CollectionSelectionOps,
 ) {
     val window = LocalAppWindow.current
     val tv = window.isTv
@@ -328,40 +396,45 @@ private fun TwoPaneCollection(
                 Spacer(Modifier.height(16.dp))
                 CollectionTitle(collection, large = true)
                 Spacer(Modifier.height(16.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    itemVerticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (tv) {
-                        // 电视不用下拉菜单：播放全部 + 随机 + 加入队列平铺，焦点默认在“播放全部”
-                        Button(
-                            onClick = ops.playAll,
-                            modifier = Modifier.focusRequester(playFocus).heightIn(min = 48.dp).tvFocusRing(CircleShape),
-                        ) {
-                            Icon(Icons.Filled.PlayArrow, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(playLabel(collection), Modifier.semantics { contentDescription = "${playLabel(collection)}：${collection.title}" })
+                if (selection.active) {
+                    SelectionBarFor(selectionOps)
+                } else {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (tv) {
+                            // 电视不用下拉菜单：播放全部 + 随机 + 加入队列平铺，焦点默认在“播放全部”
+                            Button(
+                                onClick = ops.playAll,
+                                modifier = Modifier.focusRequester(playFocus).heightIn(min = 48.dp).tvFocusRing(CircleShape),
+                            ) {
+                                Icon(Icons.Filled.PlayArrow, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(playLabel(collection), Modifier.semantics { contentDescription = "${playLabel(collection)}：${collection.title}" })
+                            }
+                            FilledTonalIconButton(onClick = ops.shuffle, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
+                                Icon(Icons.Filled.Shuffle, "随机播放")
+                            }
+                            FilledTonalIconButton(onClick = ops.queue, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
+                                Icon(Icons.AutoMirrored.Filled.QueueMusic, "加入播放队列")
+                            }
+                        } else {
+                            PlayAllSplitButton(
+                                onPlayAll = ops.playAll,
+                                onShuffle = ops.shuffle,
+                                onQueue = ops.queue,
+                                onSave = ops.save,
+                                label = playLabel(collection),
+                            )
                         }
-                        FilledTonalIconButton(onClick = ops.shuffle, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
-                            Icon(Icons.Filled.Shuffle, "随机播放")
-                        }
-                        FilledTonalIconButton(onClick = ops.queue, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
-                            Icon(Icons.AutoMirrored.Filled.QueueMusic, "加入播放队列")
-                        }
-                    } else {
-                        PlayAllSplitButton(
-                            onPlayAll = ops.playAll,
-                            onShuffle = ops.shuffle,
-                            onQueue = ops.queue,
-                            onSave = ops.save,
-                            label = playLabel(collection),
-                        )
-                    }
-                    SaveToggle(ops, saved, if (tv) 48.dp else null)
-                    ops.openPlaybackSettings?.let { open ->
-                        FilledTonalIconButton(onClick = open, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
-                            Icon(Icons.Filled.Tune, "换源设置")
+                        SaveToggle(ops, saved, if (tv) 48.dp else null)
+                        MultiSelectToggle(selection, if (tv) 48.dp else null)
+                        ops.openPlaybackSettings?.let { open ->
+                            FilledTonalIconButton(onClick = open, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
+                                Icon(Icons.Filled.Tune, "换源设置")
+                            }
                         }
                     }
                 }
@@ -370,7 +443,7 @@ private fun TwoPaneCollection(
                 Modifier.weight(1f).fillMaxHeight(),
                 contentPadding = PaddingValues(top = if (tv) 0.dp else 56.dp, bottom = overlay + 48.dp),
             ) {
-                collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = 0.dp)
+                collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = 0.dp, selection = selection)
             }
         }
     }
@@ -393,6 +466,19 @@ private fun SaveToggle(ops: CollectionOps, saved: Boolean, size: androidx.compos
             if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
             contentDescription = "收藏到本地歌单",
         )
+    }
+}
+
+/** 进入批量选择；长按任意一行也可以进入。 */
+@Composable
+private fun MultiSelectToggle(selection: SelectionState, size: androidx.compose.ui.unit.Dp? = null) {
+    FilledTonalIconButton(
+        onClick = { selection.start() },
+        modifier = Modifier
+            .then(if (size != null) Modifier.size(size) else Modifier)
+            .tvFocusRing(CircleShape),
+    ) {
+        Icon(Icons.Filled.DoneAll, contentDescription = "批量选择歌曲")
     }
 }
 
@@ -444,7 +530,7 @@ private fun CollectionTitle(collection: CollectionUiState, large: Boolean) {
     )
 }
 
-/** 曲目区：骨架 → 失败 / 空 → 分段列表；有歌但部分失败时在列表上方提示。 */
+/** 曲目区：骨架 → 失败 / 空 → 分段列表；有歌但部分失败时在列表上方提示。多选时行点击变成勾选。 */
 private fun LazyListScope.collectionSongs(
     collection: CollectionUiState,
     actions: MusicActions,
@@ -452,6 +538,7 @@ private fun LazyListScope.collectionSongs(
     songKeys: List<String>,
     onMore: (Song) -> Unit,
     horizontal: androidx.compose.ui.unit.Dp,
+    selection: SelectionState,
 ) {
     val songs = collection.songs
     when {
@@ -488,30 +575,55 @@ private fun LazyListScope.collectionSongs(
                 key = { index, _ -> songKeys[index] },
                 contentType = { _, _ -> "song" },
             ) { index, song ->
+                val picking = selection.active
+                val isSelected = picking && song.key in selection.selected
+                val rowMore: (() -> Unit)? = if (picking) {
+                    null
+                } else {
+                    { onMore(song) }
+                }
+                val rowLongPress: (() -> Unit)? = if (picking) {
+                    null
+                } else {
+                    { selection.enter(song.key) }
+                }
                 SongRow(
                     title = song.title,
                     subtitle = if (collection.kind == CollectionKind.Album) song.artist.ifBlank { song.subtitle } else song.subtitle,
                     cover = song.cover,
                     index = index,
                     count = songs.size,
-                    onClick = { actions.play(song, songs) },
+                    onClick = {
+                        if (picking) selection.toggle(song.key) else actions.play(song, songs)
+                    },
+                    container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                     modifier = Modifier
                         .padding(horizontal = horizontal)
                         .padding(bottom = if (index < songs.lastIndex) SegmentGap else 0.dp),
                     rank = if (ranked) index + 1 else null,
                     playing = playingKey == song.key,
                     badges = songBadge(song, collection.sourceName),
-                    trailing = formatDuration(song.duration).takeIf { it.isNotBlank() && collection.kind != CollectionKind.Chart }?.let { time ->
-                        {
-                            Text(
-                                time,
-                                Modifier.padding(start = 4.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    trailing = when {
+                        picking -> ({
+                            Icon(
+                                if (isSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                                contentDescription = if (isSelected) "取消选择“${song.title}”" else "选择“${song.title}”",
+                                tint = MaterialTheme.colorScheme.primary,
                             )
+                        })
+                        else -> formatDuration(song.duration).takeIf { it.isNotBlank() && collection.kind != CollectionKind.Chart }?.let { time ->
+                            {
+                                Text(
+                                    time,
+                                    Modifier.padding(start = 4.dp),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     },
-                    onMore = { onMore(song) },
+                    onMore = rowMore,
+                    onLongClick = rowLongPress,
                 )
             }
         }

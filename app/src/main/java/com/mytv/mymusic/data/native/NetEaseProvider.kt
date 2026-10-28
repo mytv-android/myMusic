@@ -51,7 +51,6 @@ private val NETEASE_INFO = ProviderInfo(
 
 class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     private val json = NativeHttp.json
-    private val vipCache = ConcurrentHashMap<String, CachedVip>()
     private val urlCache = ConcurrentHashMap<String, CachedUrl>()
 
     override val supportsSearchPagination: Boolean = true
@@ -90,26 +89,32 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             urlCache.remove(cacheKey)
         }
 
-        if (cookie.isNotBlank() && isVip(cookie)) {
+        // eapi v1 对账号没有权限的档位会自动回退到可用档：登录的免费歌能拿到 hires，VIP 直接到母带。
+        // 未登录不试 eapi——匿名请求只会回落到 128k，比 weapi 的 320k 差。
+        if (cookie.isNotBlank()) {
             for (level in levels) {
                 val eapi = runCatching { getEapiDownloadUrl(cookie, songId, level) }.getOrNull()
-                if (eapi != null && eapi.isNotBlank()) {
+                if (!eapi.isNullOrBlank()) {
                     urlCache[cacheKey] = CachedUrl(eapi, System.currentTimeMillis() + CACHE_TTL_MS)
                     return eapi
                 }
             }
         }
 
-        val body = buildJsonObject {
-            put("ids", buildJsonArray { add(JsonPrimitive(songId)) }.toString())
-            put("br", 320000)
+        for (br in listOf(320000, 128000)) {
+            val body = buildJsonObject {
+                put("ids", buildJsonArray { add(JsonPrimitive(songId)) }.toString())
+                put("br", br)
+            }
+            val response = weapiPost(DOWNLOAD_API, body, cookie)
+            val url = runCatching { json.decodeFromString<NeteaseDownloadResponse>(response.body) }
+                .getOrNull()?.data?.firstOrNull()?.url.orEmpty()
+            if (url.isNotBlank()) {
+                urlCache[cacheKey] = CachedUrl(url, System.currentTimeMillis() + CACHE_TTL_MS)
+                return url
+            }
         }
-        val response = weapiPost(DOWNLOAD_API, body, cookie)
-        val data = json.decodeFromString<NeteaseDownloadResponse>(response.body)
-        val url = data.data.firstOrNull()?.url.orEmpty()
-        if (url.isBlank()) throw IllegalStateException("download url not found (might be vip or copyright restricted)")
-        urlCache[cacheKey] = CachedUrl(url, System.currentTimeMillis() + CACHE_TTL_MS)
-        return url
+        throw IllegalStateException("download url not found (might be vip or copyright restricted)")
     }
 
     override suspend fun lyrics(cookie: String, song: Song): String {
@@ -457,21 +462,19 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         )
     }
 
-    private suspend fun isVip(cookie: String): Boolean {
-        if (cookie.isBlank()) return false
-        val key = NativeCrypto.md5Hex(cookie)
-        val now = System.currentTimeMillis()
-        vipCache[key]?.let { cached ->
-            if (cached.expiresAt > now) return cached.value
-            vipCache.remove(key)
-        }
+    override suspend fun accountInfo(cookie: String): AccountInfo? {
+        if (cookie.isBlank()) return null
         val response = weapiPost(USER_ACCOUNT_API, buildJsonObject { put("csrf_token", "") }, cookie)
-        val data = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrNull()
-        val code = data?.int("code") ?: 0
-        val vipType = data?.get("profile")?.jsonObject?.int("vipType") ?: 0
-        val isVip = code == 200 && vipType != 0
-        vipCache[key] = CachedVip(isVip, now + CACHE_TTL_MS)
-        return isVip
+        val data = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrNull() ?: return null
+        if (data.int("code") != 200) return null
+        val profile = data["profile"]?.jsonObject ?: return null
+        val nickname = profile.string("nickname")
+        if (nickname.isBlank()) return null
+        val detail = listOfNotNull(
+            neteaseVipLabel(profile.int("vipType")),
+            profile.int("level").takeIf { it > 0 }?.let { "Lv.$it" },
+        ).joinToString(" · ")
+        return AccountInfo(nickname = nickname, avatar = profile.string("avatarUrl"), detail = detail)
     }
 
     private suspend fun fetchPlaylistDetailLimited(
@@ -532,7 +535,11 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
                 source = "netease",
                 cover = item.al.picUrl,
                 link = "https://music.163.com/#/song?id=${item.id}",
-                extra = mapOf("song_id" to item.id.toString()),
+                extra = buildMap {
+                    put("song_id", item.id.toString())
+                    val level = item.privilege.maxbrLevel.ifBlank { item.privilege.plLevel }.trim().lowercase()
+                    if (level.isNotBlank()) put("netease_level", level)
+                },
             )
         }
     }
@@ -646,18 +653,17 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             source = "netease",
             cover = item.al.picUrl,
             link = "https://music.163.com/#/song?id=${item.id}",
-            extra = mapOf("song_id" to item.id.toString()),
+            extra = buildMap {
+                put("song_id", item.id.toString())
+                val level = item.privilege.maxbrLevel.ifBlank { item.privilege.plLevel }.trim().lowercase()
+                if (level.isNotBlank()) put("netease_level", level)
+            },
             isVip = item.fee != 0 || item.privilege.fee != 0,
         )
     }
 
-    private fun preferredLevels(song: Song): List<String> {
-        val level = (song.extra["netease_level"] ?: song.extra["level"]).orEmpty().trim().lowercase()
-        return when (level) {
-            "standard", "exhigh", "lossless", "hires" -> listOf(level)
-            else -> listOf("lossless", "hires", "exhigh")
-        }
-    }
+    private fun preferredLevels(song: Song): List<String> =
+        neteaseLevelCandidates(song.extra["netease_level"] ?: song.extra["level"] ?: "")
 
     private fun parseNeteaseLink(link: String): Pair<NeteaseLinkKind, String>? {
         val candidates = mutableListOf(link)
@@ -726,7 +732,6 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     private fun JsonObject.long(key: String): Long =
         this[key]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
 
-    private data class CachedVip(val value: Boolean, val expiresAt: Long)
     private data class CachedUrl(val url: String, val expiresAt: Long)
 
     private enum class NeteaseLinkKind { Song, Album, Playlist }
@@ -753,6 +758,25 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.0.18.203152"
         const val CACHE_TTL_MS = 10 * 60 * 1000L
     }
+}
+
+/** 取流档位从高到低：母带 > 沉浸环绕 > 高清环绕 > Hi-Res > 无损 > 极高。 */
+internal val NETEASE_LEVEL_ORDER = listOf("jymaster", "sky", "jyeffect", "hires", "lossless", "exhigh")
+
+/**
+ * 取流尝试的档位序列：从歌曲标注的最高档开始往下最多两档，再以 exhigh 兜底。
+ * v1 接口对没有权限的档位会自动回退到账号可用档；档位缺省时从母带试起，免费歌也能拿到 hires。
+ */
+internal fun neteaseLevelCandidates(songLevel: String): List<String> {
+    val from = NETEASE_LEVEL_ORDER.indexOf(songLevel.trim().lowercase()).let { if (it >= 0) it else 0 }
+    return (NETEASE_LEVEL_ORDER.subList(from, NETEASE_LEVEL_ORDER.size).take(2) + "exhigh").distinct()
+}
+
+internal fun neteaseVipLabel(vipType: Int): String? = when {
+    vipType == 12 -> "黑胶SVIP"
+    vipType == 11 -> "黑胶VIP"
+    vipType > 0 -> "会员"
+    else -> null
 }
 
 @Serializable
@@ -790,7 +814,13 @@ private data class NeteaseAlbum(
 )
 
 @Serializable
-private data class NeteasePrivilege(val fl: Int = 0, val pl: Int = 0, val fee: Int = 0)
+private data class NeteasePrivilege(
+    val fl: Int = 0,
+    val pl: Int = 0,
+    val fee: Int = 0,
+    val maxbrLevel: String = "",
+    val plLevel: String = "",
+)
 
 @Serializable
 private data class NeteaseSize(val size: Long = 0)
@@ -833,6 +863,7 @@ private data class NeteaseDetailSong(
     val ar: List<NeteaseArtist> = emptyList(),
     val al: NeteaseAlbum = NeteaseAlbum(),
     val dt: Int = 0,
+    val privilege: NeteasePrivilege = NeteasePrivilege(),
 )
 
 @Serializable

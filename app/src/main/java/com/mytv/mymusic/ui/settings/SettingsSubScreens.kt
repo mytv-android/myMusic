@@ -112,6 +112,7 @@ import coil3.compose.AsyncImage
 import com.mytv.mymusic.aggregate.MatchStrictness
 import com.mytv.mymusic.aggregate.PlaybackMode
 import com.mytv.mymusic.data.ProviderInfo
+import com.mytv.mymusic.ui.AccountProfile
 import com.mytv.mymusic.ui.Cover
 import com.mytv.mymusic.ui.CoverBox
 import com.mytv.mymusic.ui.InfoNote
@@ -829,6 +830,7 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                 AccountRow(
                     provider = provider,
                     loggedIn = !state.cookies[provider.id].isNullOrBlank(),
+                    profile = state.accountProfiles[provider.id],
                     index = index,
                     count = providers.size,
                     tv = tv,
@@ -910,6 +912,7 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
 private fun AccountRow(
     provider: ProviderInfo,
     loggedIn: Boolean,
+    profile: AccountProfile?,
     index: Int,
     count: Int,
     tv: Boolean,
@@ -917,18 +920,35 @@ private fun AccountRow(
     onCookie: () -> Unit,
     onLogout: () -> Unit,
 ) {
+    // 已登录且拿到资料时展示账号卡片：头像、昵称、会员/等级；拿不到资料就保持原来的平台行
+    val avatar = profile?.avatar.orEmpty()
+    val summary = when {
+        loggedIn -> {
+            val info = profile?.let { p -> listOf(p.nickname, p.detail).filter { it.isNotBlank() }.joinToString(" · ") }.orEmpty()
+            info.ifBlank { "已登录" }
+        }
+        provider.qrLogin -> "未登录"
+        tv -> "未登录 · 请在手机上登录"
+        else -> "未登录 · 仅支持 Cookie"
+    }
     ListRow(
         title = provider.name,
         index = index,
         count = count,
         onClick = if (tv) null else onCookie,
-        leading = { ProviderMark(provider.name, 40.dp, active = loggedIn) },
-        summary = when {
-            loggedIn -> "已登录"
-            provider.qrLogin -> "未登录"
-            tv -> "未登录 · 请在手机上登录"
-            else -> "未登录 · 仅支持 Cookie"
+        leading = {
+            if (loggedIn && avatar.isNotBlank()) {
+                AsyncImage(
+                    model = avatar,
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.size(40.dp).clip(CircleShape),
+                )
+            } else {
+                ProviderMark(provider.name, 40.dp, active = loggedIn)
+            }
         },
+        summary = summary,
         showChevron = false,
         trailing = {
             when {

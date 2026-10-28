@@ -668,6 +668,27 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         return isVip
     }
 
+    override suspend fun accountInfo(cookie: String): AccountInfo? {
+        val effective = effectiveCookie(cookie)
+        if (effective.isBlank()) return null
+        val body = runCatching {
+            NativeHttp.get(
+                BILIBILI_NAV_API,
+                headers = mapOf("Referer" to BILIBILI_REFERER),
+                cookie = effective,
+                userAgent = BILIBILI_USER_AGENT,
+            )
+        }.getOrNull() ?: return null
+        val response = runCatching { json.decodeFromString<BilibiliNavResponse>(body) }.getOrNull() ?: return null
+        val data = response.data ?: return null
+        if (response.code != 0 || !data.isLogin || data.uname.isBlank()) return null
+        val detail = listOfNotNull(
+            data.levelInfo.currentLevel.takeIf { it > 0 }?.let { "Lv.$it" },
+            if (data.vipStatus == 1 && data.vipType > 0) "大会员" else null,
+        ).joinToString(" · ")
+        return AccountInfo(nickname = data.uname, avatar = data.face, detail = detail)
+    }
+
     private fun buildSongsFromPages(
         bvid: String,
         rootTitle: String,
@@ -1014,7 +1035,13 @@ private data class BilibiliNavData(
     val isLogin: Boolean = false,
     val vipStatus: Int = 0,
     val vipType: Int = 0,
+    val uname: String = "",
+    val face: String = "",
+    @SerialName("level_info") val levelInfo: BilibiliNavLevel = BilibiliNavLevel(),
 )
+
+@Serializable
+private data class BilibiliNavLevel(@SerialName("current_level") val currentLevel: Int = 0)
 
 @Serializable
 private data class BilibiliQrGenerateResponse(

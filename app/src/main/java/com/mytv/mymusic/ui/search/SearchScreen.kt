@@ -46,9 +46,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -63,6 +65,7 @@ import androidx.compose.material.icons.filled.Merge
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
@@ -147,6 +150,7 @@ import com.mytv.mymusic.ui.CoverBox
 import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.PlaylistPickerSheet
 import com.mytv.mymusic.ui.SearchUiState
 import com.mytv.mymusic.ui.TrackActionsSheet
 import com.mytv.mymusic.ui.components.AppLoading
@@ -159,6 +163,8 @@ import com.mytv.mymusic.ui.components.PlayButtonSize
 import com.mytv.mymusic.ui.components.PlayPauseButton
 import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.SegmentGap
+import com.mytv.mymusic.ui.components.SelectionBar
+import com.mytv.mymusic.ui.components.SelectionState
 import com.mytv.mymusic.ui.components.Skeleton
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
@@ -212,6 +218,10 @@ private class SearchCtx(
 ) {
     val landing: Boolean get() = submittedQuery.value.isBlank()
     val hasQuery: Boolean get() = submittedQuery.value.isNotBlank()
+
+    /** 歌曲结果的多选状态，key 是聚合曲目 id；换关键词或换结果类型时退出。 */
+    val selection = SelectionState()
+    var pickerOpen: Boolean by mutableStateOf(false)
 
     fun play(track: CanonicalTrack) = actions.playTrack(track, groups.value)
     fun isCurrent(track: CanonicalTrack) = currentTrackId.value == track.id
@@ -337,6 +347,9 @@ fun SearchScreen(
         editing.value = false
         focusManager.clearFocus()
     }
+    // 换关键词或换结果类型后旧的选择没有意义；多选优先于收起键盘的返回行为
+    LaunchedEffect(search.submittedQuery, search.kind) { ctx.selection.exit() }
+    BackHandler(enabled = ctx.selection.active) { ctx.selection.exit() }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         if (window.isTv) {
@@ -366,6 +379,24 @@ fun SearchScreen(
                 actionTrack.value = null
                 actions.openMerge(track)
             },
+        )
+    }
+    if (ctx.pickerOpen) {
+        // 多选加入歌单：每条聚合曲目取当前最优音源的那首存进本地歌单
+        val pickedSongs = ctx.groups.value
+            .filter { it.id in ctx.selection.selected }
+            .mapNotNull { preferredSong(it, state.cookies) }
+        PlaylistPickerSheet(
+            playlists = playlists,
+            onPick = { id ->
+                actions.addSongsToPlaylist(id, pickedSongs)
+                ctx.selection.exit()
+            },
+            onCreate = { name ->
+                actions.addSongsToNewPlaylist(name, pickedSongs)
+                ctx.selection.exit()
+            },
+            onDismiss = { ctx.pickerOpen = false },
         )
     }
 }
@@ -798,6 +829,43 @@ private fun PlatformsNote(ctx: SearchCtx) {
 
 /* ---------------- 结果 ---------------- */
 
+/**
+ * 歌曲结果的多选：未激活时是右对齐的小“多选”按钮（电视也靠它进入，长按在电视上被菜单占用），
+ * 激活后换成批量操作条。选择只作用于结果行（最佳匹配卡不参与）。
+ */
+@Composable
+private fun SearchSelectionHeader(ctx: SearchCtx, modifier: Modifier = Modifier) {
+    val groups = ctx.groups.value
+    if (groups.size < 2) return
+    val selection = ctx.selection
+    val rowIds = groups.drop(1).map { it.id }
+    if (!selection.active) {
+        Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(
+                onClick = selection::start,
+                modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+            ) {
+                Icon(Icons.Filled.DoneAll, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("多选", Modifier.semantics { contentDescription = "批量选择歌曲" })
+            }
+        }
+        return
+    }
+    SelectionBar(
+        count = selection.selected.size,
+        allSelected = selection.selected.containsAll(rowIds),
+        onToggleAll = { selection.toggleAll(rowIds) },
+        onPlay = {
+            val picked = groups.filter { it.id in selection.selected }
+            if (picked.isNotEmpty()) ctx.actions.playTrack(picked.first(), picked)
+        },
+        onAddTo = { ctx.pickerOpen = true },
+        onExit = { selection.exit() },
+        modifier = modifier,
+    )
+}
+
 @Composable
 private fun ResultsList(ctx: SearchCtx, rowWidth: Dp) {
     val window = LocalAppWindow.current
@@ -817,6 +885,7 @@ private fun ResultsList(ctx: SearchCtx, rowWidth: Dp) {
         ),
     ) {
         if (ctx.kind.value == SearchKind.Song) {
+            item("selheader", contentType = "selheader") { SearchSelectionHeader(ctx, Modifier.padding(bottom = 8.dp)) }
             songItems(ctx, songResults, rowWidth, bestInline = true, altExpanded = altExpanded, onToggleAlt = { altExpanded = !altExpanded })
             if (window.isPhone && !ctx.loading.value && ctx.history.value.isNotEmpty()) {
                 item("history", contentType = "history") { Column { HistorySection(ctx, big = false) } }
@@ -848,11 +917,14 @@ private fun SongResultsTwoPane(ctx: SearchCtx, rowWidth: Dp) {
                 if (groups.isNotEmpty()) BestMatchCard(ctx, groups.first(), vertical = true) else BestSkeleton(vertical = true)
             }
         }
-        LazyColumn(
-            Modifier.weight(1f).fillMaxHeight(),
-            contentPadding = PaddingValues(top = 4.dp, bottom = bottom),
-        ) {
-            songItems(ctx, results, rowWidth, bestInline = false, altExpanded = altExpanded, onToggleAlt = { altExpanded = !altExpanded })
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            SearchSelectionHeader(ctx, Modifier.padding(bottom = 8.dp))
+            LazyColumn(
+                Modifier.weight(1f).fillMaxHeight(),
+                contentPadding = PaddingValues(top = 4.dp, bottom = bottom),
+            ) {
+                songItems(ctx, results, rowWidth, bestInline = false, altExpanded = altExpanded, onToggleAlt = { altExpanded = !altExpanded })
+            }
         }
     }
 }
@@ -983,20 +1055,38 @@ private fun SearchSongRow(
     val window = LocalAppWindow.current
     val cookies = ctx.cookies.value
     var menuOpen by remember { mutableStateOf(false) }
+    val picking = ctx.selection.active
+    val isSelected = picking && track.id in ctx.selection.selected
     val wide = rowWidth >= 560.dp
     val inlineMax = if (rowWidth >= 420.dp) 4 else 3
-    val badges: (@Composable RowScope.() -> Unit)? = if (wide) {
+    val badges: (@Composable RowScope.() -> Unit)? = if (wide || picking) {
         null
     } else {
         { PlatformBadges(track, cookies, max = inlineMax) }
     }
-    val trailing: (@Composable RowScope.() -> Unit)? = if (!wide && !window.isTablet) {
-        null
-    } else {
-        {
-            if (wide) PlatformBadges(track, cookies, max = 5, modifier = Modifier.padding(end = 4.dp))
-            if (window.isTablet) MoreActionButton(ctx, track, menuOpen, { menuOpen = it })
+    val selectTrailing: (@Composable RowScope.() -> Unit) = {
+        Icon(
+            if (isSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+            contentDescription = if (isSelected) "取消选择“${track.title}”" else "选择“${track.title}”",
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(end = 4.dp),
+        )
+    }
+    val trailing: (@Composable RowScope.() -> Unit)? = when {
+        picking -> selectTrailing
+        !wide && !window.isTablet -> null
+        else -> {
+            {
+                if (wide) PlatformBadges(track, cookies, max = 5, modifier = Modifier.padding(end = 4.dp))
+                if (window.isTablet) MoreActionButton(ctx, track, menuOpen, { menuOpen = it })
+            }
         }
+    }
+    val rowMore: (() -> Unit)? = if (picking || window.isTablet) null else ({ ctx.openActions(track) })
+    val rowLongPress: (() -> Unit)? = when {
+        picking -> null
+        window.isTablet -> ({ menuOpen = true })
+        else -> ({ ctx.openActions(track) })
     }
     SongRow(
         title = track.title,
@@ -1008,13 +1098,18 @@ private fun SearchSongRow(
         cover = track.cover,
         index = index,
         count = count,
-        onClick = { ctx.play(track) },
-        modifier = modifier.onMenuKey { ctx.openActions(track) },
+        onClick = {
+            if (picking) ctx.selection.toggle(track.id) else ctx.play(track)
+        },
+        container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = modifier.onMenuKey {
+            if (ctx.selection.active) ctx.selection.toggle(track.id) else ctx.openActions(track)
+        },
         playing = ctx.isCurrent(track),
         badges = badges,
         trailing = trailing,
-        onMore = if (window.isTablet) null else ({ ctx.openActions(track) }),
-        onLongClick = if (window.isTablet) ({ menuOpen = true }) else ({ ctx.openActions(track) }),
+        onMore = rowMore,
+        onLongClick = rowLongPress,
     )
 }
 
@@ -1973,6 +2068,10 @@ private fun TvSongResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit, rowWidth: D
             contentPadding = PaddingValues(top = 4.dp, bottom = 48.dp, start = 4.dp, end = 4.dp),
         ) {
             item("kinds", contentType = "kinds") { KindToggle(ctx, Modifier.widthIn(max = 420.dp).fillMaxWidth().padding(bottom = 12.dp)) }
+            // 电视进入多选后退出键（返回）已经由 BackHandler 接管，操作条放在列表最上面
+            if (ctx.kind.value == SearchKind.Song) {
+                item("selheader", contentType = "selheader") { SearchSelectionHeader(ctx, Modifier.padding(bottom = 8.dp)) }
+            }
             songItems(
                 ctx,
                 results,
@@ -1981,7 +2080,7 @@ private fun TvSongResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit, rowWidth: D
                 altExpanded = altExpanded,
                 onToggleAlt = { altExpanded = !altExpanded },
                 statusInList = false,
-                firstFocus = if (groups.size > 1) target else null,
+                firstFocus = if (groups.size > 1 && !ctx.selection.active) target else null,
                 stateFocus = if (groups.isEmpty()) target else null,
             )
         }

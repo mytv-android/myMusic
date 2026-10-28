@@ -1,10 +1,12 @@
 package com.mytv.mymusic.ui.charts
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -34,8 +36,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -101,12 +106,15 @@ import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicChip
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.PlaylistPickerSheet
 import com.mytv.mymusic.ui.TrackActionsSheet
 import com.mytv.mymusic.ui.components.AppLoading
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.PageScaffold
 import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.SegmentGap
+import com.mytv.mymusic.ui.components.SelectionBar
+import com.mytv.mymusic.ui.components.SelectionState
 import com.mytv.mymusic.ui.components.Skeleton
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
@@ -137,9 +145,12 @@ fun ChartsScreen(
     var target by remember { mutableStateOf<SongAction?>(null) }
     val onMore: (Song, List<Song>) -> Unit = { song, queue -> target = SongAction(song, queue) }
     if (LocalAppWindow.current.isTv) {
+        // 电视榜单首页是卡片流，没有歌曲行；批量选择在榜单详情页（CollectionScreen）里
         TvCharts(charts, sources, actions, recommended, history)
     } else {
-        PhoneCharts(state, charts, sources, actions, onMore)
+        val selection = remember { SelectionState() }
+        BackHandler(enabled = selection.active) { selection.exit() }
+        PhoneCharts(state, charts, sources, actions, onMore, selection, playlists)
     }
     target?.let { SongActionsSheet(it, favorites, playlists, actions) { target = null } }
 }
@@ -151,14 +162,26 @@ private fun PhoneCharts(
     sources: List<ProviderInfo>,
     actions: MusicActions,
     onMore: (Song, List<Song>) -> Unit,
+    selection: SelectionState,
+    playlists: List<LocalPlaylistSummary>,
 ) {
     val window = LocalAppWindow.current
     val gutter = window.gutter
     val playingKey = state.current?.key
+    // 主推榜单 + 平台热歌合并成可选池，按 key 去重（同一首可能两边都有）
+    val pool = remember(charts.featuredSongs, charts.hotSongs) {
+        (charts.featuredSongs + charts.hotSongs).distinctBy { it.key }
+    }
+    var pickerOpen by remember { mutableStateOf(false) }
     PageScaffold(
         title = "榜单",
         subtitle = chartsSubtitle(charts),
         actions = {
+            IconButton(
+                onClick = { selection.start() },
+                enabled = pool.isNotEmpty(),
+                modifier = Modifier.tvFocusRing(CircleShape),
+            ) { Icon(Icons.Filled.DoneAll, "批量选择歌曲") }
             IconButton(onClick = actions::refreshCharts) { Icon(Icons.Filled.Refresh, "刷新榜单") }
         },
     ) { padding ->
@@ -195,6 +218,22 @@ private fun PhoneCharts(
                         )
                     }
                     else -> {
+                        if (selection.active) {
+                            item(key = "selbar", contentType = "selbar") {
+                                SelectionBar(
+                                    count = selection.selected.size,
+                                    allSelected = pool.isNotEmpty() && selection.selected.containsAll(pool.map { it.key }),
+                                    onToggleAll = { selection.toggleAll(pool.map { it.key }) },
+                                    onPlay = {
+                                        val picked = pool.filter { it.key in selection.selected }
+                                        if (picked.isNotEmpty()) actions.play(picked.first(), picked)
+                                    },
+                                    onAddTo = { pickerOpen = true },
+                                    onExit = { selection.exit() },
+                                    modifier = Modifier.padding(horizontal = gutter).padding(bottom = 8.dp),
+                                )
+                            }
+                        }
                         if (!charts.supported) {
                             item(key = "note", contentType = "note") {
                                 Box(Modifier.padding(horizontal = gutter, vertical = 4.dp)) {
@@ -222,7 +261,7 @@ private fun PhoneCharts(
                                 ) {
                                     if (hasFeatured) {
                                         Column(Modifier.weight(1.15f)) {
-                                            FeaturedChart(featured!!, featuredSongs, playingKey, actions, onMore)
+                                            FeaturedChart(featured!!, featuredSongs, playingKey, actions, onMore, selection)
                                         }
                                     }
                                     if (more.isNotEmpty()) {
@@ -241,7 +280,7 @@ private fun PhoneCharts(
                             if (hasFeatured) {
                                 item(key = "featured", contentType = "featured") {
                                     Column(Modifier.padding(horizontal = gutter)) {
-                                        FeaturedChart(featured!!, featuredSongs, playingKey, actions, onMore)
+                                        FeaturedChart(featured!!, featuredSongs, playingKey, actions, onMore, selection)
                                     }
                                 }
                             }
@@ -274,6 +313,18 @@ private fun PhoneCharts(
                                     }
                                     Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
                                         charts.hotSongs.forEachIndexed { index, song ->
+                                            val picking = selection.active
+                                            val isSelected = picking && song.key in selection.selected
+                                            val rowMore: (() -> Unit)? = if (picking) {
+                                                null
+                                            } else {
+                                                { onMore(song, charts.hotSongs) }
+                                            }
+                                            val rowLongPress: (() -> Unit)? = if (picking) {
+                                                null
+                                            } else {
+                                                { selection.enter(song.key) }
+                                            }
                                             SongRow(
                                                 title = song.title,
                                                 subtitle = song.subtitle,
@@ -282,8 +333,21 @@ private fun PhoneCharts(
                                                 count = charts.hotSongs.size,
                                                 rank = index + 1,
                                                 playing = playingKey == song.key,
-                                                onClick = { actions.play(song, charts.hotSongs) },
-                                                onMore = { onMore(song, charts.hotSongs) },
+                                                container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                                                onClick = { if (picking) selection.toggle(song.key) else actions.play(song, charts.hotSongs) },
+                                                trailing = if (picking) {
+                                                    {
+                                                        Icon(
+                                                            if (isSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                                                            contentDescription = if (isSelected) "取消选择“${song.title}”" else "选择“${song.title}”",
+                                                            tint = MaterialTheme.colorScheme.primary,
+                                                        )
+                                                    }
+                                                } else {
+                                                    null
+                                                },
+                                                onMore = rowMore,
+                                                onLongClick = rowLongPress,
                                             )
                                         }
                                     }
@@ -302,6 +366,20 @@ private fun PhoneCharts(
                 }
             }
         }
+    }
+    if (pickerOpen) {
+        PlaylistPickerSheet(
+            playlists = playlists,
+            onPick = { id ->
+                actions.addSongsToPlaylist(id, pool.filter { it.key in selection.selected })
+                selection.exit()
+            },
+            onCreate = { name ->
+                actions.addSongsToNewPlaylist(name, pool.filter { it.key in selection.selected })
+                selection.exit()
+            },
+            onDismiss = { pickerOpen = false },
+        )
     }
 }
 
@@ -399,7 +477,9 @@ private fun FeaturedChart(
     playingKey: String?,
     actions: MusicActions,
     onMore: (Song, List<Song>) -> Unit,
+    selection: SelectionState,
 ) {
+    val picking = selection.active
     SectionLabel(chart.name.ifBlank { "榜首" }) {
         FilledTonalButton(onClick = { actions.playChart(chart) }, modifier = Modifier.heightIn(min = 40.dp)) {
             Icon(Icons.Filled.PlayArrow, null, Modifier.size(18.dp))
@@ -412,10 +492,23 @@ private fun FeaturedChart(
         ChartSpotlight(
             song = first,
             single = songs.size == 1,
-            onPlay = { actions.play(first, songs) },
-            onMore = { onMore(first, songs) },
+            selecting = picking,
+            selected = first.key in selection.selected,
+            onPlay = { if (picking) selection.toggle(first.key) else actions.play(first, songs) },
+            onMore = if (picking) null else ({ onMore(first, songs) }),
         )
         songs.drop(1).forEachIndexed { offset, song ->
+            val isSelected = song.key in selection.selected
+            val rowMore: (() -> Unit)? = if (picking) {
+                null
+            } else {
+                { onMore(song, songs) }
+            }
+            val rowLongPress: (() -> Unit)? = if (picking) {
+                null
+            } else {
+                { selection.enter(song.key) }
+            }
             SongRow(
                 title = song.title,
                 subtitle = song.subtitle,
@@ -424,8 +517,21 @@ private fun FeaturedChart(
                 count = songs.size,
                 rank = offset + 2,
                 playing = playingKey == song.key,
-                onClick = { actions.play(song, songs) },
-                onMore = { onMore(song, songs) },
+                container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                onClick = { if (picking) selection.toggle(song.key) else actions.play(song, songs) },
+                trailing = if (picking) {
+                    {
+                        Icon(
+                            if (isSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                            contentDescription = if (isSelected) "取消选择“${song.title}”" else "选择“${song.title}”",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                } else {
+                    null
+                },
+                onMore = rowMore,
+                onLongClick = rowLongPress,
             )
         }
     }
@@ -438,7 +544,14 @@ private fun FeaturedChart(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChartSpotlight(song: Song, single: Boolean, onPlay: () -> Unit, onMore: () -> Unit) {
+private fun ChartSpotlight(
+    song: Song,
+    single: Boolean,
+    selecting: Boolean,
+    selected: Boolean,
+    onPlay: () -> Unit,
+    onMore: (() -> Unit)?,
+) {
     val shape = if (single) RoundedCornerShape(28.dp) else RoundedCornerShape(28.dp, 28.dp, 4.dp, 4.dp)
     val content = MaterialTheme.colorScheme.onTertiaryContainer
     Row(
@@ -447,6 +560,7 @@ private fun ChartSpotlight(song: Song, single: Boolean, onPlay: () -> Unit, onMo
             .heightIn(min = 124.dp)
             .clip(shape)
             .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
             .combinedClickable(onClick = onPlay, onLongClick = onMore, onLongClickLabel = "更多操作")
             .padding(start = 18.dp, end = 14.dp, top = 14.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -471,11 +585,31 @@ private fun ChartSpotlight(song: Song, single: Boolean, onPlay: () -> Unit, onMo
             FilledIconButton(
                 onClick = onPlay,
                 modifier = Modifier.padding(top = 6.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.tertiary,
-                    contentColor = MaterialTheme.colorScheme.onTertiary,
-                ),
-            ) { Icon(Icons.Filled.PlayArrow, "播放${song.title}") }
+                colors = if (selecting) {
+                    IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary,
+                        contentColor = MaterialTheme.colorScheme.onTertiary,
+                    )
+                },
+            ) {
+                Icon(
+                    when {
+                        !selecting -> Icons.Filled.PlayArrow
+                        selected -> Icons.Filled.CheckCircle
+                        else -> Icons.Filled.RadioButtonUnchecked
+                    },
+                    contentDescription = when {
+                        !selecting -> "播放${song.title}"
+                        selected -> "取消选择“${song.title}”"
+                        else -> "选择“${song.title}”"
+                    },
+                )
+            }
         }
         Cover(song.cover, song.title, 92.dp, shape = MaterialShapes.Cookie12Sided.toShape())
     }

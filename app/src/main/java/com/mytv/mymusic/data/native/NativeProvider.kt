@@ -16,6 +16,9 @@ data class SongSearchPage(
     val hasMore: Boolean,
 )
 
+/** 已登录账号的资料，用于账号卡片；拿不到就只显示“已登录”。 */
+data class AccountInfo(val nickname: String = "", val avatar: String = "", val detail: String = "")
+
 interface NativeProvider {
     val info: ProviderInfo
     val supportsSearchPagination: Boolean get() = false
@@ -86,6 +89,9 @@ interface NativeProvider {
 
     suspend fun checkLogin(sessionId: String, key: String): QRCheckResult =
         throw UnsupportedOperationException("${info.name} 暂不支持扫码登录")
+
+    /** 登录账号的昵称、头像、会员/等级；null 表示这个平台没有实现或资料不可用。 */
+    suspend fun accountInfo(cookie: String): AccountInfo? = null
 }
 
 abstract class BaseNativeProvider(override val info: ProviderInfo) : NativeProvider

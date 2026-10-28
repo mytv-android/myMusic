@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -30,9 +31,12 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
@@ -41,6 +45,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -86,6 +91,7 @@ import com.mytv.mymusic.ui.LocalPlaylistDetail
 import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.PlaylistPickerSheet
 import com.mytv.mymusic.ui.TrackActionsSheet
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.AppLoading
@@ -96,6 +102,8 @@ import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.PageScaffold
 import com.mytv.mymusic.ui.components.PlayAllSplitButton
 import com.mytv.mymusic.ui.components.SegmentGap
+import com.mytv.mymusic.ui.components.SelectionBar
+import com.mytv.mymusic.ui.components.SelectionState
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.components.distinctKeys
@@ -144,6 +152,9 @@ fun LocalPlaylistScreen(
     var deleteOpen by remember { mutableStateOf(false) }
     var addOpen by remember { mutableStateOf(false) }
     var actionEntry by remember { mutableStateOf<Pair<Song, PlaylistEntryEntity>?>(null) }
+    val selection = remember { SelectionState() }
+    var pickerOpen by remember { mutableStateOf(false) }
+    BackHandler(enabled = selection.active) { selection.exit() }
 
     // 确认删除会返回，软删除写库后 deletedAt 变化又会返回一次（退场动画期间页面仍在组合中），只能返回一次
     var left by remember { mutableStateOf(false) }
@@ -170,6 +181,17 @@ fun LocalPlaylistScreen(
     val remove: (PlaylistEntryEntity, Song) -> Unit = { entry, song ->
         actions.removeEntry(playlistId, entry.position)
         undo.show("已移除“${song.title}”") { actions.restoreEntry(entry) }
+    }
+    // 多选：移除一次重排，撤销按原位置逐条插回
+    val removeSelected: () -> Unit = {
+        val doomed = entries.filter { it.songKey in selection.selected }
+        if (doomed.isNotEmpty()) {
+            actions.removeEntries(playlistId, doomed.map { it.position })
+            undo.show("已移除 ${doomed.size} 首") {
+                doomed.sortedBy { it.position }.forEach { actions.restoreEntry(it) }
+            }
+            selection.exit()
+        }
     }
     val rowContainer = if (embedded) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLow
     val coverUrls = remember(songs) { songs.map { it.cover }.filter { it.isNotBlank() }.take(4) }
@@ -210,19 +232,48 @@ fun LocalPlaylistScreen(
                 contentType = { _, _ -> "song" },
             ) { index, entry ->
                 val song = detail?.songByPosition?.get(entry.position) ?: Song()
+                val picking = selection.active
+                val isSelected = picking && song.key in selection.selected
+                val rowMore: (() -> Unit)? = if (picking) {
+                    null
+                } else {
+                    { actionEntry = song to entry }
+                }
+                val rowLongPress: (() -> Unit)? = if (picking) {
+                    null
+                } else {
+                    { selection.enter(song.key) }
+                }
+                val selectTrailing: (@Composable RowScope.() -> Unit)? = if (picking) {
+                    {
+                        Icon(
+                            if (isSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                            contentDescription = if (isSelected) "取消选择“${song.title}”" else "选择“${song.title}”",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                } else {
+                    null
+                }
+                val durationTrailing: (@Composable RowScope.() -> Unit)? = if (song.duration > 0 && !window.isPhone) {
+                    {
+                        Text(formatDuration(song.duration), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    null
+                }
                 SongRow(
                     title = song.title,
                     subtitle = song.subtitle,
                     cover = song.cover,
                     index = index,
                     count = entries.size,
-                    onClick = { actions.play(song, songs) },
+                    onClick = { if (picking) selection.toggle(song.key) else actions.play(song, songs) },
                     playing = state.current?.key == song.key,
-                    container = rowContainer,
-                    trailing = if (song.duration > 0 && !window.isPhone) ({
-                        Text(formatDuration(song.duration), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }) else null,
-                    onMore = { actionEntry = song to entry },
+                    container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else rowContainer,
+                    trailing = selectTrailing ?: durationTrailing,
+                    onMore = rowMore,
+                    onLongClick = rowLongPress,
                 )
             }
         }
@@ -290,14 +341,30 @@ fun LocalPlaylistScreen(
         }
     }
     val playActions: @Composable (Boolean) -> Unit = { showEdit ->
-        PlaylistActionRow(
-            enabled = songs.isNotEmpty(),
-            onPlayAll = { actions.play(songs.first(), songs) },
-            onShuffle = { val list = songs.shuffled(); actions.play(list.first(), list) },
-            onAdd = { addOpen = true },
-            menu = if (showEdit) menu else null,
-            playFocus = playFocus,
-        )
+        if (selection.active) {
+            SelectionBar(
+                count = selection.selected.size,
+                allSelected = songs.isNotEmpty() && selection.selected.containsAll(songs.map { it.key }),
+                onToggleAll = { selection.toggleAll(songs.map { it.key }) },
+                onPlay = {
+                    val picked = songs.filter { it.key in selection.selected }
+                    if (picked.isNotEmpty()) actions.play(picked.first(), picked)
+                },
+                onAddTo = { pickerOpen = true },
+                onExit = { selection.exit() },
+                onRemove = removeSelected,
+            )
+        } else {
+            PlaylistActionRow(
+                enabled = songs.isNotEmpty(),
+                onPlayAll = { actions.play(songs.first(), songs) },
+                onShuffle = { val list = songs.shuffled(); actions.play(list.first(), list) },
+                onAdd = { addOpen = true },
+                menu = if (showEdit) menu else null,
+                playFocus = playFocus,
+                onMultiSelect = if (songs.isNotEmpty()) ({ selection.start() }) else null,
+            )
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -438,6 +505,20 @@ fun LocalPlaylistScreen(
             onDismiss = { actionEntry = null },
         )
     }
+    if (pickerOpen) {
+        PlaylistPickerSheet(
+            playlists = playlists.filterNot { it.id == playlistId },
+            onPick = { id ->
+                actions.addSongsToPlaylist(id, songs.filter { it.key in selection.selected })
+                selection.exit()
+            },
+            onCreate = { name ->
+                actions.addSongsToNewPlaylist(name, songs.filter { it.key in selection.selected })
+                selection.exit()
+            },
+            onDismiss = { pickerOpen = false },
+        )
+    }
     if (addOpen) {
         AddTracksSheet(
             search = librarySearch,
@@ -511,7 +592,9 @@ private fun PlaylistHeader(
     }
 }
 
-/** 播放全部（Split button，展开随机播放）+ 添加；大屏再加编辑和更多。 */
+/**
+ * 播放全部（Split button，展开随机播放）+ 添加；大屏再加编辑和更多。多选入口在最右侧。
+ */
 @Composable
 private fun PlaylistActionRow(
     enabled: Boolean,
@@ -520,6 +603,7 @@ private fun PlaylistActionRow(
     onAdd: () -> Unit,
     menu: PlaylistMenu?,
     playFocus: FocusRequester,
+    onMultiSelect: (() -> Unit)? = null,
 ) {
     Row(
         Modifier.fillMaxWidth(),
@@ -542,6 +626,11 @@ private fun PlaylistActionRow(
                 Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("添加")
+            }
+        }
+        if (enabled && onMultiSelect != null) {
+            FilledTonalIconButton(onClick = onMultiSelect, modifier = Modifier.tvFocusRing(CircleShape)) {
+                Icon(Icons.Filled.DoneAll, contentDescription = "批量选择歌曲")
             }
         }
         if (menu != null) {
