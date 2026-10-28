@@ -32,9 +32,11 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.State
@@ -73,7 +75,6 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.lerp
 import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.tvFocusRing
@@ -99,24 +100,25 @@ data class TransportGroupSize(
     val width: Dp get() = sideWidth * 2 + playWidth + gap * 2
 
     companion object {
-        /** 手机播放页：312×88，播放段 144。 */
-        val Phone = TransportGroupSize(88.dp, 80.dp, 144.dp, 34.dp, 40.dp, pressGrow = 20.dp)
+        /** 手机播放页：256×88，播放键 88 见方。 */
+        val Phone = TransportGroupSize(88.dp, 80.dp, 88.dp, 34.dp, 40.dp, pressGrow = 20.dp)
 
-        /** 平板播放栏：320×88。 */
-        val Tablet = TransportGroupSize(88.dp, 80.dp, 152.dp, 34.dp, 40.dp, pressGrow = 20.dp)
+        /** 平板播放栏：256×88。 */
+        val Tablet = TransportGroupSize(88.dp, 80.dp, 88.dp, 34.dp, 40.dp, pressGrow = 20.dp)
 
-        /** 手机歌词页底部的小号：高 56，52 / 88 / 52。 */
-        val Compact = TransportGroupSize(56.dp, 52.dp, 88.dp, 26.dp, 32.dp, pressGrow = 12.dp)
+        /** 手机歌词页底部的小号：高 56，播放键 56 见方。 */
+        val Compact = TransportGroupSize(56.dp, 52.dp, 56.dp, 26.dp, 32.dp, pressGrow = 12.dp)
 
-        /** 电视控制条：236×56，64 / 100 / 64（按设计稿；控制条分两行，按钮组压到 56 高给进度条让出一行）。 */
-        val Tv = TransportGroupSize(56.dp, 64.dp, 100.dp, 26.dp, 32.dp, pressGrow = 14.dp)
+        /** 电视控制条：192×56（控制条分两行，按钮组压到 56 高给进度条让出一行）。 */
+        val Tv = TransportGroupSize(56.dp, 64.dp, 56.dp, 26.dp, 32.dp, pressGrow = 14.dp)
     }
 }
 
 /**
  * 上一首 / 播放 / 下一首连成一块的按钮组：两端满圆、内侧 [TransportGroupSize.innerCorner]。
- * 播放中中段变胶囊、间距拉开（默认空间弹簧）；按下哪段哪段变宽，相邻段让位（快速空间弹簧）。
- * 宽度和间距只在布局阶段读，圆角只在图层里读：按下和播放状态的过渡不触发组合。
+ * 中间播放键是 M3E 花瓣形（Cookie12），各尺寸里播放段宽=高，花瓣才不会被拉扁。
+ * 按下哪段哪段变宽，相邻段让位（快速空间弹簧）；播放中两段间距拉开（默认空间弹簧）。
+ * 宽度和间距只在布局阶段读，形状只在图层里读：按下和播放状态的过渡不触发组合。
  *
  * 不用 material3 的 ButtonGroup：alpha25 的版本按条目 DSL 布局并在放不下时把按钮收进溢出菜单，
  * 不支持固定段宽、动画间距和中段单独变形，窄屏上还可能把上一首 / 下一首藏进菜单。
@@ -144,13 +146,14 @@ fun TransportButtonGroup(
     val playGrow = animateFloatAsState(if (playPressed) 1f else 0f, motion.fastSpatialSpec(), label = "playGrow")
     val trailGrow = animateFloatAsState(if (trailPressed) 1f else 0f, motion.fastSpatialSpec(), label = "trailGrow")
     val gap = animateDpAsState(if (playing) size.playingGap else size.gap, motion.defaultSpatialSpec(), label = "groupGap")
-    val pill = animateFloatAsState(if (playing) 1f else 0f, motion.defaultSpatialSpec(), label = "playPill")
 
     val outer = size.height / 2
     val inner = size.innerCorner
     // 媒体控制在 RTL 下也不镜像，所以用绝对方向的圆角和摆放
     val leadShape = remember(size) { AbsoluteRoundedCornerShape(outer, inner, inner, outer) }
     val trailShape = remember(size) { AbsoluteRoundedCornerShape(inner, outer, outer, inner) }
+    // 播放键的花瓣形容器，电视焦点环也沿花瓣描
+    val playShape = MaterialShapes.Cookie12Sided.toShape()
     val secondary = MaterialTheme.colorScheme.secondaryContainer
     val onSecondary = MaterialTheme.colorScheme.onSecondaryContainer
 
@@ -167,8 +170,8 @@ fun TransportButtonGroup(
             ) { Icon(Icons.Filled.SkipPrevious, null, Modifier.size(size.iconSize)) }
             GroupSegment(
                 onClick = onPlayPause,
-                shape = { RoundedCornerShape(lerp(inner.value, outer.value, pill.value).dp) },
-                focusShape = if (playing) CircleShape else RoundedCornerShape(inner),
+                shape = { playShape },
+                focusShape = playShape,
                 container = MaterialTheme.colorScheme.primary,
                 content = MaterialTheme.colorScheme.onPrimary,
                 interaction = playSource,

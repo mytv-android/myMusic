@@ -2,8 +2,8 @@ package com.mytv.mymusic.ui.player
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
@@ -40,10 +40,12 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalFloatingToolbar
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.State
@@ -385,21 +387,24 @@ private fun DockSkipButton(icon: ImageVector, description: String, onClick: () -
     }
 }
 
-/** 竖向工具栏里的播放键：72dp primary 方块、24dp 圆角，按下时圆角收到 16dp（快速空间弹簧，只在图层里读）。 */
+/** 竖向工具栏里的播放键：72dp 花瓣形 primary 容器，按下时轻微收缩（快速空间弹簧，只在图层里读）。 */
 @Composable
 private fun DockPlayButton(playing: Boolean, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val corner = animateDpAsState(if (pressed) 16.dp else 24.dp, MaterialTheme.motionScheme.fastSpatialSpec(), label = "dockPlayCorner")
+    val cookie = MaterialShapes.Cookie12Sided.toShape()
+    val scale = animateFloatAsState(if (pressed) 0.92f else 1f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "dockPlayScale")
     Surface(
         onClick = onClick,
         modifier = Modifier
             .size(72.dp)
             .graphicsLayer {
-                shape = RoundedCornerShape(corner.value)
+                shape = cookie
                 clip = true
+                scaleX = scale.value
+                scaleY = scale.value
             }
-            .tvFocusRing(RoundedCornerShape(24.dp))
+            .tvFocusRing(cookie)
             .semantics {
                 role = Role.Button
                 contentDescription = if (playing) "暂停" else "播放"
