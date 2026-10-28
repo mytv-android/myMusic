@@ -59,6 +59,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -122,6 +124,8 @@ fun MyMusicApp(model: MusicViewModel) {
     val sleep by model.sleepTimer.collectAsState()
     // 不在这里读 value：进度每 500ms 变一次，读了会让整棵界面跟着重组
     val position = model.position.collectAsState()
+    val update by model.updateDetails.collectAsState()
+    val updateProgress = model.updateState.collectAsState()
 
     val actions = remember(model) { MusicActions(model) }
     val snackbar = remember { SnackbarHostState() }
@@ -163,8 +167,9 @@ fun MyMusicApp(model: MusicViewModel) {
         }
     }
 
+    // 每次回到前台都通知一次：从“安装未知来源”设置页授权返回后要靠它继续安装
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.onAppForeground() }
     LaunchedEffect(Unit) {
-        model.onAppForeground()
         // 两个互不相关的收集器合并成一个 effect，少一套协程与 effect 节点
         launch { model.syncEvents.collect { event -> snackbar.showSnackbar(event.message) } }
         model.events.collect { event ->
@@ -345,6 +350,13 @@ fun MyMusicApp(model: MusicViewModel) {
                 onDismiss = actions::closeMerge,
             )
         }
+        UpdateDialog(
+            update = update,
+            skippedCode = state.skippedUpdateCode,
+            suppressed = route == "settings/about",
+            actions = actions,
+            progress = { updateProgress.value.progress },
+        )
     }
 }
 

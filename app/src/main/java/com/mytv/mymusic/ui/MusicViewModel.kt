@@ -175,6 +175,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var collectionGeneration = 0
     private var failoverInProgress = false
     private var updateDownloadJob: Job? = null
+    private var pendingUpdateInstall = false
     private var splitOverrideKeys: Set<String> = emptySet()
     private var mergeTargets: Map<String, String> = emptyMap()
     private var aggregateSongs: Map<String, List<Song>> = emptyMap()
@@ -336,12 +337,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val settings = app.settings.state.first()
                 loadCharts(providerId = settings.chartsSource.ifBlank { null }, force = true)
                 loadPlaylists(providerId = settings.playlistsSource.ifBlank { null }, force = true)
-                if (System.currentTimeMillis() - settings.lastUpdateCheck > UPDATE_CHECK_INTERVAL_MS) {
-                    app.update.check(manual = false)
-                }
             }
             app.sync.syncIfStaleOnForeground()
         }
+        // 每次启动都检查一次更新，发现新版本由顶层弹窗提示；不依赖平台信息是否加载成功
+        viewModelScope.launch { app.update.check(manual = false) }
         viewModelScope.launch(Dispatchers.IO) {
             val cutoff = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000
             runCatching { aggregateDao.pruneMatches(cutoff) }
@@ -2738,7 +2738,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun downloadUpdate() {
         updateDownloadJob?.cancel()
-        updateDownloadJob = viewModelScope.launch { app.update.download() }
+        updateDownloadJob = viewModelScope.launch {
+            if (!app.update.download()) return@launch
+            // 下载并校验完成后直接拉起安装器，用户不需要再点一次
+            launchUpdateInstaller()
+        }
     }
 
     fun cancelUpdateDownload() {
@@ -2748,13 +2752,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun installUpdate() {
+        viewModelScope.launch { launchUpdateInstaller() }
+    }
+
+    /** 拉起系统安装器。缺少“安装未知来源”权限时打开系统设置，授权返回后自动继续安装。 */
+    private suspend fun launchUpdateInstaller() {
         val file = updateState.value.file ?: return
-        viewModelScope.launch {
-            when (app.update.install(file)) {
-                com.mytv.mymusic.data.update.InstallResult.Launched -> Unit
-                com.mytv.mymusic.data.update.InstallResult.NeedsPermission -> app.update.openInstallPermissionSettings()
-                com.mytv.mymusic.data.update.InstallResult.Failed -> Unit
+        when (app.update.install(file)) {
+            com.mytv.mymusic.data.update.InstallResult.Launched -> pendingUpdateInstall = false
+            com.mytv.mymusic.data.update.InstallResult.NeedsPermission -> {
+                pendingUpdateInstall = true
+                app.update.openInstallPermissionSettings()
             }
+            com.mytv.mymusic.data.update.InstallResult.Failed -> pendingUpdateInstall = false
         }
     }
 
@@ -2788,6 +2798,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onAppForeground() {
         app.sync.syncIfStaleOnForeground()
+        // 从“安装未知来源”设置页返回：已授权就直接继续安装，不用再点按钮
+        if (pendingUpdateInstall && canInstallPackages()) {
+            pendingUpdateInstall = false
+            viewModelScope.launch { launchUpdateInstaller() }
+        }
+    }
+
+    private fun canInstallPackages(): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < 26) return true
+        return getApplication<Application>().packageManager.canRequestPackageInstalls()
     }
 
     /** 进入同步、音乐库或平台账号页面时拉取一次，避免两台设备停在不同版本。 */
@@ -2847,7 +2867,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val BROWSE_CACHE_MS = 10L * 60 * 1000
-        const val UPDATE_CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
         val LINK_PATTERN = Regex("""https?://\S+""", RegexOption.IGNORE_CASE)
     }
 }

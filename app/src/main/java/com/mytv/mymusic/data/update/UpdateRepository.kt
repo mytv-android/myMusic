@@ -366,6 +366,7 @@ class UpdateRepository(
             _state.update { it.copy(permissionRequired = true, error = "请先允许本应用安装未知来源的应用") }
             return InstallResult.NeedsPermission
         }
+        _state.update { it.copy(permissionRequired = false, error = "") }
         val uri = runCatching {
             FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         }.onFailure {
