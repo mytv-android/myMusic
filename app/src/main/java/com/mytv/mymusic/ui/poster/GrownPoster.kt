@@ -176,6 +176,9 @@ internal fun coverTreatment(current: Boolean, hasLyrics: Boolean, blurAllowed: B
     else -> CoverTreatment(blurDp = 0f, dim = NoBlurCoverDim, zoom = 1f, saturate = false)
 }
 
+/** 封面在播放页上或正在飞：和播放页的封面一样清晰、不压暗。 */
+private val FlyingCover = CoverTreatment(blurDp = 0f, dim = 0f, zoom = 1f, saturate = false)
+
 /** 序号两位补零：“正在播放 · 03”“第 07 首”。 */
 internal fun posterNumber(number: Int): String = number.toString().padStart(2, '0')
 
@@ -224,6 +227,9 @@ private const val CoverSaturation = 1.15f
  * @param focused 墙自己的焦点（电视方向键）停在这张卡上：和获得 Compose 焦点一样展开上一首 / 下一首。
  * @param primaryFocusRequester 挂在正在播放卡的播放键、别的歌卡的“播放”上，墙把焦点交进卡里时用。
  * @param coverModifier 加在封面层上，给 SharedCover 飞入飞出用。
+ * @param coverFlying 封面这会儿在播放页上或正在飞（手机正在播放的大卡）：封面按播放页那样清晰不压，
+ *   飞行时浮层里画的就是它，起飞不会一下变糊；压层、歌词和控件先隐去，落地后模糊、压暗和文字再一起淡入，
+ *   不会在浮层撤掉那一帧突然变暗、冒出文字。
  * @param coverPlaceholderKey 小格封面在 Coil 内存缓存里的键：大图加载完之前先拿它垫着，放大时不闪底色。
  */
 @Composable
@@ -254,6 +260,7 @@ internal fun GrownPoster(
     coverPlaceholderKey: String? = null,
     lyricsLoading: Boolean = false,
     lightsOut: Boolean = false,
+    coverFlying: Boolean = false,
 ) {
     val window = LocalAppWindow.current
     val style = GrownPosterStyle.of(wallMetricsFor(window.isTv, window.widthDp, window.heightDp))
@@ -268,7 +275,12 @@ internal fun GrownPoster(
     // 原文还在取、还在解析时先按“有歌词”排（不闪成大歌名），但不显示上一份结果
     val hasLyrics = fetching || (raw.isNotBlank() && (parsed.loading || lines.isNotEmpty()))
     val shownLines = if (fetching || parsed.loading) emptyList() else lines
-    val treatment = coverTreatment(current, hasLyrics, blurAllowed)
+    val treatment = if (coverFlying) FlyingCover else coverTreatment(current, hasLyrics, blurAllowed)
+    val overlay = animateFloatAsState(
+        if (coverFlying) 0f else 1f,
+        MaterialTheme.motionScheme.defaultEffectsSpec(),
+        label = "posterOverlay",
+    )
 
     // 上一首 / 下一首展开的三个来源，各自是状态，只有控件行读
     val hover = remember { MutableInteractionSource() }
@@ -290,9 +302,9 @@ internal fun GrownPoster(
             },
     ) {
         PosterCover(song, cardPx, treatment, coverScale, coverModifier, coverPlaceholderKey)
-        PosterScrims(treatment.dim, blackout = lightsOut && !current)
+        PosterScrims(treatment.dim, blackout = lightsOut && !current, Modifier.graphicsLayer { alpha = overlay.value })
         // 换状态（这张卡开始 / 不再播放）时内容重新淡入，对照原型的 npIn
-        SettleIn(current, Modifier.fillMaxSize().atCardSize(cardPx)) {
+        SettleIn(current, Modifier.fillMaxSize().graphicsLayer { alpha = overlay.value }.atCardSize(cardPx)) {
             if (current) {
                 NowCard(
                     song = song,
@@ -427,11 +439,11 @@ private fun PosterCover(
  * 渐变缓存在 drawWithCache 里，配色只作为滤镜色在绘制时套上（和 CollectionScreen 的头部同一个做法）。
  */
 @Composable
-private fun PosterScrims(dim: Float, blackout: Boolean) {
+private fun PosterScrims(dim: Float, blackout: Boolean, modifier: Modifier = Modifier) {
     val surface = MaterialTheme.colorScheme.surface
     val amount = animateFloatAsState(dim, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "posterDim")
     Spacer(
-        Modifier
+        modifier
             .fillMaxSize()
             .drawWithCache {
                 val top = TintedGradient(Brush.verticalGradient(0f to Color.White.copy(alpha = 0.6f), 0.26f to Color.Transparent))

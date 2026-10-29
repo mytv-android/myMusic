@@ -74,12 +74,14 @@ import com.mytv.mymusic.ui.charts.SongAction
 import com.mytv.mymusic.ui.charts.SongActionsSheet
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.components.LocalSharedTransitionScope
 import com.mytv.mymusic.ui.components.sharedNowPlayingCover
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.player.AmbientClock
 import com.mytv.mymusic.ui.player.rememberScreenReaderOn
 import com.mytv.mymusic.ui.providerName
 import com.mytv.mymusic.ui.queueMoveNextTarget
+import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -126,6 +128,9 @@ internal fun PosterWallScreen(
     val snackbar = LocalAppSnackbar.current
     val scope = rememberCoroutineScope()
     val screenReader = rememberScreenReaderOn()
+    // 手机上正在播放的大卡封面和播放页的封面是同一个共享元素；减少动画时不飞
+    val sharedScope = LocalSharedTransitionScope.current
+    val coverShared = window.isPhone && sharedScope != null && !LocalAppearance.current.reduceMotion
     val pulse = rememberPosterPulse(
         playing = state.playing,
         mode = state.lyricsBackground,
@@ -239,6 +244,8 @@ internal fun PosterWallScreen(
                         } else {
                             Modifier
                         },
+                        // 封面在播放页上或飞行途中：浮层里画清晰的封面，卡里的压层和文字等落地再淡入
+                        coverFlying = isCurrent && coverShared && (!active || sharedScope?.isTransitionActive == true),
                         lyricsLoading = isCurrent && !lyricsReady,
                         lightsOut = state.poster.lightsOut,
                     )
