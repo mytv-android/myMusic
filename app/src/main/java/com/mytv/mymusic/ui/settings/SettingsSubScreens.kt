@@ -764,6 +764,7 @@ private fun capabilities(provider: ProviderInfo): String {
         "单曲".takeIf { provider.search },
         "歌单".takeIf { provider.searchPlaylist },
         "专辑".takeIf { provider.searchAlbum },
+        "歌手".takeIf { provider.searchArtist },
         "榜单".takeIf { provider.topLists },
         "歌词".takeIf { provider.lyrics },
     ).joinToString(" · ")

@@ -72,6 +72,13 @@ interface NativeProvider {
     suspend fun searchAlbums(cookie: String, keyword: String): List<Playlist> =
         throw UnsupportedOperationException("${info.name} 暂不支持专辑搜索")
 
+    suspend fun searchArtists(cookie: String, keyword: String): List<Playlist> =
+        throw UnsupportedOperationException("${info.name} 暂不支持歌手搜索")
+
+    /** 歌手的歌曲。搜索结果里带上的歌手条目用 Playlist 表示，id 即歌手 id。 */
+    suspend fun artistSongs(cookie: String, id: String): List<Song> =
+        throw UnsupportedOperationException("${info.name} 暂不支持歌手歌曲")
+
     suspend fun albumSongs(cookie: String, id: String): List<Song> =
         throw UnsupportedOperationException("${info.name} 暂不支持专辑歌曲")
 

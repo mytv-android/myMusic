@@ -47,6 +47,7 @@ private val KUGOU_INFO = ProviderInfo(
     playlistSongs = true,
     parsePlaylist = true,
     searchAlbum = true,
+    searchArtist = true,
     albumSongs = true,
     parseAlbum = true,
     userPlaylists = true,
@@ -351,6 +352,45 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         if (albums.isEmpty()) throw IllegalStateException("no albums found")
         return albums
     }
+
+    override suspend fun searchArtists(cookie: String, keyword: String): List<Playlist> {
+        val url = "http://mobilecdn.kugou.com/api/v3/search/singer?" + query(
+            mapOf(
+                "keyword" to keyword,
+                "format" to "json",
+                "page" to "1",
+            )
+        )
+        val body = NativeHttp.get(url, cookie = cookie, randomIp = true, userAgent = MOBILE_USER_AGENT)
+        val resp = json.decodeFromString<KugouSingerSearchResponse>(body)
+        if (resp.errcode != 0 || resp.status != 1) {
+            throw IllegalStateException("kugou singer search api error: status=${resp.status} errcode=${resp.errcode} error=${resp.error}")
+        }
+        // 这个接口不认 pagesize，固定返回一批；详情里才有头像和歌曲数
+        val artists = resp.data.orEmpty().take(10).mapNotNull { item ->
+            if (item.singerId == 0) return@mapNotNull null
+            val info = runCatching { fetchSingerInfo(cookie, item.singerId) }.getOrNull()
+            Playlist(
+                id = item.singerId.toString(),
+                name = info?.singerName?.takeIf { it.isNotBlank() } ?: item.singerName,
+                cover = info?.imgUrl.orEmpty().replaceFirst("{size}", "240"),
+                trackCount = info?.songCount ?: 0,
+                creator = "",
+                description = "",
+                source = "kugou",
+                link = "https://www.kugou.com/singer/${item.singerId}.html",
+                extra = mapOf(
+                    "type" to "artist",
+                    "album_count" to (info?.albumCount ?: 0).toString(),
+                ),
+            )
+        }
+        if (artists.isEmpty()) throw IllegalStateException("no artists found")
+        return artists
+    }
+
+    override suspend fun artistSongs(cookie: String, id: String): List<Song> =
+        fetchSingerSongs(cookie, id)
 
     override suspend fun albumSongs(cookie: String, id: String): List<Song> =
         fetchAlbumDetail(cookie, id).second
@@ -1138,6 +1178,95 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             )
         }
         throw IllegalStateException("tracker kugou download url not found")
+    }
+
+    private suspend fun fetchSingerInfo(cookie: String, singerId: Int): KugouSingerInfo {
+        val url = "http://mobilecdn.kugou.com/api/v3/singer/info?" + query(
+            mapOf("singerid" to singerId.toString(), "with_res_tag" to "1")
+        )
+        val body = NativeHttp.get(url, cookie = cookie, randomIp = true, userAgent = MOBILE_USER_AGENT)
+        val resp = json.decodeFromString<KugouSingerInfoResponse>(kugouStripTag(body))
+        if (resp.errcode != 0 || resp.status != 1) {
+            throw IllegalStateException("kugou singer info api error: status=${resp.status} errcode=${resp.errcode}")
+        }
+        return resp.data
+    }
+
+    private suspend fun fetchSingerSongs(cookie: String, id: String): List<Song> {
+        val singerId = id.trim()
+        if (singerId.isEmpty()) throw IllegalArgumentException("singer id is empty")
+        val songs = mutableListOf<Song>()
+        val pageSize = 100
+        var page = 1
+        var total = 0
+        while (songs.size < KUGOU_SINGER_SONG_LIMIT) {
+            val url = "http://mobilecdn.kugou.com/api/v3/singer/song?" + query(
+                mapOf(
+                    "sorttype" to "2",
+                    "version" to "9108",
+                    "identity" to "3",
+                    "plat" to "0",
+                    "pagesize" to pageSize.toString(),
+                    "singerid" to singerId,
+                    "area_code" to "1",
+                    "page" to page.toString(),
+                )
+            )
+            val body = NativeHttp.get(url, cookie = cookie, randomIp = true, userAgent = MOBILE_USER_AGENT)
+            val resp = json.decodeFromString<KugouAlbumSongsResponse>(body)
+            if (resp.errcode != 0 || resp.status != 1) {
+                throw IllegalStateException("kugou singer songs api error: status=${resp.status} errcode=${resp.errcode} error=${resp.error}")
+            }
+            if (total == 0) total = resp.data.total
+            if (resp.data.info.isEmpty()) break
+            for (item in resp.data.info) {
+                val finalHash = firstNonEmpty(item.hash, item.sqHash, item.hqHash, item.resHash)
+                if (!isValidHash(finalHash)) continue
+                var name = item.songName.trim()
+                var artist = item.singerName.trim()
+                if (name.isEmpty() || artist.isEmpty()) {
+                    val parts = item.filename.split(" - ")
+                    if (parts.size >= 2) {
+                        artist = parts[0].trim()
+                        name = parts.drop(1).joinToString(" - ").trim()
+                    } else if (name.isEmpty()) {
+                        name = item.filename.trim()
+                    }
+                }
+                var size = item.fileSize
+                when (finalHash) {
+                    item.sqHash -> if (item.sqFileSize > 0) size = item.sqFileSize
+                    item.hqHash -> if (item.hqFileSize > 0) size = item.hqFileSize
+                }
+                val bitrate = if (item.duration > 0 && size > 0) (size * 8 / 1000 / item.duration).toInt() else 0
+                songs += Song(
+                    id = finalHash,
+                    name = name,
+                    artist = artist,
+                    album = item.albumName.trim(),
+                    albumId = item.albumId,
+                    duration = item.duration,
+                    size = size,
+                    bitrate = bitrate,
+                    source = "kugou",
+                    cover = item.transParam.unionCover.replaceFirst("{size}", "240"),
+                    link = "https://www.kugou.com/song/#hash=$finalHash",
+                    extra = mapOf(
+                        "hash" to finalHash,
+                        "sq_hash" to item.sqHash,
+                        "hq_hash" to item.hqHash,
+                        "audio_id" to item.audioId.toString(),
+                        "album_id" to item.albumId,
+                        "privilege" to item.privilege.toString(),
+                    ),
+                )
+            }
+            if (resp.data.info.size < pageSize) break
+            if (total > 0 && songs.size >= total) break
+            page++
+        }
+        if (songs.isEmpty()) throw IllegalStateException("kugou singer songs not found")
+        return songs
     }
 
     private suspend fun isVipAccount(cookie: String, cache: VipCache): Boolean {
@@ -2531,6 +2660,9 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
 
     private fun nowSeconds(): String = (System.currentTimeMillis() / 1000).toString()
 
+    /** 歌手详情会在 JSON 前后夹 HTML 注释标记，解析前去掉。 */
+    private fun kugouStripTag(body: String): String = TAG_PATTERN.replace(body, "").trim()
+
     private fun query(params: Map<String, String>): String =
         params.entries.sortedBy { it.key }.joinToString("&") { (key, value) ->
             URLEncoder.encode(key, "UTF-8") + "=" + URLEncoder.encode(value, "UTF-8")
@@ -2597,6 +2729,9 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         const val KUGOU_LITE_VER = "11440"
         const val KUGOU_LITE_KEY = "185672dd44712f60bb1736df5a377e82"
         const val HOT_SONG_TOP_LIST_ID = "8888"
+        const val KUGOU_SINGER_SONG_LIMIT = 500
+
+        private val TAG_PATTERN = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
         const val KUGOU_LITE_PUBLIC_KEY =
             "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDECi0Np2UR87scwrvTr72L6oO01rBbbBPriSDFPxr3Z5syug0O24QyQO8bg27+0+4kBzTBTBOZ/WWU0WryL1JSXRTXLgFVxtzIY41Pe7lPOgsfTCn5kZcvKhYKJesKnnJDNr5/abvTGf+rHG3YRwsCHcQ08/q6ifSioBszvb3QiwIDAQAB"
 
@@ -2840,6 +2975,36 @@ private data class KugouAlbumInfoData(
 )
 
 @Serializable
+private data class KugouSingerSearchResponse(
+    val status: Int = 0,
+    val errcode: Int = 0,
+    val error: String = "",
+    // 没有匹配时接口返回 data:null，而不是空数组
+    val data: List<KugouSingerSearchItem>? = null,
+)
+
+@Serializable
+private data class KugouSingerSearchItem(
+    @SerialName("singerid") val singerId: Int = 0,
+    @SerialName("singername") val singerName: String = "",
+)
+
+@Serializable
+private data class KugouSingerInfoResponse(
+    val status: Int = 0,
+    val errcode: Int = 0,
+    val data: KugouSingerInfo = KugouSingerInfo(),
+)
+
+@Serializable
+private data class KugouSingerInfo(
+    @SerialName("singerid") val singerId: Int = 0,
+    @SerialName("singername") val singerName: String = "",
+    @SerialName("songcount") val songCount: Int = 0,
+    @SerialName("albumcount") val albumCount: Int = 0,
+    @SerialName("imgurl") val imgUrl: String = "",
+)
+
 private data class KugouAlbumSongsResponse(
     val status: Int = 0,
     val errcode: Int = 0,

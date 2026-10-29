@@ -67,7 +67,7 @@ data class SearchUiState(
     val landing: Boolean get() = submittedQuery.isBlank()
 }
 
-enum class CollectionKind { Chart, Playlist, Album }
+enum class CollectionKind { Chart, Playlist, Album, Artist }
 
 /** 登录平台的账号资料；资料接口拿不到时 detail 为空，界面只显示“已登录”。 */
 data class AccountProfile(

@@ -652,13 +652,26 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openPlaylist(playlist: Playlist, album: Boolean) {
+        openCollection(playlist, if (album) CollectionKind.Album else CollectionKind.Playlist)
+    }
+
+    fun openArtist(playlist: Playlist) {
+        openCollection(playlist, CollectionKind.Artist)
+    }
+
+    private fun openCollection(playlist: Playlist, kind: CollectionKind) {
         val source = playlist.source.ifBlank { settingsState.value.provider }
+        val fallback = when (kind) {
+            CollectionKind.Album -> "专辑"
+            CollectionKind.Artist -> "歌手"
+            else -> "歌单"
+        }
         val subtitle = listOf(
-            playlist.creator.ifBlank { if (album) "专辑" else "歌单" },
+            playlist.creator.ifBlank { fallback },
             "${playlist.trackCount} 首".takeIf { playlist.trackCount > 0 },
         ).filterNotNull().joinToString(" / ")
         _collection.value = CollectionUiState(
-            kind = if (album) CollectionKind.Album else CollectionKind.Playlist,
+            kind = kind,
             id = playlist.id,
             title = playlist.name,
             subtitle = subtitle,
@@ -670,10 +683,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _events.tryEmit(UiEvent.OpenCollection(playlist.name))
         val generation = ++collectionGeneration
         viewModelScope.launch {
-            val result = if (album) {
-                runCatching { app.repository.albumSongs(source, cookieFor(source), playlist.id) }
-            } else {
-                runCatching { app.repository.playlistSongs(source, cookieFor(source), playlist.id) }
+            val result = runCatching {
+                when (kind) {
+                    CollectionKind.Album -> app.repository.albumSongs(source, cookieFor(source), playlist.id)
+                    CollectionKind.Artist -> app.repository.artistSongs(source, cookieFor(source), playlist.id)
+                    else -> app.repository.playlistSongs(source, cookieFor(source), playlist.id)
+                }
             }
             if (generation != collectionGeneration) return@launch
             _collection.update {
@@ -696,6 +711,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 when (current.kind) {
                     CollectionKind.Chart -> app.repository.topListSongs(current.source, cookieFor(current.source), current.id)
                     CollectionKind.Album -> app.repository.albumSongs(current.source, cookieFor(current.source), current.id)
+                    CollectionKind.Artist -> app.repository.artistSongs(current.source, cookieFor(current.source), current.id)
                     CollectionKind.Playlist -> app.repository.playlistSongs(current.source, cookieFor(current.source), current.id)
                 }
             }
@@ -1034,7 +1050,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (query.isBlank()) return
         when (current.kind) {
             SearchKind.Song -> searchAggregated(query, force, page)
-            SearchKind.Album, SearchKind.Playlist -> searchCollections(current.kind, query)
+            SearchKind.Album, SearchKind.Playlist, SearchKind.Artist -> searchCollections(current.kind, query)
             SearchKind.Link -> openLink(query)
         }
     }
@@ -1162,7 +1178,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         collectionSearchJob = viewModelScope.launch {
             val providers = enabledProviders().filter {
-                if (kind == SearchKind.Album) it.searchAlbum else it.searchPlaylist
+                when (kind) {
+                    SearchKind.Album -> it.searchAlbum
+                    SearchKind.Artist -> it.searchArtist
+                    else -> it.searchPlaylist
+                }
             }
             if (providers.isEmpty()) {
                 _search.update {
@@ -1184,10 +1204,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                 try {
                                     Result.success(
                                         withTimeoutOrNull(6_000) {
-                                            if (kind == SearchKind.Album) {
-                                                app.repository.searchAlbums(provider.id, cookieFor(provider.id), query)
-                                            } else {
-                                                app.repository.searchPlaylists(provider.id, cookieFor(provider.id), query)
+                                            when (kind) {
+                                                SearchKind.Album ->
+                                                    app.repository.searchAlbums(provider.id, cookieFor(provider.id), query)
+                                                SearchKind.Artist ->
+                                                    app.repository.searchArtists(provider.id, cookieFor(provider.id), query)
+                                                else ->
+                                                    app.repository.searchPlaylists(provider.id, cookieFor(provider.id), query)
                                             }
                                         }
                                     )

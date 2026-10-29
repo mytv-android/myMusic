@@ -40,6 +40,7 @@ private val NETEASE_INFO = ProviderInfo(
     playlistSongs = true,
     parsePlaylist = true,
     searchAlbum = true,
+    searchArtist = true,
     albumSongs = true,
     parseAlbum = true,
     userPlaylists = true,
@@ -236,6 +237,56 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
                 ),
             )
         }
+    }
+
+    override suspend fun searchArtists(cookie: String, keyword: String): List<Playlist> {
+        val response = cloudSearch(cookie, keyword, 100, 10)
+        val root = json.decodeFromString<NeteaseSearchResponse>(response.body)
+        return root.result?.artists.orEmpty().map { item ->
+            Playlist(
+                id = item.id.toString(),
+                name = item.name,
+                cover = item.picUrl,
+                trackCount = item.musicSize,
+                creator = item.alias.firstOrNull().orEmpty(),
+                description = "",
+                source = "netease",
+                link = "https://music.163.com/#/artist?id=${item.id}",
+                extra = mapOf(
+                    "type" to "artist",
+                    "album_count" to item.albumSize.toString(),
+                ),
+            )
+        }
+    }
+
+    override suspend fun artistSongs(cookie: String, id: String): List<Song> {
+        val artistId = id.trim()
+        if (artistId.isBlank()) throw IllegalArgumentException("artist id is empty")
+        val ids = mutableListOf<String>()
+        var offset = 0
+        while (ids.size < ARTIST_SONG_LIMIT) {
+            val body = buildJsonObject {
+                put("id", artistId)
+                put("limit", 100)
+                put("offset", offset)
+                put("csrf_token", "")
+            }
+            val response = weapiPost(ARTIST_SONGS_API, body, cookie)
+            val data = json.decodeFromString<NeteaseArtistSongsResponse>(response.body)
+            if (data.code != 200) throw IllegalStateException("netease api error code: ${data.code}")
+            val page = data.songs.map { it.id.toString() }.filter { it.isNotBlank() && it != "0" }
+            if (page.isEmpty()) break
+            ids += page
+            if (!data.more) break
+            offset += page.size
+        }
+        val songs = mutableListOf<Song>()
+        ids.take(ARTIST_SONG_LIMIT).chunked(500).forEach { batch ->
+            songs += fetchSongsBatch(cookie, batch)
+        }
+        if (songs.isEmpty()) throw IllegalStateException("netease artist songs not found")
+        return songs
     }
 
     override suspend fun albumSongs(cookie: String, id: String): List<Song> =
@@ -828,6 +879,8 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         const val SHORT_LINK_HOST = "163cn.tv"
         const val REFERER = "http://music.163.com/"
         const val SEARCH_API = "http://music.163.com/api/linux/forward"
+        const val ARTIST_SONGS_API = "https://music.163.com/weapi/v1/artist/songs"
+        const val ARTIST_SONG_LIMIT = 500
         const val DOWNLOAD_API = "http://music.163.com/weapi/song/enhance/player/url"
         const val DOWNLOAD_EAPI = "https://interface3.music.163.com/eapi/song/enhance/player/url/v1"
         const val DETAIL_API = "https://music.163.com/weapi/v3/song/detail"
@@ -920,7 +973,28 @@ private data class NeteaseSearchResult(
     val songs: List<NeteaseSearchSong> = emptyList(),
     val playlists: List<NeteaseSearchPlaylist> = emptyList(),
     val albums: List<NeteaseSearchAlbum> = emptyList(),
+    val artists: List<NeteaseSearchArtist> = emptyList(),
 )
+
+@Serializable
+private data class NeteaseSearchArtist(
+    val id: Long = 0,
+    val name: String = "",
+    val picUrl: String = "",
+    val alias: List<String> = emptyList(),
+    val albumSize: Int = 0,
+    val musicSize: Int = 0,
+)
+
+@Serializable
+private data class NeteaseArtistSongsResponse(
+    val code: Int = 0,
+    val more: Boolean = false,
+    val songs: List<NeteaseArtistSongRef> = emptyList(),
+)
+
+@Serializable
+private data class NeteaseArtistSongRef(val id: Long = 0)
 
 @Serializable
 private data class NeteaseSearchSong(

@@ -37,6 +37,7 @@ private val KUWO_INFO = ProviderInfo(
     playlistSongs = true,
     parsePlaylist = true,
     searchAlbum = true,
+    searchArtist = true,
     albumSongs = true,
     parseAlbum = true,
     playlistCategories = true,
@@ -285,6 +286,38 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         return albums
     }
 
+    override suspend fun searchArtists(cookie: String, keyword: String): List<Playlist> {
+        val body = searchCollection(cookie, keyword, "artist")
+        val response = try {
+            json.decodeFromString<KuwoArtistSearchResponse>(legacyJson(body))
+        } catch (e: Exception) {
+            throw IllegalStateException("kuwo artist json parse error: ${e.message}", e)
+        }
+        val artists = response.abslist.orEmpty().mapNotNull { item ->
+            val artistId = item.artistId.trim()
+            if (artistId.isEmpty()) return@mapNotNull null
+            Playlist(
+                id = artistId,
+                name = normalizeKuwoText(item.artist),
+                cover = kuwoArtistCover(response.basePicPath, item.picPath),
+                trackCount = item.songNum.trim().toIntOrNull() ?: 0,
+                creator = normalizeKuwoText(item.aArtist),
+                description = normalizeKuwoText(item.desc),
+                source = "kuwo",
+                link = "http://www.kuwo.cn/singer_detail/$artistId",
+                extra = mapOf(
+                    "type" to "artist",
+                    "album_count" to (item.albumNum.trim().toIntOrNull() ?: 0).toString(),
+                ),
+            )
+        }
+        if (artists.isEmpty()) throw IllegalStateException("no artists found")
+        return artists
+    }
+
+    override suspend fun artistSongs(cookie: String, id: String): List<Song> =
+        fetchArtistSongs(cookie, id)
+
     override suspend fun albumSongs(cookie: String, id: String): List<Song> =
         fetchAlbumDetail(cookie, id).second
 
@@ -420,6 +453,59 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
             else -> limit
         }
         return fetchTopListSongs(cookie, HOT_SONG_TOP_LIST_ID, safeLimit)
+    }
+
+    private suspend fun fetchArtistSongs(cookie: String, id: String): List<Song> {
+        val artistId = id.trim()
+        if (artistId.isEmpty()) throw IllegalArgumentException("artist id is empty")
+        val songs = mutableListOf<Song>()
+        val pageSize = 100
+        for (page in 0 until KUWO_ARTIST_MAX_PAGES) {
+            val url = "$SEARCH_LEGACY_API?" + query(
+                "artistid" to artistId,
+                "ft" to "music",
+                "itemset" to "web_2013",
+                "client" to "kt",
+                "rformat" to "json",
+                "encoding" to "utf8",
+                "pn" to page.toString(),
+                "rn" to pageSize.toString(),
+            )
+            val body = NativeHttp.get(url, cookie = cookie, randomIp = true, userAgent = KUWO_USER_AGENT)
+            val response = try {
+                json.decodeFromString<KuwoArtistSongsResponse>(legacyJson(body))
+            } catch (e: Exception) {
+                throw IllegalStateException("kuwo artist songs json parse error: ${e.message}", e)
+            }
+            val pageSongs = response.abslist.orEmpty()
+            if (pageSongs.isEmpty()) break
+            for (item in pageSongs) {
+                val songId = item.musicRid.removePrefix("MUSIC_").trim()
+                if (songId.isEmpty()) continue
+                songs += Song(
+                    id = songId,
+                    name = normalizeKuwoText(item.name).ifEmpty { normalizeKuwoText(item.songName) },
+                    artist = normalizeKuwoText(item.artist),
+                    album = normalizeKuwoText(item.album),
+                    albumId = item.albumId.trim(),
+                    duration = item.duration.trim().toIntOrNull() ?: 0,
+                    source = "kuwo",
+                    link = "http://www.kuwo.cn/play_detail/$songId",
+                    extra = mapOf("rid" to songId),
+                )
+            }
+            if (pageSongs.size < pageSize) break
+        }
+        if (songs.isEmpty()) throw IllegalStateException("kuwo artist songs not found")
+        return songs
+    }
+
+    /** 歌手头像是相对路径，拼上接口给的前缀；没有头像时返回空串。 */
+    private fun kuwoArtistCover(basePath: String, picPath: String): String {
+        val path = picPath.trim()
+        if (path.isEmpty()) return ""
+        if (path.startsWith("http")) return path
+        return basePath.trim().trimEnd('/') + "/" + path.trimStart('/')
     }
 
     private suspend fun searchCollection(cookie: String, keyword: String, ft: String): String {
@@ -1747,6 +1833,7 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         const val HOT_SONG_TOP_LIST_ID = "16"
         const val KUWO_PLAYLIST_PAGE_SIZE = 100
         const val KUWO_PLAYLIST_MAX_PAGES = 500
+        const val KUWO_ARTIST_MAX_PAGES = 5
         const val KUWO_TOP_LIST_PAGE_SIZE = 300
         const val ALBUM_DETAIL_PAGE_SIZE = 100
         const val DEFAULT_HOT_SONG_LIMIT = 100
@@ -1820,6 +1907,36 @@ private data class KuwoPlaylistSearchItem(
 )
 
 @Serializable
+private data class KuwoArtistSearchResponse(
+    @SerialName("BASEPICPATH") val basePicPath: String = "",
+    val abslist: List<KuwoArtistSearchItem>? = null,
+)
+
+@Serializable
+private data class KuwoArtistSearchItem(
+    @SerialName("ARTISTID") val artistId: String = "",
+    @SerialName("ARTIST") val artist: String = "",
+    @SerialName("AARTIST") val aArtist: String = "",
+    @SerialName("PICPATH") val picPath: String = "",
+    @SerialName("SONGNUM") val songNum: String = "",
+    @SerialName("ALBUMNUM") val albumNum: String = "",
+    val desc: String = "",
+)
+
+@Serializable
+private data class KuwoArtistSongsResponse(val abslist: List<KuwoArtistSong>? = null)
+
+@Serializable
+private data class KuwoArtistSong(
+    @SerialName("MUSICRID") val musicRid: String = "",
+    @SerialName("NAME") val name: String = "",
+    @SerialName("SONGNAME") val songName: String = "",
+    @SerialName("ARTIST") val artist: String = "",
+    @SerialName("ALBUM") val album: String = "",
+    @SerialName("ALBUMID") val albumId: String = "",
+    @SerialName("DURATION") val duration: String = "",
+)
+
 private data class KuwoAlbumSearchResponse(val albumlist: List<KuwoAlbumSearchItem>? = null)
 
 @Serializable

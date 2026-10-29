@@ -65,6 +65,35 @@ class CollectionMatcherTest {
     }
 
     @Test
+    fun groupsTheSameArtistByName() {
+        val groups = CollectionMatcher.group(
+            mapOf(
+                "netease" to listOf(playlist("1", "周杰伦", "Jay Chou", 589, "netease")),
+                "qq" to listOf(playlist("2", "周杰伦", "", 1013, "qq")),
+            ),
+            names,
+            SearchKind.Artist,
+            priority,
+        )
+        assertEquals(1, groups.size)
+        assertEquals(2, groups.single().sources.size)
+    }
+
+    @Test
+    fun doesNotGroupArtistsWithDifferentNames() {
+        val groups = CollectionMatcher.group(
+            mapOf(
+                "netease" to listOf(playlist("1", "周杰伦", "", 589, "netease")),
+                "qq" to listOf(playlist("2", "林俊杰", "", 800, "qq")),
+            ),
+            names,
+            SearchKind.Artist,
+            priority,
+        )
+        assertEquals(2, groups.size)
+    }
+
+    @Test
     fun doesNotGroupPlaylistsWithDifferentNames() {
         val groups = CollectionMatcher.group(
             mapOf(

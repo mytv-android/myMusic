@@ -178,7 +178,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val FailedStatuses = setOf(ProviderStatus.Timeout, ProviderStatus.Error, ProviderStatus.Skipped)
-private val SearchKinds = listOf(SearchKind.Song, SearchKind.Playlist, SearchKind.Album)
+private val SearchKinds = listOf(SearchKind.Song, SearchKind.Playlist, SearchKind.Album, SearchKind.Artist)
 private val UrlPattern = Regex("""https?://\S+""", RegexOption.IGNORE_CASE)
 private val TwoPaneLeft = 320.dp
 private val TvLeft = 300.dp
@@ -529,7 +529,7 @@ private fun SearchField(
                 Box {
                     if (value.isEmpty()) {
                         Text(
-                            "歌曲、歌单、专辑，或粘贴链接",
+                            "歌曲、歌单、专辑、歌手，或粘贴链接",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -1317,6 +1317,7 @@ private fun kindProviders(
     val supports = providers.filter {
         when (kind) {
             SearchKind.Album -> it.searchAlbum
+            SearchKind.Artist -> it.searchArtist
             SearchKind.Playlist -> it.searchPlaylist
             else -> it.search
         }
@@ -1633,7 +1634,11 @@ private fun SongEmptyState(ctx: SearchCtx, focus: FocusRequester?) {
 @Composable
 private fun CollectionEmptyState(ctx: SearchCtx, focus: FocusRequester?) {
     val kind = ctx.kind.value
-    val label = if (kind == SearchKind.Album) "专辑" else "歌单"
+    val label = when (kind) {
+        SearchKind.Album -> "专辑"
+        SearchKind.Artist -> "歌手"
+        else -> "歌单"
+    }
     val retry = { ctx.actions.submitSearch(ctx.submittedQuery.value) }
     val error = ctx.error.value
     when {
@@ -1766,10 +1771,10 @@ private fun LazyListScope.collectionItems(ctx: SearchCtx, keys: List<String>, st
 @Composable
 private fun CollectionNote(kind: SearchKind) {
     Text(
-        if (kind == SearchKind.Album) {
-            "按名称、歌手和曲目数把各平台的同一张专辑放在一起，点平台名打开对应版本。"
-        } else {
-            "歌单只按同名推荐，不合并不同平台的歌单内容。"
+        when (kind) {
+            SearchKind.Album -> "按名称、歌手和曲目数把各平台的同一张专辑放在一起，点平台名打开对应版本。"
+            SearchKind.Artist -> "按姓名把各平台的同一个歌手放在一起，点平台名打开这个歌手的歌曲。"
+            else -> "歌单只按同名推荐，不合并不同平台的歌单内容。"
         },
         Modifier.padding(start = 4.dp, top = 12.dp),
         style = MaterialTheme.typography.bodySmall,
@@ -1781,7 +1786,7 @@ private fun CollectionNote(kind: SearchKind) {
 @Composable
 private fun CollectionRow(ctx: SearchCtx, item: CanonicalCollection, index: Int, count: Int, modifier: Modifier = Modifier) {
     val window = LocalAppWindow.current
-    val album = ctx.kind.value == SearchKind.Album
+    val kind = ctx.kind.value
     val shape = segmentShape(index, count)
     val first = item.sources.firstOrNull()
     Row(
@@ -1791,7 +1796,7 @@ private fun CollectionRow(ctx: SearchCtx, item: CanonicalCollection, index: Int,
             .tvFocusRing(shape, scale = 1.02f)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .clickable(enabled = first != null) { first?.let { ctx.actions.openPlaylist(it.playlist, album) } }
+            .clickable(enabled = first != null) { first?.let { ctx.openCollection(it.playlist, kind) } }
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1817,6 +1822,11 @@ private fun CollectionRow(ctx: SearchCtx, item: CanonicalCollection, index: Int,
     }
 }
 
+/** 歌单 / 专辑走 openPlaylist，歌手走 openArtist，详情页按类型加载歌曲。 */
+private fun SearchCtx.openCollection(playlist: com.mytv.mymusic.data.Playlist, kind: SearchKind) {
+    if (kind == SearchKind.Artist) actions.openArtist(playlist) else actions.openPlaylist(playlist, kind == SearchKind.Album)
+}
+
 private fun collectionSubtitle(item: CanonicalCollection): String = listOf(
     item.creator,
     if (item.trackCount > 0) "${item.trackCount} 首" else "",
@@ -1833,11 +1843,11 @@ private fun CollectionSources(ctx: SearchCtx, item: CanonicalCollection, modifie
 /** 平台按钮：平台名 + 该平台版本的曲目数，点按打开这个平台的版本。 */
 @Composable
 private fun SourcePill(ctx: SearchCtx, source: CollectionSource, focusRequester: FocusRequester? = null) {
-    val album = ctx.kind.value == SearchKind.Album
+    val kind = ctx.kind.value
     val shape = RoundedCornerShape(8.dp)
     val count = source.playlist.trackCount
     Surface(
-        onClick = { ctx.actions.openPlaylist(source.playlist, album) },
+        onClick = { ctx.openCollection(source.playlist, kind) },
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         modifier = Modifier
@@ -2110,7 +2120,6 @@ private fun TvCollectionResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit) {
             focusedQuery = key
         }
     }
-    val album = kind == SearchKind.Album
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 48.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             TvQueryBar(submittedQuery, onClick = { onEdit(true) }, modifier = Modifier.weight(1f))
@@ -2137,9 +2146,9 @@ private fun TvCollectionResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit) {
                     ) { index, item ->
                         TvCollectionCard(
                             item,
-                            album,
+                            kind,
                             onFocused = { focusedId.value = item.id },
-                            onOpen = { item.sources.firstOrNull()?.let { ctx.actions.openPlaylist(it.playlist, album) } },
+                            onOpen = { item.sources.firstOrNull()?.let { ctx.openCollection(it.playlist, kind) } },
                             modifier = if (index == 0) Modifier.focusRequester(target) else Modifier,
                         )
                     }
@@ -2175,7 +2184,7 @@ private fun TvFocusedCollection(
 @Composable
 private fun TvCollectionCard(
     item: CanonicalCollection,
-    album: Boolean,
+    kind: SearchKind,
     onFocused: () -> Unit,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2188,7 +2197,9 @@ private fun TvCollectionCard(
             .clip(shape)
             .clickable(onClick = onOpen)
             // 放在 clickable 之后：保留点击，同时不再把下面的标题、作者重复读一遍
-            .clearAndSetSemantics { contentDescription = "${if (album) "专辑" else "歌单"}：${item.name}，${collectionSubtitle(item)}" }
+            .clearAndSetSemantics {
+                contentDescription = "${kind.label}：${item.name}，${collectionSubtitle(item)}"
+            }
             .padding(8.dp),
     ) {
         CoverBox(item.cover, item.name, Modifier.size(160.dp), RoundedCornerShape(20.dp), fontSize = 48f)

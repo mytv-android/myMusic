@@ -44,6 +44,7 @@ private val QQ_INFO = ProviderInfo(
     playlistSongs = true,
     parsePlaylist = true,
     searchAlbum = true,
+    searchArtist = true,
     albumSongs = true,
     parseAlbum = true,
     userPlaylists = true,
@@ -482,6 +483,46 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         return albums
     }
 
+    override suspend fun searchArtists(cookie: String, keyword: String): List<Playlist> {
+        val url = QQ_SEARCH_API + "?" + qqQuery(
+            "format" to "json",
+            "p" to "1",
+            "n" to "10",
+            "w" to keyword,
+            "t" to "9",
+        )
+        val body = NativeHttp.get(
+            url,
+            headers = mapOf("Referer" to "https://y.qq.com/portal/search.html"),
+            cookie = cookie,
+            randomIp = true,
+            userAgent = QQ_WINDOWS_USER_AGENT,
+        )
+        val response = json.decodeFromString<QQSingerSearchResponse>(body)
+        val artists = response.data.singer.list.mapNotNull { item ->
+            if (item.singerMID.isBlank()) return@mapNotNull null
+            Playlist(
+                id = item.singerMID,
+                name = item.singerName,
+                cover = toHttps(item.singerPic),
+                trackCount = item.songNum,
+                creator = "",
+                description = "",
+                source = "qq",
+                link = "https://y.qq.com/n/ryqq/singer/${item.singerMID}",
+                extra = mapOf(
+                    "type" to "artist",
+                    "album_count" to item.albumNum.toString(),
+                ),
+            )
+        }
+        if (artists.isEmpty()) throw IllegalStateException("no artists found")
+        return artists
+    }
+
+    override suspend fun artistSongs(cookie: String, id: String): List<Song> =
+        fetchSingerSongs(cookie, id)
+
     override suspend fun albumSongs(cookie: String, id: String): List<Song> =
         fetchAlbumDetail(cookie, id).second
 
@@ -792,6 +833,87 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         val result = if (type == "wx") checkWxLogin(key) else checkQqLogin(key)
         if (result.status == "success" || result.status == "expired") loginSessions.remove(sessionId)
         return result
+    }
+
+    private suspend fun fetchSingerSongs(cookie: String, id: String): List<Song> {
+        val singerMid = id.trim()
+        if (singerMid.isEmpty()) throw IllegalArgumentException("singer id is empty")
+        val headers = mapOf(
+            "Referer" to "https://y.qq.com/",
+            "Content-Type" to "application/json",
+        )
+        val songs = mutableListOf<Song>()
+        val batchSize = 100
+        var totalNum = 0
+        var begin = 0
+        while (songs.size < QQ_SINGER_SONG_LIMIT) {
+            val body = buildJsonObject {
+                putJsonObject("comm") {
+                    put("ct", 24)
+                    put("cv", 0)
+                }
+                putJsonObject("singer") {
+                    put("module", "musichall.song_list_server")
+                    put("method", "GetSingerSongList")
+                    putJsonObject("param") {
+                        put("singerMid", singerMid)
+                        put("order", 1)
+                        put("begin", begin)
+                        put("num", batchSize)
+                    }
+                }
+            }
+            val response = NativeHttp.postJson(
+                QQ_MUSICU_API,
+                body.toString(),
+                headers = headers,
+                cookie = cookie,
+                randomIp = true,
+                userAgent = QQ_WINDOWS_USER_AGENT,
+            )
+            val page = json.decodeFromString<QQSingerSongsResponse>(response.body)
+            if (page.singer.code != 0) {
+                throw IllegalStateException("qq singer songs api error code: ${page.singer.code}")
+            }
+            if (totalNum == 0) totalNum = page.singer.data.totalNum
+            val pageSongs = page.singer.data.songList
+            if (pageSongs.isEmpty()) break
+            for (entry in pageSongs) {
+                val songInfo = entry.songInfo
+                if (songInfo.mid.isEmpty()) continue
+                val artists = songInfo.singer.map { it.name }.filter { it.isNotEmpty() }
+                val (fileSize, bitrate) = pickFileSize(
+                    songInfo.file.size128Mp3,
+                    songInfo.file.size320Mp3,
+                    songInfo.file.sizeFlac,
+                    songInfo.interval,
+                )
+                val cover = if (songInfo.album.mid.isNotEmpty()) coverUrl(songInfo.album.mid) else ""
+                songs += Song(
+                    id = songInfo.mid,
+                    name = songInfo.name,
+                    artist = artists.joinToString(", "),
+                    album = songInfo.album.name,
+                    albumId = songInfo.album.mid,
+                    duration = songInfo.interval,
+                    size = fileSize,
+                    bitrate = bitrate,
+                    source = "qq",
+                    cover = cover,
+                    link = "https://y.qq.com/n/ryqq/songDetail/${songInfo.mid}",
+                    extra = mapOf(
+                        "songmid" to songInfo.mid,
+                        "album_mid" to songInfo.album.mid,
+                        "album_id" to songInfo.album.id.toString(),
+                    ),
+                )
+            }
+            if (pageSongs.size < batchSize) break
+            if (totalNum > 0 && begin + pageSongs.size >= totalNum) break
+            begin += batchSize
+        }
+        if (songs.isEmpty()) throw IllegalStateException("qq singer songs not found")
+        return songs
     }
 
     private suspend fun fetchAlbumDetail(cookie: String, id: String): Pair<Playlist, List<Song>> {
@@ -2186,6 +2308,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
 
         const val QQ_MUSICU_API = "https://u.y.qq.com/cgi-bin/musicu.fcg"
         const val QQ_SEARCH_API = "http://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp"
+        const val QQ_SINGER_SONG_LIMIT = 500
         const val QQ_SONG_DETAIL_API = "https://c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg"
         const val QQ_PLAYLIST_SEARCH_API = "http://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist"
         const val QQ_CATEGORY_API = "https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_tag_conf.fcg"
@@ -2291,6 +2414,39 @@ private data class QQPay(
     val paydownload: Int = 0,
     val payplay: Int = 0,
     val paytrackprice: Int = 0,
+)
+
+@Serializable
+private data class QQSingerSearchResponse(val data: QQSingerSearchData = QQSingerSearchData())
+
+@Serializable
+private data class QQSingerSearchData(val singer: QQSingerSearchList = QQSingerSearchList())
+
+@Serializable
+private data class QQSingerSearchList(val list: List<QQSingerSearchItem> = emptyList())
+
+@Serializable
+private data class QQSingerSearchItem(
+    @SerialName("singerMID") val singerMID: String = "",
+    @SerialName("singerName") val singerName: String = "",
+    @SerialName("singerPic") val singerPic: String = "",
+    @SerialName("songNum") val songNum: Int = 0,
+    @SerialName("albumNum") val albumNum: Int = 0,
+)
+
+@Serializable
+private data class QQSingerSongsResponse(val singer: QQSingerSongsNode = QQSingerSongsNode())
+
+@Serializable
+private data class QQSingerSongsNode(
+    val code: Int = 0,
+    val data: QQSingerSongsData = QQSingerSongsData(),
+)
+
+@Serializable
+private data class QQSingerSongsData(
+    val totalNum: Int = 0,
+    val songList: List<QQAlbumSongEntry> = emptyList(),
 )
 
 @Serializable

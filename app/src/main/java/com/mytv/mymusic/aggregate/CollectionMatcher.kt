@@ -49,7 +49,11 @@ object CollectionMatcher {
                         bestGroup = group
                     }
                 }
-                val threshold = if (kind == SearchKind.Album) 0.88f else 0.98f
+                val threshold = when (kind) {
+                    // 歌手按姓名归并：各平台写法略有出入（别名、大小写），放宽到和专辑同一档
+                    SearchKind.Album, SearchKind.Artist -> 0.88f
+                    else -> 0.98f
+                }
                 if (bestGroup != null && bestScore >= threshold) {
                     bestGroup.sources += CollectionSource(providerId, providerNames[providerId] ?: providerId, playlist, bestScore)
                     bestGroup.confidence = max(bestGroup.confidence, bestScore)
@@ -78,6 +82,10 @@ object CollectionMatcher {
         if (a.nameKey.isBlank() || b.nameKey.isBlank()) return 0f
         if (kind == SearchKind.Playlist) {
             return if (a.nameKey == b.nameKey) 1f else 0f
+        }
+        // 歌手没有“作者”可比，姓名相近就视为同一个；歌曲数各平台口径差很大，不参与打分
+        if (kind == SearchKind.Artist) {
+            return similarity(a.nameKey, b.nameKey)
         }
         val name = similarity(a.nameKey, b.nameKey)
         val creator = similarity(a.creatorKey, b.creatorKey)

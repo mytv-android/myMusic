@@ -449,7 +449,11 @@ private fun TwoPaneCollection(
     }
 }
 
-private fun playLabel(collection: CollectionUiState) = if (collection.kind == CollectionKind.Album) "播放专辑" else "播放全部"
+private fun playLabel(collection: CollectionUiState) = when (collection.kind) {
+    CollectionKind.Album -> "播放专辑"
+    CollectionKind.Artist -> "播放歌手"
+    else -> "播放全部"
+}
 
 /** 收藏 = 存成本地歌单。已收藏时只显示状态，取消收藏要去“我的”里删歌单（删除需要二次确认）。 */
 @Composable
@@ -488,6 +492,8 @@ private fun CollectionCover(collection: CollectionUiState, large: Boolean) {
     val (size, shape) = when (collection.kind) {
         CollectionKind.Chart -> (if (large) DpSize(240.dp, 270.dp) else DpSize(150.dp, 170.dp)) to MaterialShapes.Arch.toShape()
         CollectionKind.Album -> (if (large) DpSize(240.dp, 240.dp) else DpSize(140.dp, 140.dp)) to (RoundedCornerShape(16.dp) as Shape)
+        // 歌手头像用圆形，和专辑、歌单的方形封面分开
+        CollectionKind.Artist -> (if (large) DpSize(240.dp, 240.dp) else DpSize(140.dp, 140.dp)) to (CircleShape as Shape)
         CollectionKind.Playlist -> (if (large) DpSize(240.dp, 240.dp) else DpSize(128.dp, 128.dp)) to (RoundedCornerShape(28.dp) as Shape)
     }
     CoverBox(collection.cover, collection.title, Modifier.size(size), shape, size.width.value * 0.36f)

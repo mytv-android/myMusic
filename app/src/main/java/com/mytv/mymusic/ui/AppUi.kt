@@ -116,6 +116,8 @@ class MusicActions(private val model: MusicViewModel) {
     fun clearCategory() = model.clearCategory()
     fun categoryPage(page: Int) = model.categoryPage(page)
     fun openPlaylist(playlist: com.mytv.mymusic.data.Playlist, album: Boolean = false) = model.openPlaylist(playlist, album)
+
+    fun openArtist(playlist: com.mytv.mymusic.data.Playlist) = model.openArtist(playlist)
     fun playCollection() = model.playCollection()
     fun saveCollection() = model.saveCollectionToLibrary()
     fun retryCollection() = model.retryCollection()

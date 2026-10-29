@@ -17,6 +17,7 @@ data class ProviderInfo(
     @SerialName("PlaylistSongs") val playlistSongs: Boolean = false,
     @SerialName("ParsePlaylist") val parsePlaylist: Boolean = false,
     @SerialName("SearchAlbum") val searchAlbum: Boolean = false,
+    @SerialName("SearchArtist") val searchArtist: Boolean = false,
     @SerialName("AlbumSongs") val albumSongs: Boolean = false,
     @SerialName("ParseAlbum") val parseAlbum: Boolean = false,
     @SerialName("UserPlaylists") val userPlaylists: Boolean = false,
@@ -104,4 +105,4 @@ data class QRCreateResult(@SerialName("session_id") val sessionId: String = "", 
 data class QRCheckResult(val status: String = "", val message: String = "", val cookie: String = "")
 
 enum class RepeatMode { Off, All, One }
-enum class SearchKind(val label: String) { Song("单曲"), Playlist("歌单"), Album("专辑"), Link("链接") }
+enum class SearchKind(val label: String) { Song("单曲"), Playlist("歌单"), Album("专辑"), Artist("歌手"), Link("链接") }

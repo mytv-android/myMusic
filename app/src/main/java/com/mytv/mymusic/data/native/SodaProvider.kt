@@ -51,6 +51,7 @@ private val SODA_INFO = ProviderInfo(
     playlistSongs = true,
     parsePlaylist = true,
     searchAlbum = true,
+    searchArtist = true,
     albumSongs = true,
     parseAlbum = true,
     userPlaylists = true,
@@ -220,6 +221,30 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             }
         }
         return albums
+    }
+
+    override suspend fun searchArtists(cookie: String, keyword: String): List<Playlist> {
+        val body = fetchAndroidSearch(cookie, "artist", keyword, 1, ANDROID_SEARCH_PAGE_SIZE)
+        val resp = decodeSodaJson<SodaSearchResponse>(body, "soda artist search json parse error")
+        val artists = mutableListOf<Playlist>()
+        resp.resultGroups.forEach { group ->
+            group.data.forEach { item ->
+                val artist = item.entity.artist
+                if (artist.id.isEmpty()) return@forEach
+                artists += Playlist(
+                    source = SODA_SOURCE,
+                    id = artist.id,
+                    name = artist.name,
+                    cover = buildImageUrl(artist.urlAvatar, ""),
+                    trackCount = artist.countTracks,
+                    creator = "",
+                    description = "",
+                    link = "https://www.qishui.com/artist/${artist.id}",
+                    extra = mapOf("type" to "artist"),
+                )
+            }
+        }
+        return artists
     }
 
     override suspend fun albumSongs(cookie: String, id: String): List<Song> =
@@ -2702,6 +2727,15 @@ private data class SodaSearchEntity(
     val track: SodaTrack = SodaTrack(),
     val playlist: SodaUserPlaylistItem = SodaUserPlaylistItem(),
     val album: SodaAlbumInfo = SodaAlbumInfo(),
+    val artist: SodaSearchArtist = SodaSearchArtist(),
+)
+
+@Serializable
+private data class SodaSearchArtist(
+    val id: String = "",
+    val name: String = "",
+    @SerialName("count_tracks") val countTracks: Int = 0,
+    @SerialName("url_avatar") val urlAvatar: SodaImage = SodaImage(),
 )
 
 @Serializable

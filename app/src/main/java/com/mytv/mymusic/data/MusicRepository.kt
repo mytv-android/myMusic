@@ -48,6 +48,12 @@ class MusicRepository {
     suspend fun searchAlbums(provider: String, cookie: String, keyword: String): List<Playlist> =
         requireProvider(provider).searchAlbums(cookie, keyword)
 
+    suspend fun searchArtists(provider: String, cookie: String, keyword: String): List<Playlist> =
+        requireProvider(provider).searchArtists(cookie, keyword)
+
+    suspend fun artistSongs(provider: String, cookie: String, id: String): List<Song> =
+        requireProvider(provider).artistSongs(cookie, id)
+
     suspend fun albumSongs(provider: String, cookie: String, id: String): List<Song> =
         requireProvider(provider).albumSongs(cookie, id)
 
