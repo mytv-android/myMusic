@@ -302,23 +302,24 @@ td.v small { display: block; font: 500 11.5px/1.4 var(--body); opacity: .8; }
 .wallmini { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
 .wallmini canvas { width: 100%; aspect-ratio: 4 / 3; display: block; border-radius: 16px; background: #101215; }
 </style>
+h3.decided { font: 700 15px/1.3 var(--body); color: var(--accent); margin: 26px 0 12px; }
 </head>
 <body>
 <div class="wrap">
 <header class="mast">
-  <div class="eyebrow">myMusic · 设计方案 · 2026-10-29 · 律动</div>
+  <div class="eyebrow">myMusic · 设计方案 · 2026-10-29 · 律动 · 方向已确认，未实现</div>
   <h1>律动<em>踩在拍上</em></h1>
   <p class="lede">打开“律动”后，光团会跟着音乐起伏，但看不出它在跟节奏。原因主要在时间上，不在动画上：App 分析的声音，要大约半秒以后才会被听到；每一拍能看到的变化，又被压到了几个百分点。这份方案分三步改：先把分析结果按播放进度对齐，再加一层节拍跟踪，最后由封面、光晕和流速来表现拍子。整屏亮度不跟着闪。</p>
   <div class="chips">
     <span class="chip"><b>原因</b> 画面比声音早 0.5–0.8 秒</span>
     <span class="chip"><b>改后</b> 仿真偏差中位 −11 ~ −21ms</span>
-    <span class="chip"><b>设置</b> 只多一项“跟拍校准”</span>
+    <span class="chip"><b>设置</b> 多一项“跟拍校准”，强度加一档“强烈”</span>
     <span class="chip"><b>依据</b> Media3 1.11.1 · 现有 RhythmAnalysis</span>
   </div>
   <div class="keys">
     <div><h3>对齐时间</h3><p>每个分析帧带上它在歌里的位置，等真正播到才交给画面。只做这一步，现有的效果就不再错拍。</p></div>
     <div><h3>跟踪拍子</h3><p>根据最近 8 秒的起拍估出速度和相位，按拍子网格起拍。弱拍、漏检不影响网格；没有固定拍子的音乐不硬凑。</p></div>
-    <div><h3>换个表现方式</h3><p>每一拍让封面弹一下、轮廓转一格、光晕亮一下、流光推一下。光团亮度不跟单拍走，整屏亮度仍然守住每帧 3% 的约束。</p></div>
+    <div><h3>换个表现方式</h3><p>每一拍让封面弹一下、光晕亮一下、流光推一下，外轮廓照旧匀速转。光团亮度不跟单拍走，三档都守住整屏亮度每帧 3% 的约束。</p></div>
     <div><h3>用上提前量</h3><p>分析本来就比播放早半秒，界面要表现的那一拍其实已经分析过了。所以可以在拍前 50ms 起势，峰值正好落在拍上。</p></div>
   </div>
 </header>
@@ -402,7 +403,7 @@ td.v small { display: block; font: 500 11.5px/1.4 var(--body); opacity: .8; }
       <div class="row"><span class="lab">曲目</span><div class="seg" id="trackSeg"></div></div>
       <div class="row"><span class="lab">声音</span><div class="seg"><button type="button" id="snd" class="sound" aria-pressed="false">播放声音</button></div><span class="hint" id="srcline"></span></div>
       <div class="row"><span class="lab">输出设备（决定左边早多少）</span><div class="seg" id="devSeg"></div></div>
-      <div class="row"><span class="lab">律动强度（右边）</span><div class="seg" id="intSeg"><button type="button" data-v="soft" aria-pressed="false">柔和</button><button type="button" data-v="standard" aria-pressed="true">标准</button></div></div>
+      <div class="row"><span class="lab">律动强度（右边）</span><div class="seg" id="intSeg"><button type="button" data-v="soft" aria-pressed="false">柔和</button><button type="button" data-v="standard" aria-pressed="true">标准</button><button type="button" data-v="strong" aria-pressed="false">强烈</button></div></div>
       <div class="row"><span class="lab">跟拍校准（右边，正数让画面晚一点）</span><div class="range"><input type="range" id="calib" min="-150" max="150" step="10" value="0" aria-label="跟拍校准，毫秒"><output for="calib" id="calibOut">0 ms</output></div></div>
     </div>
     <div class="duo">
@@ -423,7 +424,7 @@ td.v small { display: block; font: 500 11.5px/1.4 var(--body); opacity: .8; }
     </div>
     <div class="stats" id="stats"></div>
     <div class="notes">
-      <div><h3>看什么</h3><p>对着底鼓看左边的光环和光团：它们总在鼓声之前就开始了。右边封面的弹跳和轮廓转动，会和底鼓、军鼓同时落下。</p></div>
+      <div><h3>看什么</h3><p>对着底鼓看左边的光环和光团：它们总在鼓声之前就开始了。右边封面的弹跳和光晕，会和底鼓、军鼓同时落下。</p></div>
       <div><h3>换设备</h3><p>换成“蓝牙耳机”，左边的提前量从 0.53 秒变成 0.72 秒，在律动曲（104 BPM）里会从“稍微晚一点”变成“明显早”。右边不受影响，因为改后用的是 ExoPlayer 的播放位置。</p></div>
       <div><h3>换曲目</h3><p>慢歌（76 BPM）的一拍有 0.79 秒，左边差不多落在两拍正中间。“氛围”这首没有固定拍子：右边认出这一点后不按网格起拍，只有低频事件时以一半力度轻轻回应一下。</p></div>
     </div>
@@ -479,20 +480,21 @@ td.v small { display: block; font: 500 11.5px/1.4 var(--body); opacity: .8; }
   </div>
   <div class="main">
     <div class="tablebox"><table>
-      <colgroup><col style="width: 9%"><col style="width: 22%"><col><col style="width: 17%"></colgroup>
-      <thead><tr><th>元素</th><th>现在</th><th>改后 · 标准</th><th>改后 · 柔和</th></tr></thead>
+      <colgroup><col style="width: 8%"><col style="width: 19%"><col><col style="width: 14%"><col style="width: 19%"></colgroup>
+      <thead><tr><th>元素</th><th>现在</th><th>改后 · 标准</th><th>改后 · 柔和</th><th>改后 · 强烈</th></tr></thead>
       <tbody>
-        <tr><td class="k">封面</td><td>外轮廓 40 秒一圈匀速转</td><td>每拍弹一下（放大 3%，拍前 50ms 起势、160ms 回落）；外轮廓每拍转一格，带一点回弹，平均下来仍是 40 秒一圈</td><td>不弹，匀速转</td></tr>
-        <tr><td class="k">光晕</td><td>0.62 + 0.05 × swell</td><td>每拍不透明度 +0.18、放大 2.5%，280ms 回落</td><td>每拍 +0.10</td></tr>
-        <tr><td class="k">流光</td><td>半径跟 swell；鼓点胀 5%、亮 0.02</td><td>半径照旧跟 swell；每拍把流速推到 3.6 倍，再在 400ms 内落回。光量不跟单拍</td><td>推到 2.4 倍</td></tr>
-        <tr><td class="k">光环</td><td>鼓点时从封面中心散开，峰值 0.06</td><td>小节首拍时，从封面轮廓往外散开一圈同形状的光，峰值 0.16，1.1 秒散完</td><td>无</td></tr>
-        <tr><td class="k">进度条</td><td>波幅跟 swell</td><td>波幅照旧；波速改成每拍走一个波长（<code>waveSpeed = wavelength × BPM ÷ 60</code>）</td><td>同标准</td></tr>
-        <tr><td class="k">歌词</td><td>不动</td><td>不动</td><td>不动</td></tr>
+        <tr><td class="k">封面</td><td>外轮廓 40 秒一圈匀速转</td><td>每拍弹一下（放大 3%，拍前 50ms 起势、160ms 回落）；外轮廓照旧 40 秒一圈匀速转</td><td>不弹</td><td>每拍放大 5%</td></tr>
+        <tr><td class="k">光晕</td><td>0.62 + 0.05 × swell</td><td>每拍不透明度 +0.18、放大 2.5%，280ms 回落</td><td>每拍 +0.10</td><td>每拍 +0.26、放大 3.5%</td></tr>
+        <tr><td class="k">流光</td><td>半径跟 swell；鼓点胀 5%、亮 0.02</td><td>半径照旧跟 swell；每拍把流速推到 3.6 倍，再在 400ms 内落回。光量不跟单拍</td><td>推到 2.4 倍</td><td>推到 4.4 倍</td></tr>
+        <tr><td class="k">光环</td><td>鼓点时从封面中心散开，峰值 0.06</td><td>小节首拍时，从封面轮廓往外散开一圈同形状的光，峰值 0.16，1.1 秒散完</td><td>无</td><td>每拍都散一圈：首拍 0.16，其余拍 0.10</td></tr>
+        <tr><td class="k">进度条</td><td>波幅跟 swell</td><td>波幅照旧；波速改成每拍走一个波长（<code>waveSpeed = wavelength × BPM ÷ 60</code>）</td><td>同标准</td><td>同标准</td></tr>
+        <tr><td class="k">歌词</td><td>不动</td><td>不动</td><td>不动</td><td>不动</td></tr>
       </tbody>
     </table></div>
     <div class="notes">
-      <div><h3>亮度约束不变</h3><p>上一轮定下的“逐帧亮度变化不超过约 3%”仍然有效。拍子用在封面大小、轮廓角度和流速上，这三样都不改变整屏亮度；光晕只占封面周围一圈。原型里每台手机下方显示的“整屏亮度逐帧最大变化”，就是按这条约束实时测出来的。</p></div>
-      <div><h3>轮廓“转一格”</h3><p>步长按“40 秒一圈”的平均速度折算，104 BPM 时每拍转 5.2°。整体转速和现在一样，只是从匀速改成踩着拍走。暂停、没有锁定拍子时恢复匀速转动。</p></div>
+      <div><h3>亮度约束不变</h3><p>上一轮定下的“逐帧亮度变化不超过约 3%”仍然有效。拍子用在封面大小和流速上，这两样都不改变整屏亮度；光晕和光环只占封面周围一圈。原型里每台手机下方显示的“整屏亮度逐帧最大变化”，就是按这条约束实时测出来的。</p></div>
+      <div><h3>外轮廓不踩拍</h3><p>已确认：外轮廓保持 40 秒一圈匀速转，不改成每拍转一格。拍子只落在封面大小上，转动一直是平滑的，看久了不累。</p></div>
+      <div><h3>强烈档</h3><p>弹跳、光晕和流速推力都加大，光环从“只在小节首拍”改成“每拍都有”，首拍那一圈更亮。原型里切到“强烈”可以看到，整屏亮度逐帧变化仍在 3% 以内，因为光环只占封面外一圈。</p></div>
       <div><h3>进度条只锁速度</h3><p>M3 的 <code>LinearWavyProgressIndicator</code> 不开放波的相位，所以只能让波速跟上拍子，波峰不一定正好落在拍点上。BPM 变化超过 2% 才更新 <code>waveSpeed</code>，避免动画反复重启。</p></div>
       <div><h3>减少动画、电视</h3><p>开启“减少动画”（或系统移除动画）后，和现在一样定格，不做分析。电视上帧循环限制在 30 帧，起势和回落都按真实时间计算，最多晚一帧（33ms），仍在门限之内。</p></div>
     </div>
@@ -508,9 +510,9 @@ td.v small { display: block; font: 500 11.5px/1.4 var(--body); opacity: .8; }
   <div class="main">
     <div class="wallmini"><canvas id="wallDemo" aria-label="海报墙大卡跟拍示意"></canvas>
       <ol class="legend">
-        <li><span class="dot">1</span><div><b>大卡上的播放键</b>Cookie 形状的播放键每拍转一格，和播放页封面的外轮廓一样。</div></li>
+        <li><span class="dot">1</span><div><b>大卡上的播放键</b>Cookie 形状的播放键跟播放页封面一样每拍弹一下，外形照旧匀速转；柔和档不弹。</div></li>
         <li><span class="dot">2</span><div><b>大卡的光晕</b>每拍亮一下，用的是和播放页光晕同一条包络。</div></li>
-        <li><span class="dot">3</span><div><b>小节首拍</b>（标准档）亮度从大卡往外一圈圈传开，每隔一格晚 60ms，提亮 6%，离大卡三格以外不受影响。</div></li>
+        <li><span class="dot">3</span><div><b>亮度波</b>标准档在小节首拍、强烈档每拍，亮度从大卡往外一圈圈传开，每隔一格晚 60ms；首拍提亮 6%，其余拍 4%，离大卡三格以外不受影响。</div></li>
         <li><span class="dot">4</span><div><b>不受影响的部分</b>镜头、电视空闲漂移、格子大小和焦点框都不跟拍。分析器只在海报墙或播放页显示时运行。</div></li>
       </ol>
     </div>
@@ -520,8 +522,8 @@ td.v small { display: block; font: 500 11.5px/1.4 var(--body); opacity: .8; }
 <section class="sec" id="settings">
   <div class="side">
     <div class="eyebrow">06 · 设置</div>
-    <h2>设置只多一项</h2>
-    <p>新增的这一项在 播放页 › 律动 里，只在歌词背景选了“律动”时显示。跟其他播放页设置一样，只保存在本机，不参与同步。</p>
+    <h2>设置：多一项，多一档</h2>
+    <p>新增“跟拍校准”，律动强度从两档变三档，都在 播放页 › 律动 里，只在歌词背景选了“律动”时显示。跟其他播放页设置一样，只保存在本机，不参与同步。</p>
   </div>
   <div class="main">
     <div class="board">
@@ -529,15 +531,17 @@ td.v small { display: block; font: 500 11.5px/1.4 var(--body); opacity: .8; }
         <h4>播放页</h4>
         <div class="grp">律动</div>
         <div class="it"><b>歌词背景</b><div class="sg"><span>关闭</span><span>动态</span><span class="on">律动</span></div></div>
-        <div class="it"><b>律动强度</b><div class="sg"><span>柔和</span><span class="on">标准</span></div><small>柔和：只有光晕和流光跟拍。标准：再加上封面弹跳、轮廓转动和小节光环。</small></div>
+        <div class="it"><b>律动强度</b><div class="sg"><span>柔和</span><span class="on">标准</span><span>强烈<span class="new">新</span></span></div><small>柔和：只有光晕和流光跟拍。标准：再加上封面弹跳和小节首拍的光环。强烈：弹得更明显，每拍都有光环。</small></div>
         <div class="it last"><b>跟拍校准<span class="new">新</span></b><div class="sl"><i></i><output>0 ms</output></div><small>画面和声音对不上时再调。大多数耳机和音箱会自己上报延迟，保持 0 就行。</small></div>
       </div>
       <div class="prose" style="max-width: 30em">
         <h3>跟拍校准</h3>
         <p>AppStore 新增 <code>rhythm_offset_ms</code>，范围 −200 到 +200，步长 10，默认 0；正数让画面晚一点。少数蓝牙设备不上报延迟，或者电视的“声音模式”另外加了处理延迟，这时画面会早一点，用这一项来补。</p>
         <p>拖动滑杆时如果正在播放，播放页背景会立刻按新的偏移跟拍，不用另做试音界面。</p>
+        <h3>强度加一档“强烈”</h3>
+        <p><code>RhythmIntensity</code> 从 <code>Soft, Standard</code> 变成 <code>Soft, Standard, Strong</code>，默认仍是标准；旧值照常读出。设置页的 <code>ConnectedToggleGroup</code> 从两段变三段。</p>
         <h3>强度档的说明文字改为</h3>
-        <p>“柔和：只有光晕和流光跟拍。标准：再加上封面弹跳、轮廓转动和小节光环。”原来的说明是“柔和只改流速和光量；标准还让光团随低频胀缩，鼓点时散开一圈光环”，要换掉。</p>
+        <p>“柔和：只有光晕和流光跟拍。标准：再加上封面弹跳和小节首拍的光环。强烈：弹得更明显，每拍都有光环。”原来的说明是“柔和只改流速和光量；标准还让光团随低频胀缩，鼓点时散开一圈光环”，要换掉。</p>
       </div>
     </div>
   </div>
@@ -557,14 +561,14 @@ td.v small { display: block; font: 500 11.5px/1.4 var(--body); opacity: .8; }
         <tr><td class="k">playback/RhythmAudioSink.kt <span class="mono">新</span></td><td>包住 <code>DefaultAudioSink</code> 的 <code>ForwardingAudioSink</code>：<code>handleBuffer</code> 记下每个缓冲的 pts；<code>getCurrentPositionUs</code> 记下播放位置；<code>play</code> / <code>pause</code> / <code>flush</code> / <code>setPlaybackParameters</code> 更新播放时钟；<code>setOutputStreamOffsetUs</code> 之后收到的第一个缓冲处记一个分界（无缝衔接到下一首）。<code>RhythmRenderersFactory.buildAudioSink</code> 里套上这一层。</td></tr>
         <tr><td class="k">playback/PlaybackClock.kt <span class="mono">新</span></td><td>用 <code>@Volatile</code> 保存一组（位置、nanoTime、速度、是否在播），提供 <code>audibleUs(nowNanos)</code>。只读不锁，界面线程每帧调用。</td></tr>
         <tr><td class="k">playback/BeatTracker.kt <span class="mono">新</span></td><td>速度图、相位、置信度、小节首拍、跳转后快速重新锁定、无缝衔接的分界。由分析线程调用；结果以不可变的 <code>BeatGrid</code> 发布，同时保留分界前的一份旧网格。</td></tr>
-        <tr><td class="k">ui/player/BeatClock.kt <span class="mono">新</span></td><td>纯 Kotlin，不依赖 Compose：每帧根据听到的位置和网格决定要不要起拍，并提供 pop / glow / shove 三条包络，以及轮廓转格的目标角。</td></tr>
+        <tr><td class="k">ui/player/BeatClock.kt <span class="mono">新</span></td><td>纯 Kotlin，不依赖 Compose：每帧根据听到的位置和网格决定要不要起拍，并提供 pop / glow / shove 三条包络。</td></tr>
         <tr><td class="k">playback/RhythmAnalyzer.kt</td><td>给分析帧加上 pts；把 <code>StateFlow</code> 换成 64 帧的环形缓冲 <code>RhythmTimeline</code>（单写多读）；分析完顺手推给跟踪器；<code>reset</code> 区分换歌和同一首里的跳转。</td></tr>
         <tr><td class="k">playback/RhythmAnalysis.kt</td><td><code>RhythmFrame</code> 增加 <code>ptsUs</code>、<code>fluxBass</code>、<code>fluxMid</code>（按频点数平均）。原有的检测流程不变。</td></tr>
-        <tr><td class="k">ui/player/FlowFieldMotion.kt</td><td>分析帧改为按听到的位置取用；去掉鼓点让光团胀亮的部分（bloom）；增加流速推力；光环改成只在小节首拍触发，形状跟封面一致。<code>FlowIntensity</code> 的两档重新取值。</td></tr>
-        <tr><td class="k">ui/player/LyricsBackdrop.kt</td><td><code>BackdropPulse</code> 增加 <code>beatPop</code>、<code>beatGlow</code>、<code>tickAngle</code>、<code>bpm</code>、<code>locked</code>，只在绘制阶段读；<code>RhythmFeed</code> 改成按帧去取；光环按封面形状的路径来画。</td></tr>
-        <tr><td class="k">ui/player/CoverStage.kt</td><td>形状封面在 <code>graphicsLayer</code> 里读 <code>beatPop</code> 做缩放；旋转在锁定拍子时追 <code>tickAngle</code>，否则保持匀速；光晕读 <code>beatGlow</code>。</td></tr>
+        <tr><td class="k">ui/player/FlowFieldMotion.kt</td><td>分析帧改为按听到的位置取用；去掉鼓点让光团胀亮的部分（bloom）；增加流速推力；光环形状跟封面一致，标准档只在小节首拍触发、强烈档每拍触发。<code>FlowIntensity</code> 三档重新取值。</td></tr>
+        <tr><td class="k">ui/player/LyricsBackdrop.kt</td><td><code>BackdropPulse</code> 增加 <code>beatPop</code>、<code>beatGlow</code>、<code>bpm</code>、<code>locked</code>，只在绘制阶段读；<code>RhythmFeed</code> 改成按帧去取；光环按封面形状的路径来画。</td></tr>
+        <tr><td class="k">ui/player/CoverStage.kt</td><td>形状封面在 <code>graphicsLayer</code> 里读 <code>beatPop</code> 做缩放；外轮廓旋转不变；光晕读 <code>beatGlow</code>。</td></tr>
         <tr><td class="k">ui/components/Progress.kt</td><td><code>WavySeekBar</code> 增加 <code>waveSpeed</code> 参数；播放页在拍子锁定时传入 <code>wavelength × BPM ÷ 60</code>。</td></tr>
-        <tr><td class="k">data/AppStore.kt、ui/settings/LyricsSettingsScreen.kt</td><td><code>rhythm_offset_ms</code> 设置项和滑杆，两档强度的说明文字。</td></tr>
+        <tr><td class="k">data/AppStore.kt、ui/settings/LyricsSettingsScreen.kt</td><td><code>rhythm_offset_ms</code> 设置项和滑杆；<code>RhythmIntensity</code> 加 <code>Strong</code>，强度选择改成三段，三档的说明文字。</td></tr>
       </tbody>
     </table></div>
     <div class="notes">
@@ -586,13 +590,14 @@ td.v small { display: block; font: 500 11.5px/1.4 var(--body); opacity: .8; }
     <div class="phases">
       <div class="phase"><header><span class="tag">B1</span><h3>对齐时间</h3></header><ul><li>RhythmAudioSink、PlaybackClock、RhythmTimeline</li><li>RhythmFeed 改成按听到的位置取帧，现有效果原样保留</li><li>调试叠层（提前量、对齐后的偏差）</li></ul></div>
       <div class="phase"><header><span class="tag">B2</span><h3>节拍跟踪</h3></header><ul><li>BeatTracker、BeatGrid，以及跳转和无缝衔接的处理</li><li>BeatClock 和单元测试</li><li>调试叠层加上 BPM、置信度和首拍</li></ul></div>
-      <div class="phase"><header><span class="tag">B3</span><h3>表现</h3></header><ul><li>封面弹跳和轮廓转格、光晕、流速推力、首拍形状光环、进度条波速</li><li>两档强度重新取值，在真机上核对亮度约束</li><li>三端核对（手机、平板、电视 30 帧）</li></ul></div>
+      <div class="phase"><header><span class="tag">B3</span><h3>表现</h3></header><ul><li>封面弹跳、光晕、流速推力、形状光环、进度条波速</li><li>三档强度重新取值（含新的“强烈”），在真机上核对亮度约束</li><li>三端核对（手机、平板、电视 30 帧）</li></ul></div>
       <div class="phase"><header><span class="tag">B4</span><h3>设置和海报墙</h3></header><ul><li>跟拍校准滑杆、说明文字</li><li>海报墙的大卡跟拍；排在海报墙 P2（放大和跟随）之后</li></ul></div>
     </div>
+    <h3 class="decided">已确认（2026-10-29）</h3>
     <div class="qs">
-      <div class="q"><b>1. 封面外轮廓要不要“每拍转一格”？</b><span>这是最显眼的跟拍方式，但比匀速转动更“机械”。不要的话，标准档就只保留弹跳。</span></div>
-      <div class="q"><b>2. 两档够不够？</b><span>现在是 柔和 / 标准。如果想要更明显，可以再加一档“强烈”：弹跳 5%、光晕 +0.26，每拍都有光环，但会碰到亮度约束的上限。</span></div>
-      <div class="q"><b>3. 跟拍校准放在设置里可以吗？</b><span>也可以不做成设置，只在调试叠层里调，等确实遇到对不上的设备再说。</span></div>
+      <div class="q"><b>1. 外轮廓不踩拍</b><span>保持 40 秒一圈匀速转，标准档只保留封面弹跳。</span></div>
+      <div class="q"><b>2. 加一档“强烈”</b><span>弹跳 5%、光晕 +0.26、流速推到 4.4 倍、每拍都有光环；整屏亮度仍守住每帧 3%。</span></div>
+      <div class="q"><b>3. 跟拍校准放进设置</b><span>播放页 › 律动 里的滑杆，−200 到 +200ms，只在选了“律动”时显示。</span></div>
     </div>
   </div>
 </section>
@@ -1394,19 +1399,23 @@ class NowMotion extends FlowBase {
 }
 
 /* 改后：按拍子时钟走。拍子换成“形状、运动、局部光”来表现，光团亮度不再跟单拍跳 */
+// 光环：'' 不出，'down' 只在小节首拍，'beat' 每拍都出（首拍更亮）
 const NEW = {
-  standard: { pop: .03, glow: .18, halo: .025, shove: 2.6, tick: true, ripple: true },
-  soft: { pop: 0, glow: .1, halo: .012, shove: 1.4, tick: false, ripple: false },
+  soft: { pop: 0, glow: .1, halo: .012, shove: 1.4, ripple: '' },
+  standard: { pop: .03, glow: .18, halo: .025, shove: 2.6, ripple: 'down' },
+  strong: { pop: .05, glow: .26, halo: .035, shove: 3.4, ripple: 'beat' },
 };
 class NewMotion extends FlowBase {
-  constructor() { super(); this.level = 'standard'; this.e = { pop: 0, glow: 0, shove: 0 }; this.target = 0; this.vel = 0; this.lock = 0; this.bpm = 0; }
+  constructor() { super(); this.level = 'standard'; this.e = { pop: 0, glow: 0, shove: 0 }; this.lock = 0; this.bpm = 0; }
   get K() { return NEW[this.level]; }
   feed(f) { this.feedLevels(f); }
   onBeat(e, bpm) {
     this.bpm = bpm;
-    // 外轮廓每拍转一格：步长按 40 秒一圈的平均速度折算，转速和现在一样，只是踩着拍走
-    if (this.K.tick && e.kind === 'grid') this.target += TAU / (SPIN_S * bpm / 60);
-    if (this.K.ripple && e.down) { this.ripples.push({ age: 0 }); if (this.ripples.length > 2) this.ripples.shift(); }
+    const R = this.K.ripple;
+    if (R === 'beat' || (R === 'down' && e.down)) {
+      this.ripples.push({ age: 0, a: e.down ? .16 : .1 });
+      if (this.ripples.length > 3) this.ripples.shift();
+    }
   }
   step(dt, clock, t) {
     this.stepLevels(dt);
@@ -1414,13 +1423,8 @@ class NewMotion extends FlowBase {
     this.lock = clock.lock;
     this.e.pop = clock.env(t, .16); this.e.glow = clock.env(t, .28); this.e.shove = clock.env(t, .4);
     this.flow(dt, 1 + K.shove * this.e.shove);
-    if (K.tick && clock.lock > .5) {
-      // 欠阻尼弹簧追目标角：一格转完带一点回弹（ω = 2π·3.2，ζ = 0.55）
-      const w = TAU * 3.2, z = .55, n = Math.max(1, Math.ceil(dt / .004)), h = dt / n;
-      for (let i = 0; i < n; i++) { this.vel += (-w * w * (this.spin - this.target) - 2 * z * w * this.vel) * h; this.spin += this.vel * h; }
-    } else {
-      this.spin += dt * TAU / SPIN_S; this.target = this.spin; this.vel = 0;
-    }
+    // 外轮廓不踩拍，保持 40 秒一圈匀速转
+    this.spin += dt * TAU / SPIN_S;
     const locked = clock.lock > .5 && this.bpm > 0;
     this.wavePhase += dt * (locked ? WAVE_LEN * this.bpm / 60 : WAVE_SPEED);
     for (const r of this.ripples) r.age += dt;
@@ -1435,8 +1439,8 @@ class NewMotion extends FlowBase {
   get haloAlpha() { return .62 + NOW.cover * this.s.swell + this.K.glow * this.e.glow; }
   get haloScale() { return 1 + this.K.halo * this.e.glow; }
   get pop() { return 1 + this.K.pop * this.e.pop; }
-  // 小节首拍：从封面轮廓往外散开一圈同形状的光，1.1 秒散完
-  ripple(r) { return { kind: 'shape', grow: r.age * 1.05, alpha: .16 * clamp(r.age / .08, 0, 1) * Math.pow(Math.max(0, 1 - r.age / 1.1), 1.6) }; }
+  // 从封面轮廓往外散开一圈同形状的光，1.1 秒散完
+  ripple(r) { return { kind: 'shape', grow: r.age * 1.05, alpha: r.a * clamp(r.age / .08, 0, 1) * Math.pow(Math.max(0, 1 - r.age / 1.1), 1.6) }; }
 }
 /* ================= 手机播放页示意：背景画在半分辨率画布上，封面、光晕和进度条画在全分辨率画布上 ================= */
 const CAN_FILTER = 'filter' in CanvasRenderingContext2D.prototype;
@@ -1927,25 +1931,23 @@ const UI = {
   },
 };
 
-/* ---------- 海报墙示意：大卡在中间，小节首拍时亮度一圈圈传开 ---------- */
+/* ---------- 海报墙示意：大卡在中间，起拍时亮度一圈圈传开（标准只在小节首拍，强烈每拍） ---------- */
 const WallDemo = {
-  build() { this.cv = $('#wallDemo'); this.c = this.cv.getContext('2d'); this.wave = []; this.lastCount = 0; this.spin = 0; this.vel = 0; this.target = 0; this.lastFired = null; },
+  build() { this.cv = $('#wallDemo'); this.c = this.cv.getContext('2d'); this.wave = []; this.lastCount = 0; this.spin = 0; },
   frame() {
     const cv = this.cv; if (!cv || !UI.visibleWall) return;
     const dpr = Math.min(2, devicePixelRatio || 1), W = cv.clientWidth, H = cv.clientHeight;
     if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     const c = this.c, clock = Live.clock, t = Live.tu, m = Live.nu;
     c.setTransform(dpr, 0, 0, dpr, 0, 0); c.fillStyle = '#101215'; c.fillRect(0, 0, W, H);
-    // 小节首拍：从大卡往外传的亮度波
+    // 从大卡往外传的亮度波：和播放页光环同一个开关
     if (clock.count !== this.lastCount) {
       this.lastCount = clock.count;
-      if (clock.down && m.level === 'standard' && clock.lock > .5) this.wave.push(clock.last);
-      if (clock.lock > .5 && Live.tracker.grid().bpm) this.target += TAU / (SPIN_S * Live.tracker.grid().bpm / 60);
+      const R = NEW[m.level].ripple;
+      if (clock.lock > .5 && (R === 'beat' || (R === 'down' && clock.down))) this.wave.push({ t: clock.last, a: clock.down ? .06 : .04 });
     }
-    this.wave = this.wave.filter(w => t - w < 1.2);
-    const wsp = TAU * 3.2, z = .55, dt = 1 / 60;
-    if (clock.lock > .5) { this.vel += (-wsp * wsp * (this.spin - this.target) - 2 * z * wsp * this.vel) * dt; this.spin += this.vel * dt; }
-    else { this.spin += dt * TAU / SPIN_S; this.target = this.spin; }
+    this.wave = this.wave.filter(w => t - w.t < 1.2);
+    this.spin += TAU / SPIN_S / 60;
     const cols = 6, rows = 4, gap = 4, u = Math.min((W - gap * (cols + 1)) / cols, (H - gap * (rows + 1)) / rows);
     const ox = (W - (u * cols + gap * (cols - 1))) / 2, oy = (H - (u * rows + gap * (rows - 1))) / 2;
     const gx = 2, gy = 1; // 大卡占 (2..3, 1..2)
@@ -1954,7 +1956,7 @@ const WallDemo = {
       if (x >= gx && x <= gx + 1 && y >= gy && y <= gy + 1) continue;
       const dist = Math.max(Math.abs(x - (gx + .5)) - .5, Math.abs(y - (gy + .5)) - .5);
       let lift = 0;
-      for (const w of this.wave) { const age = t - w - (dist - 1) * .06; if (age > 0 && dist <= 3) lift = Math.max(lift, .06 * Math.exp(-age / .25) * smooth01(age / .04)); }
+      for (const w of this.wave) { const age = t - w.t - (dist - 1) * .06; if (age > 0 && dist <= 3) lift = Math.max(lift, w.a * Math.exp(-age / .25) * smooth01(age / .04)); }
       const s = SONGS[i++ % 3], px = ox + x * (u + gap), py = oy + y * (u + gap);
       c.save(); c.beginPath(); c.roundRect(px, py, u, u, 8); c.clip(); c.drawImage(s.img, px, py, u, u);
       c.fillStyle = `rgba(0,0,0,${(.35 - lift * 2.5).toFixed(3)})`; c.fillRect(px, py, u, u); c.restore();
@@ -1967,8 +1969,8 @@ const WallDemo = {
     c.save(); c.beginPath(); c.roundRect(px, py, gw, gw, 18); c.clip(); c.drawImage(song.img, px, py, gw, gw);
     const sc = c.createLinearGradient(0, py + gw * .45, 0, py + gw); sc.addColorStop(0, 'rgba(0,0,0,0)'); sc.addColorStop(1, 'rgba(0,0,0,.65)');
     c.fillStyle = sc; c.fillRect(px, py, gw, gw); c.restore();
-    // Cookie 播放键：每拍转一格
-    const bx = px + gw - gw * .2, by = py + gw - gw * .2, br = gw * .12;
+    // Cookie 播放键：跟封面一起每拍弹一下，外形照旧匀速转
+    const bx = px + gw - gw * .2, by = py + gw - gw * .2, br = gw * .12 * m.pop;
     c.save(); c.fillStyle = song.pal.p; c.fill(shapePath(SHAPES.Cookie12Sided, this.spin, br, bx, by)); c.restore();
     c.fillStyle = song.pal.op; c.beginPath(); c.moveTo(bx - br * .28, by - br * .38); c.lineTo(bx + br * .42, by); c.lineTo(bx - br * .28, by + br * .38); c.closePath(); c.fill();
   },
