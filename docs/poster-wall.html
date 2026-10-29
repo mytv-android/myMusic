@@ -249,6 +249,14 @@ td .mono { color: var(--muted); }
 .tile.focus .dim { opacity: 0; }
 
 /* 入场：左上角起一道波，格子从上方落下、0.88 → 1 */
+/* 听歌模式：还没出的歌先占着位，越往后越淡；续取中走一道微光 */
+.tile.ghost { opacity: var(--ga, 1); }
+.tile.ghost .clip { background: color-mix(in srgb, var(--p) 6%, var(--sch)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--os) 9%, transparent); }
+.tile.ghost .shim { position: absolute; inset: 0; opacity: 0; transition: opacity .3s;
+  background: linear-gradient(100deg, transparent 35%, color-mix(in srgb, var(--os) 13%, transparent) 50%, transparent 65%); background-size: 260% 100%; }
+.tile.ghost.wait .shim { opacity: 1; animation: shim 1.4s linear infinite; }
+@keyframes shim { from { background-position: 130% 0; } to { background-position: -130% 0; } }
+@media (prefers-reduced-motion: reduce) { .tile.ghost.wait .shim { animation: none; background-position: 50% 0; } }
 .tile.land { animation: land .62s var(--spatial) both; animation-delay: var(--d, 0s); }
 @keyframes land { from { opacity: 0; transform: translateY(-60px) scale(.88); } }
 
@@ -453,11 +461,11 @@ td .mono { color: var(--muted); }
     <span class="chip">手机 <b>360×800 dp</b></span>
     <span class="chip">平板横屏 <b>1280×800 dp</b></span>
     <span class="chip">电视 <b>960×540 dp</b></span>
-    <span class="chip">新增：<b>队列海报墙 · 详情页海报视图 · 6 个墙内设置 · 1 个入口设置</b></span>
+    <span class="chip">新增：<b>队列海报墙 · 详情页海报视图 · 听歌模式带状墙 · 6 个墙内设置 · 1 个入口设置</b></span>
     <span class="chip">不改：播放页、队列面板、详情页列表、迷你播放器默认行为</span>
   </div>
   <div class="keys">
-    <div><h3>无限的墙</h3><p>12×8 单元为一块，四种模板加镜像拼接，向四周无限延伸，队列不够就从头循环。电视上方向键永远走得动。</p></div>
+    <div><h3>无限的墙</h3><p>12×8 单元为一块，四种模板加镜像拼接，向四周无限延伸，队列不够就从头循环。听歌模式的推荐流例外：排成一条往前长的带子。</p></div>
     <div><h3>大卡就地放大</h3><p>点一格，它长成 6×6，同一块里其余 11 格按位移最小的方式重排，别的块不动。</p></div>
     <div><h3>卡里放歌词</h3><p>正在播放的大卡显示前一行、当前行、后一行和翻译，逐字填色；没有歌词就露出清晰封面。</p></div>
     <div><h3>跟着切歌走</h3><p>切到下一首，镜头滑到离屏幕中心最近的那一份，把它放大；整面墙换成新封面的配色。</p></div>
@@ -494,6 +502,7 @@ td .mono { color: var(--muted); }
     <div class="hint"><span>电视：先点一下画面</span><span class="kbd">← ↑ → ↓</span>移焦点 <span class="kbd">Enter</span>放大 / 播放 <span class="kbd">Esc</span>返回</div>
     <p>电视上 6 秒不操作，浮层控件淡出；再过一会儿镜头开始漂移（App 里是 30 秒，原型缩短到 12 秒，也可以直接点下面的“空闲漂移”）。漂移中按任意键，第一下只把镜头拉回正在播放。</p>
     <p>上面第二排切到“歌单详情”，看详情页的海报视图（同一批歌换了顺序）：一开始这张歌单没在放，所以没有大卡；点“播放全部”或某首的“播放”之后才出现。</p>
+    <p>切到“听歌模式”，看推荐流的墙：已经听了 4 首，队列里一共 15 首，后面是逐格变淡的占位格。连按“下一首”到只剩 3 首，占位格开始走微光，1.6 秒后续上 15 首，墙上原有的格子不动。</p>
   </div>
   <div class="main">
     <div class="tabs" role="tablist" aria-label="设备" id="devtabs">
@@ -504,6 +513,7 @@ td .mono { color: var(--muted); }
     <div class="tabs" role="tablist" aria-label="数据源" id="srctabs">
       <button role="tab" aria-selected="true" data-m="queue">播放队列</button>
       <button role="tab" aria-selected="false" data-m="collection">歌单详情</button>
+      <button role="tab" aria-selected="false" data-m="feed">听歌模式</button>
     </div>
     <div class="board" id="protoBoard">
       <figure id="protoFig">
@@ -663,6 +673,30 @@ td .mono { color: var(--muted); }
   </div>
 </section>
 
+<section class="sec" id="feed">
+  <div class="side">
+    <div class="eyebrow">听歌模式</div>
+    <h2>推荐流不循环，只往前长</h2>
+    <p>听歌模式（a18b1ab）的队列是服务端实时出的：QQ 电台一次最多 15 首，网易云私人漫游最多 18 首，队列剩 3 首时在队尾续一批。原方案“曲目不足就从头循环”放到这里会出错，所以队列墙在听歌模式下换一种排法。详情页的海报视图不受影响。</p>
+  </div>
+  <div class="main">
+    <ol class="legend">
+      <li><span class="dot">1</span><div><b>为什么不能循环</b>循环会把已经听过的歌排到正在放的这首后面，看起来像接下来要放，可接下来放什么，服务端还没给。另外重复单元的形状由首数决定（<code>ceil(N/12)</code> 块，列数按平方根取整）：续一批，单元可能从 2 列变成 3 列，整面墙的格子全部换人，大卡那一份也会跳到别处。</div></li>
+      <li><span class="dot">2</span><div><b>排成一条带子</b>块按列排成固定高度的带子：手机 2 块高，平板和电视 1 块高，都正好盖住一屏，往右一直长。第 i 首仍然坐第 i 个位，模板和镜像仍由块坐标决定，所以续上来的歌只会填进后面的位，墙上已有的格子一个都不动。</div></li>
+      <li><span class="dot">3</span><div><b>队尾的占位格</b>已出的歌后面接 18 个占位格，逐格变淡，看得出墙还在往前长。续取中占位格上走一道微光；新的一批到了，占位格就地翻成封面，按入场的波依次落下。续取失败就停在占位格，不弹错，和现在的续流逻辑一致。</div></li>
+      <li><span class="dot">4</span><div><b>镜头有边</b>拖动限制在带子里：上下不出带子，左边到第一块，右边到最后一个占位格，甩动碰边就停。切歌跟随时镜头往前挪一两格，像时间线在走。电视空闲漂移碰到边就掉头，主要沿着带子横着漂。</div></li>
+    </ol>
+    <div class="notes">
+      <div><h3>什么时候算听歌模式</h3><p>正在放的歌带着 <code>listening_mode</code> 标记，并且等于 ViewModel 里正在续流的模式（<code>activeFeed</code>）。换成别的队列时 <code>play()</code> 会清掉续流，墙退回循环排法，和换队列一样重新入场。App 重启后队列还在、续流没了，也按普通队列排。</p></div>
+      <div><h3>顶栏胶囊</h3><p>标题写模式名，比如“私人漫游”；副标题写“听歌模式 · 网易云 · 已听 12 首 · 后面还有 5 首”，续取中加上“正在续取…”。不写总首数，因为它一直在变。</p></div>
+      <div><h3>大卡上的“播放”</h3><p>实现成 <code>seekTo</code> 到队列里的那一项，不能调 <code>play(song, queue)</code>：<code>play()</code> 会清掉 <code>activeFeed</code>，推荐流就断了。普通队列墙也按 <code>seekTo</code> 做，两边行为一致。“下一首播放”同样只在队列里挪位置。</p></div>
+      <div><h3>开一晚上</h3><p>听上几个小时，队列会有上百首，带子很长。格子只组合视口附近的，成本不变。“定位”直接算出当前这首的位置，因为每首只有一份，不用在附近找最近的那一份。</p></div>
+      <div><h3>模式卡片页不加海报视图</h3><p>歌单 › 听歌模式 那一页是入口，不是曲目表，点一下就开播；海报墙“先放大、再播放”的两步在那里是多余的。那些卡片本来就是封面铺满整卡，和海报墙的风格一致。</p></div>
+      <div><h3>和律动跟拍</h3><p>没有额外改动。推荐流里照常切歌，节拍跟踪按“切到另一首就清掉重来”处理；大卡跟拍和普通队列一样。</p></div>
+    </div>
+  </div>
+</section>
+
 <section class="sec" id="m3e">
   <div class="side">
     <div class="eyebrow">换成 M3E</div>
@@ -699,12 +733,13 @@ td .mono { color: var(--muted); }
     <div class="tablebox"><table>
       <thead><tr><th>文件</th><th>内容</th></tr></thead>
       <tbody>
-        <tr><td class="k">PosterSource.kt</td><td>数据源抽象：<code>Queue</code>（播放队列，总有一首在放）和 <code>Collection</code>（歌单 / 专辑 / 榜单 / 本地歌单，可能没在放）；提供曲目、标题、序号含义、点“播放”时调用的动作</td></tr>
+        <tr><td class="k">PosterSource.kt</td><td>数据源抽象：<code>Queue</code>（播放队列，总有一首在放）和 <code>Collection</code>（歌单 / 专辑 / 榜单 / 本地歌单，可能没在放）；提供曲目、标题、序号含义、点“播放”时调用的动作。<code>Queue</code> 带一个可空的 <code>feed</code>（模式名、平台、是否在续取），非空时墙按带子排</td></tr>
         <tr><td class="k">PosterWallScreen.kt</td><td>队列海报墙的路由入口、浮层控件、设置面板、返回键优先级；三端共用，靠 <code>LocalAppWindow</code> 取格距</td></tr>
         <tr><td class="k">CollectionPosterView.kt</td><td>详情页的海报视图：顶栏胶囊 + 浮动工具栏，嵌进 CollectionScreen 和 LocalPlaylistScreen，按 <code>collection_view</code> 和列表视图切换</td></tr>
-        <tr><td class="k">WallGeometry.kt</td><td>模板、镜像、块哈希、重复单元、<code>songAt</code>；纯 Kotlin，配单元测试</td></tr>
+        <tr><td class="k">WallGeometry.kt</td><td>模板、镜像、块哈希、重复单元、<code>songAt</code>，以及听歌模式的带状排法 <code>FeedBand(rows)</code>；纯 Kotlin，配单元测试，其中一条校验“续一批前后，已有曲目的位置不变”</td></tr>
         <tr><td class="k">WallReflowTable.kt</td><td>192 种重排的常量表，由测试源码里的求解器生成；另有一个测试校验每种都正好铺满</td></tr>
-        <tr><td class="k">WallCamera.kt</td><td><code>Animatable&lt;Offset&gt;</code>，拖动后用 <code>splineBasedDecay</code> 甩出惯性，对齐到整像素；平移只在 layout 阶段读取，不触发重组。电视空闲漂移也在这里：<code>withFrameNanos</code> 循环推镜头，任意按键取消</td></tr>
+        <tr><td class="k">WallCamera.kt</td><td><code>Animatable&lt;Offset&gt;</code>，拖动后用 <code>splineBasedDecay</code> 甩出惯性，对齐到整像素；平移只在 layout 阶段读取，不触发重组。电视空闲漂移也在这里：<code>withFrameNanos</code> 循环推镜头，任意按键取消。听歌模式下有边界：甩动碰边停住，漂移碰边掉头</td></tr>
+        <tr><td class="k">MusicViewModel.kt / UiStates.kt</td><td>把私有的 <code>activeFeed</code> 暴露成 <code>ListeningFeedUi(modeId, name, providerName, appending)</code>，开始续取和续完时更新；海报墙只读这一份</td></tr>
         <tr><td class="k">PosterWallLayout.kt</td><td>自定义 <code>Layout</code>：只组合视口外扩两格内的格子，用 <code>key(块x, 块y, 位)</code> 复用；每格的位置是一个 <code>Animatable&lt;IntRect&gt;</code>，重排时走弹簧</td></tr>
         <tr><td class="k">PosterTile.kt / GrownPoster.kt</td><td>小格、正在播放大卡、别的歌大卡；染色层画在 drawBehind 里，只在绘制阶段读取动画色（和 CollectionScreen 的 TintedGradient 同一个做法）</td></tr>
         <tr><td class="k">PosterLyrics.kt</td><td>三行歌词，复用 <code>LyricsParser</code> 和 karaoke Brush；放大的弹簧落定后才组合</td></tr>
@@ -735,20 +770,20 @@ td .mono { color: var(--muted); }
   <div class="side">
     <div class="eyebrow">分期与决定</div>
     <h2>怎么做、已经定了什么</h2>
-    <p>五期，每期都能单独验收。四个待定问题已于 2026-10-29 确认，结论在下面。</p>
+    <p>五期，每期都能单独验收。四个待定问题已于 2026-10-29 确认，结论在下面；同一天补上了听歌模式的适配。</p>
   </div>
   <div class="main">
     <div class="phases">
-      <div class="phase"><header><span class="tag">P1</span><h3>能看的墙</h3></header><ul><li>WallGeometry、重排表和它们的单元测试</li><li>WallCamera：拖动、惯性、整像素对齐</li><li>小格组件，带染色和序号；队列面板加入口</li></ul></div>
-      <div class="phase"><header><span class="tag">P2</span><h3>大卡与跟随</h3></header><ul><li>点格子放大、块内重排的弹簧动画</li><li>三种大卡和控件，SharedCover 飞入飞出</li><li>切歌跟随、“定位正在播放”按钮</li></ul></div>
-      <div class="phase"><header><span class="tag">P3</span><h3>歌词与电视</h3></header><ul><li>PosterLyrics：固定字号预算、逐字填色、翻译</li><li>方向键空间导航、长按 OK、返回键优先级、空闲淡出</li><li>空闲漂移和“第一下只唤醒”</li><li>按格子像素取封面档位</li></ul></div>
+      <div class="phase"><header><span class="tag">P1</span><h3>能看的墙</h3></header><ul><li>WallGeometry、重排表和它们的单元测试</li><li>WallCamera：拖动、惯性、整像素对齐</li><li>小格组件，带染色和序号；队列面板加入口</li><li>听歌模式的带状排法和镜头边界</li></ul></div>
+      <div class="phase"><header><span class="tag">P2</span><h3>大卡与跟随</h3></header><ul><li>点格子放大、块内重排的弹簧动画</li><li>三种大卡和控件，SharedCover 飞入飞出</li><li>切歌跟随、“定位正在播放”按钮；大卡“播放”走 <code>seekTo</code></li><li>听歌模式的占位格、续取微光、新一批的落位动画</li></ul></div>
+      <div class="phase"><header><span class="tag">P3</span><h3>歌词与电视</h3></header><ul><li>PosterLyrics：固定字号预算、逐字填色、翻译</li><li>方向键空间导航、长按 OK、返回键优先级、空闲淡出</li><li>空闲漂移和“第一下只唤醒”；听歌模式碰边掉头</li><li>按格子像素取封面档位</li></ul></div>
       <div class="phase"><header><span class="tag">P4</span><h3>详情页海报视图</h3></header><ul><li>PosterSource 抽出 Collection 数据源，CollectionPosterView 嵌进三种详情页和本地歌单</li><li>浮动工具栏、未在播放时的初始状态、<code>collection_view</code> 记忆</li><li>无封面曲目的字体海报兜底、骨架格、错误态</li></ul></div>
       <div class="phase"><header><span class="tag">P5</span><h3>设置、入场、收尾</h3></header><ul><li>墙内设置面板和设置 › 播放页里的入口设置</li><li>入场波和退场反向波，减弱动效时只淡入</li><li>电视盒子上测帧率、TalkBack 走查、README 和 THIRD_PARTY_NOTICES</li></ul></div>
     </div>
     <div class="qs">
       <div class="q"><b>1. 范围：播放队列和详情页都做</b><span>歌单、专辑、榜单详情和本地歌单都能切成海报视图，见“详情页”一节；按分期，队列先做（P1–P3），详情页在 P4。</span></div>
       <div class="q"><b>2. 点格子先放大，再点“播放”</b><span>按 folia 的做法，三端一致。手机上播别的歌要点两下，换来的是不会误触换歌。</span></div>
-      <div class="q"><b>3. 曲目不足时循环铺满</b><span>队列和详情页都一样，空位从头接着填，墙永远是满的。</span></div>
+      <div class="q"><b>3. 曲目不足时循环铺满</b><span>队列和详情页都一样，空位从头接着填，墙永远是满的。听歌模式的推荐流例外，不循环，见“听歌模式”一节。</span></div>
       <div class="q"><b>4. 电视空闲时镜头漂移</b><span>30 秒起漂，第一下按键只唤醒；墙内设置可关，默认开。细节见“交互”一节。</span></div>
     </div>
   </div>
@@ -1261,6 +1296,10 @@ const DRIFT_SPEED = 10;   // 漂移速度 dp/s
 
 /* 歌单模式用的示例歌单：同一批歌换个顺序 */
 const COLLECTION = { title: '深夜循环', meta: '歌单 · 网易云', seed: '#7A5CA8' };
+/* 听歌模式示例：服务端实时出歌，一批 15 首，队列剩 3 首时续下一批（App 里 FEED_EXTEND_THRESHOLD = 3） */
+const FEED = { title: '私人漫游', meta: '听歌模式 · 网易云', batch: 15, threshold: 3, fetchMs: 1600, ghosts: 18 };
+/* 听歌模式的墙是一条固定高度的带子（单位：块），刚好盖住一屏，往右一直长 */
+const FEED_ROWS = { phone: 2, tablet: 1, tv: 1 };
 const COLL_SONGS = (() => { const r = rng(42), a = SONGS.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; })();
 
 /* Cookie12Sided：播放键的花瓣形，和 App 里 PlayPauseButton 同一个形状 */
@@ -1290,10 +1329,14 @@ class Wall {
     this.ac = new AbortController(); this.sig = { signal: this.ac.signal };
     this.dev = dev; this.kind = kind; this.g = GEOM[kind]; this.ts = TILE_STYLE[kind];
     this.mode = opts.mode || 'queue';
-    this.songs = this.mode === 'queue' ? SONGS : COLL_SONGS; this.field = fieldFor(this.songs.length);
+    if (this.mode === 'feed') {
+      // 推荐流不循环：块按列排成带子，第 i 首坐第 i 个位，已出的歌后面接一段占位格
+      this.feedRng = rng(7); this.pool = []; this.appending = false;
+      this.songs = this.takeBatch(); this.field = { feed: true, rows: FEED_ROWS[kind] };
+    } else { this.songs = this.mode === 'queue' ? SONGS : COLL_SONGS; this.field = fieldFor(this.songs.length); }
     this.P = this.g.pitch; this.G = this.g.gap; this.BWp = BW * this.P; this.BHp = BH * this.P;
-    // 队列模式总有一首在放；歌单模式默认“这张歌单还没在放”（cur = -1）
-    this.cur = opts.cur ?? (this.mode === 'queue' ? 2 : -1); this.playing = true; this.t = 0;
+    // 队列模式总有一首在放；歌单模式默认“这张歌单还没在放”（cur = -1）；听歌模式假设已经听了 4 首
+    this.cur = opts.cur ?? (this.mode === 'collection' ? -1 : this.mode === 'feed' ? 4 : 2); this.playing = true; this.t = 0;
     this.set = { tint: 'mid', lights: false, num: true, tr: true, follow: true, drift: true };
     this.cam = { x: 0, y: 0 }; this.camT = null; this.vel = null;
     this.grown = null; this.focus = null; this.els = new Map(); this.range = '';
@@ -1326,7 +1369,7 @@ class Wall {
     const k = this.kind, back = ic('back');
     const head = `<div class="headbar chrome" style="${k === 'phone' ? 'left:12px;top:36px' : k === 'tv' ? 'left:32px;top:24px' : 'left:24px;top:20px'}">
         <button class="bk" data-act="back" aria-label="返回">${back}</button>
-        <div class="ttl"><b>${this.mode === 'queue' ? '播放队列' : COLLECTION.title}</b><span></span></div></div>`;
+        <div class="ttl"><b>${this.mode === 'queue' ? '播放队列' : this.mode === 'feed' ? FEED.title : COLLECTION.title}</b><span></span></div></div>`;
     const fabs = this.mode === 'collection' ? this.toolHTML() : k === 'phone'
       ? `<button class="fab round chrome" data-act="locate" style="right:84px;bottom:34px" aria-label="定位正在播放">${ic('locate')}</button>
          <button class="fab sq chrome" data-act="tune" style="right:16px;bottom:30px" aria-label="海报墙设置">${ic('tune')}</button>`
@@ -1367,11 +1410,11 @@ class Wall {
       <h4>海报墙</h4>
       <div class="grp"><div class="lab">海报染色</div>${opt('tint', [['off', '关'], ['low', '弱'], ['mid', '中'], ['high', '强']])}</div>
       ${sw('lights', '关灯（只亮正在播放）')}
-      ${sw('num', this.mode === 'queue' ? '显示队列序号' : '显示曲目序号')}
+      ${sw('num', this.mode !== 'collection' ? '显示队列序号' : '显示曲目序号')}
       ${sw('tr', '显示歌词翻译')}
       ${sw('follow', '切歌时自动跟随')}
       ${k === 'tv' ? sw('drift', '空闲时镜头漂移') : ''}
-      <div class="lab" style="margin-top:4px">${this.mode === 'queue' ? '更多：迷你播放器点按打开哪一页，在 设置 › 播放页' : '详情页会记住你上次用的是列表还是海报'}</div>
+      <div class="lab" style="margin-top:4px">${this.mode !== 'collection' ? '更多：迷你播放器点按打开哪一页，在 设置 › 播放页' : '详情页会记住你上次用的是列表还是海报'}</div>
     </div>`;
   }
 
@@ -1392,7 +1435,40 @@ class Wall {
     const g = this.g, top = this.kind === 'phone' ? 84 : this.kind === 'tv' ? 80 : 0, bot = this.kind === 'phone' ? 92 : this.mode === 'collection' && this.kind === 'tablet' ? 88 : 0;
     return { x: this.cam.x, y: this.cam.y + top, w: g.vw, h: g.vh - top - bot };
   }
+  /* 这一位坐的是第几首。普通墙按重复单元循环；听歌模式按带子算，超出已出的歌是占位格，再往后和带子外是 -1（不画） */
+  songAt(bx, by, s) {
+    const f = this.field;
+    if (!f.feed) return songAt(f, bx, by, s);
+    if (bx < 0 || by < 0 || by >= f.rows) return -1;
+    const i = (bx * f.rows + by) * SLOTS + s;
+    return i < this.songs.length + FEED.ghosts ? i : -1;
+  }
+  posOf(i) { const R = this.field.rows, k = Math.floor(i / SLOTS); return { bx: Math.floor(k / R), by: k % R, slot: i % SLOTS }; }
+  /* 听歌模式：带子铺满整屏、不露空边时镜头能去的范围。左边到第一块，右边到最后一个占位格所在的块 */
+  fillRange() {
+    const g = this.g, H = this.field.rows * this.BHp, right = (this.posOf(this.songs.length + FEED.ghosts - 1).bx + 1) * this.BWp;
+    const y = H >= g.vh ? [0, H - g.vh] : [(H - g.vh) / 2, (H - g.vh) / 2];
+    return { x0: 0, x1: Math.max(0, right - g.vw), y0: y[0], y1: y[1] };
+  }
+  /* 拖动和漂移的边界：铺满范围再放宽一个格距。普通墙无边 */
+  bounds() {
+    if (!this.field.feed) return null;
+    const f = this.fillRange(), m = this.P;
+    return { x0: f.x0 - m, x1: f.x1 + m, y0: f.y0 - m, y1: f.y1 + m };
+  }
+  /* 把镜头收回边界；from 是这次手势或漂移开始时的位置，本来就在界外（比如刚居中到边上的大卡）时不往回拽。返回被挡住的轴 */
+  clampCam(from) {
+    const b = this.bounds();
+    if (!b) return { x: false, y: false };
+    const cx = clamp(this.cam.x, Math.min(b.x0, from.x), Math.max(b.x1, from.x));
+    const cy = clamp(this.cam.y, Math.min(b.y0, from.y), Math.max(b.y1, from.y));
+    const hit = { x: cx !== this.cam.x, y: cy !== this.cam.y };
+    this.cam.x = cx; this.cam.y = cy;
+    return hit;
+  }
   nearestCopy(song, pt) {
+    // 听歌模式每首只有一份，直接算位置
+    if (this.field.feed) return song >= 0 && song < this.songs.length ? this.posOf(song) : null;
     // pt：屏幕坐标；在中心块周围 ±2 块里找这首歌离屏幕点最近的一份（按屏幕上实际的位置，含已放大块的重排）
     const wx = this.cam.x + pt.x, wy = this.cam.y + pt.y;
     const cbx = Math.floor(wx / this.BWp), cby = Math.floor(wy / this.BHp);
@@ -1400,7 +1476,7 @@ class Wall {
     for (let by = cby - 2; by <= cby + 2; by++) for (let bx = cbx - 2; bx <= cbx + 2; bx++) {
       const rs = this.rectsOf(bx, by);
       for (let s = 0; s < SLOTS; s++) {
-        if (songAt(this.field, bx, by, s) !== song) continue;
+        if (this.songAt(bx, by, s) !== song) continue;
         const w = this.world(bx, by, rs[s]), d = Math.hypot(w.x + w.w / 2 - wx, w.y + w.h / 2 - wy);
         if (d < bd) { bd = d; best = { bx, by, slot: s }; }
       }
@@ -1410,8 +1486,14 @@ class Wall {
 
   /* ---------- 相机 ---------- */
   centerOn(p, animate = true) {
-    const r = this.rectAt(p), v = this.view(), g = this.g;
-    const tx = r.x + r.w / 2 - g.vw / 2, ty = r.y + r.h / 2 - (v.y - this.cam.y) - v.h / 2;
+    const r = this.rectAt(p), v = this.view(), g = this.g, top = v.y - this.cam.y;
+    let tx = r.x + r.w / 2 - g.vw / 2, ty = r.y + r.h / 2 - top - v.h / 2;
+    if (this.field.feed) {
+      // 带子有边：尽量铺满整屏不露空边，但大卡必须整张落在可用区里
+      const f = this.fillRange();
+      tx = clamp(clamp(tx, f.x0, f.x1), r.x + r.w - g.vw, r.x);
+      ty = clamp(clamp(ty, f.y0, f.y1), r.y + r.h - top - v.h, r.y - top);
+    }
     this.vel = null;
     if (!animate || REDUCED) { this.cam = { x: tx, y: ty }; this.camT = null; this.camV = { x: 0, y: 0 }; this.place(); }
     else { this.camT = { x: tx, y: ty }; this.camV = this.camV || { x: 0, y: 0 }; }
@@ -1430,6 +1512,9 @@ class Wall {
       this.place();
     } else if (this.vel) {
       this.cam.x -= this.vel.x * dt; this.cam.y -= this.vel.y * dt;
+      const hit = this.clampCam(this.vel.from);
+      if (hit.x) this.vel.x = 0;
+      if (hit.y) this.vel.y = 0;
       const k = Math.exp(-4.2 * dt); this.vel.x *= k; this.vel.y *= k;
       if (Math.hypot(this.vel.x, this.vel.y) < 8) this.vel = null;
       this.place();
@@ -1437,7 +1522,11 @@ class Wall {
       // 方向是两条慢正弦叠加，一直在拐弯但没有急转；起步 3 秒内从 0 加速到 10dp/s
       const d = this.drift; d.t += dt;
       const ang = d.a0 + .9 * Math.sin(d.t / 19) + .5 * Math.sin(d.t / 31), sp = DRIFT_SPEED * Math.min(1, d.t / 3);
-      this.cam.x += Math.cos(ang) * sp * dt; this.cam.y += Math.sin(ang) * sp * dt;
+      this.cam.x += d.fx * Math.cos(ang) * sp * dt; this.cam.y += d.fy * Math.sin(ang) * sp * dt;
+      // 听歌模式碰到带子的边就掉头，所以主要是沿着带子横着漂
+      const hit = this.clampCam(d.from);
+      if (hit.x) d.fx = -d.fx;
+      if (hit.y) d.fy = -d.fy;
       this.place();
     }
     this.tick(dt);
@@ -1459,6 +1548,7 @@ class Wall {
     for (let by = by0; by <= by1; by++) for (let bx = bx0; bx <= bx1; bx++) {
       const rs = this.rectsOf(bx, by);
       for (let s = 0; s < SLOTS; s++) {
+        if (this.songAt(bx, by, s) < 0) continue;
         const w = this.world(bx, by, rs[s]);
         if (w.x + w.w < this.cam.x - ov || w.x > this.cam.x + g.vw + ov || w.y + w.h < this.cam.y - ov || w.y > this.cam.y + g.vh + ov) continue;
         const id = `${bx},${by},${s}`; seen.add(id);
@@ -1472,9 +1562,16 @@ class Wall {
     for (const [id, el] of this.els) if (!seen.has(id)) { el.remove(); this.els.delete(id); }
   }
   makeTile(bx, by, s) {
-    const i = songAt(this.field, bx, by, s), song = this.songs[i];
+    const i = this.songAt(bx, by, s), song = this.songs[i];
     const el = document.createElement('div');
     el.className = 'tile'; el.dataset.id = `${bx},${by},${s}`; el.dataset.song = i;
+    if (!song) {
+      // 还没出的歌：占位格越往后越淡，续取中走一道微光
+      el.classList.add('ghost'); el.classList.toggle('wait', this.appending);
+      el.style.setProperty('--ga', (1 - (i - this.songs.length) / FEED.ghosts * .85).toFixed(3));
+      el.innerHTML = '<div class="clip"><div class="shim"></div></div>';
+      return el;
+    }
     el.innerHTML = `<div class="clip"><div class="art" style="background-image:url(${cover(song)})"></div><div class="dim"></div><div class="shade"></div></div>
       <span class="no ${this.ts.no}">${pad2(i + 1)}</span>
       <div class="meta"><div class="tt">${esc(song.t)}</div><div class="ar">${esc(song.a)}</div></div>`;
@@ -1588,6 +1685,9 @@ class Wall {
     applyScheme(this.scr, s ? s.seed : COLLECTION.seed);
     this.scr.querySelector('.headbar span').textContent = this.mode === 'queue'
       ? `${n} 首 · 正在播放第 ${this.cur + 1} 首`
+      : this.mode === 'feed'
+      // 推荐流的总数一直在变，不写“共几首”
+      ? `${FEED.meta} · 已听 ${this.cur} 首 · 后面还有 ${n - this.cur - 1} 首${this.appending ? ' · 正在续取…' : ''}`
       : `${COLLECTION.meta} · ${n} 首${s ? ` · 正在播放第 ${this.cur + 1} 首` : ''}`;
   }
   playIndex(i, from = null) {
@@ -1600,8 +1700,49 @@ class Wall {
       if (this.focus) this.focus = p;
     }
     this.relayout(); this.updateLocate();
+    if (this.field.feed) this.extend();
   }
-  step(d) { this.playIndex(mod(this.cur + d, this.songs.length)); }
+  step(d) {
+    if (this.field.feed) {
+      // 推荐流不绕回：到了队尾就等下一批
+      const i = clamp(this.cur + d, 0, this.songs.length - 1);
+      if (i === this.cur) { this.toast(d > 0 ? '下一批还在路上' : '这已经是这次听歌模式的第一首'); return; }
+      this.playIndex(i);
+      return;
+    }
+    this.playIndex(mod(this.cur + d, this.songs.length));
+  }
+  /* 听歌模式：队列剩 3 首时续一批（App 里是 extendFeedIfNeeded）。新歌落在原来的占位格上，墙上已有的格子一个都不动 */
+  extend() {
+    if (this.appending || this.songs.length - this.cur > FEED.threshold) return;
+    this.appending = true; this.applySong();
+    for (const el of this.els.values()) if (el.classList.contains('ghost')) el.classList.add('wait');
+    this.feedT = setTimeout(() => {
+      const from = this.songs.length, more = this.takeBatch();
+      this.songs = this.songs.concat(more); this.appending = false;
+      // 占位格整段重建：前面翻成封面，后面接上新的占位格
+      for (const [id, el] of this.els) if (+el.dataset.song >= from) { el.remove(); this.els.delete(id); }
+      this.range = ''; this.place();
+      if (!REDUCED) for (const el of this.els.values()) {
+        const i = +el.dataset.song;
+        if (i < from || i >= this.songs.length) continue;
+        el.style.setProperty('--d', Math.min(.34, (i - from) * .03).toFixed(3) + 's');
+        el.classList.remove('land'); void el.offsetWidth; el.classList.add('land');
+      }
+      this.applySong(); this.updateLocate(); this.toast(`续上 ${more.length} 首`);
+    }, FEED.fetchMs);
+  }
+  takeBatch() {
+    const out = [];
+    while (out.length < FEED.batch) {
+      if (!this.pool.length) {
+        this.pool = SONGS.slice();
+        for (let i = this.pool.length - 1; i > 0; i--) { const j = Math.floor(this.feedRng() * (i + 1)); [this.pool[i], this.pool[j]] = [this.pool[j], this.pool[i]]; }
+      }
+      out.push(this.pool.pop());
+    }
+    return out;
+  }
   togglePlay() {
     this.playing = !this.playing;
     const np = this.nowEl?.querySelector('.np');
@@ -1611,7 +1752,7 @@ class Wall {
     }
   }
   updateLocate() {
-    const g = this.grown, on = g && songAt(this.field, g.bx, g.by, g.slot) === this.cur, b = this.scr.querySelector('[data-act="locate"]');
+    const g = this.grown, on = g && this.songAt(g.bx, g.by, g.slot) === this.cur, b = this.scr.querySelector('[data-act="locate"]');
     b.classList.toggle('sel', this.cur >= 0 && !on);
     b.classList.toggle('dis', this.cur < 0);
   }
@@ -1644,6 +1785,7 @@ class Wall {
         const id = act.closest('.tile').dataset.id.split(',').map(Number);
         this.playIndex(+act.dataset.i, { bx: id[0], by: id[1], slot: id[2] });
         if (this.mode === 'collection') this.toast('从这首开始播放，队列换成整张歌单');
+        else if (this.mode === 'feed') this.toast('在队列里跳到这首，听歌模式不中断');
       }
       else if (a === 'nextup') this.toast(`「${this.songs[+act.dataset.i].t}」将在下一首播放`);
       else if (a === 'more') this.toast('长按格子或点“更多”：歌曲操作面板');
@@ -1651,6 +1793,7 @@ class Wall {
     }
     if (!this.sheet.classList.contains('off') && !e.target.closest('.sheet')) { this.sheet.classList.add('off'); return; }
     const tile = e.target.closest('.tile');
+    if (tile?.classList.contains('ghost')) { this.toast(`后面的歌由「${FEED.title}」实时出，剩 3 首时自动续一批`); return; }
     if (tile && !tile.classList.contains('grown')) {
       const [bx, by, slot] = tile.dataset.id.split(',').map(Number), p = { bx, by, slot };
       this.growAt(p); this.centerOn(p); this.updateLocate();
@@ -1676,7 +1819,7 @@ class Wall {
       const dx = (e.clientX - st.x) / k(), dy = (e.clientY - st.y) / k();
       if (!st.moved && Math.hypot(dx, dy) > 6) { st.moved = true; this.wall.classList.add('drag'); this.wall.setPointerCapture?.(e.pointerId); }
       if (!st.moved) return;
-      this.cam.x = st.cx - dx; this.cam.y = st.cy - dy; this.place();
+      this.cam.x = st.cx - dx; this.cam.y = st.cy - dy; this.clampCam({ x: st.cx, y: st.cy }); this.place();
       st.hist.push([performance.now(), e.clientX, e.clientY]); if (st.hist.length > 6) st.hist.shift();
     }, this.sig);
     window.addEventListener('pointerup', () => {
@@ -1684,7 +1827,7 @@ class Wall {
       if (st.moved) {
         this.dragged = true; setTimeout(() => this.dragged = false, 0);
         const h = st.hist, a = h[0], b = h[h.length - 1], dt = Math.max(16, b[0] - a[0]) / 1000;
-        this.vel = { x: (b[1] - a[1]) / k() / dt, y: (b[2] - a[2]) / k() / dt };
+        this.vel = { x: (b[1] - a[1]) / k() / dt, y: (b[2] - a[2]) / k() / dt, from: { x: st.cx, y: st.cy } };
       }
       this.wall.classList.remove('drag'); st = null;
     }, this.sig);
@@ -1717,13 +1860,14 @@ class Wall {
     if (this.kind !== 'tv' || !this.set.drift) return;
     this.scr.classList.add('idle', 'drifting');
     clearTimeout(this.idleT); clearTimeout(this.driftT);
-    this.vel = null; this.drift = { t: 0, a0: Math.random() * TAU };
+    this.vel = null;
+    this.drift = { t: 0, a0: this.field.feed ? (Math.random() < .5 ? 0 : Math.PI) : Math.random() * TAU, fx: 1, fy: 1, from: { ...this.cam } };
   }
   rectsNear(p) {
     const out = [];
     for (let by = p.by - 1; by <= p.by + 1; by++) for (let bx = p.bx - 1; bx <= p.bx + 1; bx++) {
       const rs = this.rectsOf(bx, by);
-      for (let s = 0; s < SLOTS; s++) out.push({ p: { bx, by, slot: s }, r: this.world(bx, by, rs[s]) });
+      for (let s = 0; s < SLOTS; s++) if (this.songAt(bx, by, s) >= 0) out.push({ p: { bx, by, slot: s }, r: this.world(bx, by, rs[s]) });
     }
     return out;
   }
@@ -1774,14 +1918,15 @@ class Wall {
   enter() {
     if (!this.focus) { this.move(0, 0); return; }
     const f = this.focus, g = this.grown;
+    if (!this.songs[this.songAt(f.bx, f.by, f.slot)]) { this.toast(`后面的歌由「${FEED.title}」实时出，剩 3 首时自动续一批`); return; }
     if (g && g.bx === f.bx && g.by === f.by && g.slot === f.slot) {
-      const i = songAt(this.field, f.bx, f.by, f.slot);
+      const i = this.songAt(f.bx, f.by, f.slot);
       if (i === this.cur) this.togglePlay(); else this.playIndex(i, f);
     } else { this.growAt(f); this.reveal(f); this.updateLocate(); }
   }
   backKey() {
     if (!this.sheet.classList.contains('off')) { this.sheet.classList.add('off'); return; }
-    if (this.focus && this.grown && this.focus.bx === this.grown.bx && this.focus.by === this.grown.by && this.focus.slot === this.grown.slot && songAt(this.field, this.grown.bx, this.grown.by, this.grown.slot) !== this.cur) { this.collapse(); return; }
+    if (this.focus && this.grown && this.focus.bx === this.grown.bx && this.focus.by === this.grown.by && this.focus.slot === this.grown.slot && this.songAt(this.grown.bx, this.grown.by, this.grown.slot) !== this.cur) { this.collapse(); return; }
     if (this.focus) { this.focus = null; this.relayout(); return; }
     this.toast('再按返回：离开海报墙');
   }
@@ -1796,7 +1941,7 @@ class Wall {
       el.classList.remove('land'); void el.offsetWidth; el.classList.add('land');
     }
   }
-  destroy() { this.ac.abort(); cancelAnimationFrame(this.raf); this.raf = 0; clearTimeout(this.idleT); clearTimeout(this.driftT); this.scr.innerHTML = ''; }
+  destroy() { this.ac.abort(); cancelAnimationFrame(this.raf); this.raf = 0; clearTimeout(this.idleT); clearTimeout(this.driftT); clearTimeout(this.feedT); this.scr.innerHTML = ''; }
 }
 </script>
 <script>
@@ -1814,7 +1959,7 @@ function mount(kind = kindNow, mode = modeNow) {
   wall?.destroy();
   protoDev.className = `dev ${kind}${kind === 'phone' ? ' big' : ''}`;
   protoFig.style.width = kind === 'phone' ? 'min(100%, 340px)' : '100%';
-  $('#protoCap').innerHTML = CAP[kind] + (mode === 'collection' ? ' · 歌单详情' : ' · 播放队列');
+  $('#protoCap').innerHTML = CAP[kind] + (mode === 'collection' ? ' · 歌单详情' : mode === 'feed' ? ' · 听歌模式' : ' · 播放队列');
   scaler.observe(protoDev);
   wall = new Wall(protoDev, kind, { mode });
   $$('#devtabs button').forEach(x => x.setAttribute('aria-selected', String(x.dataset.k === kind)));
