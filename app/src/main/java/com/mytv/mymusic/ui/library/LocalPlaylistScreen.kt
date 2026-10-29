@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.RemoveCircleOutline
@@ -77,6 +78,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mytv.mymusic.data.CollectionView
 import com.mytv.mymusic.data.PlaylistEntryEntity
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
@@ -110,6 +112,11 @@ import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatDuration
+import com.mytv.mymusic.ui.poster.CollectionPosterOps
+import com.mytv.mymusic.ui.poster.CollectionPosterView
+import com.mytv.mymusic.ui.poster.LOCAL_PLAYLIST_LABEL
+import com.mytv.mymusic.ui.poster.PosterExtraAction
+import com.mytv.mymusic.ui.providerName
 import com.mytv.mymusic.ui.relativeTime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -120,6 +127,8 @@ private class Loaded(val detail: LocalPlaylistDetail?)
 /**
  * 自建歌单详情 + 编辑。编辑是同一页的模式，不另开页面：
  * 手机是单栏；≥840dp 平板和电视左栏放拼贴和操作、右栏放曲目；embedded 时嵌在“我的”的右侧详情窗格里。
+ * collection_view 选了海报时显示海报视图（CollectionPosterView）；编辑（排序、移除、添加）只在列表视图里，
+ * 海报视图里点“编辑”就进列表的编辑模式，点“完成”回到海报。
  */
 @Composable
 fun LocalPlaylistScreen(
@@ -175,8 +184,16 @@ fun LocalPlaylistScreen(
         editing = false
     }
     BackHandler(editing) { finishEdit() }
-    // 电视：普通模式焦点在“播放全部”，编辑模式在第一行的“下移”（不默认落在移除上）
-    TvDefaultFocus(if (editing) editFocus else playFocus, playlist?.id to editing)
+    // 编辑中总是列表：海报视图里点“编辑”只打开编辑模式，不改记住的视图
+    val posterView = state.collectionView == CollectionView.Poster && !editing
+    val showPoster: () -> Unit = remember(actions, selection) {
+        {
+            selection.exit()
+            actions.setCollectionView(CollectionView.Poster)
+        }
+    }
+    // 电视：普通模式焦点在“播放全部”，编辑模式在第一行的“下移”（不默认落在移除上）；海报视图自己管焦点，切回列表时重新落一次
+    TvDefaultFocus(if (editing) editFocus else playFocus, Triple(playlist?.id, editing, posterView))
 
     val remove: (PlaylistEntryEntity, Song) -> Unit = { entry, song ->
         actions.removeEntry(playlistId, entry.position)
@@ -363,12 +380,26 @@ fun LocalPlaylistScreen(
                 menu = if (showEdit) menu else null,
                 playFocus = playFocus,
                 onMultiSelect = if (songs.isNotEmpty()) ({ selection.start() }) else null,
+                // 嵌在“我的”里没有顶栏，入口放操作行；手机和双栏的左栏操作行已经排满，入口在顶栏
+                onPosterView = if (embedded) showPoster else null,
             )
         }
     }
 
     Box(Modifier.fillMaxSize()) {
         when {
+            posterView && (load == null || playlist != null) -> LocalPlaylistPoster(
+                state = state,
+                actions = actions,
+                detail = detail,
+                cover = coverUrls.firstOrNull().orEmpty(),
+                onEdit = { editing = true },
+                onAddTracks = { addOpen = true },
+                onSongActions = { song, entry -> actionEntry = song to entry },
+                onBack = onBack,
+                resetKey = playlistId,
+                holdAwake = actionEntry != null || addOpen || renameOpen || deleteOpen,
+            )
             load == null -> PlaylistLoading(embedded)
             playlist == null -> MissingPlaylist(onBack)
             embedded -> {
@@ -410,7 +441,15 @@ fun LocalPlaylistScreen(
                 title = if (editing) "编辑歌单" else playlist.name,
                 subtitle = if (editing) "" else meta,
                 onBack = if (editing) finishEdit else onBack,
-                actions = { if (editing) DoneButton(finishEdit) },
+                actions = {
+                    if (editing) {
+                        DoneButton(finishEdit)
+                    } else {
+                        IconButton(onClick = showPoster, modifier = Modifier.tvFocusRing(CircleShape)) {
+                            Icon(Icons.Filled.GridView, "海报视图")
+                        }
+                    }
+                },
             ) { padding ->
                 TwoColumns(
                     padding,
@@ -456,6 +495,9 @@ fun LocalPlaylistScreen(
                     if (editing) {
                         DoneButton(finishEdit, Modifier.padding(end = 8.dp))
                     } else {
+                        IconButton(onClick = showPoster, modifier = Modifier.tvFocusRing(CircleShape)) {
+                            Icon(Icons.Filled.GridView, "海报视图")
+                        }
                         IconButton(onClick = { editing = true }, modifier = Modifier.tvFocusRing(CircleShape)) {
                             Icon(Icons.Filled.Edit, "编辑歌单")
                         }
@@ -563,6 +605,78 @@ private data class PlaylistMenu(
     val onDelete: () -> Unit,
 )
 
+/**
+ * 自建歌单的海报视图（[detail] 为 null 时是读取中，墙上是骨架格）。工具栏第三格是“编辑”：进列表的编辑模式。
+ * 播放都不弹出播放页；长按格子、大卡的“更多”打开和列表同一个 TrackActionsSheet（带“从歌单移除”）。
+ */
+@Composable
+private fun LocalPlaylistPoster(
+    state: MusicUiState,
+    actions: MusicActions,
+    detail: LocalPlaylistDetail?,
+    cover: String,
+    onEdit: () -> Unit,
+    onAddTracks: () -> Unit,
+    onSongActions: (Song, PlaylistEntryEntity) -> Unit,
+    onBack: () -> Unit,
+    resetKey: Any?,
+    holdAwake: Boolean,
+) {
+    val songs = detail?.songs.orEmpty()
+    // 解不出来的条目不在 songs 里：按同样的过滤把条目和 songs 一一对齐，下标才对得上
+    val songEntries = remember(detail) {
+        detail?.let { d -> d.entries.filter { it.position in d.songByPosition } }.orEmpty()
+    }
+    val ops = remember(actions, songs, songEntries, onSongActions, onBack) {
+        CollectionPosterOps(
+            playAll = { if (songs.isNotEmpty()) actions.play(songs.first(), songs, openPlayer = false) },
+            shuffle = {
+                val list = songs.shuffled()
+                if (list.isNotEmpty()) actions.play(list.first(), list, openPlayer = false)
+            },
+            playFrom = { index -> songs.getOrNull(index)?.let { actions.play(it, songs, openPlayer = false) } },
+            playNext = { index -> songs.getOrNull(index)?.let(actions::playSongNext) },
+            songActions = { index ->
+                val song = songs.getOrNull(index)
+                val entry = songEntries.getOrNull(index)
+                if (song != null && entry != null) onSongActions(song, entry)
+            },
+            showList = { actions.setCollectionView(CollectionView.List) },
+            back = onBack,
+        )
+    }
+    val edit = remember(onEdit) { PosterExtraAction(Icons.Filled.Edit, "编辑歌单", onEdit) }
+    val providers = state.providers
+    val sourceName: (Song) -> String = remember(providers) { { song -> providerName(providers, song.source) } }
+    // 空歌单沿用列表的提示；“添加歌曲”是搜索面板，不用切回列表
+    val message: (@Composable () -> Unit)? = if (detail != null && songs.isEmpty()) ({
+        EmptyState(
+            icon = Icons.Filled.Search,
+            title = "歌单还是空的",
+            message = "点“添加歌曲”搜索歌曲，或在任意歌曲的菜单里选择“加到歌单”。",
+            actionLabel = "添加歌曲",
+            onAction = onAddTracks,
+        )
+    }) else null
+    CollectionPosterView(
+        state = state,
+        actions = actions,
+        title = detail?.playlist?.name.orEmpty(),
+        kindLabel = LOCAL_PLAYLIST_LABEL,
+        sourceLabel = "",
+        cover = cover,
+        songs = songs,
+        loading = detail == null,
+        playLabel = "播放全部",
+        ops = ops,
+        sourceName = sourceName,
+        extra = edit,
+        message = message,
+        resetKey = resetKey,
+        holdAwake = holdAwake,
+    )
+}
+
 @Composable
 private fun PlaylistHeader(
     name: String,
@@ -604,6 +718,7 @@ private fun PlaylistActionRow(
     menu: PlaylistMenu?,
     playFocus: FocusRequester,
     onMultiSelect: (() -> Unit)? = null,
+    onPosterView: (() -> Unit)? = null,
 ) {
     Row(
         Modifier.fillMaxWidth(),
@@ -631,6 +746,11 @@ private fun PlaylistActionRow(
         if (enabled && onMultiSelect != null) {
             FilledTonalIconButton(onClick = onMultiSelect, modifier = Modifier.tvFocusRing(CircleShape)) {
                 Icon(Icons.Filled.DoneAll, contentDescription = "批量选择歌曲")
+            }
+        }
+        if (onPosterView != null) {
+            FilledTonalIconButton(onClick = onPosterView, modifier = Modifier.tvFocusRing(CircleShape)) {
+                Icon(Icons.Filled.GridView, contentDescription = "海报视图")
             }
         }
         if (menu != null) {

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -86,7 +87,7 @@ import kotlin.math.roundToInt
  * 空闲 4 秒进入环境模式：控制条和胶囊淡出，封面放大一点，歌词向下扩展、当前行放大，底部只留一条细进度，
  * 右上角显示时钟（[ambientClock]，设置里可关）。
  *
- * 控制条分两行：上行按钮组 + 定时 / 收藏 / 队列 / 音源，下行整宽的波浪进度。进度条要吃掉左右键快退快进，
+ * 控制条分两行：上行按钮组 + 定时 / 收藏 / 队列 / 海报墙 / 音源，下行整宽的波浪进度。进度条要吃掉左右键快退快进，
  * 按设计稿把它夹在按钮组和四个按钮中间的话，焦点一到进度条就再也走不到右边的按钮；分两行后用上下键换行。
  *
  * 重组边界：环境模式只在进出时重组一次；过渡进度只在测量、摆放和图层里读，播放进度只在小组件和绘制阶段读。
@@ -328,6 +329,7 @@ private fun TvDock(
                     state = if (favorite) "已收藏" else "未收藏",
                 )
                 DockAction(Icons.AutoMirrored.Filled.QueueMusic, "播放队列", onOpenQueue)
+                DockAction(Icons.Filled.GridView, "海报墙", actions::openPosterWall)
                 DockAction(Icons.Filled.SwapHoriz, "换音源", onOpenSource)
             }
         }

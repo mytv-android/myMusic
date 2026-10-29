@@ -60,7 +60,7 @@ private val Expanded = 240.dp
 
 /**
  * 电视导航抽屉：平时只显示图标；焦点进入后展开显示文字，并压暗右侧内容。展开是浮在内容上的，内容不重新布局。
- * 顺序按遥控器习惯把搜索放在最上面。
+ * 顺序按遥控器习惯把搜索放在最上面。顶上的“正在播放”按设置打开播放页或海报墙（[onOpenNowPlaying]）。
  */
 @Composable
 fun TvNavRail(
@@ -68,7 +68,7 @@ fun TvNavRail(
     current: Song?,
     onSelect: (String) -> Unit,
     onSettings: () -> Unit,
-    onOpenPlayer: () -> Unit,
+    onOpenNowPlaying: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val width = animateDpAsState(if (expanded) Expanded else Collapsed, MaterialTheme.motionScheme.fastSpatialSpec(), label = "tvRail")
@@ -96,7 +96,7 @@ fun TvNavRail(
                         detail = current.title,
                         selected = false,
                         expanded = expanded,
-                        onClick = onOpenPlayer,
+                        onClick = onOpenNowPlaying,
                         leading = { Cover(current.cover, current.title, 32.dp, corner = 8.dp) },
                     )
                     Spacer(Modifier.height(8.dp))

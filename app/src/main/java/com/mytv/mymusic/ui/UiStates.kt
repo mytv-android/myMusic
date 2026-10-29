@@ -83,6 +83,24 @@ data class SearchUiState(
     val landing: Boolean get() = submittedQuery.isBlank()
 }
 
+/** 听歌模式队列里每首歌 extra 上的标记，值是模式 id；换队列后靠它判断还要不要继续续流。 */
+const val LISTENING_FEED_MARK = "listening_mode"
+
+/**
+ * 正在续流的听歌模式，海报墙据此把队列排成带子。[modeId] 等于队列里歌曲 extra 的 [LISTENING_FEED_MARK]；
+ * [appending] 为 true 时正在队尾续取下一批。换队列（play）后变回 null，App 重启后也是 null。
+ */
+data class ListeningFeedUi(
+    val modeId: String,
+    val name: String,
+    val providerId: String,
+    val providerName: String,
+    val appending: Boolean,
+) {
+    /** 这首歌是不是这条推荐流里的：正在放的歌属于它时，海报墙才按带子排。 */
+    fun owns(song: Song?): Boolean = song?.extra?.get(LISTENING_FEED_MARK) == modeId
+}
+
 enum class CollectionKind { Chart, Playlist, Album, Artist }
 
 /** 登录平台的账号资料；资料接口拿不到时 detail 为空，界面只显示“已登录”。 */

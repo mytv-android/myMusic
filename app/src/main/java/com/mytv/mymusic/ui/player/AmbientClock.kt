@@ -19,10 +19,15 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -33,9 +38,10 @@ import java.util.Calendar
  * 电视环境模式右上角的时钟，跟随系统 12/24 小时制。
  * 12 小时制和锁屏时钟一样只显示“9:30”，上午/下午只写进读屏描述，画面上不再多一段小字。
  * 整分钟刷新一次，不按秒轮询；改时间、改时区、切换 12/24 小时制时立即刷新。
+ * [overImages]：压在封面上（海报墙的顶栏）时加一层柔和的投影，和原型的 text-shadow 一样。
  */
 @Composable
-fun AmbientClock(modifier: Modifier = Modifier) {
+fun AmbientClock(modifier: Modifier = Modifier, overImages: Boolean = false) {
     val context = LocalContext.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     DisposableEffect(context) {
@@ -69,13 +75,15 @@ fun AmbientClock(modifier: Modifier = Modifier) {
     val hour = calendar.get(Calendar.HOUR_OF_DAY)
     val minute = calendar.get(Calendar.MINUTE)
     val typography = MaterialTheme.typography.displaySmall
-    val style = remember(typography) {
+    val density = LocalDensity.current
+    val style = remember(typography, overImages, density) {
         typography.copy(
             fontSize = 34.sp,
             lineHeight = 34.sp,
             fontWeight = FontWeight.Light,
             letterSpacing = 0.02.em,
             fontFeatureSettings = "tnum",
+            shadow = if (overImages) with(density) { Shadow(Color.Black.copy(alpha = 0.5f), Offset(0f, 2.dp.toPx()), 12.dp.toPx()) } else null,
         )
     }
     val description = clockDescription(hour, minute, use24Hour)

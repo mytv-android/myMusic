@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Equalizer
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
@@ -25,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -121,6 +124,14 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
                 )
             }
             Spacer(Modifier.weight(1f))
+            // 海报墙的主入口：收起面板，把队列铺成墙
+            IconButton(
+                onClick = { onDismiss(); actions.openPosterWall() },
+                modifier = Modifier.tvFocusRing(CircleShape),
+                enabled = state.queue.isNotEmpty(),
+            ) {
+                Icon(Icons.Filled.GridView, "海报墙")
+            }
             TextButton(onClick = { actions.clearQueue(); onDismiss() }, modifier = Modifier.tvFocusRing()) {
                 Text("清空", Modifier.semantics { contentDescription = "清空播放队列" })
             }

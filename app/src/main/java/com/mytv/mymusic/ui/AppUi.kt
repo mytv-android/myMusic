@@ -93,6 +93,7 @@ import com.mytv.mymusic.aggregate.PlaybackMode
 import com.mytv.mymusic.aggregate.TrackSource
 import com.mytv.mymusic.aggregate.availabilityOf
 import com.mytv.mymusic.data.DownloadRecord
+import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
@@ -122,7 +123,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun openPlaylist(playlist: com.mytv.mymusic.data.Playlist, album: Boolean = false) = model.openPlaylist(playlist, album)
 
     fun openArtist(playlist: com.mytv.mymusic.data.Playlist) = model.openArtist(playlist)
-    fun playCollection() = model.playCollection()
+    fun playCollection(openPlayer: Boolean = true) = model.playCollection(openPlayer)
     fun saveCollection() = model.saveCollectionToLibrary()
     fun retryCollection() = model.retryCollection()
     fun closeCollection() = model.closeCollection()
@@ -156,14 +157,24 @@ class MusicActions(private val model: MusicViewModel) {
     fun mergeTo(track: CanonicalTrack) = model.mergeTo(track)
     fun mergeAlternative(track: CanonicalTrack, source: TrackSource) = model.mergeAlternative(track, source)
 
-    fun play(song: Song, queue: List<Song>) = model.play(song, queue)
+    /** [openPlayer] 为 false 时不弹出播放页（详情页海报视图里的播放全部 / 随机 / 大卡上的“播放”）。 */
+    fun play(song: Song, queue: List<Song>, openPlayer: Boolean = true) = model.play(song, queue, openPlayer)
     fun playSavedSongs(records: List<com.mytv.mymusic.data.SavedSong>) = model.playSavedSongs(records)
     fun playTrack(track: CanonicalTrack, queue: List<CanonicalTrack>) = model.playTrack(track, queue)
     fun transport(action: String) = model.transport(action)
     fun seek(position: Long) = model.seek(position)
     fun openPlayer() = model.openPlayer(true)
     fun closePlayer() = model.openPlayer(false)
+    fun openPosterWall() = model.openPosterWall()
+    fun closePosterWall() = model.closePosterWall()
+    /** 迷你播放器等“正在播放”入口的点按：按设置打开播放页或海报墙。写着“打开播放页 / 全屏播放”的按钮仍用 [openPlayer]。 */
+    fun openNowPlaying() = model.openNowPlaying()
     fun playQueueIndex(index: Int) = model.playQueueIndex(index)
+    fun moveQueueItemNext(index: Int) = model.moveQueueItemNext(index)
+    /** 任意一首（不一定在队列里）的“下一首播放”，详情页海报视图的大卡用。 */
+    fun playSongNext(song: Song) = model.playSongNext(song)
+    /** 播放进度（每 500ms），只在需要画进度的叶子里读，见 MusicViewModel.position。 */
+    val position: kotlinx.coroutines.flow.StateFlow<Long> get() = model.position
     fun clearQueue() = model.clearQueue()
     fun favorite(song: Song) = model.toggleFavorite(song)
     fun download(song: Song) = model.download(song)
@@ -207,6 +218,10 @@ class MusicActions(private val model: MusicViewModel) {
     fun setTvAmbientClock(value: Boolean) = model.setTvAmbientClock(value)
     fun setRhythmOffset(value: Int) = model.setRhythmOffset(value)
     fun setRhythmDebug(value: Boolean) = model.setRhythmDebug(value)
+    fun setPosterPrefs(transform: (com.mytv.mymusic.data.PosterPrefs) -> com.mytv.mymusic.data.PosterPrefs) =
+        model.setPosterPrefs(transform)
+    fun setCollectionView(value: com.mytv.mymusic.data.CollectionView) = model.setCollectionView(value)
+    fun setMiniPlayerTarget(value: MiniPlayerTarget) = model.setMiniPlayerTarget(value)
     fun startSleepTimer(minutes: Int) = model.startSleepTimer(minutes)
     fun sleepAfterCurrent() = model.sleepAfterCurrent()
     fun cancelSleepTimer() = model.cancelSleepTimer()
@@ -262,6 +277,13 @@ class MusicActions(private val model: MusicViewModel) {
 
     fun diagnostics(): String = model.diagnostics()
 }
+
+/** “正在播放”入口点按后去哪，读屏和 onClickLabel 用。 */
+val MiniPlayerTarget.openLabel: String
+    get() = when (this) {
+        MiniPlayerTarget.Player -> "打开播放页"
+        MiniPlayerTarget.PosterWall -> "打开海报墙"
+    }
 
 fun coverInitial(title: String): String = title.trim().firstOrNull()?.toString().orEmpty().ifBlank { "音" }
 

@@ -47,6 +47,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -84,6 +85,8 @@ import com.mytv.mymusic.ui.library.libraryRoutes
 import com.mytv.mymusic.ui.player.PlayerScreen
 import com.mytv.mymusic.ui.player.QueueSheet
 import com.mytv.mymusic.ui.player.SleepTimerSheet
+import com.mytv.mymusic.ui.poster.PosterWallBottomChrome
+import com.mytv.mymusic.ui.poster.PosterWallScreen
 import com.mytv.mymusic.ui.search.searchRoutes
 import com.mytv.mymusic.ui.settings.settingsRoutes
 import com.mytv.mymusic.ui.theme.LocalHazeState
@@ -214,6 +217,11 @@ fun MyMusicApp(model: MusicViewModel) {
         else -> navInset
     }
     val playerVisible = state.playerOpen && state.current != null
+    // 队列海报墙在主界面之上、播放页之下；播放页可以盖在墙上，关掉回到墙
+    val posterVisible = state.posterOpen && state.current != null
+    val covered = playerVisible || posterVisible
+    // 播放页还在组合里（含退场动画）：墙等它完全退场再拿遥控器焦点（播放页的焦点组退场途中不放焦点出去）
+    val playerComposed = remember { mutableStateOf(false) }
     val enterSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     val exitSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
 
@@ -227,9 +235,9 @@ fun MyMusicApp(model: MusicViewModel) {
                 Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-                    // 播放页盖在上面时，下面的页面不让读屏读到、也不让遥控器焦点进入
-                    .then(if (playerVisible) Modifier.clearAndSetSemantics {} else Modifier)
-                    .focusProperties { onEnter = { if (playerVisible) cancelFocusChange() } }
+                    // 播放页或海报墙盖在上面时，下面的页面不让读屏读到、也不让遥控器焦点进入
+                    .then(if (covered) Modifier.clearAndSetSemantics {} else Modifier)
+                    .focusProperties { onEnter = { if (covered) cancelFocusChange() } }
                     .focusGroup(),
             ) {
                 when {
@@ -238,7 +246,7 @@ fun MyMusicApp(model: MusicViewModel) {
                         current = state.current,
                         onSelect = ::openTab,
                         onSettings = { openSettings("settings") },
-                        onOpenPlayer = actions::openPlayer,
+                        onOpenNowPlaying = actions::openNowPlaying,
                     )
                     window.showRail -> TabletNavRail(
                         selected = selectedTab,
@@ -265,7 +273,8 @@ fun MyMusicApp(model: MusicViewModel) {
                             }
                         }
                         androidx.compose.animation.AnimatedVisibility(
-                            visible = window.isPhone && !playerVisible,
+                            // 海报墙开着时也收起：迷你播放器的封面不能在墙底下和播放页的封面配成共享元素飞出来
+                            visible = window.isPhone && !covered,
                             modifier = Modifier.align(Alignment.BottomCenter),
                             enter = fadeIn(),
                             exit = fadeOut(),
@@ -283,11 +292,30 @@ fun MyMusicApp(model: MusicViewModel) {
                         }
                     }
                     if (window.showBottomPlayerBar && state.current != null) {
-                        BottomPlayerBar(state, position, actions, onOpenQueue = { queueOpen = true }, visible = !playerVisible)
+                        BottomPlayerBar(state, position, actions, onOpenQueue = { queueOpen = true }, visible = !covered)
                     }
                 }
                 if (window.showNowPlayingPane) {
-                    NowPlayingPane(state, position, favorites, actions, onOpenQueue = { queueOpen = true }, onOpenTimer = { timerOpen = true }, sleep = sleep, visible = !playerVisible)
+                    NowPlayingPane(state, position, favorites, actions, onOpenQueue = { queueOpen = true }, onOpenTimer = { timerOpen = true }, sleep = sleep, visible = !covered)
+                }
+            }
+            AnimatedVisibility(
+                visible = posterVisible,
+                enter = fadeIn(enterSpec),
+                exit = fadeOut(exitSpec),
+            ) {
+                PlayerTheme {
+                    val playlists by model.localPlaylists.collectAsState()
+                    PosterWallScreen(
+                        state = state,
+                        position = position,
+                        favorites = favorites,
+                        playlists = playlists,
+                        actions = actions,
+                        active = !playerVisible,
+                        focusReady = { !playerComposed.value },
+                        onOpenQueue = { queueOpen = true },
+                    )
                 }
             }
             AnimatedVisibility(
@@ -296,6 +324,10 @@ fun MyMusicApp(model: MusicViewModel) {
                 enter = if (state.reduceMotion || window.isPhone) fadeIn() else slideInVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) { it / 3 } + fadeIn(),
                 exit = if (state.reduceMotion || window.isPhone) fadeOut() else slideOutVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { it / 3 } + fadeOut(),
             ) {
+                DisposableEffect(Unit) {
+                    playerComposed.value = true
+                    onDispose { playerComposed.value = false }
+                }
                 CompositionLocalProvider(LocalCoverVisibilityScope provides this) {
                 PlayerTheme {
                     PlayerScreen(
@@ -318,6 +350,8 @@ fun MyMusicApp(model: MusicViewModel) {
                 Modifier.align(Alignment.BottomCenter).padding(
                     bottom = 8.dp + when {
                         playerVisible -> navInset
+                        // 让开海报墙右下角的定位和设置按钮
+                        posterVisible -> navInset + if (window.isTv) 0.dp else PosterWallBottomChrome
                         window.showBottomPlayerBar && state.current != null -> BottomPlayerBarHeight + navInset
                         else -> overlayBottom
                     },
@@ -334,8 +368,8 @@ fun MyMusicApp(model: MusicViewModel) {
             PlayerTheme { SleepTimerSheet(state, sleep, actions, onDismiss = { timerOpen = false }) }
         }
         if (state.sourcePickerTrack != null) {
-            // 从播放页打开时沿用播放页的深色配色
-            if (playerVisible) PlayerTheme { SourcePickerSheet(state, actions) } else SourcePickerSheet(state, actions)
+            // 从播放页、海报墙打开时沿用它们的深色配色
+            if (covered) PlayerTheme { SourcePickerSheet(state, actions) } else SourcePickerSheet(state, actions)
         }
         state.mergeTrack?.let { track ->
             val candidates = remember(search.aggregateGroups, state.canonicalQueue, track.id) {

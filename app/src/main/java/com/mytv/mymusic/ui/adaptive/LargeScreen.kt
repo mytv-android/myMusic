@@ -70,6 +70,7 @@ import com.mytv.mymusic.ui.Cover
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.TopTab
+import com.mytv.mymusic.ui.openLabel
 import com.mytv.mymusic.ui.components.PlayButtonSize
 import com.mytv.mymusic.ui.components.PlayPauseButton
 import com.mytv.mymusic.ui.components.SourceChip
@@ -156,7 +157,8 @@ fun BottomPlayerBar(
                 .widthIn(max = 280.dp)
                 .weight(0.8f)
                 .clip(RoundedCornerShape(16.dp))
-                .clickable(onClickLabel = "打开播放页", onClick = actions::openPlayer)
+                // 整块（封面 + 歌名）按设置去播放页或海报墙；右边的“打开播放页”按钮总是打开播放页
+                .clickable(onClickLabel = state.miniPlayerTarget.openLabel, onClick = actions::openNowPlaying)
                 .padding(4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -259,7 +261,7 @@ fun NowPlayingPane(
                 Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 24.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                PaneCover(song, state.playing, state.coverShape, actions::openPlayer)
+                PaneCover(song, state.playing, state.coverShape, state.miniPlayerTarget.openLabel, actions::openNowPlaying)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -338,10 +340,10 @@ fun NowPlayingPane(
 
 /**
  * 窗格封面：和播放页同一个形状封面（同一首歌同一种形状，播放时轮廓慢转，暂停变圆角方形），不带光晕和手势：
- * 光晕会被窗格的滚动区域裁出硬边。整块点开播放页，按下时略微缩小；读屏只读“打开播放页”。
+ * 光晕会被窗格的滚动区域裁出硬边。整块按设置点开播放页或海报墙，按下时略微缩小；读屏只读 [openLabel]。
  */
 @Composable
-private fun PaneCover(song: Song, playing: Boolean, shape: CoverShapeChoice, onOpen: () -> Unit) {
+private fun PaneCover(song: Song, playing: Boolean, shape: CoverShapeChoice, openLabel: String, onOpen: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val press = animateFloatAsState(if (pressed) 0.96f else 1f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "paneCoverPress")
@@ -352,7 +354,7 @@ private fun PaneCover(song: Song, playing: Boolean, shape: CoverShapeChoice, onO
             // 形状封面不是矩形，矩形水波纹不合适，按压反馈交给缩放
             .clickable(interactionSource = interaction, indication = null, onClick = onOpen)
             // 封面图本身不读，可点的封面要有名字
-            .semantics { contentDescription = "打开播放页" },
+            .semantics { contentDescription = openLabel },
     ) {
         Box(
             Modifier
@@ -361,7 +363,7 @@ private fun PaneCover(song: Song, playing: Boolean, shape: CoverShapeChoice, onO
                     scaleX = press.value
                     scaleY = press.value
                 }
-                // 封面舞台自带“某某的封面”描述，这里统一读外层的“打开播放页”
+                // 封面舞台自带“某某的封面”描述，这里统一读外层的 openLabel
                 .clearAndSetSemantics {},
         ) {
             CoverStage(

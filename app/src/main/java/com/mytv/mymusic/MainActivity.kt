@@ -9,14 +9,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mytv.mymusic.ui.MusicViewModel
 import com.mytv.mymusic.ui.MyMusicApp
+import com.mytv.mymusic.ui.components.LocalDarkBarsRequests
 import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.MyMusicTheme
 import com.mytv.mymusic.ui.theme.isTelevision
@@ -39,12 +42,14 @@ class MainActivity : ComponentActivity() {
                     LayoutMode.Tv -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                 }
             }
-            // 电视固定深色；播放页固定深色，打开时系统栏图标跟着变浅
+            // 电视固定深色；播放页、海报墙、详情页的海报视图固定深色，打开时系统栏图标跟着变浅
             val tvDevice = remember { isTelevision() }
+            val darkBars = remember { mutableIntStateOf(0) }
             val dark = tvDevice ||
                 state.appearance.layout == LayoutMode.Tv ||
                 state.appearance.isDark(isSystemInDarkTheme()) ||
-                (state.playerOpen && state.current != null)
+                ((state.playerOpen || state.posterOpen) && state.current != null) ||
+                darkBars.intValue > 0
             SideEffect(dark) {
                 // Android 6–7 的导航栏图标只能是白色，导航栏颜色固定取 darkScrim；全透明时浅色主题下按键看不见
                 val navDarkScrim = if (android.os.Build.VERSION.SDK_INT < 26) Color.argb(0x80, 0x1b, 0x1b, 0x1b) else Color.TRANSPARENT
@@ -58,7 +63,7 @@ class MainActivity : ComponentActivity() {
                 appearance = state.appearance,
                 coverSeed = state.coverSeed.takeIf { it != 0 }?.let { androidx.compose.ui.graphics.Color(it) },
             ) {
-                MyMusicApp(model)
+                CompositionLocalProvider(LocalDarkBarsRequests provides darkBars) { MyMusicApp(model) }
             }
         }
     }

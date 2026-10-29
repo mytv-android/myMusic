@@ -152,8 +152,6 @@ fun TransportButtonGroup(
     // 媒体控制在 RTL 下也不镜像，所以用绝对方向的圆角和摆放
     val leadShape = remember(size) { AbsoluteRoundedCornerShape(outer, inner, inner, outer) }
     val trailShape = remember(size) { AbsoluteRoundedCornerShape(inner, outer, outer, inner) }
-    // 播放键的花瓣形容器，电视焦点环也沿花瓣描
-    val playShape = MaterialShapes.Cookie12Sided.toShape()
     val secondary = MaterialTheme.colorScheme.secondaryContainer
     val onSecondary = MaterialTheme.colorScheme.onSecondaryContainer
 
@@ -168,26 +166,13 @@ fun TransportButtonGroup(
                 interaction = leadSource,
                 modifier = Modifier.semantics { contentDescription = "上一首" },
             ) { Icon(Icons.Filled.SkipPrevious, null, Modifier.size(size.iconSize)) }
-            GroupSegment(
+            CookiePlayButton(
+                playing = playing,
                 onClick = onPlayPause,
-                shape = { playShape },
-                focusShape = playShape,
-                container = MaterialTheme.colorScheme.primary,
-                content = MaterialTheme.colorScheme.onPrimary,
+                iconSize = size.playIconSize,
                 interaction = playSource,
-                focusScale = 1.06f,
-                accentFocus = true,
-                modifier = Modifier
-                    .then(if (playFocusRequester != null) Modifier.focusRequester(playFocusRequester) else Modifier)
-                    .semantics {
-                        contentDescription = if (playing) "暂停" else "播放"
-                        stateDescription = if (playing) "正在播放" else "已暂停"
-                    },
-            ) {
-                Crossfade(playing, label = "playIcon") { isPlaying ->
-                    Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(size.playIconSize))
-                }
-            }
+                focusRequester = playFocusRequester,
+            )
             GroupSegment(
                 onClick = onNext,
                 shape = { trailShape },
@@ -224,6 +209,50 @@ fun TransportButtonGroup(
                 it.place(x, 0, zIndex = if (i == 1) 1f else 0f)
                 x += it.width + g
             }
+        }
+    }
+}
+
+/**
+ * 花瓣形（Cookie12）播放键：主色底，暂停 / 播放图标交叉淡入；电视焦点是底色缝加 onSurface 的双圈，放大 1.06 倍。
+ * 播放页连接按钮组的中段和海报墙大卡共用这一个。尺寸由调用方定（按钮组里是测量时给的固定宽高）。
+ * [rotation] 不为 null 时花瓣按它转（度，只在图层里读），图标反向转回来保持正立；按钮组里不转。
+ */
+@Composable
+internal fun CookiePlayButton(
+    playing: Boolean,
+    onClick: () -> Unit,
+    iconSize: Dp,
+    modifier: Modifier = Modifier,
+    interaction: MutableInteractionSource = remember { MutableInteractionSource() },
+    focusRequester: FocusRequester? = null,
+    rotation: (() -> Float)? = null,
+) {
+    // 播放键的花瓣形容器，电视焦点环也沿花瓣描
+    val playShape = MaterialShapes.Cookie12Sided.toShape()
+    GroupSegment(
+        onClick = onClick,
+        shape = { playShape },
+        focusShape = playShape,
+        container = MaterialTheme.colorScheme.primary,
+        content = MaterialTheme.colorScheme.onPrimary,
+        interaction = interaction,
+        focusScale = 1.06f,
+        accentFocus = true,
+        modifier = modifier
+            .then(if (rotation != null) Modifier.graphicsLayer { rotationZ = rotation() } else Modifier)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .semantics {
+                contentDescription = if (playing) "暂停" else "播放"
+                stateDescription = if (playing) "正在播放" else "已暂停"
+            },
+    ) {
+        Crossfade(
+            playing,
+            modifier = if (rotation != null) Modifier.graphicsLayer { rotationZ = -rotation() } else Modifier,
+            label = "playIcon",
+        ) { isPlaying ->
+            Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, Modifier.size(iconSize))
         }
     }
 }

@@ -51,10 +51,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.ui.Cover
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.TopTab
+import com.mytv.mymusic.ui.openLabel
 import com.mytv.mymusic.ui.components.PlayButtonSize
 import com.mytv.mymusic.ui.components.PlayPauseButton
 import com.mytv.mymusic.ui.components.ProgressRing
@@ -112,7 +114,7 @@ fun PhoneBottomBar(
 }
 
 /**
- * 悬浮胶囊迷你播放器。左右滑切歌，上滑展开，长按打开队列；
+ * 悬浮胶囊迷你播放器。点按按设置打开播放页或海报墙，左右滑切歌，上滑总是展开播放页，长按打开队列；
  * 手势都有对应的按钮或读屏自定义操作，读屏用户不需要手势。
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -137,9 +139,9 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
             .clip(shape)
             .frosted(if (blur) container.copy(alpha = 0.82f) else container, shape)
             .combinedClickable(
-                onClickLabel = "打开播放页",
+                onClickLabel = state.miniPlayerTarget.openLabel,
                 onLongClickLabel = "打开播放队列",
-                onClick = actions::openPlayer,
+                onClick = actions::openNowPlaying,
                 onLongClick = onOpenQueue,
             )
             .pointerInput(Unit) {
@@ -168,10 +170,16 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
             }
             .semantics {
                 contentDescription = "正在播放 ${song.title}，${song.artist}"
-                customActions = listOf(
+                customActions = listOfNotNull(
                     CustomAccessibilityAction("下一首") { actions.transport("next"); true },
                     CustomAccessibilityAction("上一首") { actions.transport("previous"); true },
                     CustomAccessibilityAction("打开播放队列") { onOpenQueue(); true },
+                    // 点按去了海报墙时，上滑展开播放页要有对应的读屏操作
+                    if (state.miniPlayerTarget == MiniPlayerTarget.PosterWall) {
+                        CustomAccessibilityAction("打开播放页") { actions.openPlayer(); true }
+                    } else {
+                        null
+                    },
                 )
             }
             .padding(start = 8.dp, end = 4.dp),

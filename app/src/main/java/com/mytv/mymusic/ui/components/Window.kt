@@ -3,8 +3,11 @@ package com.mytv.mymusic.ui.components
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalConfiguration
@@ -45,6 +48,19 @@ val LocalAppSnackbar = staticCompositionLocalOf<SnackbarHostState> { error("Loca
 
 /** 浮在内容上的迷你播放器和导航栏占用的高度，列表把它加到 contentPadding 底部。 */
 val LocalOverlayPadding = compositionLocalOf { PaddingValues(0.dp) }
+
+/** 正在显示的深色沉浸页面数（详情页的海报视图）：大于 0 时系统栏图标变浅，见 MainActivity。 */
+val LocalDarkBarsRequests = staticCompositionLocalOf<MutableIntState> { mutableIntStateOf(0) }
+
+/** [active] 时请求系统栏用浅色图标（页面本身是深色的），不再需要或离开组合时撤回。 */
+@Composable
+fun RequestDarkBars(active: Boolean) {
+    val requests = LocalDarkBarsRequests.current
+    DisposableEffect(requests, active) {
+        if (active) requests.intValue++
+        onDispose { if (active) requests.intValue-- }
+    }
+}
 
 @Composable
 fun rememberAppWindow(layout: LayoutMode = LayoutMode.Auto): AppWindow {

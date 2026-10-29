@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Shuffle
@@ -84,6 +85,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.aggregate.Availability
+import com.mytv.mymusic.data.CollectionView
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.charts.DiscoverErrorState
@@ -102,6 +104,10 @@ import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.components.tvFocusRing
+import com.mytv.mymusic.ui.poster.CollectionPosterOps
+import com.mytv.mymusic.ui.poster.CollectionPosterView
+import com.mytv.mymusic.ui.poster.PosterExtraAction
+import com.mytv.mymusic.ui.poster.collectionKindLabel
 
 /** 详情页的几种主操作，三种布局共用。 */
 private class CollectionOps(
@@ -121,6 +127,7 @@ internal fun collectionSaved(title: String, playlists: List<LocalPlaylistSummary
 /**
  * 榜单 / 歌单 / 专辑详情。手机：头部渐变取封面色，Split button 播放全部，分段曲目列表；
  * 平板（≥840dp）和电视：左栏封面、标题和操作不随列表滚动，右栏是曲目。
+ * collection_view 选了海报时整页换成海报视图（CollectionPosterView），手机在顶栏、平板和电视在左栏操作区切换。
  */
 @Composable
 fun CollectionScreen(
@@ -175,10 +182,20 @@ fun CollectionScreen(
         onExit = { selection.exit() },
     )
     val playingKey = state.current?.key
-    if (LocalAppWindow.current.twoPane) {
-        TwoPaneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps)
-    } else {
-        PhoneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps)
+    // 切到海报视图前退出多选：多选只在列表视图里
+    val showPoster: () -> Unit = remember(actions, selection) {
+        {
+            selection.exit()
+            actions.setCollectionView(CollectionView.Poster)
+        }
+    }
+    when {
+        state.collectionView == CollectionView.Poster ->
+            CollectionPoster(state, collection, saved, ops, actions, onBack, onMore, holdAwake = target != null || pickerOpen)
+        LocalAppWindow.current.twoPane ->
+            TwoPaneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster)
+        else ->
+            PhoneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster)
     }
     target?.let { SongActionsSheet(it, favorites, playlists, actions) { target = null } }
     if (pickerOpen) {
@@ -195,6 +212,88 @@ fun CollectionScreen(
             onDismiss = { pickerOpen = false },
         )
     }
+}
+
+/**
+ * 海报视图：曲目铺成海报墙，头部收成顶部胶囊和浮动工具栏（见 CollectionPosterView）。
+ * 播放全部 / 随机 / 大卡上的“播放”都是换成这张歌单的队列（和列表里点一行一样），但不弹出播放页；
+ * 长按格子和大卡的“更多”是和列表同一个单曲操作面板；加载失败、空歌单沿用列表的提示，盖在墙中间。
+ */
+@Composable
+private fun CollectionPoster(
+    state: MusicUiState,
+    collection: CollectionUiState,
+    saved: Boolean,
+    ops: CollectionOps,
+    actions: MusicActions,
+    onBack: () -> Unit,
+    onMore: (Song) -> Unit,
+    holdAwake: Boolean,
+) {
+    val songs = collection.songs
+    val posterOps = remember(actions, songs, onBack, onMore) {
+        CollectionPosterOps(
+            playAll = { actions.playCollection(openPlayer = false) },
+            shuffle = {
+                val shuffled = songs.shuffled()
+                if (shuffled.isNotEmpty()) actions.play(shuffled.first(), shuffled, openPlayer = false)
+            },
+            playFrom = { index -> songs.getOrNull(index)?.let { actions.play(it, songs, openPlayer = false) } },
+            playNext = { index -> songs.getOrNull(index)?.let(actions::playSongNext) },
+            songActions = { index -> songs.getOrNull(index)?.let(onMore) },
+            showList = { actions.setCollectionView(CollectionView.List) },
+            back = onBack,
+        )
+    }
+    val save = remember(ops, saved) {
+        PosterExtraAction(
+            icon = if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+            description = "收藏到本地歌单",
+            onClick = { if (!saved) ops.save() },
+            on = saved,
+            stateDescription = if (saved) "已存到本地歌单" else "未收藏",
+        )
+    }
+    val providers = state.providers
+    val sourceName: (Song) -> String = remember(collection.sourceName, providers) {
+        { song -> collection.sourceName.ifBlank { providerName(providers, song.source) } }
+    }
+    val message: (@Composable () -> Unit)? = when {
+        songs.isNotEmpty() || collection.loading -> null
+        collection.error.isNotBlank() -> ({
+            DiscoverErrorState(
+                title = "歌曲没有加载出来",
+                message = listOf(collection.sourceName, collection.error).filter { it.isNotBlank() }.joinToString("："),
+                onRetry = actions::retryCollection,
+            )
+        })
+        else -> ({
+            EmptyState(
+                icon = Icons.AutoMirrored.Filled.PlaylistAdd,
+                title = "这里还没有歌曲",
+                message = "稍后重试，或换一个来源。",
+                actionLabel = "重试",
+                onAction = actions::retryCollection,
+            )
+        })
+    }
+    CollectionPosterView(
+        state = state,
+        actions = actions,
+        title = collection.title,
+        kindLabel = collectionKindLabel(collection.kind),
+        sourceLabel = collection.sourceName,
+        cover = collection.cover,
+        songs = songs,
+        loading = collection.loading,
+        playLabel = playLabel(collection),
+        ops = posterOps,
+        sourceName = sourceName,
+        extra = save,
+        message = message,
+        resetKey = collection.kind to collection.id,
+        holdAwake = holdAwake,
+    )
 }
 
 /** 多选操作条的数据，三端布局共用。 */
@@ -232,6 +331,7 @@ private fun PhoneCollection(
     onMore: (Song) -> Unit,
     selection: SelectionState,
     selectionOps: CollectionSelectionOps,
+    onPosterView: () -> Unit,
 ) {
     val gutter = LocalAppWindow.current.gutter
     val overlay = LocalOverlayPadding.current.calculateBottomPadding()
@@ -272,6 +372,8 @@ private fun PhoneCollection(
                     ops.openPlaybackSettings?.let { open ->
                         IconButton(onClick = open) { Icon(Icons.Filled.Tune, "换源设置") }
                     }
+                    // 操作行已经放了播放全部、收藏、多选，海报视图的入口放顶栏
+                    IconButton(onClick = onPosterView) { Icon(Icons.Filled.GridView, "海报视图") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = surface.copy(alpha = 0f),
@@ -334,6 +436,7 @@ private fun TwoPaneCollection(
     onMore: (Song) -> Unit,
     selection: SelectionState,
     selectionOps: CollectionSelectionOps,
+    onPosterView: () -> Unit,
 ) {
     val window = LocalAppWindow.current
     val tv = window.isTv
@@ -431,6 +534,7 @@ private fun TwoPaneCollection(
                         }
                         SaveToggle(ops, saved, if (tv) 48.dp else null)
                         MultiSelectToggle(selection, if (tv) 48.dp else null)
+                        PosterViewToggle(onPosterView, if (tv) 48.dp else null)
                         ops.openPlaybackSettings?.let { open ->
                             FilledTonalIconButton(onClick = open, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
                                 Icon(Icons.Filled.Tune, "换源设置")
@@ -483,6 +587,19 @@ private fun MultiSelectToggle(selection: SelectionState, size: androidx.compose.
             .tvFocusRing(CircleShape),
     ) {
         Icon(Icons.Filled.DoneAll, contentDescription = "批量选择歌曲")
+    }
+}
+
+/** 平板和电视左栏的“海报视图”：切过去之后记住，下次打开任何详情页都是海报。 */
+@Composable
+private fun PosterViewToggle(onClick: () -> Unit, size: androidx.compose.ui.unit.Dp? = null) {
+    FilledTonalIconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .then(if (size != null) Modifier.size(size) else Modifier)
+            .tvFocusRing(CircleShape),
+    ) {
+        Icon(Icons.Filled.GridView, contentDescription = "海报视图")
     }
 }
 

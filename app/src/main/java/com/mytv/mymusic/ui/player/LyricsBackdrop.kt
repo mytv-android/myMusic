@@ -389,25 +389,24 @@ private fun Modifier.reducedResolution(factor: Int): Modifier = layout { measura
 private fun ceilDiv(value: Int, divisor: Int): Int = ((value + divisor - 1) / divisor).coerceAtLeast(1)
 
 /**
- * 律动模式下的分析器：只在播放且页面在前台时取样。分析帧由帧循环通过 [RhythmFeedReader] 按听到的位置取走。
+ * 律动模式下的分析器：只在播放且页面在前台时取样（海报墙的跟拍也用它；两处都在时按 [RhythmAnalyzer.capture] 合起来算）。分析帧由帧循环通过 [RhythmFeedReader] 按听到的位置取走。
  * 切歌不用在这里重置：跳转、换歌由 [com.mytv.mymusic.playback.RhythmAudioSink] 在音频线程上判断，
  * 无缝衔接时分析比界面先进入下一首，界面这边知道换歌时新歌的前半秒已经分析过了。
  */
 @Composable
-private fun RhythmFeed(analyzer: RhythmAnalyzer, playing: Boolean) {
+internal fun RhythmFeed(analyzer: RhythmAnalyzer, playing: Boolean) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, analyzer, playing) {
+        val owner = Any()
         fun updateCapture() {
-            analyzer.setActive(
-                playing && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED),
-            )
+            analyzer.capture(owner, playing && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
         }
         val observer = LifecycleEventObserver { _, _ -> updateCapture() }
         lifecycleOwner.lifecycle.addObserver(observer)
         updateCapture()
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            analyzer.setActive(false)
+            analyzer.capture(owner, false)
         }
     }
 }

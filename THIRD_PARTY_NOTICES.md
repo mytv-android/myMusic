@@ -54,6 +54,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## folia-major (poster wall)
+
+- Upstream: https://github.com/chthollyphile/folia-major
+- Revision checked: f96c65b27f7ca351e8db781301cedfa0a52252e2 (upstream HEAD on 2026-10-29)
+- License: GNU Affero General Public License v3.0
+- Location: `app/src/main/java/com/mytv/mymusic/ui/poster` (the `Wall*.kt` layout core and the poster UI built on it)
+- Usage: the queue / collection poster wall adapts the layout mechanism of folia-major's Lattice view: 12×8-unit blocks holding 12 poster slots; four hand-drawn block templates × four mirrors, with the template chosen by a linear step over the block coordinates and the mirror by a coordinate hash; infinite tiling of a repeat cell of ceil(N/12) blocks; growing a tapped poster in place to 6×6 and reflowing only its own block with the minimum-movement exact cover; following the current track with the camera to the nearest copy; and D-pad navigation scored as gap + 2·miss + pitch. myMusic redrew the four templates, precomputes the 192 reflows offline (`WallReflowTable.kt`) and replaces the visual layer with Material 3 Expressive components. The code is a Kotlin rewrite, not a copy of the upstream TypeScript, and no upstream assets are bundled. It is a derivative work distributed under AGPL-3.0; modifications must retain this notice and the AGPL-3.0 terms.
+
 ## MaterialKolor
 
 - Upstream: https://github.com/jordond/MaterialKolor

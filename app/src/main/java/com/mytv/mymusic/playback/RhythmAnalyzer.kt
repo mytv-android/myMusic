@@ -103,11 +103,21 @@ class RhythmAnalyzer {
     private var previousGrid: BeatGrid? = null
     private var previousUntilS = Double.NEGATIVE_INFINITY
 
+    // 谁在要分析：播放页的律动背景、海报墙大卡的跟拍可能同时在组合里，一处退出不能把另一处的也关掉
+    private val holders = HashSet<Any>()
+
     @Synchronized
     fun setActive(value: Boolean) {
         if (active == value) return
         active = value
         reset()
+    }
+
+    /** [owner] 要不要分析；有任何一处要就开着。界面用它，不直接调 [setActive]。 */
+    @Synchronized
+    fun capture(owner: Any, on: Boolean) {
+        if (on) holders.add(owner) else holders.remove(owner)
+        setActive(holders.isNotEmpty())
     }
 
     /** Drops the previous track's gain history and any queued visual result. */

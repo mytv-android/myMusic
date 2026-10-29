@@ -52,6 +52,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.data.LyricsBackgroundMode
+import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.data.RHYTHM_OFFSET_MAX_MS
 import com.mytv.mymusic.data.RhythmIntensity
 import com.mytv.mymusic.ui.MusicActions
@@ -80,8 +81,14 @@ internal val RhythmIntensity.label: String
         RhythmIntensity.Strong -> "强烈"
     }
 
+internal val MiniPlayerTarget.label: String
+    get() = when (this) {
+        MiniPlayerTarget.Player -> "播放页"
+        MiniPlayerTarget.PosterWall -> "海报墙"
+    }
+
 /**
- * 设置 → 播放页（枚举仍叫 Lyrics）：封面形状、歌词背景、律动强度和跟拍校准，电视上再加环境模式时钟。
+ * 设置 → 播放页（枚举仍叫 Lyrics）：封面形状、歌词背景、律动强度和跟拍校准、点按迷你播放器打开什么，电视上再加环境模式时钟。
  * 都只存在本机，改了立即生效。
  */
 @Composable
@@ -164,6 +171,25 @@ fun LyricsSettingsScreen(
                         "暂停、离开播放页或开启“减少动画”时停止分析；重新播放后会重新适应当前歌曲的动态范围。",
                 )
             }
+        }
+        item(key = "miniTargetHead", contentType = "sectionHeader") { SectionLabel("点按迷你播放器打开") }
+        item(key = "miniTarget", contentType = "toggleGroup") {
+            ConnectedToggleGroup(
+                options = MiniPlayerTarget.entries,
+                selected = state.miniPlayerTarget,
+                onSelect = actions::setMiniPlayerTarget,
+                label = { it.label },
+                modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+            )
+        }
+        item(key = "miniTargetNote", contentType = "note") {
+            SettingsNote(
+                when {
+                    window.isTv -> "导航栏顶上的“正在播放”打开哪一页。海报墙把播放队列铺成一面封面墙，正在放的歌放大显示歌词；墙上的“打开播放页”随时可以切过去。"
+                    window.isPhone -> "海报墙把播放队列铺成一面封面墙，正在放的歌放大显示歌词。选了海报墙，上滑迷你播放器仍然打开播放页。"
+                    else -> "点按底部播放条的封面和歌名、播放窗格的封面时打开哪一页。海报墙把播放队列铺成一面封面墙，正在放的歌放大显示歌词；“打开播放页”“全屏播放”按钮不受影响。"
+                },
+            )
         }
         // 强制电视布局也算电视：环境模式只在电视播放页出现
         if (window.isTv) {

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.ColumnInfo
@@ -58,14 +59,23 @@ enum class RhythmIntensity { Soft, Standard, Strong }
 private fun String?.toRhythmIntensity(): RhythmIntensity =
     RhythmIntensity.entries.firstOrNull { it.name == this } ?: RhythmIntensity.Standard
 
-/** 播放页封面形状：随机（每次切歌换一种，不和上一首重复）或固定成某一种 MaterialShapes。 */
 /** 跟拍校准的范围（毫秒）。 */
 const val RHYTHM_OFFSET_MAX_MS = 200
 
+/** 播放页封面形状：随机（每次切歌换一种，不和上一首重复）或固定成某一种 MaterialShapes。 */
 enum class CoverShapeChoice { Random, Cookie12, Cookie9, Cookie7, Sunny, SoftBurst, Clover8 }
 
 private fun String?.toCoverShapeChoice(): CoverShapeChoice =
     CoverShapeChoice.entries.firstOrNull { it.name == this } ?: CoverShapeChoice.Random
+
+private fun String?.toPosterTint(): PosterTint =
+    PosterTint.entries.firstOrNull { it.name == this } ?: PosterTint.Medium
+
+private fun String?.toCollectionView(): CollectionView =
+    CollectionView.entries.firstOrNull { it.name == this } ?: CollectionView.List
+
+private fun String?.toMiniPlayerTarget(): MiniPlayerTarget =
+    MiniPlayerTarget.entries.firstOrNull { it.name == this } ?: MiniPlayerTarget.Player
 
 class SettingsStore(private val context: Context) {
     private val providerKey = stringPreferencesKey("provider")
@@ -105,6 +115,15 @@ class SettingsStore(private val context: Context) {
     private val tvAmbientClockKey = booleanPreferencesKey("tv_ambient_clock")
     private val rhythmOffsetKey = intPreferencesKey("rhythm_offset_ms")
     private val rhythmDebugKey = booleanPreferencesKey("rhythm_debug")
+    // 海报墙：墙内设置六项 + 详情页视图 + 迷你播放器去处，和播放页的设置一样只存在本机
+    private val posterTintKey = stringPreferencesKey("poster_tint")
+    private val posterLightsOutKey = booleanPreferencesKey("poster_lights_out")
+    private val posterIndexKey = booleanPreferencesKey("poster_index")
+    private val posterTranslationKey = booleanPreferencesKey("poster_translation")
+    private val posterFollowKey = booleanPreferencesKey("poster_follow")
+    private val posterTvDriftKey = booleanPreferencesKey("poster_tv_drift")
+    private val collectionViewKey = stringPreferencesKey("collection_view")
+    private val miniPlayerTargetKey = stringPreferencesKey("mini_player_target")
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -132,6 +151,9 @@ class SettingsStore(private val context: Context) {
             tvAmbientClock = values[tvAmbientClockKey] ?: true,
             rhythmOffsetMs = (values[rhythmOffsetKey] ?: 0).coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS),
             rhythmDebug = values[rhythmDebugKey] ?: false,
+            poster = posterPrefs(values),
+            collectionView = values[collectionViewKey].toCollectionView(),
+            miniPlayerTarget = values[miniPlayerTargetKey].toMiniPlayerTarget(),
             equalizer = EqualizerSettings(
                 enabled = values[equalizerEnabledKey] ?: false,
                 presetId = values[equalizerPresetKey] ?: "flat",
@@ -183,9 +205,31 @@ class SettingsStore(private val context: Context) {
     suspend fun rhythmOffsetMs(value: Int) =
         context.dataStore.edit { it[rhythmOffsetKey] = value.coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS) }
     suspend fun rhythmDebug(value: Boolean) = context.dataStore.edit { it[rhythmDebugKey] = value }
+    suspend fun collectionView(value: CollectionView) = context.dataStore.edit { it[collectionViewKey] = value.name }
+    suspend fun miniPlayerTarget(value: MiniPlayerTarget) = context.dataStore.edit { it[miniPlayerTargetKey] = value.name }
     suspend fun lastSeed(value: Int) = context.dataStore.edit { it[lastSeedKey] = value }
     suspend fun sleepFade(value: Boolean) = context.dataStore.edit { it[sleepFadeKey] = value }
     suspend fun cacheLimitMb(value: Int) = context.dataStore.edit { it[cacheLimitKey] = value }
+
+    /** 墙内设置：在同一次 edit 里读出当前值再写回，连着点两个开关也不会互相覆盖。 */
+    suspend fun poster(transform: (PosterPrefs) -> PosterPrefs) = context.dataStore.edit {
+        val value = transform(posterPrefs(it))
+        it[posterTintKey] = value.tint.name
+        it[posterLightsOutKey] = value.lightsOut
+        it[posterIndexKey] = value.showIndex
+        it[posterTranslationKey] = value.translation
+        it[posterFollowKey] = value.follow
+        it[posterTvDriftKey] = value.tvDrift
+    }
+
+    private fun posterPrefs(values: Preferences) = PosterPrefs(
+        tint = values[posterTintKey].toPosterTint(),
+        lightsOut = values[posterLightsOutKey] ?: false,
+        showIndex = values[posterIndexKey] ?: true,
+        translation = values[posterTranslationKey] ?: true,
+        follow = values[posterFollowKey] ?: true,
+        tvDrift = values[posterTvDriftKey] ?: true,
+    )
 
     suspend fun sodaSigner(url: String, token: String, enabled: Boolean = true) = context.dataStore.edit {
         it[sodaSignerUrlKey] = url.trim()
@@ -317,6 +361,12 @@ data class AppSettings(
     val rhythmOffsetMs: Int = 0,
     /** 播放页角落显示跟拍调试信息（只在可调试的安装包里能打开）。 */
     val rhythmDebug: Boolean = false,
+    /** 海报墙的墙内设置，队列墙和详情页海报视图共用。 */
+    val poster: PosterPrefs = PosterPrefs(),
+    /** 详情页上次用的视图（列表 / 海报），不单独做设置项。 */
+    val collectionView: CollectionView = CollectionView.List,
+    /** 点按迷你播放器打开播放页还是海报墙（设置 › 播放页）。 */
+    val miniPlayerTarget: MiniPlayerTarget = MiniPlayerTarget.Player,
     val equalizer: EqualizerSettings = EqualizerSettings(),
     val searchHistory: List<String> = emptyList(),
     val lastUpdateCheck: Long = 0L,
