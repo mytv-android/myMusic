@@ -336,6 +336,19 @@ td .mono { color: var(--muted); }
 .fab.round { width: 48px; height: 48px; border-radius: 24px; background: color-mix(in srgb, var(--sch) 86%, transparent); }
 .fab.round.sel { background: var(--p); color: var(--op); }
 .fab.sq { width: 56px; height: 56px; border-radius: 16px; background: var(--pc); color: var(--opc); }
+.ftool { position: absolute; z-index: 10; display: flex; align-items: center; gap: 2px; padding: 8px; border-radius: 32px; background: color-mix(in srgb, var(--sch) 90%, transparent); box-shadow: 0 8px 24px -8px rgba(0, 0, 0, .65); }
+.ftool .pa { height: 48px; padding: 0 18px 0 14px; margin-right: 6px; border-radius: 24px; display: inline-flex; gap: 6px; align-items: center; background: var(--p); color: var(--op); font: 700 14px/1 var(--body); white-space: nowrap; transition: border-radius var(--fast-d) var(--fast); }
+.ftool .pa:active { border-radius: 14px; }
+.ftool .ib { width: 48px; height: 48px; border-radius: 24px; display: grid; place-items: center; color: var(--os); transition: background-color .2s, color .2s, opacity .2s; }
+.ftool .ib:hover { background: color-mix(in srgb, var(--os) 10%, transparent); }
+.ftool .ib.on { color: var(--p); }
+.ftool .ib.sel { background: var(--pc); color: var(--opc); }
+.ftool .ib.dis { opacity: .38; }
+.ftool.phone { padding: 6px; }
+.ftool.phone .pa { height: 44px; padding: 0 14px 0 10px; margin-right: 2px; font-size: 13.5px; }
+.ftool.phone .ib { width: 40px; height: 44px; border-radius: 20px; }
+.ftool.tv { padding: 4px; }
+.screen.drifting .tile.focus { box-shadow: none; }
 .pstatus { position: absolute; z-index: 11; left: 0; right: 0; top: 0; height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; font: 600 13px/1 var(--body); color: var(--os); background: linear-gradient(color-mix(in srgb, var(--s) 70%, transparent), transparent); }
 .pstatus .sig { display: flex; gap: 5px; align-items: center; } .pstatus .sig i { width: 14px; height: 10px; border-radius: 2px; background: currentColor; } .pstatus .sig i.bat { width: 9px; height: 13px; }
 .phandle { position: absolute; z-index: 11; bottom: 8px; left: 50%; translate: -50% 0; width: 108px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--os) 50%, transparent); }
@@ -413,28 +426,43 @@ td .mono { color: var(--muted); }
 .mk .st .seg i { flex: 1; height: 40px; border-radius: 6px; background: var(--sc); color: var(--osc); display: grid; place-items: center; font: 600 13px/1 var(--body); font-style: normal; }
 .mk .st .seg i:first-child { border-radius: 20px 6px 6px 20px; } .mk .st .seg i:last-child { border-radius: 6px 20px 20px 6px; }
 .mk .st .seg i.on { background: var(--p); color: var(--op); border-radius: 20px; }
+.mk .dtop { position: absolute; left: 0; right: 0; top: 0; height: 380px; background: linear-gradient(color-mix(in srgb, var(--p) 34%, var(--s)), var(--s)); }
+.mk .dbar { position: absolute; left: 4px; right: 8px; top: 32px; height: 56px; display: flex; align-items: center; justify-content: space-between; }
+.mk .dbar > span:first-child { width: 48px; height: 48px; display: grid; place-items: center; }
+.mk .pw.sm { width: 44px; height: 44px; border-radius: 14px; }
+.mk .dhead { position: absolute; left: 16px; right: 16px; top: 100px; display: flex; gap: 16px; align-items: flex-end; }
+.mk .dcv { width: 120px; height: 120px; border-radius: 24px; background-size: cover; background-position: center; flex: none; }
+.mk .dhead b { display: block; font: 800 26px/1.2 var(--body); }
+.mk .dhead span { font: 500 12.5px/1.4 var(--body); color: var(--osv); }
+.mk .dact { position: absolute; left: 16px; right: 16px; top: 238px; display: flex; gap: 8px; align-items: center; }
+.mk .split { display: inline-flex; gap: 2px; }
+.mk .split i { height: 48px; display: inline-flex; align-items: center; gap: 6px; padding: 0 16px 0 12px; background: var(--p); color: var(--op); font: 700 14px/1 var(--body); font-style: normal; border-radius: 24px 6px 6px 24px; }
+.mk .split i + i { padding: 0 12px; border-radius: 6px 24px 24px 6px; }
+.mk .dact .ib { width: 48px; height: 48px; border-radius: 24px; display: grid; place-items: center; background: var(--sc); color: var(--osc); }
+.mk .rows.dl { position: absolute; left: 16px; right: 16px; top: 304px; }
 </style>
 </head>
 <body>
 <div class="wrap">
 
 <header class="mast">
-  <div class="eyebrow">myMusic · 设计方案 · 2026-10-29 · 待确认，未实现</div>
-  <h1>播放队列<em>海报墙</em></h1>
-  <p class="lede">给播放队列加一个可选的海报视图：队列里的歌按封面铺成一面可以四向拖动的墙，正在播放的那首放大成 6×6 的大卡，卡里滚动歌词。版式和交互参考 folia-major 的 Lattice，外观换成 Material 3 Expressive：圆角、形状、配色和弹簧动效都沿用现有播放页那一套。原来的队列列表和播放页都不动，海报墙只是多出来的一个入口。</p>
+  <div class="eyebrow">myMusic · 设计方案 · 2026-10-29 · 方向已确认，未实现</div>
+  <h1>队列与歌单<em>海报墙</em></h1>
+  <p class="lede">给播放队列和歌单 / 专辑 / 榜单详情加一个可选的海报视图：曲目按封面铺成一面可以四向拖动的墙，正在播放的那首放大成 6×6 的大卡，卡里滚动歌词。版式和交互参考 folia-major 的 Lattice，外观换成 Material 3 Expressive：圆角、形状、配色和弹簧动效都沿用现有播放页那一套。原来的列表、队列面板和播放页都不动，海报墙只是多出来的视图。</p>
   <div class="chips">
     <span class="chip">手机 <b>360×800 dp</b></span>
     <span class="chip">平板横屏 <b>1280×800 dp</b></span>
     <span class="chip">电视 <b>960×540 dp</b></span>
-    <span class="chip">新增：<b>海报墙页 · 5 个墙内设置 · 1 个入口设置</b></span>
-    <span class="chip">不改：播放页、队列面板、迷你播放器默认行为</span>
+    <span class="chip">新增：<b>队列海报墙 · 详情页海报视图 · 6 个墙内设置 · 1 个入口设置</b></span>
+    <span class="chip">不改：播放页、队列面板、详情页列表、迷你播放器默认行为</span>
   </div>
   <div class="keys">
     <div><h3>无限的墙</h3><p>12×8 单元为一块，四种模板加镜像拼接，向四周无限延伸，队列不够就从头循环。电视上方向键永远走得动。</p></div>
     <div><h3>大卡就地放大</h3><p>点一格，它长成 6×6，同一块里其余 11 格按位移最小的方式重排，别的块不动。</p></div>
     <div><h3>卡里放歌词</h3><p>正在播放的大卡显示前一行、当前行、后一行和翻译，逐字填色；没有歌词就露出清晰封面。</p></div>
     <div><h3>跟着切歌走</h3><p>切到下一首，镜头滑到离屏幕中心最近的那一份，把它放大；整面墙换成新封面的配色。</p></div>
-    <div><h3>可选项</h3><p>从队列面板进入；迷你播放器默认仍打开播放页，可在设置里改成海报墙。</p></div>
+    <div><h3>两处可用</h3><p>队列面板里进海报墙；歌单 / 专辑 / 榜单详情顶栏一键切成海报视图，并记住选择。</p></div>
+    <div><h3>电视屏保</h3><p>电视上 30 秒不操作，镜头开始缓慢漂移；按任意键回到正在播放。</p></div>
   </div>
 </header>
 
@@ -464,13 +492,18 @@ td .mono { color: var(--muted); }
     <p>队列是一张 30 首的混合歌单，封面都是程序画的。只有三首配了歌词：03《但愿人长久》、04《独上西楼》、21《送别》，都是古诗词，翻译行是我自己译的英文。歌词按演示速度走，每行 4.6 秒。</p>
     <div class="hint"><span class="kbd">拖动</span>平移 <span class="kbd">点格子</span>放大 <span class="kbd">右下角</span>设置</div>
     <div class="hint"><span>电视：先点一下画面</span><span class="kbd">← ↑ → ↓</span>移焦点 <span class="kbd">Enter</span>放大 / 播放 <span class="kbd">Esc</span>返回</div>
-    <p>电视上 6 秒不操作，浮层控件会淡出。</p>
+    <p>电视上 6 秒不操作，浮层控件淡出；再过一会儿镜头开始漂移（App 里是 30 秒，原型缩短到 12 秒，也可以直接点下面的“空闲漂移”）。漂移中按任意键，第一下只把镜头拉回正在播放。</p>
+    <p>上面第二排切到“歌单详情”，看详情页的海报视图（同一批歌换了顺序）：一开始这张歌单没在放，所以没有大卡；点“播放全部”或某首的“播放”之后才出现。</p>
   </div>
   <div class="main">
     <div class="tabs" role="tablist" aria-label="设备" id="devtabs">
       <button role="tab" aria-selected="true" data-k="tablet">平板横屏</button>
       <button role="tab" aria-selected="false" data-k="phone">手机</button>
       <button role="tab" aria-selected="false" data-k="tv">电视</button>
+    </div>
+    <div class="tabs" role="tablist" aria-label="数据源" id="srctabs">
+      <button role="tab" aria-selected="true" data-m="queue">播放队列</button>
+      <button role="tab" aria-selected="false" data-m="collection">歌单详情</button>
     </div>
     <div class="board" id="protoBoard">
       <figure id="protoFig">
@@ -483,6 +516,7 @@ td .mono { color: var(--muted); }
       <button class="btn primary" data-demo="toggle">播放 / 暂停</button>
       <button class="btn" data-demo="next">下一首（看跟随）</button>
       <button class="btn" data-demo="enter">重播入场</button>
+      <button class="btn" data-demo="drift">空闲漂移（电视）</button>
     </div>
   </div>
 </section>
@@ -513,7 +547,7 @@ td .mono { color: var(--muted); }
       <tbody>
         <tr><td class="k">手机</td><td>56dp（52 + 4）</td><td>108dp</td><td>332dp</td><td>672×448dp</td><td>大卡占满宽度，左右各留 14dp；标题最小 12.5sp，最多三行</td></tr>
         <tr><td class="k">平板横屏</td><td>102dp（96 + 6）</td><td>198dp</td><td>606dp</td><td>1224×816dp</td><td>一块约等于一屏</td></tr>
-        <tr><td class="k">电视</td><td>80dp（75 + 5）</td><td>155dp</td><td>475dp</td><td>960×640dp</td><td>大卡高度在 540dp 里留出上下余量；10 英尺距离下 2×2 的标题约 15sp</td></tr>
+        <tr><td class="k">电视</td><td>76dp（71 + 5）</td><td>147dp</td><td>451dp</td><td>912×608dp</td><td>顶部控件行占到 80dp，大卡放在它下面，540dp 高度里刚好放下；10 英尺距离下 2×2 的标题约 14sp</td></tr>
       </tbody>
     </table></div>
   </div>
@@ -559,13 +593,16 @@ td .mono { color: var(--muted); }
         <tr><td class="k">歌曲操作</td><td>长按格子，弹出现有的 SongActionsSheet</td><td>长按 OK</td></tr>
         <tr><td class="k">返回</td><td>先关设置面板，再离开海报墙</td><td>先关面板，再收起非当前的大卡，再清掉焦点，最后离开</td></tr>
         <tr><td class="k">回到正在播放</td><td>右下角“定位”按钮。正在播放的那首没放大时，按钮高亮</td><td>同一个按钮，但电视上它和设置一起放在顶部一排，底部留给大卡；焦点可以走到这排按钮上</td></tr>
-        <tr><td class="k">空闲</td><td>—</td><td>6 秒不操作，浮层控件和焦点环淡出，只剩墙和右上角时钟（沿用“电视时钟”设置）</td></tr>
+        <tr><td class="k">空闲</td><td>—</td><td>6 秒不操作，浮层控件和焦点环淡出，只剩墙和右上角时钟（沿用“电视时钟”设置）；30 秒起镜头缓慢漂移，见下</td></tr>
       </tbody>
     </table></div>
     <div class="notes">
       <div><h3>方向键规则</h3><p>第一次按方向键，只选中离屏幕中心最近的格子。之后的候选格必须整个位于前进方向上。得分 = 沿该方向的间距 + 横向错开时的惩罚（错开距离 × 2 + 一个格距），平分时选横向偏移小的。候选只在当前块和周围 8 块里找。</p></div>
       <div><h3>镜头少动</h3><p>folia 每次移焦点都把焦点格居中，电视上这样会把正在播放的大卡推出画面。我们改成 Leanback 的做法：焦点在安全区里就不动镜头，出界才平移最小距离。点格子放大、切歌跟随和“定位”仍然居中。</p></div>
       <div><h3>焦点不放大</h3><p>folia 获得焦点时整格放大一个缝宽。我们改成圆角加大 8dp、套上双圈焦点环、去掉染色。原因是 API 23–27 上 graphicsLayer 放大会把文字糊掉，播放页做的时候已经踩过一次。</p></div>
+      <div><h3>空闲漂移（电视）</h3><p>30 秒不操作后，镜头以 10dp/s 漂移，3 秒内从静止加速到这个速度。方向由两条慢正弦叠加（周期 19 秒和 31 秒），一直在拐弯，但没有急转。正在播放的大卡照常放大、照常走歌词，只是慢慢漂出画面；切歌时镜头仍跟到新歌那一份，然后接着漂。</p></div>
+      <div><h3>唤醒</h3><p>漂移中按任何键，第一下只唤醒：停住，镜头弹回正在播放的大卡，浮层淡入，焦点环回到原来的格子；这一下不执行键本身的动作。返回键也一样，免得一按就退出。</p></div>
+      <div><h3>为什么要漂</h3><p>电视常开着当背景放歌，一面静止的墙在 OLED 电视上会留下残影。漂移让每个像素都在变，又不像幻灯片那样跳。墙内设置里可以关，只在电视上显示这个开关。</p></div>
       <div><h3>焦点不进 Compose 焦点系统</h3><p>墙是虚拟的、无限的，不在屏幕上的格子根本没有组合出来，Compose 的 focusSearch 找不到它们。所以由墙自己收方向键、自己记焦点；浮层按钮仍走普通焦点。</p></div>
     </div>
   </div>
@@ -575,7 +612,7 @@ td .mono { color: var(--muted); }
   <div class="side">
     <div class="eyebrow">入口与设置</div>
     <h2>可选，不抢现有路径</h2>
-    <p>默认不改任何人的习惯：迷你播放器点开仍是播放页。想用海报墙的人有三个入口，也可以把它设成迷你播放器的默认去处。</p>
+    <p>默认不改任何人的习惯：迷你播放器点开仍是播放页，详情页打开仍是列表。队列海报墙有三个入口，也可以设成迷你播放器的默认去处；详情页在顶栏一键切成海报，之后记住。</p>
   </div>
   <div class="main">
     <div class="board" id="entryBoard"></div>
@@ -583,6 +620,7 @@ td .mono { color: var(--muted); }
       <li><span class="n">1</span><div><b>队列面板标题栏</b><span>“播放队列”面板右上角加一个海报墙按钮（网格图标）。三端都有，这是主入口。</span></div></li>
       <li><span class="n">2</span><div><b>播放页“更多”菜单</b><span>浮动工具栏的“更多”里加一项“海报墙”。电视的控制坞同理。</span></div></li>
       <li><span class="n">3</span><div><b>迷你播放器（可选）</b><span>设置 › 播放页 › “点按迷你播放器打开”：播放页（默认）/ 海报墙。</span></div></li>
+      <li><span class="n">4</span><div><b>歌单 / 专辑 / 榜单详情</b><span>顶栏右侧加“海报视图”按钮（手机）；平板和电视加在左栏操作区。详见下一节。</span></div></li>
     </ul>
     <div class="tablebox"><table>
       <thead><tr><th>设置</th><th>位置</th><th>选项</th><th>默认</th><th>AppStore 键</th></tr></thead>
@@ -592,10 +630,36 @@ td .mono { color: var(--muted); }
         <tr><td class="k">显示队列序号</td><td>墙内设置面板</td><td>开 / 关</td><td>开</td><td><code>poster_index</code></td></tr>
         <tr><td class="k">显示歌词翻译</td><td>墙内设置面板</td><td>开 / 关</td><td>开</td><td><code>poster_translation</code></td></tr>
         <tr><td class="k">切歌时自动跟随</td><td>墙内设置面板</td><td>开 / 关</td><td>开</td><td><code>poster_follow</code></td></tr>
+        <tr><td class="k">空闲时镜头漂移</td><td>墙内设置面板，只在电视上出现</td><td>开 / 关</td><td>开</td><td><code>poster_tv_drift</code></td></tr>
+        <tr><td class="k">详情页视图</td><td>不单独做设置项，记住上次</td><td>列表 / 海报</td><td>列表</td><td><code>collection_view</code></td></tr>
         <tr><td class="k">点按迷你播放器打开</td><td>设置 › 播放页</td><td>播放页 / 海报墙</td><td>播放页</td><td><code>mini_player_target</code></td></tr>
       </tbody>
     </table></div>
-    <p class="count">以上和播放页的几项设置一样，只存在本机，不进同步文件。墙内面板在手机上是底部弹出，平板上是 380dp 侧板，电视上是右侧面板，都用现有的 AdaptiveSheet。</p>
+    <p class="count">墙内设置在队列和详情页之间共用一份。以上和播放页的几项设置一样，只存在本机，不进同步文件。墙内面板在手机上是底部弹出，平板上是 380dp 侧板，电视上是右侧面板，都用现有的 AdaptiveSheet。</p>
+  </div>
+</section>
+
+<section class="sec" id="detail">
+  <div class="side">
+    <div class="eyebrow">详情页</div>
+    <h2>歌单、专辑、榜单也能切成海报</h2>
+    <p>同一个海报墙组件，换一个数据源：曲目来自这张歌单，序号是曲目序号。和队列墙的区别在于“这张歌单可能根本没在放”。</p>
+  </div>
+  <div class="main">
+    <ol class="legend">
+      <li><span class="dot">1</span><div><b>怎么切换</b>手机在顶栏右侧加一个“海报视图”图标按钮（操作行已经放了播放全部、收藏、多选，挤不下）；平板和电视加在左栏的操作区。海报视图里，工具栏最右侧的列表图标切回来。选择记在 <code>collection_view</code> 里，下次打开任何详情页都沿用。</div></li>
+      <li><span class="dot">2</span><div><b>刚打开、这张歌单没在放</b>不放大任何格子，镜头对准第一块，01 在左上附近；配色取歌单封面。原来的头部（大封面、标题、播放全部）收成两样：顶部胶囊写标题和“歌单 · 网易云 · 30 首”，底部一条浮动工具栏放 播放全部 / 随机 / 收藏 / 定位 / 列表 / 设置。</div></li>
+      <li><span class="dot">3</span><div><b>开始播放之后</b>点“播放全部”、“随机”，或者在某首的大卡上点“播放”，队列换成这张歌单（和列表里点一行的行为一样），这首放大成正在播放的大卡，之后和队列墙一样跟着切歌走。</div></li>
+      <li><span class="dot">4</span><div><b>正在放的歌就在这张歌单里</b>例如从这张歌单播放后又回到详情页：一进来就把那首放大并居中，跟队列墙打开时一样。判断依据是当前歌曲的 key 在这张歌单里，不要求队列就是这张歌单。</div></li>
+    </ol>
+    <div class="notes">
+      <div><h3>工具栏</h3><p>M3E 的 HorizontalFloatingToolbar：左边是 48dp 高的“播放全部”主按钮（primary），右边 5 个 48dp 图标钮（手机 40dp）。电视上放到顶部一排，和顶栏胶囊同一高度，底部留给大卡；焦点默认落在“播放全部”，和现在电视详情页一致。</p></div>
+      <div><h3>多选不进海报视图</h3><p>批量加入歌单、批量播放这些操作留在列表视图里。海报视图里长按格子只弹单曲的 SongActionsSheet，不进入多选。</p></div>
+      <div><h3>没有封面的曲目</h3><p>有些榜单和本地歌单的曲目没有单曲封面。兜底：用歌单封面取出来的颜色铺底，把歌名用大字直接排在格子里，再压一层颗粒，看起来像一张字体海报，不会出现灰色空格。</p></div>
+      <div><h3>很长的歌单</h3><p>重复单元是 <code>ceil(N/12)</code> 块，500 首的榜单就是 42 块，铺开很大，但只渲染视口附近的格子，成本和歌单长度无关。加载中显示同样版式的骨架格；加载失败沿用现有的 DiscoverErrorState。</p></div>
+      <div><h3>自建歌单</h3><p>本地歌单的详情页同样可以切换，但编辑模式（排序、删除、添加曲目）只在列表视图里。在海报视图里点“编辑”，会先切回列表。</p></div>
+      <div><h3>循环铺满</h3><p>和队列一样，曲目不足就从头循环。三首歌的专辑也会铺满一整面墙，大小不同的格子让重复的封面不至于单调。</p></div>
+    </div>
   </div>
 </section>
 
@@ -635,10 +699,12 @@ td .mono { color: var(--muted); }
     <div class="tablebox"><table>
       <thead><tr><th>文件</th><th>内容</th></tr></thead>
       <tbody>
-        <tr><td class="k">PosterWallScreen.kt</td><td>路由入口、浮层控件、设置面板、返回键优先级；三端共用，靠 <code>LocalAppWindow</code> 取格距</td></tr>
+        <tr><td class="k">PosterSource.kt</td><td>数据源抽象：<code>Queue</code>（播放队列，总有一首在放）和 <code>Collection</code>（歌单 / 专辑 / 榜单 / 本地歌单，可能没在放）；提供曲目、标题、序号含义、点“播放”时调用的动作</td></tr>
+        <tr><td class="k">PosterWallScreen.kt</td><td>队列海报墙的路由入口、浮层控件、设置面板、返回键优先级；三端共用，靠 <code>LocalAppWindow</code> 取格距</td></tr>
+        <tr><td class="k">CollectionPosterView.kt</td><td>详情页的海报视图：顶栏胶囊 + 浮动工具栏，嵌进 CollectionScreen 和 LocalPlaylistScreen，按 <code>collection_view</code> 和列表视图切换</td></tr>
         <tr><td class="k">WallGeometry.kt</td><td>模板、镜像、块哈希、重复单元、<code>songAt</code>；纯 Kotlin，配单元测试</td></tr>
         <tr><td class="k">WallReflowTable.kt</td><td>192 种重排的常量表，由测试源码里的求解器生成；另有一个测试校验每种都正好铺满</td></tr>
-        <tr><td class="k">WallCamera.kt</td><td><code>Animatable&lt;Offset&gt;</code>，拖动后用 <code>splineBasedDecay</code> 甩出惯性，对齐到整像素；平移只在 layout 阶段读取，不触发重组</td></tr>
+        <tr><td class="k">WallCamera.kt</td><td><code>Animatable&lt;Offset&gt;</code>，拖动后用 <code>splineBasedDecay</code> 甩出惯性，对齐到整像素；平移只在 layout 阶段读取，不触发重组。电视空闲漂移也在这里：<code>withFrameNanos</code> 循环推镜头，任意按键取消</td></tr>
         <tr><td class="k">PosterWallLayout.kt</td><td>自定义 <code>Layout</code>：只组合视口外扩两格内的格子，用 <code>key(块x, 块y, 位)</code> 复用；每格的位置是一个 <code>Animatable&lt;IntRect&gt;</code>，重排时走弹簧</td></tr>
         <tr><td class="k">PosterTile.kt / GrownPoster.kt</td><td>小格、正在播放大卡、别的歌大卡；染色层画在 drawBehind 里，只在绘制阶段读取动画色（和 CollectionScreen 的 TintedGradient 同一个做法）</td></tr>
         <tr><td class="k">PosterLyrics.kt</td><td>三行歌词，复用 <code>LyricsParser</code> 和 karaoke Brush；放大的弹簧落定后才组合</td></tr>
@@ -667,22 +733,23 @@ td .mono { color: var(--muted); }
 
 <section class="sec" id="plan">
   <div class="side">
-    <div class="eyebrow">分期与待定</div>
-    <h2>怎么做、要你拍板什么</h2>
-    <p>四期，每期都能单独验收。确认下面几个问题后再开工。</p>
+    <div class="eyebrow">分期与决定</div>
+    <h2>怎么做、已经定了什么</h2>
+    <p>五期，每期都能单独验收。四个待定问题已于 2026-10-29 确认，结论在下面。</p>
   </div>
   <div class="main">
     <div class="phases">
       <div class="phase"><header><span class="tag">P1</span><h3>能看的墙</h3></header><ul><li>WallGeometry、重排表和它们的单元测试</li><li>WallCamera：拖动、惯性、整像素对齐</li><li>小格组件，带染色和序号；队列面板加入口</li></ul></div>
       <div class="phase"><header><span class="tag">P2</span><h3>大卡与跟随</h3></header><ul><li>点格子放大、块内重排的弹簧动画</li><li>三种大卡和控件，SharedCover 飞入飞出</li><li>切歌跟随、“定位正在播放”按钮</li></ul></div>
-      <div class="phase"><header><span class="tag">P3</span><h3>歌词与电视</h3></header><ul><li>PosterLyrics：固定字号预算、逐字填色、翻译</li><li>方向键空间导航、长按 OK、返回键优先级、空闲淡出</li><li>按格子像素取封面档位</li></ul></div>
-      <div class="phase"><header><span class="tag">P4</span><h3>设置、入场、收尾</h3></header><ul><li>墙内设置面板和设置 › 播放页里的入口设置</li><li>入场波和退场反向波，减弱动效时只淡入</li><li>电视盒子上测帧率、TalkBack 走查、README 和 THIRD_PARTY_NOTICES</li></ul></div>
+      <div class="phase"><header><span class="tag">P3</span><h3>歌词与电视</h3></header><ul><li>PosterLyrics：固定字号预算、逐字填色、翻译</li><li>方向键空间导航、长按 OK、返回键优先级、空闲淡出</li><li>空闲漂移和“第一下只唤醒”</li><li>按格子像素取封面档位</li></ul></div>
+      <div class="phase"><header><span class="tag">P4</span><h3>详情页海报视图</h3></header><ul><li>PosterSource 抽出 Collection 数据源，CollectionPosterView 嵌进三种详情页和本地歌单</li><li>浮动工具栏、未在播放时的初始状态、<code>collection_view</code> 记忆</li><li>无封面曲目的字体海报兜底、骨架格、错误态</li></ul></div>
+      <div class="phase"><header><span class="tag">P5</span><h3>设置、入场、收尾</h3></header><ul><li>墙内设置面板和设置 › 播放页里的入口设置</li><li>入场波和退场反向波，减弱动效时只淡入</li><li>电视盒子上测帧率、TalkBack 走查、README 和 THIRD_PARTY_NOTICES</li></ul></div>
     </div>
     <div class="qs">
-      <div class="q"><b>1. 只做播放队列，还是歌单详情页也加？</b><span>同一个组件可以拿歌单 / 专辑 / 榜单的曲目当数据源，在详情页顶部加“列表 | 海报”切换。我建议先只做队列，跑顺了再扩到详情页。</span></div>
-      <div class="q"><b>2. 点格子先放大，还是直接播放？</b><span>方案按 folia 的做法：先放大，再点“播放”。好处是三端语义一致，在电视上也更稳；代价是手机上播一首别的歌要点两下。</span></div>
-      <div class="q"><b>3. 队列很短时怎么办？</b><span>按 folia 的做法，空位从头循环填满，所以 3 首歌的队列会铺满一墙同样的 3 张封面。另一种是少于 12 首就只铺一块、不循环，墙有边界。我倾向循环，墙看起来才完整。</span></div>
-      <div class="q"><b>4. 电视空闲时要不要缓慢漂移？</b><span>现在空闲只淡出控件。可以再加一个“屏保式”的镜头缓慢漂移，一有按键就回到正在播放。这是 folia 没有的，算加戏，看你要不要。</span></div>
+      <div class="q"><b>1. 范围：播放队列和详情页都做</b><span>歌单、专辑、榜单详情和本地歌单都能切成海报视图，见“详情页”一节；按分期，队列先做（P1–P3），详情页在 P4。</span></div>
+      <div class="q"><b>2. 点格子先放大，再点“播放”</b><span>按 folia 的做法，三端一致。手机上播别的歌要点两下，换来的是不会误触换歌。</span></div>
+      <div class="q"><b>3. 曲目不足时循环铺满</b><span>队列和详情页都一样，空位从头接着填，墙永远是满的。</span></div>
+      <div class="q"><b>4. 电视空闲时镜头漂移</b><span>30 秒起漂，第一下按键只唤醒；墙内设置可关，默认开。细节见“交互”一节。</span></div>
     </div>
   </div>
 </section>
@@ -722,6 +789,7 @@ const IC = {
   grid: 'M3 3v8h8V3zm6 6H5V5h4zm-6 4v8h8v-8zm6 6H5v-4h4zm4-16v8h8V3zm6 6h-4V5h4zm-6 4v8h8v-8zm6 6h-4v-4h4z',
   shuffle: 'M10.59 9.17 5.41 4 4 5.41l5.17 5.17zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04z',
   fav: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
+  favo: 'M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z',
   more: 'M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
   check: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
   close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
@@ -1174,7 +1242,7 @@ const songAt = (f, bx, by, slot) => ((mod(by, f.rows) * f.cols + mod(bx, f.cols)
 const GEOM = {
   phone: { pitch: 56, gap: 4, vw: 360, vh: 800, lf: 20, lt: 12.5, nt: 18, pad: 16, top: 112, chrome: 'phone' },
   tablet: { pitch: 102, gap: 6, vw: 1280, vh: 800, lf: 34, lt: 16, nt: 22, pad: 26, top: 0, chrome: 'tablet' },
-  tv: { pitch: 80, gap: 5, vw: 960, vh: 540, lf: 27, lt: 14, nt: 19, pad: 22, top: 0, chrome: 'tv' },
+  tv: { pitch: 76, gap: 5, vw: 960, vh: 540, lf: 26, lt: 14, nt: 19, pad: 20, top: 0, chrome: 'tv' },
 };
 </script>
 <script>
@@ -1187,6 +1255,13 @@ const pad2 = n => String(n).padStart(2, '0');
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const LINE_DUR = 4.6;     // 原型里每行歌词停留秒数（演示用，比真实歌曲快）
 const PLAIN_DUR = 36;     // 没有歌词的歌，原型里播 36 秒就切下一首
+const IDLE_AFTER = 6;     // 电视：多少秒不操作，浮层淡出
+const DRIFT_AFTER = 12;   // 电视：多少秒不操作，镜头开始漂移（App 里是 30 秒，原型缩短）
+const DRIFT_SPEED = 10;   // 漂移速度 dp/s
+
+/* 歌单模式用的示例歌单：同一批歌换个顺序 */
+const COLLECTION = { title: '深夜循环', meta: '歌单 · 网易云', seed: '#7A5CA8' };
+const COLL_SONGS = (() => { const r = rng(42), a = SONGS.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; })();
 
 /* Cookie12Sided：播放键的花瓣形，和 App 里 PlayPauseButton 同一个形状 */
 function cookiePath(R = 24, n = 12, depth = .07) {
@@ -1214,17 +1289,26 @@ class Wall {
   constructor(dev, kind, opts = {}) {
     this.ac = new AbortController(); this.sig = { signal: this.ac.signal };
     this.dev = dev; this.kind = kind; this.g = GEOM[kind]; this.ts = TILE_STYLE[kind];
-    this.songs = SONGS; this.field = fieldFor(SONGS.length);
+    this.mode = opts.mode || 'queue';
+    this.songs = this.mode === 'queue' ? SONGS : COLL_SONGS; this.field = fieldFor(this.songs.length);
     this.P = this.g.pitch; this.G = this.g.gap; this.BWp = BW * this.P; this.BHp = BH * this.P;
-    this.cur = opts.cur ?? 2; this.playing = true; this.t = 0;
-    this.set = { tint: 'mid', lights: false, num: true, tr: true, follow: true };
+    // 队列模式总有一首在放；歌单模式默认“这张歌单还没在放”（cur = -1）
+    this.cur = opts.cur ?? (this.mode === 'queue' ? 2 : -1); this.playing = true; this.t = 0;
+    this.set = { tint: 'mid', lights: false, num: true, tr: true, follow: true, drift: true };
     this.cam = { x: 0, y: 0 }; this.camT = null; this.vel = null;
     this.grown = null; this.focus = null; this.els = new Map(); this.range = '';
     this.build();
-    const home = this.nearestCopy(this.cur, { x: this.g.vw / 2, y: this.g.vh / 2 });
-    this.growAt(home, false);
-    this.centerOn(home, false);
-    this.applySong(false);
+    if (this.cur >= 0) {
+      const home = this.nearestCopy(this.cur, { x: this.g.vw / 2, y: this.g.vh / 2 });
+      this.growAt(home, false);
+      this.centerOn(home, false);
+    } else {
+      // 歌单没在放：不放大任何格。第 1 位总在块的左上角，手机把它对齐到顶栏下方；平板和电视一块差不多一屏，对准块中心
+      this.cam = this.kind === 'phone' ? { x: -12, y: -(this.view().y - this.cam.y) - 4 } : { x: this.BWp / 2 - this.g.vw / 2, y: this.BHp / 2 - this.g.vh / 2 };
+      this.range = ''; this.place();
+    }
+    this.applySong(false); this.updateLocate();
+    this.wake();
     this.last = performance.now();
     this.raf = requestAnimationFrame(t => this.frame(t));
     if (!opts.quiet) this.entrance();
@@ -1242,8 +1326,8 @@ class Wall {
     const k = this.kind, back = ic('back');
     const head = `<div class="headbar chrome" style="${k === 'phone' ? 'left:12px;top:36px' : k === 'tv' ? 'left:32px;top:24px' : 'left:24px;top:20px'}">
         <button class="bk" data-act="back" aria-label="返回">${back}</button>
-        <div class="ttl"><b>播放队列</b><span>${this.songs.length} 首 · 顺序播放</span></div></div>`;
-    const fabs = k === 'phone'
+        <div class="ttl"><b>${this.mode === 'queue' ? '播放队列' : COLLECTION.title}</b><span></span></div></div>`;
+    const fabs = this.mode === 'collection' ? this.toolHTML() : k === 'phone'
       ? `<button class="fab round chrome" data-act="locate" style="right:84px;bottom:34px" aria-label="定位正在播放">${ic('locate')}</button>
          <button class="fab sq chrome" data-act="tune" style="right:16px;bottom:30px" aria-label="海报墙设置">${ic('tune')}</button>`
       : k === 'tv'
@@ -1259,6 +1343,18 @@ class Wall {
     this.bindPointer(); this.bindKeys();
     scr.addEventListener('click', e => this.onClick(e), this.sig);
   }
+  /* 歌单模式：底部浮动工具栏（电视放顶部一排），承担详情页原来的“播放全部 / 随机 / 收藏” */
+  toolHTML() {
+    const k = this.kind, pos = k === 'tv' ? 'right:132px;top:20px' : 'left:50%;translate:-50% 0;bottom:28px';
+    return `<div class="ftool chrome ${k}" style="${pos}">
+      <button class="pa" data-act="playall">${ic('play', 20)}播放全部</button>
+      <button class="ib" data-act="shuffle" aria-label="随机播放">${ic('shuffle', 22)}</button>
+      <button class="ib" data-act="fav" aria-label="收藏歌单">${ic('favo', 22)}</button>
+      <button class="ib" data-act="locate" aria-label="定位正在播放">${ic('locate', 22)}</button>
+      <button class="ib" data-act="list" aria-label="切回列表视图">${ic('list', 22)}</button>
+      <button class="ib" data-act="tune" aria-label="海报墙设置">${ic('tune', 22)}</button>
+    </div>`;
+  }
   sheetHTML() {
     const k = this.kind;
     const pos = k === 'phone' ? 'left:0;right:0;bottom:0;border-radius:28px 28px 0 0;padding:14px 20px 28px'
@@ -1271,10 +1367,11 @@ class Wall {
       <h4>海报墙</h4>
       <div class="grp"><div class="lab">海报染色</div>${opt('tint', [['off', '关'], ['low', '弱'], ['mid', '中'], ['high', '强']])}</div>
       ${sw('lights', '关灯（只亮正在播放）')}
-      ${sw('num', '显示队列序号')}
+      ${sw('num', this.mode === 'queue' ? '显示队列序号' : '显示曲目序号')}
       ${sw('tr', '显示歌词翻译')}
       ${sw('follow', '切歌时自动跟随')}
-      <div class="lab" style="margin-top:4px">更多：迷你播放器点按打开哪一页，在 设置 › 播放页</div>
+      ${k === 'tv' ? sw('drift', '空闲时镜头漂移') : ''}
+      <div class="lab" style="margin-top:4px">${this.mode === 'queue' ? '更多：迷你播放器点按打开哪一页，在 设置 › 播放页' : '详情页会记住你上次用的是列表还是海报'}</div>
     </div>`;
   }
 
@@ -1290,7 +1387,9 @@ class Wall {
   }
   rectAt(p) { return this.world(p.bx, p.by, this.rectsOf(p.bx, p.by)[p.slot]); }
   view() {
-    const g = this.g, top = this.kind === 'phone' ? 84 : 0, bot = this.kind === 'phone' ? 92 : 0;
+    // 手机：顶栏和底部按钮之间；歌单模式的平板还要让出底部工具栏
+    // 电视：顶部一排控件下方（80dp 起）才算可用区，451dp 的大卡正好放下
+    const g = this.g, top = this.kind === 'phone' ? 84 : this.kind === 'tv' ? 80 : 0, bot = this.kind === 'phone' ? 92 : this.mode === 'collection' && this.kind === 'tablet' ? 88 : 0;
     return { x: this.cam.x, y: this.cam.y + top, w: g.vw, h: g.vh - top - bot };
   }
   nearestCopy(song, pt) {
@@ -1333,6 +1432,12 @@ class Wall {
       this.cam.x -= this.vel.x * dt; this.cam.y -= this.vel.y * dt;
       const k = Math.exp(-4.2 * dt); this.vel.x *= k; this.vel.y *= k;
       if (Math.hypot(this.vel.x, this.vel.y) < 8) this.vel = null;
+      this.place();
+    } else if (this.drift) {
+      // 方向是两条慢正弦叠加，一直在拐弯但没有急转；起步 3 秒内从 0 加速到 10dp/s
+      const d = this.drift; d.t += dt;
+      const ang = d.a0 + .9 * Math.sin(d.t / 19) + .5 * Math.sin(d.t / 31), sp = DRIFT_SPEED * Math.min(1, d.t / 3);
+      this.cam.x += Math.cos(ang) * sp * dt; this.cam.y += Math.sin(ang) * sp * dt;
       this.place();
     }
     this.tick(dt);
@@ -1442,6 +1547,7 @@ class Wall {
   }
   tick(dt) {
     const s = this.songs[this.cur];
+    if (!s) return;
     if (this.playing) this.t += dt;
     const total = s.ly ? s.ly.length * LINE_DUR : PLAIN_DUR;
     if (this.t >= total) { this.t = 0; this.step(1); return; }
@@ -1478,9 +1584,11 @@ class Wall {
   }
   collapse() { if (!this.grown) return; this.grown = null; this.relayout(); }
   applySong(animate = true) {
-    const s = this.songs[this.cur];
-    applyScheme(this.scr, s.seed);
-    this.scr.querySelector('.headbar span').textContent = `${this.songs.length} 首 · 正在播放第 ${this.cur + 1} 首`;
+    const s = this.songs[this.cur], n = this.songs.length;
+    applyScheme(this.scr, s ? s.seed : COLLECTION.seed);
+    this.scr.querySelector('.headbar span').textContent = this.mode === 'queue'
+      ? `${n} 首 · 正在播放第 ${this.cur + 1} 首`
+      : `${COLLECTION.meta} · ${n} 首${s ? ` · 正在播放第 ${this.cur + 1} 首` : ''}`;
   }
   playIndex(i, from = null) {
     this.cur = i; this.t = 0; this.playing = true;
@@ -1503,8 +1611,9 @@ class Wall {
     }
   }
   updateLocate() {
-    const g = this.grown, on = g && songAt(this.field, g.bx, g.by, g.slot) === this.cur;
-    this.scr.querySelector('[data-act="locate"]').classList.toggle('sel', !on);
+    const g = this.grown, on = g && songAt(this.field, g.bx, g.by, g.slot) === this.cur, b = this.scr.querySelector('[data-act="locate"]');
+    b.classList.toggle('sel', this.cur >= 0 && !on);
+    b.classList.toggle('dis', this.cur < 0);
   }
   toast(msg) {
     this.toastEl.textContent = msg; this.toastEl.classList.add('on');
@@ -1514,7 +1623,7 @@ class Wall {
     if (this.dragged) { this.dragged = false; return; }
     const act = e.target.closest('[data-act]'), opt = e.target.closest('.opts button'), sw = e.target.closest('[data-sw]');
     if (opt) { const k = opt.parentElement.dataset.set; this.set[k] = opt.dataset.v; opt.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === opt)); this.applySet(); return; }
-    if (sw) { const k = sw.dataset.sw; this.set[k] = !this.set[k]; sw.classList.toggle('on', this.set[k]); this.applySet(); return; }
+    if (sw) { const k = sw.dataset.sw; this.set[k] = !this.set[k]; sw.classList.toggle('on', this.set[k]); this.applySet(); if (k === 'drift') this.wake(); return; }
     if (act) {
       const a = act.dataset.act;
       if (a === 'toggle') this.togglePlay();
@@ -1522,9 +1631,20 @@ class Wall {
       else if (a === 'next') { this.t = 0; this.step(1); }
       else if (a === 'open') this.toast('打开播放页：大卡飞回封面位置');
       else if (a === 'back') this.toast('返回：格子按入场的反方向收起');
-      else if (a === 'locate') { const p = this.nearestCopy(this.cur, { x: this.g.vw / 2, y: this.g.vh / 2 }); this.growAt(p); this.centerOn(p); this.updateLocate(); }
+      else if (a === 'locate') {
+        if (this.cur < 0) { this.toast('这张歌单还没在播放'); return; }
+        const p = this.nearestCopy(this.cur, { x: this.g.vw / 2, y: this.g.vh / 2 }); this.growAt(p); this.centerOn(p); this.updateLocate();
+      }
+      else if (a === 'playall') this.playIndex(0);
+      else if (a === 'shuffle') { this.playIndex(Math.floor(Math.random() * this.songs.length)); this.toast('随机播放：队列换成打乱后的这张歌单'); }
+      else if (a === 'fav') { const on = act.classList.toggle('on'); act.innerHTML = ic(on ? 'fav' : 'favo', 22); this.toast(on ? '已收藏为本地歌单' : '已取消收藏'); }
+      else if (a === 'list') this.toast('切回列表视图；下次打开详情页仍是列表');
       else if (a === 'tune') this.sheet.classList.toggle('off');
-      else if (a === 'play') { const id = act.closest('.tile').dataset.id.split(',').map(Number); this.playIndex(+act.dataset.i, { bx: id[0], by: id[1], slot: id[2] }); }
+      else if (a === 'play') {
+        const id = act.closest('.tile').dataset.id.split(',').map(Number);
+        this.playIndex(+act.dataset.i, { bx: id[0], by: id[1], slot: id[2] });
+        if (this.mode === 'collection') this.toast('从这首开始播放，队列换成整张歌单');
+      }
       else if (a === 'nextup') this.toast(`「${this.songs[+act.dataset.i].t}」将在下一首播放`);
       else if (a === 'more') this.toast('长按格子或点“更多”：歌曲操作面板');
       return;
@@ -1546,6 +1666,7 @@ class Wall {
     let st = null;
     const k = () => this.dev.clientWidth / this.g.vw;
     this.wall.addEventListener('pointerdown', e => {
+      if (this.kind === 'tv') { const was = this.drift; this.wake(); if (was) return; }
       if (e.button !== 0 || e.target.closest('button')) return;
       st = { x: e.clientX, y: e.clientY, cx: this.cam.x, cy: this.cam.y, moved: false, hist: [[performance.now(), e.clientX, e.clientY]] };
       this.camT = null; this.vel = null;
@@ -1573,6 +1694,8 @@ class Wall {
   bindKeys() {
     this.dev.addEventListener('keydown', e => {
       const dirs = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      // 漂移中按的第一下只用来唤醒：停住、镜头回到正在播放，不执行这个键
+      if (this.drift) { e.preventDefault(); this.wake(); return; }
       this.wake();
       if (dirs[e.key]) { e.preventDefault(); this.move(...dirs[e.key]); }
       else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.enter(); }
@@ -1581,8 +1704,20 @@ class Wall {
   }
   wake() {
     if (this.kind !== 'tv') return;
-    this.scr.classList.remove('idle');
-    clearTimeout(this.idleT); this.idleT = setTimeout(() => this.scr.classList.add('idle'), 6000);
+    this.scr.classList.remove('idle', 'drifting');
+    if (this.drift) {
+      this.drift = null;
+      if (this.cur >= 0) { const p = this.nearestCopy(this.cur, { x: this.g.vw / 2, y: this.g.vh / 2 }); this.growAt(p); this.centerOn(p); this.updateLocate(); }
+    }
+    clearTimeout(this.idleT); clearTimeout(this.driftT);
+    this.idleT = setTimeout(() => this.scr.classList.add('idle'), IDLE_AFTER * 1000);
+    if (this.set.drift) this.driftT = setTimeout(() => this.startDrift(), DRIFT_AFTER * 1000);
+  }
+  startDrift() {
+    if (this.kind !== 'tv' || !this.set.drift) return;
+    this.scr.classList.add('idle', 'drifting');
+    clearTimeout(this.idleT); clearTimeout(this.driftT);
+    this.vel = null; this.drift = { t: 0, a0: Math.random() * TAU };
   }
   rectsNear(p) {
     const out = [];
@@ -1661,7 +1796,7 @@ class Wall {
       el.classList.remove('land'); void el.offsetWidth; el.classList.add('land');
     }
   }
-  destroy() { this.ac.abort(); cancelAnimationFrame(this.raf); this.raf = 0; clearTimeout(this.idleT); this.scr.innerHTML = ''; }
+  destroy() { this.ac.abort(); cancelAnimationFrame(this.raf); this.raf = 0; clearTimeout(this.idleT); clearTimeout(this.driftT); this.scr.innerHTML = ''; }
 }
 </script>
 <script>
@@ -1670,23 +1805,26 @@ class Wall {
 const CAP = {
   tablet: '<b>平板横屏</b> · 格距 102dp · 大卡 606dp',
   phone: '<b>手机</b> · 格距 56dp · 大卡 332dp',
-  tv: '<b>电视</b> · 格距 80dp · 大卡 475dp · 先点画面再用方向键',
+  tv: '<b>电视</b> · 格距 76dp · 大卡 451dp · 先点画面再用方向键',
 };
-let wall = null;
+let wall = null, kindNow = 'tablet', modeNow = 'queue';
 const protoDev = $('#protoDev'), protoFig = $('#protoFig');
-function mount(kind) {
+function mount(kind = kindNow, mode = modeNow) {
+  kindNow = kind; modeNow = mode;
   wall?.destroy();
   protoDev.className = `dev ${kind}${kind === 'phone' ? ' big' : ''}`;
   protoFig.style.width = kind === 'phone' ? 'min(100%, 340px)' : '100%';
-  $('#protoCap').innerHTML = CAP[kind];
+  $('#protoCap').innerHTML = CAP[kind] + (mode === 'collection' ? ' · 歌单详情' : ' · 播放队列');
   scaler.observe(protoDev);
-  wall = new Wall(protoDev, kind);
+  wall = new Wall(protoDev, kind, { mode });
+  $$('#devtabs button').forEach(x => x.setAttribute('aria-selected', String(x.dataset.k === kind)));
+  $$('#srctabs button').forEach(x => x.setAttribute('aria-selected', String(x.dataset.m === mode)));
 }
 $$('#devtabs button').forEach(b => b.addEventListener('click', () => {
-  $$('#devtabs button').forEach(x => x.setAttribute('aria-selected', String(x === b)));
   mount(b.dataset.k);
   if (b.dataset.k === 'tv') protoDev.focus({ preventScroll: true });
 }));
+$$('#srctabs button').forEach(b => b.addEventListener('click', () => mount(undefined, b.dataset.m)));
 $$('[data-demo]').forEach(b => b.addEventListener('click', () => {
   if (!wall) return;
   const a = b.dataset.demo;
@@ -1694,6 +1832,11 @@ $$('[data-demo]').forEach(b => b.addEventListener('click', () => {
   else if (a === 'next') { wall.t = 0; wall.step(1); }
   else if (a === 'prev') { wall.t = 0; wall.step(-1); }
   else if (a === 'enter') wall.entrance();
+  else if (a === 'drift') {
+    if (wall.kind !== 'tv') mount('tv');
+    protoDev.focus({ preventScroll: true });
+    wall.startDrift();
+  }
 }));
 // 屏幕外时不跑动画循环
 new IntersectionObserver(es => es.forEach(e => {
@@ -1750,10 +1893,17 @@ function entryMocks() {
       <div class="gl">海报墙</div>
       <div class="card new"><b>点按迷你播放器打开</b><div class="seg"><i class="on">播放页</i><i>海报墙</i></div><small>墙内的染色、序号、翻译和跟随，在海报墙右下角设置</small></div>
     </div></div>`;
+  const crow = COLL_SONGS.slice(0, 5).map((s, j) => `<div class="rw"><div class="c" style="background-image:url(${cover(s)})"></div><div><b>${esc(s.t)}</b><span>${esc(s.a)}</span></div><span>${ic('more', 20)}</span></div>`).join('');
+  const detail = `<div class="mk"><div class="dtop"></div>
+    <div class="dbar"><span>${ic('back')}</span><span class="pw sm" aria-label="海报视图">${ic('grid')}</span></div>
+    <div class="dhead"><div class="dcv" style="background-image:url(${cover(COLL_SONGS[0])})"></div><div><b>${COLLECTION.title}</b><span>${COLLECTION.meta} · 30 首</span></div></div>
+    <div class="dact"><span class="split"><i>${ic('play', 20)}播放全部</i><i>▾</i></span><span class="ib">${ic('favo')}</span><span class="ib">${ic('check')}</span></div>
+    <div class="rows dl">${crow}</div></div>`;
   $('#entryBoard').innerHTML =
     `<figure><div class="dev phone"><div class="screen" id="mkQ">${queue}</div></div><figcaption><b>队列面板</b> · 右上角新增入口</figcaption></figure>` +
+    `<figure><div class="dev phone"><div class="screen" id="mkD">${detail}</div></div><figcaption><b>歌单 / 专辑 / 榜单详情</b> · 顶栏新增“海报视图”</figcaption></figure>` +
     `<figure><div class="dev phone"><div class="screen" id="mkS">${settings}</div></div><figcaption><b>设置 › 播放页</b> · 新增一组</figcaption></figure>`;
-  $$('#entryBoard .dev').forEach(d => { applyScheme(d.firstElementChild, cur.seed); scaler.observe(d); });
+  $$('#entryBoard .dev').forEach(d => { applyScheme(d.firstElementChild, d.firstElementChild.id === 'mkD' ? COLLECTION.seed : cur.seed); scaler.observe(d); });
   // 队列面板后面垫一面静态的墙，看出是从墙上弹出来的
   const bg = $('#mkQ .wall');
   const f = fieldFor(SONGS.length);
