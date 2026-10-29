@@ -1,0 +1,1992 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>myMusic 律动跟拍</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Roboto+Flex:opsz,wght@8..144,300..1000&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+/* 原型里的配色变量注册成 <color>，切歌时能像 App 里一样 450ms 过渡 */
+@property --p { syntax: '<color>'; inherits: true; initial-value: #B9C3FF; }
+@property --op { syntax: '<color>'; inherits: true; initial-value: #1E2A60; }
+@property --pc { syntax: '<color>'; inherits: true; initial-value: #3A4580; }
+@property --opc { syntax: '<color>'; inherits: true; initial-value: #DEE0FF; }
+@property --sc { syntax: '<color>'; inherits: true; initial-value: #3F4466; }
+@property --osc { syntax: '<color>'; inherits: true; initial-value: #DFE1F9; }
+@property --s { syntax: '<color>'; inherits: true; initial-value: #12131A; }
+@property --os { syntax: '<color>'; inherits: true; initial-value: #E4E1EC; }
+@property --osv { syntax: '<color>'; inherits: true; initial-value: #C5C5D6; }
+@property --sch { syntax: '<color>'; inherits: true; initial-value: #272833; }
+
+:root {
+  /* 版式：规格文档。每节左侧窄栏写结论，右侧画板放可操作的原型；窄屏合成一栏 */
+  --bg: #EEF2F0;
+  --panel: #FFFFFF;
+  --board: #E2E9E6;
+  --fg: #13201C;
+  --muted: #52615C;
+  --line: #CDD8D3;
+  --accent: #006B5F;
+  --on-accent: #FFFFFF;
+  --hot: #A3461F;
+  --bezel: #0A0E0D;
+
+  --display: "Roboto Flex", "Noto Sans SC", system-ui, sans-serif;
+  --body: "Roboto Flex", "Noto Sans SC", system-ui, sans-serif;
+  --mono: "Roboto Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* 播放页固定深色 Vibrant，下面是第一首歌的配色；原型按歌曲改写 */
+  --p: #B9C3FF; --op: #1E2A60; --pc: #3A4580; --opc: #DEE0FF;
+  --sc: #3F4466; --osc: #DFE1F9; --s: #12131A; --os: #E4E1EC; --osv: #C5C5D6; --sch: #272833;
+
+  /* M3 Expressive 弹簧的 CSS 近似；支持 linear() 的浏览器由脚本换成真实弹簧曲线 */
+  --fast: cubic-bezier(.3, 1.45, .45, 1); --fast-d: .36s;
+  --spatial: cubic-bezier(.3, 1.25, .4, 1); --spatial-d: .5s;
+  --slow: cubic-bezier(.3, 1.2, .4, 1); --slow-d: .7s;
+  --effects: cubic-bezier(.2, 0, 0, 1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C1211; --panel: #141B19; --board: #101715; --fg: #E1EAE6; --muted: #95A6A0;
+    --line: #26322E; --accent: #5ED4BF; --on-accent: #00382F; --hot: #F2A07A; --bezel: #000000;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0C1211; --panel: #141B19; --board: #101715; --fg: #E1EAE6; --muted: #95A6A0;
+  --line: #26322E; --accent: #5ED4BF; --on-accent: #00382F; --hot: #F2A07A; --bezel: #000000;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 96px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+p { margin: 0; }
+code, .mono { font-family: var(--mono); font-size: .86em; }
+code { background: var(--board); border-radius: 6px; padding: 1px 6px; overflow-wrap: anywhere; }
+a { color: var(--accent); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+/* ---------- 页头 ---------- */
+.mast { display: grid; gap: 20px; padding-block: 24px 40px; }
+.eyebrow { font: 500 12px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.mast h1 { font-size: clamp(44px, 8vw, 92px); line-height: .98; font-weight: 900; letter-spacing: -.025em; }
+.mast h1 em { font-style: normal; color: var(--accent); }
+.lede { font-size: clamp(17px, 2vw, 20px); line-height: 1.65; max-width: 44em; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font: 500 12.5px/1 var(--mono); padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); }
+.chip b { color: var(--fg); font-weight: 500; }
+
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+.keys > div { background: var(--panel); padding: 18px 18px 20px; display: grid; gap: 6px; align-content: start; }
+.keys h3 { font-size: 16px; font-weight: 800; }
+.keys p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+/* ---------- 章节 ---------- */
+section.sec { display: grid; grid-template-columns: minmax(0, 270px) minmax(0, 1fr); gap: 20px 44px; border-top: 1px solid var(--line); padding-block: 52px; }
+.side { display: grid; gap: 14px; align-content: start; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); }
+.side .eyebrow { color: var(--accent); }
+.side h2 { font-size: 30px; line-height: 1.15; font-weight: 900; letter-spacing: -.01em; }
+.side p { color: var(--muted); font-size: 14.5px; }
+.main { display: grid; gap: 28px; min-width: 0; }
+@media (max-width: 900px) {
+  section.sec { grid-template-columns: minmax(0, 1fr); padding-block: 40px; }
+  .side { position: static; }
+}
+
+.prose { display: grid; gap: 12px; max-width: 46em; }
+.prose h3 { font-size: 19px; font-weight: 800; margin-top: 8px; }
+.list { display: grid; gap: 0; border-top: 1px solid var(--line); }
+.list > li { list-style: none; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.list { padding: 0; margin: 0; }
+.list .n { font: 500 13px/1.9 var(--mono); color: var(--accent); }
+.list b { display: block; font-size: 15.5px; }
+.list span { color: var(--muted); font-size: 14px; }
+
+.board { position: relative; background-color: var(--board); background-image: radial-gradient(var(--line) 1px, transparent 1.3px); background-size: 18px 18px; border-radius: 22px; padding: 28px clamp(14px, 3vw, 32px); display: flex; flex-wrap: wrap; gap: 32px 28px; justify-content: center; align-items: flex-start; min-width: 0; }
+[hidden] { display: none !important; }
+figure { width: min(100%, 230px); margin: 0; display: grid; gap: 10px; justify-items: center; min-width: 0; }
+figcaption { font: 500 12px/1.4 var(--mono); color: var(--muted); letter-spacing: .04em; text-align: center; }
+figcaption b { color: var(--fg); font-weight: 500; }
+
+/* 设备外框：内部按 dp 原尺寸排版，脚本按可用宽度整体缩放 */
+.dev { position: relative; width: 100%; overflow: hidden; background: var(--bezel); box-shadow: 0 0 0 7px var(--bezel), 0 18px 40px -18px rgba(0, 0, 0, .55); isolation: isolate; }
+.dev.phone { max-width: 300px; aspect-ratio: 360 / 800; border-radius: 30px; }
+.dev.phone.big { max-width: 340px; }
+.dev.tablet { max-width: 760px; aspect-ratio: 1280 / 800; border-radius: 18px; }
+.dev.tv { max-width: 760px; aspect-ratio: 960 / 540; border-radius: 6px; box-shadow: 0 0 0 9px var(--bezel), 0 22px 44px -18px rgba(0, 0, 0, .55); }
+.screen { position: absolute; left: 0; top: 0; transform-origin: 0 0; transform: scale(var(--k, 1)); overflow: hidden; background: var(--s); color: var(--os); font-family: var(--body); }
+.phone .screen { width: 360px; height: 800px; }
+.tablet .screen { width: 1280px; height: 800px; }
+.tv .screen { width: 960px; height: 540px; }
+
+.tabs { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); width: max-content; max-width: 100%; overflow-x: auto; }
+.tabs button { font: 600 14px/1 var(--body); border: 0; background: transparent; color: var(--muted); padding: 11px 18px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.tabs button[aria-selected="true"], .tabs button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px 28px; }
+.notes > div { display: grid; gap: 4px; align-content: start; }
+.notes h3 { font-size: 15px; font-weight: 800; }
+.notes p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+.legend { display: grid; gap: 0; counter-reset: lg; padding: 0; margin: 0; }
+.legend li { list-style: none; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.legend li b { color: var(--fg); display: block; font-size: 15px; }
+.dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 600 11px/1 var(--mono); background: var(--accent); color: var(--on-accent); margin-top: 1px; }
+.proto figure { width: 100%; }
+.proto { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 32px; align-items: start; }
+@media (max-width: 760px) { .proto { grid-template-columns: minmax(0, 1fr); justify-items: center; } .proto .legend { width: 100%; } }
+.protoside { display: grid; gap: 18px; min-width: 0; align-content: start; }
+.ctl { display: grid; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; }
+.ctl .row { display: grid; gap: 8px; }
+.ctl .lab { font: 600 13px/1.3 var(--body); color: var(--muted); }
+.chipset { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; }
+.schip { display: grid; justify-items: center; gap: 4px; padding: 8px 4px 6px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; font: 500 12px/1.2 var(--body); }
+.schip svg { width: 34px; height: 34px; }
+.schip[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel)); font-weight: 700; }
+.hint { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kbd { font: 500 12px/1 var(--mono); padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
+
+/* 表格 */
+.tablebox { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 12px/1.4 var(--mono); letter-spacing: .06em; color: var(--muted); background: var(--board); }
+tr:last-child td { border-bottom: 0; }
+td.k { font-weight: 700; white-space: nowrap; }
+td .mono { color: var(--muted); }
+
+.shapes { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; }
+.shape { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px 10px 12px; display: grid; justify-items: center; gap: 8px; }
+.shape svg { width: 76px; height: 76px; }
+.shape span { font: 500 11.5px/1.3 var(--mono); color: var(--muted); text-align: center; }
+.shape.pick { border-color: var(--accent); }
+
+.shot { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); max-width: 640px; }
+.shot img { display: block; width: 100%; height: auto; }
+
+/* 对照演示 */
+.duo { display: flex; flex-wrap: wrap; gap: 24px; justify-content: center; }
+.duo figure { width: min(100%, 280px); }
+.stage { position: relative; width: 100%; aspect-ratio: 9 / 16; border-radius: 22px; overflow: hidden; background: #111; box-shadow: 0 0 0 6px var(--bezel); }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ctrls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; }
+.btn { font: 600 14px/1 var(--body); border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 11px 16px; border-radius: 999px; cursor: pointer; display: inline-flex; gap: 8px; align-items: center; }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn svg { width: 18px; height: 18px; fill: currentColor; }
+.file { position: relative; overflow: hidden; }
+.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.src { font-size: 13px; color: var(--muted); text-align: center; min-height: 1.6em; }
+.meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; }
+.meter { display: grid; gap: 5px; }
+.meter .lab { display: flex; justify-content: space-between; font: 500 12px/1.3 var(--mono); color: var(--muted); }
+.meter .bar { height: 6px; border-radius: 3px; background: var(--board); overflow: hidden; }
+.meter .bar i { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: 0 50%; transform: scaleX(0); }
+.meter.old .bar i { background: var(--hot); }
+.count { font: 500 12.5px/1.5 var(--mono); color: var(--muted); }
+.count b { font-size: 20px; color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.phases { display: grid; gap: 14px; }
+.phase { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 18px 20px; display: grid; gap: 8px; }
+.phase header { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.phase h3 { font-size: 18px; font-weight: 800; }
+.phase .tag { font: 500 11.5px/1 var(--mono); color: var(--accent); letter-spacing: .08em; }
+.phase ul { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: 14px; display: grid; gap: 4px; }
+.qs { display: grid; gap: 14px; }
+.q { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; display: grid; gap: 4px; }
+.q b { font-size: 15.5px; }
+.q span { color: var(--muted); font-size: 14px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; }
+}
+</style>
+<style>
+/* ---------- 对照原型：两台手机 ---------- */
+.duo { display: grid; grid-template-columns: repeat(2, minmax(0, 300px)); gap: 26px; justify-content: center; }
+@media (max-width: 640px) { .duo { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } }
+.duo figure { width: 100%; }
+.stage { position: relative; width: 100%; aspect-ratio: 9 / 16; border-radius: 26px; overflow: hidden; background: var(--s); box-shadow: 0 0 0 6px var(--bezel), 0 18px 40px -18px rgba(0, 0, 0, .55); container-type: inline-size; color: var(--os); isolation: isolate; }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ov { position: absolute; inset: 0; pointer-events: none; font-family: var(--body); }
+.ov .top { position: absolute; left: 4cqw; right: 4cqw; top: 4.5cqw; display: flex; align-items: center; justify-content: space-between; }
+.ov .top span { font: 600 3.6cqw/1 var(--body); color: var(--osv); letter-spacing: .02em; }
+.ov svg.i { fill: currentColor; width: 6.6cqw !important; height: 6.6cqw !important; }
+.ov .meta { position: absolute; left: 8cqw; right: 8cqw; top: 66%; display: grid; gap: 1.4cqw; text-align: left; }
+.ov .meta b { font: 800 5.6cqw/1.25 var(--body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov .meta span { font: 500 3.7cqw/1.3 var(--body); color: var(--p); }
+.ov .times { position: absolute; left: 8cqw; right: 8cqw; top: 79.4%; display: flex; justify-content: space-between; font: 500 3cqw/1 var(--mono); color: var(--osv); }
+.ov .ctl3 { position: absolute; left: 0; right: 0; top: 84.5%; display: flex; justify-content: center; align-items: center; gap: 9cqw; }
+.ov .ctl3 .pp { width: 19cqw; height: 19cqw; display: grid; place-items: center; color: var(--op); position: relative; }
+.ov .ctl3 .pp svg.bg { position: absolute; inset: 0; width: 100% !important; height: 100% !important; fill: var(--p); }
+.ov .ctl3 .pp svg.i { position: relative; width: 8.4cqw !important; height: 8.4cqw !important; }
+.tagline { display: flex; justify-content: center; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.tagline b { font: 700 13px/1.3 var(--body); color: var(--fg); letter-spacing: 0; }
+.pill { font: 500 11.5px/1 var(--mono); padding: 5px 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.pill.hot { color: var(--hot); border-color: color-mix(in srgb, var(--hot) 45%, var(--line)); }
+.pill.ok { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.readout { display: grid; gap: 2px; justify-items: center; font: 500 12.5px/1.45 var(--body); color: var(--muted); text-align: center; min-height: 3.2em; }
+.readout b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 控件面板 */
+.ctlgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; }
+.ctlgrid .row { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.ctlgrid .lab { font: 600 13px/1.3 var(--body); color: var(--muted); }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg button, .seg label.btn { font: 600 13px/1 var(--body); border: 1px solid var(--line); background: var(--bg); color: var(--fg); padding: 9px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.seg label.btn { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 6px; }
+.seg label.btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.seg label.btn:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+.range { display: flex; gap: 10px; align-items: center; }
+.range input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.range output { font: 500 12.5px/1 var(--mono); min-width: 5.5em; text-align: right; color: var(--fg); }
+.sound { justify-self: start; }
+
+/* 时间线 */
+.tl { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 14px 14px 10px; display: grid; gap: 8px; }
+.tl canvas { width: 100%; height: 168px; display: block; }
+.tl .cap { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 500 12px/1.4 var(--mono); color: var(--muted); }
+.tl .cap i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.stats { display: flex; flex-wrap: wrap; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.stats > div { flex: 1 1 200px; background: var(--panel); padding: 12px 14px; display: grid; gap: 2px; align-content: start; }
+.stats span { font: 500 11.5px/1.4 var(--mono); color: var(--muted); letter-spacing: .03em; }
+.stats b { font: 600 19px/1.3 var(--body); font-variant-numeric: tabular-nums; }
+.stats b.hot { color: var(--hot); }
+.stats b.ok { color: var(--accent); }
+.stats em { font-style: normal; font: 500 12px/1.4 var(--body); color: var(--muted); }
+
+/* 图解 */
+.fig { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 16px; overflow-x: auto; }
+.fig svg { display: block; width: 100%; min-width: 620px; height: auto; font-family: var(--body); }
+.fig .t { font: 600 13px var(--body); fill: var(--fg); }
+.fig .s { font: 500 11.5px var(--mono); fill: var(--muted); }
+.fig .box { fill: var(--board); stroke: var(--line); }
+.fig .boxa { fill: color-mix(in srgb, var(--accent) 14%, var(--panel)); stroke: var(--accent); }
+.fig .boxh { fill: color-mix(in srgb, var(--hot) 12%, var(--panel)); stroke: var(--hot); }
+.fig .ln { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.fig .lna { stroke: var(--accent); stroke-width: 2; fill: none; }
+.fig .lnh { stroke: var(--hot); stroke-width: 2; fill: none; stroke-dasharray: 6 5; }
+.fig .ha { fill: var(--hot); }
+.fig .aa { fill: var(--accent); }
+.fig .ma { fill: var(--muted); }
+
+/* 相位表 */
+td.v { font: 500 13px/1.4 var(--mono); white-space: nowrap; }
+td.v.bad { color: var(--hot); }
+td.v.ok { color: var(--accent); }
+td.v small { display: block; font: 500 11.5px/1.4 var(--body); opacity: .8; }
+
+/* 设置示意 */
+.setmock { width: min(100%, 360px); background: #121318; color: #E4E1EC; border-radius: 26px; padding: 18px 16px 20px; box-shadow: 0 0 0 6px var(--bezel); display: grid; gap: 4px; font-family: var(--body); }
+.setmock h4 { margin: 4px 6px 10px; font: 800 20px/1.2 var(--body); }
+.setmock .grp { font: 600 12.5px/1 var(--body); color: #B9C3FF; margin: 12px 8px 6px; }
+.setmock .it { background: #1B1C22; border-radius: 6px; padding: 13px 14px; display: grid; gap: 9px; }
+.setmock .it:first-of-type { border-radius: 18px 18px 6px 6px; }
+.setmock .it.last { border-radius: 6px 6px 18px 18px; }
+.setmock .it b { font: 600 15px/1.3 var(--body); }
+.setmock .it small { font: 400 12.5px/1.45 var(--body); color: #C5C5D6; }
+.setmock .sg { display: flex; border-radius: 999px; overflow: hidden; gap: 2px; }
+.setmock .sg span { flex: 1; text-align: center; padding: 9px 0; background: #2A2B33; font: 600 13px/1 var(--body); }
+.setmock .sg span.on { background: #3A4580; color: #DEE0FF; }
+.setmock .sl { display: flex; align-items: center; gap: 10px; }
+.setmock .sl i { flex: 1; height: 16px; border-radius: 8px; background: linear-gradient(90deg, #2A2B33 0 48%, transparent 48% 52%, #2A2B33 52%); position: relative; }
+.setmock .sl i::after { content: ''; position: absolute; left: calc(50% - 2px); top: -6px; width: 4px; height: 28px; border-radius: 2px; background: #B9C3FF; }
+.setmock .sl output { font: 500 12.5px/1 var(--mono); color: #DEE0FF; min-width: 3.4em; text-align: right; }
+.setmock .new { font: 600 10.5px/1 var(--mono); color: #00382F; background: #5ED4BF; padding: 3px 6px; border-radius: 6px; margin-left: 6px; vertical-align: 2px; }
+
+/* 海报墙示意 */
+.wallmini { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.wallmini canvas { width: 100%; aspect-ratio: 4 / 3; display: block; border-radius: 16px; background: #101215; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="mast">
+  <div class="eyebrow">myMusic · 设计方案 · 2026-10-29 · 律动</div>
+  <h1>律动<em>踩在拍上</em></h1>
+  <p class="lede">打开“律动”后，光团会跟着音乐起伏，但看不出它在跟节奏。原因主要在时间上，不在动画上：App 分析的声音，要大约半秒以后才会被听到；每一拍能看到的变化，又被压到了几个百分点。这份方案分三步改：先把分析结果按播放进度对齐，再加一层节拍跟踪，最后由封面、光晕和流速来表现拍子。整屏亮度不跟着闪。</p>
+  <div class="chips">
+    <span class="chip"><b>原因</b> 画面比声音早 0.5–0.8 秒</span>
+    <span class="chip"><b>改后</b> 仿真偏差中位 −11 ~ −21ms</span>
+    <span class="chip"><b>设置</b> 只多一项“跟拍校准”</span>
+    <span class="chip"><b>依据</b> Media3 1.11.1 · 现有 RhythmAnalysis</span>
+  </div>
+  <div class="keys">
+    <div><h3>对齐时间</h3><p>每个分析帧带上它在歌里的位置，等真正播到才交给画面。只做这一步，现有的效果就不再错拍。</p></div>
+    <div><h3>跟踪拍子</h3><p>根据最近 8 秒的起拍估出速度和相位，按拍子网格起拍。弱拍、漏检不影响网格；没有固定拍子的音乐不硬凑。</p></div>
+    <div><h3>换个表现方式</h3><p>每一拍让封面弹一下、轮廓转一格、光晕亮一下、流光推一下。光团亮度不跟单拍走，整屏亮度仍然守住每帧 3% 的约束。</p></div>
+    <div><h3>用上提前量</h3><p>分析本来就比播放早半秒，界面要表现的那一拍其实已经分析过了。所以可以在拍前 50ms 起势，峰值正好落在拍上。</p></div>
+  </div>
+</header>
+
+<section class="sec" id="why">
+  <div class="side">
+    <div class="eyebrow">01 · 诊断</div>
+    <h2>为什么看不出跟拍</h2>
+    <p>一共四个原因，第一个最主要：画面上的反应比声音早了半秒以上，而且早多少还随设备变化。</p>
+  </div>
+  <div class="main">
+    <div class="fig">
+      <svg viewBox="0 0 760 300" role="img" aria-label="声音和画面的路径：现在分析结果立刻上屏，比耳朵早 0.5 到 0.8 秒；改后按播放位置排队，播到才上屏">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" class="ma"/></marker>
+          <marker id="ahh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" class="ha"/></marker>
+          <marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" class="aa"/></marker>
+        </defs>
+        <text x="10" y="13" class="s">声音</text>
+        <rect x="10" y="22" width="100" height="44" rx="12" class="box"/><text x="60" y="49" text-anchor="middle" class="t">解码</text>
+        <rect x="135" y="22" width="140" height="44" rx="12" class="box"/><text x="205" y="41" text-anchor="middle" class="t">Tee 取样 · 分析</text><text x="205" y="57" text-anchor="middle" class="s">30 帧/秒</text>
+        <rect x="300" y="22" width="170" height="44" rx="12" class="box"/><text x="385" y="41" text-anchor="middle" class="t">AudioTrack 缓冲</text><text x="385" y="57" text-anchor="middle" class="s">固定 500ms</text>
+        <rect x="495" y="22" width="140" height="44" rx="12" class="box"/><text x="565" y="41" text-anchor="middle" class="t">设备输出</text><text x="565" y="57" text-anchor="middle" class="s">扬声器 / 蓝牙 / HDMI</text>
+        <rect x="660" y="22" width="90" height="44" rx="12" class="box"/><text x="705" y="49" text-anchor="middle" class="t">耳朵</text>
+        <path d="M110 44h22M275 44h22M470 44h22M635 44h22" class="ln" marker-end="url(#ah)"/>
+        <path d="M300 82h335" class="ln" stroke-dasharray="3 4"/><path d="M300 76v12M635 76v12" class="ln"/>
+        <text x="467" y="100" text-anchor="middle" class="s">0.5 秒 + 设备延迟 30–300ms</text>
+
+        <text x="10" y="146" class="s" style="fill: var(--hot)">现在</text>
+        <path d="M185 66 V 142 H 199" class="lnh" marker-end="url(#ahh)"/>
+        <rect x="202" y="122" width="116" height="40" rx="12" class="boxh"/><text x="260" y="147" text-anchor="middle" class="t">立刻上屏</text>
+        <text x="334" y="139" class="t" style="fill: var(--hot)">画面比耳朵早 0.5–0.8 秒</text>
+        <text x="334" y="156" class="s">RhythmFeed 收到就交给 FlowFieldMotion.feed</text>
+
+        <text x="10" y="268" class="s" style="fill: var(--accent)">改后</text>
+        <path d="M150 66 V 239" class="lna" marker-end="url(#aha)"/>
+        <rect x="60" y="242" width="180" height="44" rx="12" class="boxa"/><text x="150" y="261" text-anchor="middle" class="t">带 pts · 节拍跟踪</text><text x="150" y="277" text-anchor="middle" class="s">分析线程</text>
+        <rect x="270" y="242" width="170" height="44" rx="12" class="boxa"/><text x="355" y="261" text-anchor="middle" class="t">按 pts 排队</text><text x="355" y="277" text-anchor="middle" class="s">约 2 秒的环形缓冲</text>
+        <rect x="470" y="242" width="190" height="44" rx="12" class="boxa"/><text x="565" y="261" text-anchor="middle" class="t">播到才上屏</text><text x="565" y="277" text-anchor="middle" class="s">拍前 50ms 起势</text>
+        <path d="M240 264h27M440 264h27" class="lna" marker-end="url(#aha)"/>
+        <path d="M705 66 V 214 H 565 V 239" class="ln" stroke-dasharray="4 4" marker-end="url(#ah)"/>
+        <text x="696" y="206" text-anchor="end" class="s">此刻听到的位置（ExoPlayer 已扣掉缓冲和设备上报的延迟）</text>
+      </svg>
+    </div>
+
+    <ol class="list">
+      <li><span class="n">①</span><div><b>画面早了半秒以上</b><span><code>RhythmAnalyzer</code> 通过 <code>TeeAudioProcessor</code> 取样，取的是还没写进 AudioTrack 的 PCM。Media3 1.11.1 的 <code>DefaultAudioTrackBufferSizeProvider</code> 把 PCM 缓冲定死在 500ms（<code>targetPcmBufferDurationUs = 500000</code>，已从依赖的 aar 里核对过），正常播放时这块缓冲一直是满的，再加上设备输出延迟，分析出的结果比耳朵听到的早 0.5–0.8 秒。上一版方案页里的原型分析的是“正在听到”的那一段，所以原型里对得上，App 里对不上。</span></div></li>
+      <li><span class="n">②</span><div><b>早多少不固定，偶尔还会恰好对上</b><span>一拍的长度是 60/BPM 秒。提前量正好接近一拍时（比如 104 BPM 配手机扬声器），看起来只差几十毫秒；换一首速度不同的歌，或者戴上蓝牙耳机，脉冲就落到两拍中间了。ITU-R BT.1359 给的可察觉门限是：声音比画面早 45ms，或比画面晚 125ms。下表算的是画面上的一次反应离最近的拍点有多远，正数表示比拍点晚：</span></div></li>
+    </ol>
+    <div class="tablebox"><table id="phaseTable"></table></div>
+
+    <ol class="list" start="3">
+      <li><span class="n">③</span><div><b>每一拍的变化太小</b><span>上一轮为了不让整屏闪，几处跟拍的量都压低了。现在能随单拍变化的只剩下表里这些，上面还压着一层 12%–84% 的固定遮罩：</span></div></li>
+    </ol>
+    <div class="tablebox"><table>
+      <thead><tr><th>元素</th><th>跟着什么</th><th>一拍里能看到的变化（标准档）</th></tr></thead>
+      <tbody>
+        <tr><td class="k">光团半径</td><td>低频慢包络 swell（0.3 秒起、1 秒落）</td><td>不随单拍变；鼓点额外胀 5%</td></tr>
+        <tr><td class="k">光团光量</td><td>逐帧低频 ×0.03，鼓点 ×0.02</td><td>在 0.16–0.36 的底上多 0.02–0.05</td></tr>
+        <tr><td class="k">鼓点光环</td><td>鼓点</td><td>峰值不透明度 0.06，0.12 秒淡入、0.9 秒散完</td></tr>
+        <tr><td class="k">封面层、光晕</td><td>swell ×0.05</td><td>不随单拍变</td></tr>
+        <tr><td class="k">进度条波幅</td><td>0.3 + swell，指示器自带 500ms 补间</td><td>不随单拍变（补间进行中不接新值）</td></tr>
+      </tbody>
+    </table></div>
+    <ol class="list" start="4">
+      <li><span class="n">④</span><div><b>鼓点检测本身没有规律</b><span>检测只看 0–690Hz 的谱通量，贝斯音符也会触发；不应期是 280ms。遇到“底鼓在正拍、贝斯在反拍”的电子乐，常常会锁到反拍上：仿真用的 128 BPM 电子曲里，56 次检测有 33 次落在反拍。另外检测没有“拍子”的概念，漏一下、多一下都会直接出现在画面上，人眼看不出规律。</span></div></li>
+    </ol>
+  </div>
+</section>
+
+<section class="sec" id="proto">
+  <div class="side">
+    <div class="eyebrow">02 · 原型</div>
+    <h2>边听边看</h2>
+    <p>两台手机播的是同一段声音。左边按 App 现在的做法：分析结果立刻上屏，幅度用现在的值。右边是改后的拍子时钟。</p>
+    <p>点“播放声音”可以听到；静音时画面照常按同一条时钟走。也可以选一首本机音乐来试。</p>
+    <p>内置曲目带有每一拍的真实时刻，下面的时间线和统计数字就是拿它算的。</p>
+  </div>
+  <div class="main">
+    <div class="ctlgrid">
+      <div class="row"><span class="lab">曲目</span><div class="seg" id="trackSeg"></div></div>
+      <div class="row"><span class="lab">声音</span><div class="seg"><button type="button" id="snd" class="sound" aria-pressed="false">播放声音</button></div><span class="hint" id="srcline"></span></div>
+      <div class="row"><span class="lab">输出设备（决定左边早多少）</span><div class="seg" id="devSeg"></div></div>
+      <div class="row"><span class="lab">律动强度（右边）</span><div class="seg" id="intSeg"><button type="button" data-v="soft" aria-pressed="false">柔和</button><button type="button" data-v="standard" aria-pressed="true">标准</button></div></div>
+      <div class="row"><span class="lab">跟拍校准（右边，正数让画面晚一点）</span><div class="range"><input type="range" id="calib" min="-150" max="150" step="10" value="0" aria-label="跟拍校准，毫秒"><output for="calib" id="calibOut">0 ms</output></div></div>
+    </div>
+    <div class="duo">
+      <figure>
+        <div class="stage" id="stNow"></div>
+        <figcaption class="tagline"><b>现在（App 实际）</b><span class="pill hot" id="leadPill">早 0.53 s</span></figcaption>
+        <div class="readout" id="roNow"></div>
+      </figure>
+      <figure>
+        <div class="stage" id="stNew"></div>
+        <figcaption class="tagline"><b>改后</b><span class="pill ok">按播放位置对齐</span></figcaption>
+        <div class="readout" id="roNew"></div>
+      </figure>
+    </div>
+    <div class="tl">
+      <canvas id="tl" aria-label="时间线：真实拍点、现在的画面反应、改后的画面反应"></canvas>
+      <div class="cap"><span><i style="background: var(--fg)"></i>真实拍点（高的是底鼓，中等的是军鼓）</span><span><i style="background: var(--hot)"></i>现在：画面闪的时刻</span><span><i style="background: var(--accent)"></i>改后：画面起拍的时刻（大圈是小节首拍）</span><span><i style="border: 2px solid var(--accent); box-sizing: border-box"></i>已经分析过、还没播到的拍</span></div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="notes">
+      <div><h3>看什么</h3><p>对着底鼓看左边的光环和光团：它们总在鼓声之前就开始了。右边封面的弹跳和轮廓转动，会和底鼓、军鼓同时落下。</p></div>
+      <div><h3>换设备</h3><p>换成“蓝牙耳机”，左边的提前量从 0.53 秒变成 0.72 秒，在律动曲（104 BPM）里会从“稍微晚一点”变成“明显早”。右边不受影响，因为改后用的是 ExoPlayer 的播放位置。</p></div>
+      <div><h3>换曲目</h3><p>慢歌（76 BPM）的一拍有 0.79 秒，左边差不多落在两拍正中间。“氛围”这首没有固定拍子：右边认出这一点后不按网格起拍，只有低频事件时以一半力度轻轻回应一下。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="clock">
+  <div class="side">
+    <div class="eyebrow">03 · 机制</div>
+    <h2>先对齐，再跟拍</h2>
+    <p>对齐解决“早半秒”；跟踪解决“没规律”。两者都在分析线程上完成，界面每帧只需要查一次网格。</p>
+  </div>
+  <div class="main">
+    <div class="fig">
+      <svg viewBox="0 0 760 252" role="img" aria-label="时间轴：分析已经走到播放位置之后 0.53 秒；拍子网格在播放位置前后都能算出；画面在拍前 50ms 起势，峰值落在拍上">
+        <rect x="270" y="30" width="300" height="176" rx="10" style="fill: color-mix(in srgb, var(--accent) 9%, transparent)"/>
+        <text x="420" y="22" text-anchor="middle" class="s">已经分析、还没播到（提前量 0.53 s）</text>
+        <path d="M20 200 H 740" class="ln"/>
+        <g id="clkTicks"></g>
+        <path d="M270 26 V 216" stroke="var(--fg)" stroke-width="2"/>
+        <text x="270" y="236" text-anchor="middle" class="t">此刻听到</text>
+        <path d="M570 26 V 216" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>
+        <text x="570" y="236" text-anchor="middle" class="t" style="fill: var(--accent)">分析走到这里</text>
+        <text x="30" y="72" class="s">起拍曲线</text>
+        <text x="30" y="122" class="s">拍子网格</text>
+        <text x="30" y="176" class="s">画面起势</text>
+        <path id="clkEnv" class="lna"/>
+        <text x="232" y="168" class="s" text-anchor="end">拍前 50ms 起势 →</text>
+      </svg>
+    </div>
+    <ol class="list">
+      <li><span class="n">1</span><div><b>每个分析帧带上 pts</b><span>新增 <code>RhythmAudioSink</code>，它是包住 <code>DefaultAudioSink</code> 的 <code>ForwardingAudioSink</code>。它在 <code>handleBuffer</code> 里拿到每个缓冲的 <code>presentationTimeUs</code>，分析器再按样本数推出每个分析窗口末尾的 pts。</span></div></li>
+      <li><span class="n">2</span><div><b>知道“此刻听到哪儿”</b><span>渲染线程每次调用 <code>getCurrentPositionUs</code> 时，记下（位置、<code>nanoTime</code>、速度）；界面线程按 <code>nanoTime</code> 往后推算。这个位置 ExoPlayer 已经扣掉了 AudioTrack 缓冲和设备上报的延迟。<code>pause</code>、<code>flush</code> 时推算冻结。</span></div></li>
+      <li><span class="n">3</span><div><b>排队，播到才用</b><span>分析帧放进 64 帧（约 2 秒）的环形缓冲，界面每帧取走 pts 不晚于“此刻”的那些。原来的 <code>StateFlow</code> 只保留最新一帧，做不到这一点。段落呼吸（swell）也跟着对齐了，鼓点进来、过门安静下来，不会再提前半秒。</span></div></li>
+      <li><span class="n">4</span><div><b>估速度</b><span>先把最近 8 秒的起拍曲线（低频谱通量 + 0.3×中频谱通量，都按频点数平均，再减去滑动基线）做一次高斯平滑。然后在 60–180 BPM 之间每隔 0.25 BPM 取一个候选，算错开一拍和两拍的自相关，乘上一个偏向 100 BPM 的先验，取峰值后再插值。平滑这一步是仿真里发现的：不平滑的话，30 帧/秒下整数帧的间隔会占便宜，比如 150 BPM 正好 12 帧，会把 76 BPM 的慢歌认成两倍速。</span></div></li>
+      <li><span class="n">5</span><div><b>找相位</b><span>在最近 4 秒里找一组等间隔的位置，让落在上面的起拍最多，越近的拍权重越大。网格每 0.27 秒向测量值靠 35%，拍号保持连续。</span></div></li>
+      <li><span class="n">6</span><div><b>判断有没有拍</b><span>置信度由两部分相乘：一是起拍曲线错开一拍（或两拍，重拍轻拍交替时）后与自己的相关程度；二是相位梳的峰有多突出。置信度到 0.5 以上才按网格起拍。仿真里的氛围曲，置信度始终是 0。</span></div></li>
+      <li><span class="n">7</span><div><b>不乱换速度</b><span>新速度要连续 3 次都比当前好 12% 以上才换；差距在 3% 以内的只做微调。刚锁上的前 6 秒历史还短，换速度的门槛放低一些。</span></div></li>
+      <li><span class="n">8</span><div><b>小节首拍</b><span>每一拍附近的低频起拍强度，按拍号除以 4 的余数分别累加，最重的一组当首拍。四拍一样重（四拍底鼓）的歌没有明显的首拍，这时光环仍然每 4 拍出现一次，但不保证落在第一拍上。</span></div></li>
+      <li><span class="n">9</span><div><b>跳转和切歌</b><span>同一首歌里拖进度条、单曲循环回到开头时，保留速度，1.5 秒后重新对相位。切到另一首则全部清掉，新歌前 4 秒只有段落呼吸。无缝衔接时，分析会先进入下一首：跟踪器从分界那一帧重新开始，界面在播到分界之前继续用旧网格。</span></div></li>
+      <li><span class="n">10</span><div><b>没有网格时</b><span>置信度低的时候，改用对齐过时间的低频起拍，力度减半；连低频起拍也没有，就只剩段落呼吸。</span></div></li>
+    </ol>
+    <div class="tablebox"><table id="simTable"></table></div>
+    <p class="hint">上表来自 node 仿真：用的是内置的合成曲目、App 同款分析参数，提前量 0.53 秒，每首播两遍，统计的是第二遍（包含循环回开头后重新锁定的那几秒）。命中指的是真实拍点 ±60ms 内有一次起拍。</p>
+  </div>
+</section>
+
+<section class="sec" id="look">
+  <div class="side">
+    <div class="eyebrow">04 · 表现</div>
+    <h2>拍子落在哪里</h2>
+    <p>拍子主要靠形状和运动来表现，局部的光只是辅助，大面积的光团亮度不跟单拍走。歌词完全不跟拍，保证一直看得清。</p>
+  </div>
+  <div class="main">
+    <div class="tablebox"><table>
+      <colgroup><col style="width: 9%"><col style="width: 22%"><col><col style="width: 17%"></colgroup>
+      <thead><tr><th>元素</th><th>现在</th><th>改后 · 标准</th><th>改后 · 柔和</th></tr></thead>
+      <tbody>
+        <tr><td class="k">封面</td><td>外轮廓 40 秒一圈匀速转</td><td>每拍弹一下（放大 3%，拍前 50ms 起势、160ms 回落）；外轮廓每拍转一格，带一点回弹，平均下来仍是 40 秒一圈</td><td>不弹，匀速转</td></tr>
+        <tr><td class="k">光晕</td><td>0.62 + 0.05 × swell</td><td>每拍不透明度 +0.18、放大 2.5%，280ms 回落</td><td>每拍 +0.10</td></tr>
+        <tr><td class="k">流光</td><td>半径跟 swell；鼓点胀 5%、亮 0.02</td><td>半径照旧跟 swell；每拍把流速推到 3.6 倍，再在 400ms 内落回。光量不跟单拍</td><td>推到 2.4 倍</td></tr>
+        <tr><td class="k">光环</td><td>鼓点时从封面中心散开，峰值 0.06</td><td>小节首拍时，从封面轮廓往外散开一圈同形状的光，峰值 0.16，1.1 秒散完</td><td>无</td></tr>
+        <tr><td class="k">进度条</td><td>波幅跟 swell</td><td>波幅照旧；波速改成每拍走一个波长（<code>waveSpeed = wavelength × BPM ÷ 60</code>）</td><td>同标准</td></tr>
+        <tr><td class="k">歌词</td><td>不动</td><td>不动</td><td>不动</td></tr>
+      </tbody>
+    </table></div>
+    <div class="notes">
+      <div><h3>亮度约束不变</h3><p>上一轮定下的“逐帧亮度变化不超过约 3%”仍然有效。拍子用在封面大小、轮廓角度和流速上，这三样都不改变整屏亮度；光晕只占封面周围一圈。原型里每台手机下方显示的“整屏亮度逐帧最大变化”，就是按这条约束实时测出来的。</p></div>
+      <div><h3>轮廓“转一格”</h3><p>步长按“40 秒一圈”的平均速度折算，104 BPM 时每拍转 5.2°。整体转速和现在一样，只是从匀速改成踩着拍走。暂停、没有锁定拍子时恢复匀速转动。</p></div>
+      <div><h3>进度条只锁速度</h3><p>M3 的 <code>LinearWavyProgressIndicator</code> 不开放波的相位，所以只能让波速跟上拍子，波峰不一定正好落在拍点上。BPM 变化超过 2% 才更新 <code>waveSpeed</code>，避免动画反复重启。</p></div>
+      <div><h3>减少动画、电视</h3><p>开启“减少动画”（或系统移除动画）后，和现在一样定格，不做分析。电视上帧循环限制在 30 帧，起势和回落都按真实时间计算，最多晚一帧（33ms），仍在门限之内。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="wall">
+  <div class="side">
+    <div class="eyebrow">05 · 联动</div>
+    <h2>海报墙也跟拍</h2>
+    <p>海报墙方案里的大卡和播放页共用同一份拍子信号。只在歌词背景选了“律动”时才跟拍；选“动态”或“关闭”时，海报墙完全静止。</p>
+  </div>
+  <div class="main">
+    <div class="wallmini"><canvas id="wallDemo" aria-label="海报墙大卡跟拍示意"></canvas>
+      <ol class="legend">
+        <li><span class="dot">1</span><div><b>大卡上的播放键</b>Cookie 形状的播放键每拍转一格，和播放页封面的外轮廓一样。</div></li>
+        <li><span class="dot">2</span><div><b>大卡的光晕</b>每拍亮一下，用的是和播放页光晕同一条包络。</div></li>
+        <li><span class="dot">3</span><div><b>小节首拍</b>（标准档）亮度从大卡往外一圈圈传开，每隔一格晚 60ms，提亮 6%，离大卡三格以外不受影响。</div></li>
+        <li><span class="dot">4</span><div><b>不受影响的部分</b>镜头、电视空闲漂移、格子大小和焦点框都不跟拍。分析器只在海报墙或播放页显示时运行。</div></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="settings">
+  <div class="side">
+    <div class="eyebrow">06 · 设置</div>
+    <h2>设置只多一项</h2>
+    <p>新增的这一项在 播放页 › 律动 里，只在歌词背景选了“律动”时显示。跟其他播放页设置一样，只保存在本机，不参与同步。</p>
+  </div>
+  <div class="main">
+    <div class="board">
+      <div class="setmock" aria-label="播放页设置示意">
+        <h4>播放页</h4>
+        <div class="grp">律动</div>
+        <div class="it"><b>歌词背景</b><div class="sg"><span>关闭</span><span>动态</span><span class="on">律动</span></div></div>
+        <div class="it"><b>律动强度</b><div class="sg"><span>柔和</span><span class="on">标准</span></div><small>柔和：只有光晕和流光跟拍。标准：再加上封面弹跳、轮廓转动和小节光环。</small></div>
+        <div class="it last"><b>跟拍校准<span class="new">新</span></b><div class="sl"><i></i><output>0 ms</output></div><small>画面和声音对不上时再调。大多数耳机和音箱会自己上报延迟，保持 0 就行。</small></div>
+      </div>
+      <div class="prose" style="max-width: 30em">
+        <h3>跟拍校准</h3>
+        <p>AppStore 新增 <code>rhythm_offset_ms</code>，范围 −200 到 +200，步长 10，默认 0；正数让画面晚一点。少数蓝牙设备不上报延迟，或者电视的“声音模式”另外加了处理延迟，这时画面会早一点，用这一项来补。</p>
+        <p>拖动滑杆时如果正在播放，播放页背景会立刻按新的偏移跟拍，不用另做试音界面。</p>
+        <h3>强度档的说明文字改为</h3>
+        <p>“柔和：只有光晕和流光跟拍。标准：再加上封面弹跳、轮廓转动和小节光环。”原来的说明是“柔和只改流速和光量；标准还让光团随低频胀缩，鼓点时散开一圈光环”，要换掉。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="eng">
+  <div class="side">
+    <div class="eyebrow">07 · 工程</div>
+    <h2>改哪些文件</h2>
+    <p>新增 4 个文件，改 7 个文件。所有计算都放在分析线程上，界面每帧只做一次网格查询和几次 <code>exp</code> 运算。</p>
+  </div>
+  <div class="main">
+    <div class="tablebox"><table>
+      <colgroup><col style="width: 34%"><col></colgroup>
+      <thead><tr><th>文件</th><th>改动</th></tr></thead>
+      <tbody>
+        <tr><td class="k">playback/RhythmAudioSink.kt <span class="mono">新</span></td><td>包住 <code>DefaultAudioSink</code> 的 <code>ForwardingAudioSink</code>：<code>handleBuffer</code> 记下每个缓冲的 pts；<code>getCurrentPositionUs</code> 记下播放位置；<code>play</code> / <code>pause</code> / <code>flush</code> / <code>setPlaybackParameters</code> 更新播放时钟；<code>setOutputStreamOffsetUs</code> 之后收到的第一个缓冲处记一个分界（无缝衔接到下一首）。<code>RhythmRenderersFactory.buildAudioSink</code> 里套上这一层。</td></tr>
+        <tr><td class="k">playback/PlaybackClock.kt <span class="mono">新</span></td><td>用 <code>@Volatile</code> 保存一组（位置、nanoTime、速度、是否在播），提供 <code>audibleUs(nowNanos)</code>。只读不锁，界面线程每帧调用。</td></tr>
+        <tr><td class="k">playback/BeatTracker.kt <span class="mono">新</span></td><td>速度图、相位、置信度、小节首拍、跳转后快速重新锁定、无缝衔接的分界。由分析线程调用；结果以不可变的 <code>BeatGrid</code> 发布，同时保留分界前的一份旧网格。</td></tr>
+        <tr><td class="k">ui/player/BeatClock.kt <span class="mono">新</span></td><td>纯 Kotlin，不依赖 Compose：每帧根据听到的位置和网格决定要不要起拍，并提供 pop / glow / shove 三条包络，以及轮廓转格的目标角。</td></tr>
+        <tr><td class="k">playback/RhythmAnalyzer.kt</td><td>给分析帧加上 pts；把 <code>StateFlow</code> 换成 64 帧的环形缓冲 <code>RhythmTimeline</code>（单写多读）；分析完顺手推给跟踪器；<code>reset</code> 区分换歌和同一首里的跳转。</td></tr>
+        <tr><td class="k">playback/RhythmAnalysis.kt</td><td><code>RhythmFrame</code> 增加 <code>ptsUs</code>、<code>fluxBass</code>、<code>fluxMid</code>（按频点数平均）。原有的检测流程不变。</td></tr>
+        <tr><td class="k">ui/player/FlowFieldMotion.kt</td><td>分析帧改为按听到的位置取用；去掉鼓点让光团胀亮的部分（bloom）；增加流速推力；光环改成只在小节首拍触发，形状跟封面一致。<code>FlowIntensity</code> 的两档重新取值。</td></tr>
+        <tr><td class="k">ui/player/LyricsBackdrop.kt</td><td><code>BackdropPulse</code> 增加 <code>beatPop</code>、<code>beatGlow</code>、<code>tickAngle</code>、<code>bpm</code>、<code>locked</code>，只在绘制阶段读；<code>RhythmFeed</code> 改成按帧去取；光环按封面形状的路径来画。</td></tr>
+        <tr><td class="k">ui/player/CoverStage.kt</td><td>形状封面在 <code>graphicsLayer</code> 里读 <code>beatPop</code> 做缩放；旋转在锁定拍子时追 <code>tickAngle</code>，否则保持匀速；光晕读 <code>beatGlow</code>。</td></tr>
+        <tr><td class="k">ui/components/Progress.kt</td><td><code>WavySeekBar</code> 增加 <code>waveSpeed</code> 参数；播放页在拍子锁定时传入 <code>wavelength × BPM ÷ 60</code>。</td></tr>
+        <tr><td class="k">data/AppStore.kt、ui/settings/LyricsSettingsScreen.kt</td><td><code>rhythm_offset_ms</code> 设置项和滑杆，两档强度的说明文字。</td></tr>
+      </tbody>
+    </table></div>
+    <div class="notes">
+      <div><h3>测试</h3><p><code>BeatTrackerTest</code>：用四种合成起拍序列，检查速度误差在 1% 以内、4 秒内锁定、跳转后 2 秒内重新锁定、氛围曲置信度低于 0.3、不会锁成两倍速或一半速。<code>BeatClockTest</code>：网格微调时不重复起拍；往回跳时不漏拍。<code>PlaybackClockTest</code>：推算、暂停、变速。<code>RhythmAudioSinkTest</code>：缓冲只被消费了一部分时，pts 也能对上。</p></div>
+      <div><h3>开销</h3><p>每 8 帧估一次速度：481 个候选 × 240 个历史点，约 23 万次乘加，在分析线程上不到 1ms。界面每帧只做 O(1) 的计算，也不新分配对象。</p></div>
+      <div><h3>倍速</h3><p>pts 和播放位置都用媒体时间，所以倍速播放时网格照样对得上。界面上显示的 BPM 要乘以播放速度。</p></div>
+      <div><h3>调试叠层</h3><p>开发者选项里加一个开关，在播放页角落显示 BPM、置信度、第几拍、提前量（<code>getAudioTrackBufferSizeUs</code>）和最近 10 拍的偏差，方便在真机和电视上核对。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="plan">
+  <div class="side">
+    <div class="eyebrow">08 · 分期</div>
+    <h2>四步做完</h2>
+    <p>第一步单独就有用：哪怕不加跟踪，现有效果也不再错拍。后面每一步都可以单独验收。</p>
+  </div>
+  <div class="main">
+    <div class="phases">
+      <div class="phase"><header><span class="tag">B1</span><h3>对齐时间</h3></header><ul><li>RhythmAudioSink、PlaybackClock、RhythmTimeline</li><li>RhythmFeed 改成按听到的位置取帧，现有效果原样保留</li><li>调试叠层（提前量、对齐后的偏差）</li></ul></div>
+      <div class="phase"><header><span class="tag">B2</span><h3>节拍跟踪</h3></header><ul><li>BeatTracker、BeatGrid，以及跳转和无缝衔接的处理</li><li>BeatClock 和单元测试</li><li>调试叠层加上 BPM、置信度和首拍</li></ul></div>
+      <div class="phase"><header><span class="tag">B3</span><h3>表现</h3></header><ul><li>封面弹跳和轮廓转格、光晕、流速推力、首拍形状光环、进度条波速</li><li>两档强度重新取值，在真机上核对亮度约束</li><li>三端核对（手机、平板、电视 30 帧）</li></ul></div>
+      <div class="phase"><header><span class="tag">B4</span><h3>设置和海报墙</h3></header><ul><li>跟拍校准滑杆、说明文字</li><li>海报墙的大卡跟拍；排在海报墙 P2（放大和跟随）之后</li></ul></div>
+    </div>
+    <div class="qs">
+      <div class="q"><b>1. 封面外轮廓要不要“每拍转一格”？</b><span>这是最显眼的跟拍方式，但比匀速转动更“机械”。不要的话，标准档就只保留弹跳。</span></div>
+      <div class="q"><b>2. 两档够不够？</b><span>现在是 柔和 / 标准。如果想要更明显，可以再加一档“强烈”：弹跳 5%、光晕 +0.26，每拍都有光环，但会碰到亮度约束的上限。</span></div>
+      <div class="q"><b>3. 跟拍校准放在设置里可以吗？</b><span>也可以不做成设置，只在调试叠层里调，等确实遇到对不上的设备再说。</span></div>
+    </div>
+  </div>
+</section>
+</div>
+<script>
+'use strict';
+/* ================= 通用小工具（浏览器和 node 仿真共用，不碰 DOM） ================= */
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth01 = x => { const t = clamp(x, 0, 1); return t * t * (3 - 2 * t); };
+/* 与帧率无关的一阶平滑，和 FlowFieldMotion.kt 的 follow() 一样：上升、回落各用一个时间常数（秒） */
+const follow = (cur, target, dt, up, down) => cur + (target - cur) * (1 - Math.exp(-dt / (target > cur ? up : down)));
+/* 可复现的随机数：内置节奏每次合成都一样，仿真结果才能对得上 */
+function mulberry(seed) {
+  return () => {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+/* ================= 页面公用：DOM 小工具、图标、封面形状、示例封面（取自播放页方案） ================= */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- 图标（Material Symbols 24dp 路径） ---------- */
+const IC = {
+  down: 'M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z',
+  more: 'M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
+  play: 'M8 5.14v13.72a1 1 0 0 0 1.5.86l10.6-6.86a1 1 0 0 0 0-1.72L9.5 4.28A1 1 0 0 0 8 5.14z',
+  pause: 'M7.5 5h3v14h-3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm6 0h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3z',
+  prev: 'M6 6h2.2v12H6zm3.6 6 8.4 6V6z',
+  next: 'M6 18l8.4-6L6 6zm9.8-12H18v12h-2.2z',
+  fav: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
+  favo: 'M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z',
+  queue: 'M15 6H3v2h12zm0 4H3v2h12zM3 16h8v-2H3zM17 6v8.18A3 3 0 1 0 19 17V8h3V6z',
+  timer: 'M12.34 2.02A10 10 0 1 0 20.66 16.98C13.15 16.73 8.57 8.55 12.34 2.02z',
+  lyrics: 'M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm0 14H5.17L4 17.17V4h16zM6 12h7v2H6zm0-3h12v2H6zm0-3h12v2H6z',
+  swap: 'M6.99 11 3 15l3.99 4v-3H14v-2H6.99zM21 9l-3.99-4v3H10v2h7.01v3z',
+  shuffle: 'M10.59 9.17 5.41 4 4 5.41l5.17 5.17zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04z',
+  check: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
+  back: 'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z',
+  palette: 'M12 3a9 9 0 0 0 0 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z',
+  nowplaying: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-2 14.5v-9l6 4.5z',
+  eq: 'M7 18h2V6H7zm4 4h2V2h-2zm-8-8h2v-4H3zm12 4h2V6h-2zm4-8v4h2v-4z',
+  search: 'M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
+  close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
+};
+const ic = (n, size = 24) => `<svg class="i" viewBox="0 0 24 24" style="width:${size}px;height:${size}px" aria-hidden="true"><path d="${IC[n]}"/></svg>`;
+
+/* ---------- 形状：用极坐标半径函数近似 MaterialShapes，最大半径都是 1 ---------- */
+const SQ_P = 5;
+const SHAPES = {
+  Cookie12Sided: th => 1 - 0.07 * (1 - Math.cos(12 * th)) / 2,
+  Cookie9Sided: th => 1 - 0.095 * (1 - Math.cos(9 * th)) / 2,
+  Cookie7Sided: th => 1 - 0.115 * (1 - Math.cos(7 * th)) / 2,
+  Sunny: th => { const w = (Math.cos(8 * th) + 1) / 2; return 1 - 0.12 * (1 - w * w); },
+  SoftBurst: th => { const w = (Math.cos(10 * th) + 1) / 2; return 1 - 0.17 * (1 - Math.pow(w, 1.6)); },
+  Clover8Leaf: th => { const v = (1 - Math.cos(8 * th)) / 2; return 1 - 0.22 * Math.pow(v, 4); },
+  Circle: () => 1,
+  // 圆角方形：平边贴到边框，四角比圆更外，暂停时能看到几乎完整的封面
+  Square: th => {
+    const c = Math.abs(Math.cos(th)), s = Math.abs(Math.sin(th));
+    return Math.pow(Math.pow(c, SQ_P) + Math.pow(s, SQ_P), -1 / SQ_P);
+  },
+};
+const SHAPE_PICKS = ['Cookie12Sided', 'Cookie9Sided', 'Cookie7Sided', 'Sunny', 'SoftBurst', 'Clover8Leaf'];
+const SHAPE_LABEL = { random: '随机', Cookie12Sided: '十二瓣', Cookie9Sided: '九瓣', Cookie7Sided: '七瓣', Sunny: '太阳', SoftBurst: '星芒', Clover8Leaf: '八叶', Square: '圆角方形' };
+/* 随机：从 6 种里抽一种，不与上一首相同 */
+const randomShape = except => { const pool = SHAPE_PICKS.filter(n => n !== except); return pool[Math.floor(Math.random() * pool.length)]; };
+
+function polarPath(fn, rot = 0, R = 50, cx = 50, cy = 50, n = 220) {
+  let d = '';
+  for (let i = 0; i < n; i++) {
+    const th = i / n * TAU;
+    const r = fn(th - rot) * R;
+    d += (i ? 'L' : 'M') + (cx + r * Math.cos(th)).toFixed(2) + ' ' + (cy + r * Math.sin(th)).toFixed(2);
+  }
+  return d + 'Z';
+}
+
+/* ---------- M3 Expressive 弹簧 → CSS linear() ---------- */
+function springCurve(z, k) {
+  const c = 2 * z * Math.sqrt(k), dt = 1 / 1000, xs = [];
+  let x = 0, v = 0, t = 0;
+  while (t < 2) {
+    v += (-k * (x - 1) - c * v) * dt; x += v * dt; t += dt; xs.push(x);
+    if (t > .1 && Math.abs(1 - x) < .0015 && Math.abs(v) < .02) break;
+  }
+  const pts = [];
+  for (let i = 0; i <= 40; i++) pts.push(i === 40 ? 1 : xs[Math.min(xs.length - 1, Math.round(i / 40 * (xs.length - 1)))]);
+  return [`linear(0, ${pts.slice(1).map(p => p.toFixed(3)).join(', ')})`, t.toFixed(2) + 's'];
+}
+if (CSS.supports('transition-timing-function', 'linear(0, 1)')) {
+  const root = document.documentElement.style;
+  [['--fast', .6, 800], ['--spatial', .8, 380], ['--slow', .8, 200]].forEach(([n, z, k]) => {
+    const [curve, dur] = springCurve(z, k);
+    root.setProperty(n, curve); root.setProperty(n + '-d', dur);
+  });
+}
+
+/* ---------- 歌曲：歌词都是宋词 / 南唐词原文（公有领域） ---------- */
+const SONGS = [
+  {
+    title: '但愿人长久', artist: '王菲', src: 'QQ音乐', q: '无损', dur: 245, shape: 'Cookie9Sided',
+    pal: { p: '#B9C3FF', op: '#1E2A60', pc: '#3A4580', opc: '#DEE0FF', sc: '#3F4466', osc: '#DFE1F9', s: '#12131A', os: '#E4E1EC', osv: '#C5C5D6', sch: '#272833', t: '#F4B3DA', sec: '#C4C5E9' },
+    blobs: ['#5361C9', '#B05C9A', '#2E3C8F', '#8E9CF0'],
+    lyrics: ['明月几时有', '把酒问青天', '不知天上宫阙', '今夕是何年', '我欲乘风归去', '又恐琼楼玉宇', '高处不胜寒', '起舞弄清影', '何似在人间', '转朱阁 低绮户', '照无眠', '不应有恨', '何事长向别时圆', '人有悲欢离合', '月有阴晴圆缺', '此事古难全', '但愿人长久', '千里共婵娟'],
+  },
+  {
+    title: '独上西楼', artist: '邓丽君', src: '网易云', q: '极高', dur: 232, shape: 'Sunny',
+    pal: { p: '#FFB86E', op: '#4A2800', pc: '#6B3D00', opc: '#FFDCBE', sc: '#5A4330', osc: '#FFDCC0', s: '#18120D', os: '#EEE0D6', osv: '#D6C3B4', sch: '#2E251E', t: '#C9CC8C', sec: '#E3C1A5' },
+    blobs: ['#D07A22', '#9A3E24', '#E8AC4E', '#6B4420'],
+    lyrics: ['无言独上西楼', '月如钩', '寂寞梧桐', '深院锁清秋', '剪不断', '理还乱', '是离愁', '别是一般滋味', '在心头', '无言独上西楼', '月如钩', '寂寞梧桐', '深院锁清秋'],
+  },
+  {
+    title: '几多愁', artist: '邓丽君', src: '酷我', q: '320k', dur: 271, shape: 'Cookie12Sided',
+    pal: { p: '#66DBC6', op: '#00382F', pc: '#005046', opc: '#86F8E1', sc: '#2E4A44', osc: '#CCE8E1', s: '#0E1514', os: '#DDE4E1', osv: '#BEC9C5', sch: '#232B29', t: '#A8CAEC', sec: '#B1CCC5' },
+    blobs: ['#1E9C8A', '#3076A8', '#7ACBB8', '#C98AA0'],
+    lyrics: ['春花秋月何时了', '往事知多少', '小楼昨夜又东风', '故国不堪回首月明中', '雕栏玉砌应犹在', '只是朱颜改', '问君能有几多愁', '恰似一江春水向东流'],
+  },
+];
+const LINE_S = 3.8, LYRIC_START = 14;
+const palVars = p => `--p:${p.p};--op:${p.op};--pc:${p.pc};--opc:${p.opc};--sc:${p.sc};--osc:${p.osc};--s:${p.s};--os:${p.os};--osv:${p.osv};--sch:${p.sch}`;
+const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const hexA = (hex, a) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a.toFixed(4)})`;
+};
+
+/* ---------- 封面：每首歌一张程序生成的 512px 插画 ---------- */
+function paintCover(i) {
+  const S = 512, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  let rnd = 1234 + i * 77;
+  const rand = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
+  if (i === 0) {
+    let gr = g.createRadialGradient(360, 150, 10, 300, 220, 560);
+    gr.addColorStop(0, '#6F7FE0'); gr.addColorStop(.45, '#2B3478'); gr.addColorStop(1, '#0B0E2C');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    gr = g.createRadialGradient(350, 160, 40, 350, 160, 230);
+    gr.addColorStop(0, 'rgba(255,236,200,.45)'); gr.addColorStop(1, 'rgba(255,236,200,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    g.fillStyle = '#F5ECD6'; g.beginPath(); g.arc(350, 160, 76, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(190,175,150,.35)';
+    [[330, 140, 14], [372, 182, 10], [352, 196, 7]].forEach(([x, y, r]) => { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); });
+    g.strokeStyle = 'rgba(205,200,255,.28)'; g.lineCap = 'round';
+    for (let k = 0; k < 7; k++) { g.lineWidth = 10 + rand() * 18; const y = 230 + k * 26; g.beginPath(); g.moveTo(40 + rand() * 140, y); g.lineTo(260 + rand() * 220, y + rand() * 8); g.stroke(); }
+    g.fillStyle = '#090B22';
+    g.beginPath(); g.moveTo(0, 430); g.lineTo(60, 430); g.quadraticCurveTo(120, 380, 180, 372); g.lineTo(300, 372); g.quadraticCurveTo(360, 380, 420, 420); g.lineTo(512, 420); g.lineTo(512, 512); g.lineTo(0, 512); g.fill();
+    g.fillRect(150, 372, 180, 18);
+    g.beginPath(); g.moveTo(120, 392); g.quadraticCurveTo(240, 330, 360, 392); g.fill();
+  } else if (i === 1) {
+    let gr = g.createLinearGradient(0, 0, 0, S);
+    gr.addColorStop(0, '#F6B252'); gr.addColorStop(.5, '#C8582A'); gr.addColorStop(1, '#3F1712');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    const m = document.createElement('canvas'); m.width = m.height = S;
+    const mg = m.getContext('2d');
+    mg.fillStyle = '#FFF0C8'; mg.beginPath(); mg.arc(160, 150, 64, 0, TAU); mg.fill();
+    mg.globalCompositeOperation = 'destination-out'; mg.beginPath(); mg.arc(188, 128, 60, 0, TAU); mg.fill();
+    gr = g.createRadialGradient(150, 160, 20, 150, 160, 200);
+    gr.addColorStop(0, 'rgba(255,230,170,.4)'); gr.addColorStop(1, 'rgba(255,230,170,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    g.drawImage(m, 0, 0);
+    g.strokeStyle = '#2A100C'; g.fillStyle = '#2A100C'; g.lineWidth = 7;
+    g.beginPath(); g.moveTo(512, 60); g.bezierCurveTo(420, 90, 380, 160, 300, 190); g.stroke();
+    for (let k = 0; k < 9; k++) {
+      const t = k / 8, x = lerp(500, 310, t), y = lerp(66, 186, t) + Math.sin(t * 5) * 8;
+      g.save(); g.translate(x, y + 18); g.rotate(.4 + rand() * .8); g.beginPath(); g.ellipse(0, 0, 26, 14, 0, 0, TAU); g.fill(); g.restore();
+    }
+    g.beginPath(); g.moveTo(0, 512); g.lineTo(0, 330); g.lineTo(40, 300); g.lineTo(150, 300); g.lineTo(190, 330); g.lineTo(170, 330); g.lineTo(170, 512); g.fill();
+    g.fillRect(30, 250, 120, 14);
+    g.beginPath(); g.moveTo(10, 262); g.quadraticCurveTo(90, 210, 170, 262); g.fill();
+  } else {
+    let gr = g.createLinearGradient(0, 0, 0, S);
+    gr.addColorStop(0, '#9FE0D2'); gr.addColorStop(.42, '#22968A'); gr.addColorStop(1, '#0A3A40');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    gr = g.createRadialGradient(256, 300, 10, 256, 300, 200);
+    gr.addColorStop(0, 'rgba(255,255,255,.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    g.strokeStyle = 'rgba(255,255,255,.2)'; g.lineWidth = 3;
+    for (let k = 0; k < 9; k++) { const y = 300 + k * 24; g.beginPath(); g.ellipse(256 + rand() * 60 - 30, y, 120 + k * 22, 6 + k, 0, 0, TAU); g.stroke(); }
+    for (let k = 0; k < 34; k++) {
+      g.save(); g.translate(rand() * S, rand() * 300); g.rotate(rand() * TAU);
+      g.fillStyle = rand() > .35 ? 'rgba(248,190,206,.9)' : 'rgba(255,250,245,.9)';
+      g.beginPath(); g.ellipse(0, 0, 9 + rand() * 8, 5 + rand() * 4, 0, 0, TAU); g.fill(); g.restore();
+    }
+  }
+  const sm = document.createElement('canvas');
+  sm.width = sm.height = 24;
+  sm.getContext('2d').drawImage(cv, 0, 0, 24, 24);
+  return { url: cv.toDataURL('image/jpeg', .86), small: sm, img: cv };
+}
+SONGS.forEach((s, i) => Object.assign(s, paintCover(i)));
+/* ================= 内置曲目：纯 JS 合成，附带每一拍的真实时刻 =================
+ * 不用 OfflineAudioContext：node 仿真和页面要用同一份样本，才能拿真实拍点去量偏差。 */
+const SR = 44100;
+
+class Biquad {
+  constructor(type, f, q) {
+    const w = TAU * f / SR, cs = Math.cos(w), al = Math.sin(w) / (2 * q);
+    let b0, b1, b2;
+    if (type === 'lowpass') { b0 = (1 - cs) / 2; b1 = 1 - cs; b2 = b0; }
+    else if (type === 'highpass') { b0 = (1 + cs) / 2; b1 = -(1 + cs); b2 = b0; }
+    else { b0 = al; b1 = 0; b2 = -al; }
+    const a0 = 1 + al;
+    this.b = [b0 / a0, b1 / a0, b2 / a0]; this.a = [-2 * cs / a0, (1 - al) / a0];
+    this.x1 = this.x2 = this.y1 = this.y2 = 0;
+  }
+  run(x) {
+    const y = this.b[0] * x + this.b[1] * this.x1 + this.b[2] * this.x2 - this.a[0] * this.y1 - this.a[1] * this.y2;
+    this.x2 = this.x1; this.x1 = x; this.y2 = this.y1; this.y1 = y;
+    return y;
+  }
+}
+
+function synthTrack(style, seed = 7) {
+  const P = TRACKS[style];
+  const bpm = P.bpm, beat = 60 / bpm, len = P.bars * 4 * beat + .6;
+  const n = Math.ceil(len * SR), out = new Float32Array(n), rnd = mulberry(seed);
+  const noise = () => rnd() * 2 - 1;
+  const add = (t0, dur, fn) => {
+    const s0 = Math.max(0, Math.round(t0 * SR)), s1 = Math.min(n, s0 + Math.round(dur * SR));
+    for (let i = s0; i < s1; i++) out[i] += fn((i - s0) / SR);
+  };
+  const env = (x, a, d) => Math.min(1, x / a) * Math.exp(-x / d);
+  const V = {
+    kick(t, v = 1) { let ph = 0; add(t, .5, x => { ph += TAU * (44 + 100 * Math.exp(-x / .045)) / SR; return .85 * v * env(x, .003, .13) * Math.sin(ph); }); },
+    snare(t, v = 1) {
+      const bp = new Biquad('bandpass', 1900, .7);
+      add(t, .25, x => v * (1.6 * bp.run(noise()) * env(x, .002, .055) + .22 * Math.sin(TAU * 185 * x) * env(x, .002, .035)));
+    },
+    clap(t, v = 1) {
+      const bp = new Biquad('bandpass', 1300, 1.1);
+      add(t, .25, x => v * 1.8 * bp.run(noise()) * (env(x, .001, .012) * .6 + env(Math.max(0, x - .012), .001, .07)));
+    },
+    rim(t, v = 1) { const bp = new Biquad('bandpass', 2600, 3); add(t, .08, x => v * 2.2 * bp.run(noise()) * env(x, .001, .012)); },
+    hat(t, v) { const hp = new Biquad('highpass', 7200, .5); add(t, .07, x => v * hp.run(noise()) * env(x, .001, .014)); },
+    ohat(t, v) { const hp = new Biquad('highpass', 6500, .5); add(t, .22, x => v * hp.run(noise()) * env(x, .002, .07)); },
+    tone(t, f, d, peak, cut, a = .01, type = 'saw') {
+      const lp = new Biquad('lowpass', cut, .7), rel = Math.min(.12, d * .5);
+      add(t, d, x => {
+        const g = peak * Math.min(1, x / a) * (x > d - rel ? Math.max(0, (d - x) / rel) : 1);
+        const ph = (f * x) % 1;
+        return lp.run(type === 'saw' ? 2 * ph - 1 : 1 - 4 * Math.abs(ph - .5)) * g;
+      });
+    },
+    pluck(t, f, v) { const lp = new Biquad('lowpass', 2400, .8); add(t, 1.2, x => v * lp.run(((f * x) % 1) * 2 - 1) * env(x, .002, .28)); },
+    swell(t, d, v) { const bp = new Biquad('bandpass', 900, .6); add(t, d, x => v * bp.run(noise()) * Math.sin(Math.PI * x / d) ** 2); },
+  };
+  const beats = [];
+  P.write(V, beat, beats, rnd);
+  // 防削波：整体压到峰值 0.9
+  let peak = 0; for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(out[i]));
+  if (peak > .9) for (let i = 0; i < n; i++) out[i] *= .9 / peak;
+  return { pcm: out, sr: SR, dur: len, beats, bpm: P.periodic ? bpm : 0, label: P.label, style };
+}
+
+const CHORDS = [[220, 261.63, 329.63], [174.61, 220, 261.63], [196, 261.63, 329.63], [196, 246.94, 293.66]];
+const ROOTS = [55, 43.65, 65.41, 49];
+const TRACKS = {
+  groove: {
+    bpm: 104, bars: 12, periodic: true, label: '律动 · 104 BPM',
+    // 第 5–6 小节是只有和弦的过门，第 7 小节起加密镲片和一个切分的底鼓
+    write(V, beat, beats) {
+      for (let bar = 0; bar < 12; bar++) {
+        const t0 = bar * 4 * beat, ch = bar % 4, quiet = bar === 4 || bar === 5, big = bar >= 6;
+        CHORDS[ch].forEach(f => { V.tone(t0, f, 4 * beat, quiet ? .05 : .03, 1500, .25); V.tone(t0, f * 1.005, 4 * beat, quiet ? .04 : .022, 1200, .25); });
+        for (let b = 0; b < 4; b++) {
+          const t = t0 + b * beat, kick = !quiet && (b === 0 || b === 2), snare = !quiet && (b === 1 || b === 3);
+          beats.push({ t, bar, pos: b, kick, snare, quiet });
+          if (quiet) { if (b === 0) V.tone(t, ROOTS[ch] * 2, 4 * beat, .07, 300, .3, 'tri'); continue; }
+          if (kick) V.kick(t);
+          if (big && b === 2) V.kick(t + beat * .75, .8);
+          if (snare) V.snare(t);
+          V.tone(t, ROOTS[ch] * (b === 3 ? 1.5 : 1), beat * .9, .26, 380);
+          const steps = big ? 4 : 2;
+          for (let s = 0; s < steps; s++) V.hat(t + s * beat / steps, s === 0 ? .14 : .08);
+        }
+      }
+    },
+  },
+  four: {
+    bpm: 128, bars: 16, periodic: true, label: '电子 · 128 BPM',
+    // 四拍底鼓；第 9–10 小节去掉底鼓（铺垫），第 11 小节重新进
+    write(V, beat, beats) {
+      for (let bar = 0; bar < 16; bar++) {
+        const t0 = bar * 4 * beat, ch = bar % 4, drop = bar === 8 || bar === 9;
+        CHORDS[ch].forEach(f => V.tone(t0, f * 2, 4 * beat, drop ? .045 : .02, drop ? 2600 : 1800, .05));
+        if (drop) V.swell(t0, 4 * beat, bar === 9 ? .5 : .25);
+        for (let b = 0; b < 4; b++) {
+          const t = t0 + b * beat;
+          beats.push({ t, bar, pos: b, kick: !drop, snare: !drop && (b === 1 || b === 3), quiet: drop });
+          if (!drop) V.kick(t);
+          if (!drop && (b === 1 || b === 3)) V.clap(t);
+          if (!drop) V.tone(t + beat / 2, ROOTS[ch] * 2, beat * .42, .22, 600, .005);
+          V.ohat(t + beat / 2, drop ? .05 : .11);
+          V.hat(t, .05);
+        }
+      }
+    },
+  },
+  ballad: {
+    bpm: 76, bars: 8, periodic: true, label: '慢歌 · 76 BPM',
+    // 轻鼓：第一拍底鼓、第三拍边击，钢琴按八分音符分解和弦
+    write(V, beat, beats) {
+      for (let bar = 0; bar < 8; bar++) {
+        const t0 = bar * 4 * beat, ch = bar % 4;
+        CHORDS[ch].forEach(f => V.tone(t0, f, 4 * beat, .028, 900, .6));
+        V.tone(t0, ROOTS[ch] * 2, 2 * beat, .16, 260, .02, 'tri');
+        V.tone(t0 + 2 * beat, ROOTS[ch] * 3, 2 * beat, .12, 260, .02, 'tri');
+        const arp = [...CHORDS[ch], CHORDS[ch][1] * 2];
+        for (let b = 0; b < 4; b++) {
+          const t = t0 + b * beat;
+          beats.push({ t, bar, pos: b, kick: b === 0, snare: b === 2, quiet: false });
+          if (b === 0) V.kick(t, .6);
+          if (b === 2) V.rim(t, .7);
+          V.pluck(t, arp[b] * 2, .09);
+          V.pluck(t + beat / 2, arp[(b + 2) % 4] * 2, .055);
+        }
+      }
+    },
+  },
+  ambient: {
+    // 没有拍子，bpm 只用来算总长：60 BPM × 6 小节 ≈ 24 秒
+    bpm: 60, bars: 6, periodic: false, label: '氛围 · 无固定节拍',
+    // 和弦在不规则的时刻换，只有起伏没有拍子：跟拍应当认出“没有拍”并退回只呼吸
+    write(V, beat, beats, rnd) {
+      let t = 0, k = 0;
+      while (t < 22) {
+        const d = 2.2 + rnd() * 3.4, ch = k++ % 4;
+        CHORDS[ch].forEach(f => V.tone(t, f, d + 1.2, .03, 1100, 1.2));
+        V.tone(t, ROOTS[ch] * 2, d + 1, .09, 220, .8, 'tri');
+        if (rnd() < .6) V.swell(t + rnd() * d, 1.8, .3);
+        if (rnd() < .5) V.pluck(t + .3 + rnd() * d * .6, CHORDS[ch][2] * 2, .06);
+        t += d;
+      }
+    },
+  },
+};
+/* ================= RhythmAnalysis.kt 的 JS 移植（常量、流程与 App 一致） =================
+ * 额外把两路谱通量（0–690Hz、690–4000Hz，按频点平均）交出来给节拍跟踪用；App 里也只是多返回两个数。 */
+const FFT_N = 2048, MIN_DB = -100, MAX_DB = -30;
+const ENERGY_ATTACK = .62, ENERGY_RELEASE = .13;
+const AGC = { floor: 24, maxRise: .35, maxFall: .0008, minFall: .15, minRise: .03, silence: 12, gamma: .75 };
+
+class Fft {
+  constructor(n) {
+    this.n = n; this.rev = new Uint32Array(n);
+    this.cos = new Float32Array(n / 2); this.sin = new Float32Array(n / 2);
+    for (let i = 0; i < n / 2; i++) { this.cos[i] = Math.cos(-TAU * i / n); this.sin[i] = Math.sin(-TAU * i / n); }
+    let v = 0;
+    for (let i = 1; i < n; i++) { let bit = n >> 1; while (v & bit) { v ^= bit; bit >>= 1; } v ^= bit; this.rev[i] = v; }
+  }
+  run(re, im) {
+    const n = this.n;
+    for (let i = 0; i < n; i++) { const j = this.rev[i]; if (j > i) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+    for (let len = 2; len <= n; len <<= 1) {
+      const half = len >> 1, step = n / len;
+      for (let b = 0; b < n; b += len) for (let j = 0; j < half; j++) {
+        const e = b + j, o = e + half, wr = this.cos[j * step], wi = this.sin[j * step];
+        const pr = re[o] * wr - im[o] * wi, pi = re[o] * wi + im[o] * wr;
+        re[o] = re[e] - pr; im[o] = im[e] - pi; re[e] += pr; im[e] += pi;
+      }
+    }
+  }
+}
+
+class Agc {
+  constructor() { this.reset(); }
+  reset() { this.min = 0; this.max = 0; this.span = AGC.floor; this.ready = false; }
+  push(v) {
+    if (!isFinite(v) || v < AGC.silence) return 0;
+    v = clamp(v, 0, 255);
+    if (!this.ready) { this.min = v; this.max = v + AGC.floor; this.span = AGC.floor; this.ready = true; }
+    else {
+      this.max += v > this.max ? (v - this.max) * AGC.maxRise : -(this.max - v) * AGC.maxFall;
+      this.min += (v - this.min) * (v < this.min ? AGC.minFall : AGC.minRise);
+      this.min = clamp(this.min, 0, 255 - AGC.floor);
+      this.span = Math.max(AGC.floor, this.max - this.min);
+      this.max = Math.min(255, this.min + this.span);
+    }
+    return Math.pow(clamp((v - this.min) / this.span, 0, 1), AGC.gamma);
+  }
+}
+
+/* 谱通量起拍检测，同 OnsetDetector；多返回这一帧的通量 */
+class Onset {
+  constructor({ refractory = 110 } = {}) { this.refractory = refractory; this.reset(); }
+  reset() { this.prev = null; this.env = 0; this.clock = 0; this.last = -Infinity; this.hist = []; }
+  push(spec, dtMs, from, to, sensitivity = 55) {
+    const dt = isFinite(dtMs) && dtMs !== 0 ? clamp(dtMs, 1, 500) : 1000 / 30;
+    this.clock += dt; this.env *= Math.exp(-dt / 125);
+    const count = to - from;
+    if (!this.prev || this.prev.length !== count) { this.prev = spec.slice(from, to); return { onset: false, pulse: this.env, flux: 0 }; }
+    let flux = 0;
+    for (let i = 0; i < count; i++) { const d = spec[from + i] - this.prev[i]; if (d > 0) flux += d; this.prev[i] = spec[from + i]; }
+    while (this.hist.length && this.hist[0].t <= this.clock - 1000) this.hist.shift();
+    let mean = 0; for (const h of this.hist) mean += h.f; if (this.hist.length) mean /= this.hist.length;
+    let vr = 0; for (const h of this.hist) vr += (h.f - mean) ** 2;
+    const std = this.hist.length ? Math.sqrt(vr / this.hist.length) : 0;
+    const k = 2 - clamp(sensitivity, 0, 100) / 100 * 1.2;
+    const thr = Math.max(40, mean + k * std, mean * 1.6);
+    const onset = this.hist.length >= 8 && flux >= 40 && flux > thr && this.clock - this.last >= this.refractory;
+    if (onset) { this.last = this.clock; this.env = 1; }
+    this.hist.push({ t: this.clock, f: flux });
+    return { onset, pulse: this.env, flux };
+  }
+}
+
+const bandEnd = (hz, bins, sr) => Math.min(bins, Math.ceil(hz / (sr / (bins * 2))));
+
+class Analysis {
+  constructor() {
+    this.fft = new Fft(FFT_N);
+    this.re = new Float32Array(FFT_N); this.im = new Float32Array(FFT_N); this.spec = new Float32Array(FFT_N / 2);
+    this.win = Float32Array.from({ length: FFT_N }, (_, i) => .5 - .5 * Math.cos(TAU * i / (FFT_N - 1)));
+    this.agc = [new Agc(), new Agc(), new Agc()];
+    this.kickOnset = new Onset({ refractory: 280 });
+    this.midOnset = new Onset({ refractory: 110 });
+  }
+  reset() { this.agc.forEach(a => a.reset()); this.kickOnset.reset(); this.midOnset.reset(); }
+  run(samples, sr, dtMs) {
+    let sq = 0;
+    for (let i = 0; i < FFT_N; i++) { const s = samples[i]; sq += s * s; this.re[i] = s * this.win[i]; this.im[i] = 0; }
+    this.fft.run(this.re, this.im);
+    for (let i = 0; i < this.spec.length; i++) {
+      const mag = 2 * Math.hypot(this.re[i], this.im[i]) / FFT_N;
+      this.spec[i] = clamp((20 * Math.log10(Math.max(mag, 1e-12)) - MIN_DB) / (MAX_DB - MIN_DB) * 255, 0, 255);
+    }
+    const bins = this.spec.length;
+    const bassEnd = bandEnd(690, bins, sr), midEnd = bandEnd(4000, bins, sr), trebleEnd = bandEnd(14000, bins, sr);
+    const avg = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += this.spec[i]; return b > a ? s / (b - a) : 0; };
+    const kick = this.kickOnset.push(this.spec, dtMs, 0, bassEnd, 45);
+    const mid = this.midOnset.push(this.spec, dtMs, bassEnd, midEnd, 45);
+    const db = 20 * Math.log10(Math.max(Math.sqrt(sq / FFT_N), 1e-6));
+    return {
+      bass: this.agc[0].push(avg(0, bassEnd)), mid: this.agc[1].push(avg(bassEnd, midEnd)), treble: this.agc[2].push(avg(midEnd, trebleEnd)),
+      // 通量按频点数取平均：中频有 154 个点、低频只有 32 个，不平均的话拍手会比底鼓还“响”
+      loudness: clamp((db + 42) / 34, 0, 1), kick: kick.onset, fluxBass: kick.flux / bassEnd, fluxMid: mid.flux / (midEnd - bassEnd),
+    };
+  }
+}
+
+/* 按 App 的方式切帧：每 1470 个样本（30 帧/秒）分析一次最近 2048 个样本；pts 是窗口末尾那个样本的时刻 */
+const HOP = Math.round(SR / 30);
+class FrameSource {
+  constructor(track) { this.track = track; this.analysis = new Analysis(); this.next = FFT_N; }
+  /* 分析到 untilSec 为止的所有帧（绕回开头时清掉增益历史，相当于 App 里重新播放） */
+  pull(untilSec, out) {
+    const { pcm, sr } = this.track, win = this.buf || (this.buf = new Float32Array(FFT_N));
+    const until = Math.floor(untilSec * sr);
+    while (this.next <= until) {
+      const end = this.next, n = pcm.length;
+      for (let i = 0; i < FFT_N; i++) win[i] = pcm[((end - FFT_N + i) % n + n) % n];
+      const f = this.analysis.run(win, sr, 1000 / 30);
+      f.pts = end / sr;
+      out.push(f);
+      this.next += HOP;
+    }
+  }
+}
+/* ================= 节拍跟踪（建议新增 playback/BeatTracker.kt，跑在分析线程上） =================
+ * 输入：每个分析帧的 pts（秒）和两路谱通量。输出一张拍子网格：周期、某一拍的时刻、第几拍、置信度、哪一拍是小节首拍。
+ * 分析比耳朵早约半秒，所以界面此刻要用的那一拍，跟踪器已经“听过”它前后的声音，网格是回头校准过的。 */
+const BT = {
+  fps: 30, histS: 8, phaseS: 4,
+  minBpm: 60, maxBpm: 180, step: .25,
+  every: 8,          // 每 8 帧（约 0.27 秒）重估一次
+  detect: .03,       // 起拍落在窗口里的平均位置：检测到的帧比真实起拍晚这么多（秒，仿真标定）
+  midWeight: .3,     // 军鼓、拍手那一路的权重：只帮着定拍，不让钢琴八分音符、拍手把速度拉成两倍或一半
+};
+
+class BeatTracker {
+  constructor() {
+    this.N = BT.fps * BT.histS;
+    this.o = new Float32Array(this.N); this.kb = new Float32Array(this.N);
+    this.reset();
+  }
+  /* keepTempo：同一首歌里跳转（拖进度条、单曲循环回开头）时速度不会变，留着它，1.5 秒后只重新对相位 */
+  reset(keepTempo = false) {
+    this.hint = keepTempo && this.period ? { bpm: 60 / this.period, conf: this.conf } : null;
+    this.prevGrid = null; this.boundary = -Infinity;
+    this.o.fill(0); this.kb.fill(0);
+    this.n = 0; this.lastPts = -1; this.base = 0; this.since = 0;
+    this.period = 0; this.t0 = 0; this.k0 = 0; this.conf = 0; this.rawConf = 0;
+    this.cand = 0; this.candHits = 0;
+    this.acc = [0, 0, 0, 0]; this.down = 0; this.counted = null;
+    this.strength = new Map(); this.peakStrength = 1;
+  }
+
+  push(f) {
+    // 跳转（往回走或一下跳出两秒）：历史作废、速度留着。切歌时由 RhythmAnalyzer.reset() 整个清掉。
+    // 中间丢帧（分析任务排不上）按空帧补齐
+    if (this.lastPts >= 0 && (f.pts < this.lastPts - .001 || f.pts > this.lastPts + 2)) this.reset(true);
+    if (this.lastPts >= 0) {
+      const gap = Math.round((f.pts - this.lastPts) * BT.fps) - 1;
+      for (let i = 0; i < Math.min(gap, this.N); i++) this.write(0, 0);
+    }
+    const raw = f.fluxBass + BT.midWeight * f.fluxMid;
+    this.base += (raw - this.base) * .06;
+    this.write(Math.max(0, raw - this.base), f.fluxBass);
+    this.lastPts = f.pts;
+    if (++this.since >= BT.every) {
+      if (this.n >= BT.fps * 4) { this.since = 0; this.estimate(); }
+      else if (this.hint && this.n >= BT.fps * 1.5) { this.since = 0; this.relock(); }
+    }
+  }
+  /* 无缝接到下一段（下一首、单曲循环）：分析比耳朵早半秒，分界之后的帧已经进来了，界面却还在播上一段。
+   * 冻结一份旧网格给界面用到分界为止，跟踪器从分界这一帧起重新开始。 */
+  newStream(atPts, sameSong) {
+    const old = this.grid();
+    this.reset(sameSong);
+    this.prevGrid = old; this.boundary = atPts;
+  }
+  /* 界面按“此刻听到的位置”取网格：还没播到分界就用冻结的旧网格 */
+  gridAt(t) { return t < this.boundary && this.prevGrid ? this.prevGrid : this.grid(); }
+
+  write(o, kb) { this.o[this.n % this.N] = o; this.kb[this.n % this.N] = kb; this.n++; }
+
+  /* 按绝对帧号取值，小数部分线性插值；超出历史的部分当 0 */
+  v(x, arr = this.o) {
+    const i = Math.floor(x), f = x - i, lo = this.n - Math.min(this.n, this.N);
+    const g = k => (k < lo || k >= this.n) ? 0 : arr[k % this.N];
+    return g(i) * (1 - f) + g(i + 1) * f;
+  }
+  /* 三角核平滑后的起拍强度，峰值位置能插到帧以下 */
+  sv(x) { return this.v(x) + .5 * (this.v(x - 1) + this.v(x + 1)); }
+  ptsOf(x) { return this.lastPts - (this.n - 1 - x) / BT.fps; }
+  frameOf(t) { return this.n - 1 - (this.lastPts - t) * BT.fps; }
+
+  /* 速度图用的历史：先做 σ≈1.2 帧的高斯平滑。直接对尖峰做线性插值会让整数帧间隔占便宜
+   * （30 帧/秒时 150 BPM 正好 12 帧，会比真实的 152 BPM 得分高），平滑后小数间隔也能对上峰 */
+  smoothHistory() {
+    const m = Math.min(this.n, this.N), first = this.n - m, h = this.hs || (this.hs = new Float32Array(this.N));
+    const K = [.04, .11, .21, .28, .21, .11, .04];
+    for (let i = 0; i < m; i++) {
+      let s = 0;
+      for (let d = -3; d <= 3; d++) { const k = first + i + d; if (k >= first && k < this.n) s += K[d + 3] * this.o[k % this.N]; }
+      h[i] = s;
+    }
+    this.hm = m;
+  }
+  hv(x) { const i = Math.floor(x), f = x - i, g = k => (k < 0 || k >= this.hm) ? 0 : this.hs[k]; return g(i) * (1 - f) + g(i + 1) * f; }
+
+  /* 错开 lagS 秒的皮尔逊相关系数 */
+  rho(lagS) {
+    const p = lagS * BT.fps, m = this.hm;
+    let mu = 0; for (let k = 0; k < m; k++) mu += this.hs[k]; mu /= m;
+    let v = 0; for (let k = 0; k < m; k++) v += (this.hs[k] - mu) ** 2;
+    if (v < 1e-12 || p >= m - 1) return 0;
+    let c = 0, n = 0; for (let k = Math.ceil(p); k < m; k++) { c += (this.hs[k] - mu) * (this.hv(k - p) - mu); n++; }
+    return c / n / (v / m);
+  }
+
+  /* 速度图：每个候选速度的自相关（一拍和两拍的间隔都算），乘一个偏向 100 BPM 的先验 */
+  score(bpm, energy) {
+    const p = 60 / bpm * BT.fps;
+    let s = 0;
+    for (let k = Math.ceil(2 * p); k < this.hm; k++) {
+      const a = this.hs[k];
+      if (a > 0) s += a * (this.hv(k - p) + .5 * this.hv(k - 2 * p));
+    }
+    // 先验偏向 100 BPM：慢歌的八分音符分解和弦很密，不压一下会被认成两倍速
+    const prior = Math.exp(-.5 * (Math.log2(bpm / 100) / .7) ** 2);
+    return s / energy * prior;
+  }
+
+  estimate() {
+    this.smoothHistory();
+    const m = this.hm;
+    let energy = 0, recent = 0;
+    for (let k = 0; k < m; k++) { const a = this.hs[k]; energy += a * a; if (k >= m - 4 * BT.fps) recent += a; }
+    // 几乎没有起拍（安静段、纯人声长音）：置信度往下走，网格保持不动
+    if (energy < 1e-6 || recent / (4 * BT.fps) < .15) { this.rawConf = 0; this.updateConf(); return; }
+
+    const scores = [];
+    let bestI = 0;
+    for (let bpm = BT.minBpm, i = 0; bpm <= BT.maxBpm + 1e-9; bpm += BT.step, i++) {
+      scores.push(this.score(bpm, energy));
+      if (scores[i] > scores[bestI]) bestI = i;
+    }
+    // 抛物线插值到半个 BPM 以下
+    const y0 = scores[bestI - 1] ?? scores[bestI], y1 = scores[bestI], y2 = scores[bestI + 1] ?? scores[bestI];
+    const off = (y0 - 2 * y1 + y2) < 0 ? clamp(.5 * (y0 - y2) / (y0 - 2 * y1 + y2), -.5, .5) : 0;
+    const bestBpm = BT.minBpm + (bestI + off) * BT.step;
+
+    // 换速度要连续几次都明显更好；刚锁上的前 6 秒历史还短，门槛放低。和当前速度差 3% 以内只是微调
+    const curBpm = this.period ? 60 / this.period : 0;
+    const young = this.lastPts - this.adoptedAt < 6, margin = young ? 1.04 : 1.12, need = young ? 2 : 3;
+    if (!curBpm) this.adopt(bestBpm);
+    else if (Math.abs(bestBpm / curBpm - 1) < .03) this.period = lerp(this.period, 60 / bestBpm, .15);
+    else {
+      const cur = this.score(curBpm, energy);
+      if (y1 > cur * margin && Math.abs(bestBpm / (this.cand || bestBpm) - 1) < .03) this.candHits++;
+      else this.candHits = y1 > cur * margin ? 1 : 0;
+      this.cand = bestBpm;
+      if (this.candHits >= need) { this.adopt(bestBpm); this.candHits = 0; }
+    }
+    // 置信度：起拍曲线按一拍（或两拍，重拍轻拍交替时）错开后和自己有多像；没有拍的音乐在 0.2 上下
+    const r = Math.max(this.rho(this.period), this.rho(2 * this.period));
+    this.tempoConf = smooth01((r - .22) / (.42 - .22));
+    this.updatePhase();
+    this.updateConf();
+    this.countBeats();
+  }
+
+  /* 跳转后历史还不够估速度：沿用原来的速度，只找相位；相位梳的峰够突出就直接恢复置信度 */
+  relock() {
+    if (!this.period) this.adopt(this.hint.bpm);
+    this.smoothHistory();
+    this.updatePhase();
+    this.rawConf = this.conf = this.hint.conf * this.phaseConf;
+    this.countBeats();
+  }
+
+  adopt(bpm) {
+    this.period = 60 / bpm; this.t0 = 0; this.k0 = 0; this.adoptedAt = this.lastPts;
+    this.acc = [0, 0, 0, 0]; this.counted = null; this.strength.clear(); this.fresh = true;
+  }
+
+  /* 相位：在最近 4 秒里找一组等间隔的位置，让落在上面的起拍最多；近的拍权重大 */
+  updatePhase() {
+    const p = this.period * BT.fps, last = this.n - 1, K = Math.floor(BT.phaseS * BT.fps / p);
+    const J = 48, cs = new Float32Array(J);
+    let bj = 0;
+    for (let j = 0; j < J; j++) {
+      const ph = j / J * p;
+      let c = 0, w = 1;
+      for (let k = 0; k <= K; k++) { c += w * this.sv(last - ph - k * p); w *= .88; }
+      cs[j] = c; if (c > cs[bj]) bj = j;
+    }
+    // 置信度 = 速度图的峰有多突出 × 相位梳的峰有多突出：没有拍的音乐两者都平
+    let mean = 0; for (let j = 0; j < J; j++) mean += cs[j] / J;
+    this.phaseConf = smooth01(((cs[bj] - mean) / Math.max(cs[bj], 1e-9) - .3) / (.6 - .3));
+    this.rawConf = this.tempoConf * this.phaseConf;
+    const a = cs[(bj + J - 1) % J], b = cs[bj], d = cs[(bj + 1) % J];
+    const off = (a - 2 * b + d) < 0 ? clamp(.5 * (a - d) / (a - 2 * b + d), -.5, .5) : 0;
+    const measured = this.ptsOf(last - (bj + off) / J * p) - BT.detect;
+    if (this.fresh) { this.t0 = measured; this.k0 = 0; this.fresh = false; return; }
+    // 网格只往测量值慢慢拉：拍号（k0）保持连续，小节首拍的统计才不会乱
+    const k = Math.round((measured - this.t0) / this.period), pred = this.t0 + k * this.period;
+    this.t0 = pred + (measured - pred) * .35; this.k0 += k;
+  }
+
+  updateConf() { this.conf = lerp(this.conf, this.rawConf, .25); }
+
+  /* 已经完整听过的拍：量一下这一拍附近的低频起拍强度，记给小节首拍判断和界面的轻重 */
+  countBeats() {
+    if (!this.period) return;
+    // counted 记的是绝对拍号：网格挪动时 t0 换到别的拍上，相对序号会变，绝对拍号不变
+    const P = this.period, safe = this.lastPts - .12;
+    const kTo = Math.floor((safe - this.t0) / P);
+    const kFrom = this.counted === null ? kTo - Math.floor(3 / P) : this.counted - this.k0 + 1;
+    for (let k = kFrom; k <= kTo; k++) {
+      const x = this.frameOf(this.t0 + k * P + BT.detect);
+      let s = 0;
+      for (let d = -2; d <= 2; d++) s = Math.max(s, this.v(x + d, this.kb));
+      const idx = this.k0 + k, pos = ((idx % 4) + 4) % 4;
+      for (let i = 0; i < 4; i++) this.acc[i] *= i === pos ? 1 : .97;
+      this.acc[pos] = this.acc[pos] * .85 + s;
+      this.peakStrength = Math.max(s, this.peakStrength * .995);
+      this.strength.set(idx, s / this.peakStrength);
+      if (this.strength.size > 64) this.strength.delete(this.strength.keys().next().value);
+      this.counted = idx;
+    }
+    let bi = 0, sum = 0; for (let i = 0; i < 4; i++) { sum += this.acc[i]; if (this.acc[i] > this.acc[bi]) bi = i; }
+    // 四拍一样重（四拍底鼓）时没有“首拍”可言：仍然每四拍算一次，只是不保证落在第一拍
+    this.downClear = this.acc[bi] > sum / 4 * 1.25;
+    this.down = bi;
+  }
+
+  /* 给界面的快照：App 里是一个不可变对象，用 @Volatile 引用发布 */
+  grid() {
+    return { period: this.period, t0: this.t0, k0: this.k0, conf: this.conf, down: this.down, downClear: this.downClear, bpm: this.period ? 60 / this.period : 0, strength: this.strength };
+  }
+}
+/* ================= 界面这一侧：BeatClock（建议新增 ui/player/BeatClock.kt） =================
+ * 每个显示帧拿“此刻听到的位置” t 去问跟踪器的网格，决定要不要起一拍；包络按真实时刻算，和帧率无关。
+ * 网格不可信（置信度低）时退回到“对齐过时间的低频起拍”，再没有就什么都不做，只剩段落的呼吸。 */
+const BC = { pre: .05, lockOn: .5, minGap: .6 };
+
+class BeatClock {
+  constructor() { this.reset(); }
+  reset() {
+    this.last = -1e9; this.accent = 0; this.prev = -1e9; this.prevAccent = 0;
+    this.down = false; this.lock = 0; this.kickQ = []; this.count = 0; this.lastIdx = null; this.lastT = null;
+  }
+  pushKick(t) { this.kickQ.push(t); if (this.kickQ.length > 64) this.kickQ.shift(); }
+
+  update(t, dt, g) {
+    // 听到的位置往回走或一下跳出两秒（拖进度、循环）：上一拍的记录作废，否则新位置上的拍都被当成“太近”跳过
+    if (this.lastT !== null && (t < this.lastT - .05 || t > this.lastT + 2)) { const lock = this.lock; this.reset(); this.lock = lock; }
+    this.lastT = t;
+    this.lock = follow(this.lock, g.period && g.conf >= BC.lockOn ? 1 : 0, dt, .35, 1.5);
+    let fired = null;
+    if (g.period && this.lock > .5) {
+      const P = g.period, k = Math.round((t + BC.pre - g.t0) / P), b = g.t0 + k * P, idx = g.k0 + k;
+      // 同一拍只起一次：网格每次微调都可能把这一拍挪几毫秒，按拍号和最小间隔去重
+      if (b <= t + BC.pre && t - b < .12 && idx !== this.lastIdx && b - this.last > BC.minGap * P) {
+        const s = g.strength.get(idx);
+        fired = { t: b, idx, accent: .55 + .45 * clamp(s ?? .7, 0, 1), down: ((idx - g.down) % 4 + 4) % 4 === 0, kind: 'grid' };
+      }
+      while (this.kickQ.length && this.kickQ[0] <= t) this.kickQ.shift();
+    } else {
+      while (this.kickQ.length && this.kickQ[0] <= t + BC.pre) {
+        const k = this.kickQ.shift();
+        // 没有拍子网格时的低频起拍不一定是鼓（换和弦、贝斯进来），只给一半的力度
+        if (t - k < .12 && k - this.last > .25) fired = { t: k, idx: null, accent: .45, down: false, kind: 'kick' };
+      }
+    }
+    if (fired) {
+      this.prev = this.last; this.prevAccent = this.accent;
+      this.last = fired.t; this.accent = fired.accent; this.down = fired.down; this.lastIdx = fired.idx; this.count++;
+    }
+    return fired;
+  }
+
+  /* 以拍点为锚的包络：拍前 pre 秒里平滑升到峰值，拍点之后按 tau 指数回落；和上一拍的尾巴取大，不会掉一下 */
+  env(t, tau) {
+    const one = (at, acc) => {
+      const x = t - at;
+      if (x < -BC.pre) return 0;
+      return acc * (x < 0 ? smooth01((x + BC.pre) / BC.pre) : Math.exp(-x / tau));
+    };
+    return Math.max(one(this.last, this.accent), one(this.prev, this.prevAccent));
+  }
+}
+/* ================= 两套运动状态：现在（逐行对照 FlowFieldMotion.kt / CoverStage.kt）和改后 ================= */
+const FLOW_BLOBS = [
+  { cx: .26, cy: .24, ax: .22, ay: .13, fx: 1, fy: 1.3, p: 0, q: 1.1, r: .66, a: .36 },
+  { cx: .76, cy: .6, ax: .18, ay: .18, fx: .8, fy: 1.1, p: 2, q: .3, r: .6, a: .28 },
+  { cx: .34, cy: .84, ax: .25, ay: .1, fx: 1.2, fy: .9, p: 4, q: 2.2, r: .56, a: .25 },
+  { cx: .72, cy: .16, ax: .15, ay: .14, fx: 1.5, fy: 1.7, p: 1, q: 3, r: .36, a: .16 },
+];
+/* FlowIntensity.Standard（App 现在的数值） */
+const NOW = { speed: 1.3, radius: .12, mid: .08, treble: .06, bass: .03, bloomR: .05, bloomA: .02, cover: .05 };
+const SPIN_S = 40, WAVE_LEN = 30, WAVE_SPEED = 30;   // 外轮廓 40 秒一圈；波长、默认波速按 dp（每秒一个波长）
+
+class FlowBase {
+  constructor() {
+    this.ph = [0, 1.7, 3.1, 4.4, .6]; this.angle = 0;
+    this.s = { bass: 0, swell: 0, mid: 0, treble: 0, loud: 0 };
+    this.tg = { bass: 0, mid: 0, treble: 0, loud: 0 };
+    this.ripples = []; this.spin = 0; this.wave = .3; this.wavePhase = 0;
+  }
+  feedLevels(f) { this.tg = { bass: f.bass, mid: f.mid, treble: f.treble, loud: f.loudness }; }
+  stepLevels(dt) {
+    const s = this.s, t = this.tg;
+    s.bass = follow(s.bass, t.bass, dt, .07, .38);
+    s.swell = follow(s.swell, t.bass, dt, .3, 1);
+    s.mid = follow(s.mid, t.mid, dt, .12, .6);
+    s.treble = follow(s.treble, t.treble, dt, .2, .5);
+    s.loud = follow(s.loud, t.loud, dt, .5, 1.2);
+    // 进度条波幅：pulseWaveScale = 0.3 + swell，指示器自己再做 500ms 补间（这里用一阶平滑近似）
+    this.wave = follow(this.wave, Math.min(1, .3 + s.swell), dt, .25, .25);
+  }
+  flow(dt, mult = 1) {
+    const speed = (1 + NOW.speed * this.s.loud) * mult * TAU / 26;
+    for (let i = 0; i < 5; i++) this.ph[i] = (this.ph[i] + dt * speed * (.7 + i * .13)) % (20 * Math.PI);
+    this.angle = (this.angle + dt * (1 + .5 * this.s.loud) * TAU / 70) % TAU;
+  }
+  blobX(i) { const b = FLOW_BLOBS[i]; return b.cx + b.ax * Math.sin(this.ph[i] * b.fx + b.p); }
+  blobY(i) { const b = FLOW_BLOBS[i]; return b.cy + b.ay * Math.sin(this.ph[i] * b.fy + b.q); }
+  get coverDriftX() { return .06 * Math.sin(this.ph[4]); }
+  get coverDriftY() { return .04 * Math.cos(this.ph[4] * .8); }
+}
+
+/* 现在：分析帧一到就用；鼓点让光团胀 5%、亮 0.02，并从封面中心散开一圈峰值 0.06 的光环 */
+class NowMotion extends FlowBase {
+  constructor() { super(); this.kickEnv = 0; this.bloom = 0; }
+  feed(f) {
+    this.feedLevels(f);
+    if (f.kick) { this.kickEnv = 1; this.ripples.push({ age: 0 }); if (this.ripples.length > 2) this.ripples.shift(); }
+  }
+  step(dt) {
+    this.stepLevels(dt);
+    this.kickEnv *= Math.exp(-dt / .45);
+    this.bloom = follow(this.bloom, this.kickEnv, dt, .05, .3);
+    this.flow(dt);
+    this.spin = (this.spin + dt * TAU / SPIN_S) % TAU;
+    this.wavePhase += dt * WAVE_SPEED;
+    for (const r of this.ripples) r.age += dt;
+    this.ripples = this.ripples.filter(r => r.age < .9);
+  }
+  blobR(i) { return FLOW_BLOBS[i].r * (1 + NOW.radius * this.s.swell + NOW.bloomR * this.bloom); }
+  blobA(i) {
+    const s = this.s, sig = i === 1 ? NOW.mid * s.mid : i === 3 ? NOW.treble * s.treble : NOW.bass * s.bass;
+    return clamp(FLOW_BLOBS[i].a + sig + NOW.bloomA * this.bloom, 0, .7);
+  }
+  get coverAlpha() { return .42 + NOW.cover * this.s.swell; }
+  get haloAlpha() { return .62 + NOW.cover * this.s.swell; }
+  get haloScale() { return 1; }
+  get pop() { return 1; }
+  ripple(r) { return { kind: 'ring', radius: .16 + r.age * .7, alpha: .06 * clamp(r.age / .12, 0, 1) * Math.pow(Math.max(0, 1 - r.age / .9), 1.5) }; }
+}
+
+/* 改后：按拍子时钟走。拍子换成“形状、运动、局部光”来表现，光团亮度不再跟单拍跳 */
+const NEW = {
+  standard: { pop: .03, glow: .18, halo: .025, shove: 2.6, tick: true, ripple: true },
+  soft: { pop: 0, glow: .1, halo: .012, shove: 1.4, tick: false, ripple: false },
+};
+class NewMotion extends FlowBase {
+  constructor() { super(); this.level = 'standard'; this.e = { pop: 0, glow: 0, shove: 0 }; this.target = 0; this.vel = 0; this.lock = 0; this.bpm = 0; }
+  get K() { return NEW[this.level]; }
+  feed(f) { this.feedLevels(f); }
+  onBeat(e, bpm) {
+    this.bpm = bpm;
+    // 外轮廓每拍转一格：步长按 40 秒一圈的平均速度折算，转速和现在一样，只是踩着拍走
+    if (this.K.tick && e.kind === 'grid') this.target += TAU / (SPIN_S * bpm / 60);
+    if (this.K.ripple && e.down) { this.ripples.push({ age: 0 }); if (this.ripples.length > 2) this.ripples.shift(); }
+  }
+  step(dt, clock, t) {
+    this.stepLevels(dt);
+    const K = this.K;
+    this.lock = clock.lock;
+    this.e.pop = clock.env(t, .16); this.e.glow = clock.env(t, .28); this.e.shove = clock.env(t, .4);
+    this.flow(dt, 1 + K.shove * this.e.shove);
+    if (K.tick && clock.lock > .5) {
+      // 欠阻尼弹簧追目标角：一格转完带一点回弹（ω = 2π·3.2，ζ = 0.55）
+      const w = TAU * 3.2, z = .55, n = Math.max(1, Math.ceil(dt / .004)), h = dt / n;
+      for (let i = 0; i < n; i++) { this.vel += (-w * w * (this.spin - this.target) - 2 * z * w * this.vel) * h; this.spin += this.vel * h; }
+    } else {
+      this.spin += dt * TAU / SPIN_S; this.target = this.spin; this.vel = 0;
+    }
+    const locked = clock.lock > .5 && this.bpm > 0;
+    this.wavePhase += dt * (locked ? WAVE_LEN * this.bpm / 60 : WAVE_SPEED);
+    for (const r of this.ripples) r.age += dt;
+    this.ripples = this.ripples.filter(r => r.age < 1.1);
+  }
+  blobR(i) { return FLOW_BLOBS[i].r * (1 + NOW.radius * this.s.swell); }
+  blobA(i) {
+    const s = this.s, sig = i === 1 ? NOW.mid * s.mid : i === 3 ? NOW.treble * s.treble : NOW.bass * s.bass;
+    return clamp(FLOW_BLOBS[i].a + sig, 0, .7);
+  }
+  get coverAlpha() { return .42 + NOW.cover * this.s.swell; }
+  get haloAlpha() { return .62 + NOW.cover * this.s.swell + this.K.glow * this.e.glow; }
+  get haloScale() { return 1 + this.K.halo * this.e.glow; }
+  get pop() { return 1 + this.K.pop * this.e.pop; }
+  // 小节首拍：从封面轮廓往外散开一圈同形状的光，1.1 秒散完
+  ripple(r) { return { kind: 'shape', grow: r.age * 1.05, alpha: .16 * clamp(r.age / .08, 0, 1) * Math.pow(Math.max(0, 1 - r.age / 1.1), 1.6) }; }
+}
+/* ================= 手机播放页示意：背景画在半分辨率画布上，封面、光晕和进度条画在全分辨率画布上 ================= */
+const CAN_FILTER = 'filter' in CanvasRenderingContext2D.prototype;
+const COVER = { x: .5, y: .355, r: .36 };    // 封面中心（宽高比例）和半径（宽度比例）
+
+function fitCanvas(cv, scale) {
+  const w = Math.max(1, Math.round(cv.clientWidth * scale)), h = Math.max(1, Math.round(cv.clientHeight * scale));
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  return [w, h];
+}
+function shapePath(fn, rot, R, cx, cy, n = 160) {
+  const p = new Path2D();
+  for (let i = 0; i <= n; i++) {
+    const th = i / n * TAU, r = fn(th - rot) * R, x = cx + r * Math.cos(th), y = cy + r * Math.sin(th);
+    i ? p.lineTo(x, y) : p.moveTo(x, y);
+  }
+  p.closePath();
+  return p;
+}
+/* 光晕：同一张封面放大 1.03 倍、高斯模糊（标准差为封面边长的 10.7%）、饱和度 1.4，和 CoverHalo 的参数一致；每首歌预先画一次 */
+function makeHalo(img) {
+  const S = 320, C = 150, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  if (CAN_FILTER) g.filter = `blur(${(C * .107).toFixed(1)}px) saturate(1.4)`;
+  const d = C * 1.03;
+  g.drawImage(img, (S - d) / 2, (S - d) / 2, d, d);
+  return { cv, ratio: S / C };
+}
+
+class Stage {
+  constructor(el, motion) {
+    this.el = el; this.m = motion;
+    el.insertAdjacentHTML('beforeend', `<canvas class="bg" aria-hidden="true"></canvas><canvas class="fg" aria-hidden="true"></canvas>
+      <div class="ov" aria-hidden="true">
+        <div class="top">${ic('down')}<span>正在播放</span>${ic('more')}</div>
+        <div class="meta"><b></b><span></span></div>
+        <div class="times"><span class="t0">0:00</span><span class="t1">0:00</span></div>
+        <div class="ctl3">${ic('prev')}<div class="pp"><svg class="bg" viewBox="0 0 100 100"><path d="${polarPath(SHAPES.Cookie12Sided, 0)}"/></svg>${ic('pause')}</div>${ic('next')}</div>
+      </div>`);
+    this.bg = $('.bg', el); this.fg = $('.fg', el);
+    this.cb = this.bg.getContext('2d'); this.cf = this.fg.getContext('2d');
+    this.probe = document.createElement('canvas'); this.probe.width = 9; this.probe.height = 16;
+    this.pc = this.probe.getContext('2d', { willReadFrequently: true });
+    this.lum = []; this.lastLum = null; this.lastTimes = '';
+  }
+  setSong(song, title, sub) {
+    this.song = song; this.halo = makeHalo(song.img);
+    this.el.setAttribute('style', palVars(song.pal));
+    $('.meta b', this.el).textContent = title; $('.meta span', this.el).textContent = sub;
+  }
+  draw(pos, dur, now) {
+    if (!this.song) return;
+    this.drawBack(); this.drawFront(pos / dur);
+    const s = `${fmt(pos)}|${fmt(dur)}`;
+    if (s !== this.lastTimes) { this.lastTimes = s; $('.t0', this.el).textContent = fmt(pos); $('.t1', this.el).textContent = fmt(dur); }
+    this.measure(now);
+  }
+  drawBack() {
+    const [w, h] = fitCanvas(this.bg, .5), c = this.cb, m = this.m, pal = this.song.pal, M = Math.max(w, h);
+    c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1; c.filter = 'none';
+    c.fillStyle = pal.s; c.fillRect(0, 0, w, h);
+    // 底层：放大 1.7 倍、慢慢转的模糊封面
+    c.save();
+    c.translate(w * (.5 + m.coverDriftX), h * .38 + h * m.coverDriftY); c.rotate(m.angle);
+    if (CAN_FILTER) c.filter = `blur(${(M * .035).toFixed(1)}px)`;
+    c.globalAlpha = m.coverAlpha;
+    const S = M * 1.7; c.drawImage(this.song.small, -S / 2, -S / 2, S, S);
+    c.restore(); c.filter = 'none';
+    // 四团封面色光（Screen 混合）
+    c.globalCompositeOperation = 'screen';
+    FLOW_BLOBS.forEach((b, i) => {
+      const x = w * m.blobX(i), y = h * m.blobY(i), r = M * m.blobR(i), a = m.blobA(i), col = this.song.blobs[i];
+      const g = c.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, hexA(col, a)); g.addColorStop(.45, hexA(col, a * .55)); g.addColorStop(1, hexA(col, 0));
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+    });
+    // 光环
+    const ox = w * COVER.x, oy = h * COVER.y, R = w * COVER.r;
+    for (const r of m.ripples) {
+      const q = m.ripple(r);
+      if (q.kind === 'ring') {
+        const rad = M * q.radius, g = c.createRadialGradient(ox, oy, Math.max(0, rad - M * .14), ox, oy, rad + M * .04);
+        g.addColorStop(0, hexA(pal.p, 0)); g.addColorStop(.72, hexA(pal.p, q.alpha)); g.addColorStop(1, hexA(pal.p, 0));
+        c.fillStyle = g; c.fillRect(0, 0, w, h);
+      } else {
+        c.save();
+        if (CAN_FILTER) c.filter = `blur(${(R * .05).toFixed(1)}px)`;
+        c.globalAlpha = q.alpha; c.strokeStyle = pal.p; c.lineWidth = R * (.16 - .1 * Math.min(1, q.grow));
+        c.stroke(shapePath(SHAPES[this.song.shape], m.spin, R * (1.02 + q.grow), ox, oy));
+        c.restore();
+      }
+    }
+    // 固定遮罩：BackdropScrim.Phone
+    c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+    const sh = c.createLinearGradient(0, 0, 0, h);
+    sh.addColorStop(0, hexA(pal.s, .12)); sh.addColorStop(.46, hexA(pal.s, .28)); sh.addColorStop(1, hexA(pal.s, .84));
+    c.fillStyle = sh; c.fillRect(0, 0, w, h);
+  }
+  drawFront(progress) {
+    const dpr = Math.min(2, devicePixelRatio || 1), [w, h] = fitCanvas(this.fg, dpr), c = this.cf, m = this.m, pal = this.song.pal;
+    c.clearRect(0, 0, w, h);
+    const cx = w * COVER.x, cy = h * COVER.y, R = w * COVER.r, k = w / 360;
+    // 光晕
+    const hs = 2 * R * this.halo.ratio * m.haloScale;
+    c.globalAlpha = clamp(m.haloAlpha, 0, 1);
+    c.drawImage(this.halo.cv, cx - hs / 2, cy - hs / 2, hs, hs);
+    c.globalAlpha = 1;
+    // 形状封面：外轮廓转、画面正向；改后每拍弹一下
+    c.save();
+    c.translate(cx, cy); c.scale(m.pop, m.pop);
+    c.clip(shapePath(SHAPES[this.song.shape], m.spin, R, 0, 0));
+    c.drawImage(this.song.img, -R, -R, 2 * R, 2 * R);
+    c.restore();
+    // 波浪进度条
+    const x0 = w * .08, x1 = w * .92, y = h * .772, xp = lerp(x0, x1, progress), lw = 4 * k;
+    const A = 2.8 * k * m.wave, L = WAVE_LEN * k, ph = m.wavePhase * k;
+    c.lineCap = 'round'; c.lineWidth = lw;
+    c.strokeStyle = hexA(pal.os, .2);
+    c.beginPath(); c.moveTo(Math.min(x1, xp + 7 * k), y); c.lineTo(x1, y); c.stroke();
+    c.strokeStyle = pal.p; c.beginPath();
+    for (let x = x0; x <= xp - 4 * k; x += 2) { const yy = y + A * Math.sin(TAU * (x - x0 - ph) / L); x === x0 ? c.moveTo(x, yy) : c.lineTo(x, yy); }
+    c.stroke();
+    c.fillStyle = pal.p; c.beginPath(); c.roundRect(xp - 2 * k, y - 9 * k, 4 * k, 18 * k, 2 * k); c.fill();
+  }
+  /* 整屏亮度：两层缩到 9×16 取平均亮度，记最近 3 秒里相邻两帧的最大差 */
+  measure(now) {
+    const p = this.pc;
+    p.globalCompositeOperation = 'source-over'; p.clearRect(0, 0, 9, 16);
+    p.drawImage(this.bg, 0, 0, 9, 16); p.drawImage(this.fg, 0, 0, 9, 16);
+    const d = p.getImageData(0, 0, 9, 16).data;
+    let sum = 0; for (let i = 0; i < d.length; i += 4) sum += .2126 * d[i] + .7152 * d[i + 1] + .0722 * d[i + 2];
+    const lum = sum / (d.length / 4) / 255;
+    if (this.lastLum !== null) this.lum.push({ t: now, d: Math.abs(lum - this.lastLum) });
+    this.lastLum = lum;
+    while (this.lum.length && this.lum[0].t < now - 3000) this.lum.shift();
+  }
+  get flicker() { let m = 0; for (const x of this.lum) m = Math.max(m, x.d); return m; }
+}
+/* ================= 实时引擎：一条声音、一路分析、两种消费方式 =================
+ * 分析按 App 的方式跑在“前面”：每一帧都分析到 听到的位置 + 提前量（500ms 缓冲 + 设备输出延迟）。
+ * - 现在：分析帧一出来就交给画面（RhythmFeed → FlowFieldMotion.feed），画面比声音早一个提前量。
+ * - 改后：分析帧先进跟踪器（分析线程），再按 pts 排队，播到才交给画面；拍子由 BeatClock 按网格起。
+ * 时间都用“不绕回”的秒数：循环播放时声音无缝接回开头，相当于 App 里单曲循环的无缝衔接。 */
+const DEVICES = { speaker: { label: '手机扬声器', ms: 30 }, bt: { label: '蓝牙耳机', ms: 220 }, tv: { label: '电视 HDMI', ms: 100 } };
+const BUFFER_MS = 500;
+
+const Live = {
+  track: null, n: 0, dur: 1, device: 'speaker', calib: 0,
+  audible: false, ctx: null, node: null, ctxStart: 0, offset: 0, perfStart: 0, lastT: 0,
+  now: new NowMotion(), nu: new NewMotion(),
+  get lead() { return (BUFFER_MS + DEVICES[this.device].ms) / 1000; },
+  load(track) {
+    const wasAudible = this.audible;
+    this.stopSound();
+    this.track = track; this.n = track.pcm.length; this.dur = this.n / track.sr;
+    this.analysis = new Analysis(); this.win = new Float32Array(FFT_N);
+    this.hop = Math.round(track.sr / 30); this.next = FFT_N; this.tracker = new BeatTracker(); this.clock = new BeatClock(); this.queue = [];
+    this.nowEvents = []; this.newEvents = []; this.nowErr = []; this.newErr = [];
+    this.offset = 0; this.perfStart = performance.now() / 1000; this.lastT = 0;
+    this.buf = null;
+    if (wasAudible) this.startSound();
+  },
+  /* 此刻听到的位置（秒，不绕回）。有声时取 AudioContext 时钟并减掉浏览器自己的输出延迟 */
+  time() {
+    if (this.audible && this.ctx) {
+      const lat = this.ctx.outputLatency || this.ctx.baseLatency || 0;
+      return Math.max(0, this.ctx.currentTime - this.ctxStart - lat + this.offset);
+    }
+    return performance.now() / 1000 - this.perfStart + this.offset;
+  },
+  audioCtx() { return this.ctx || (this.ctx = new (window.AudioContext || window.webkitAudioContext)()); },
+  audioBuffer() {
+    if (this.buf) return this.buf;
+    const ctx = this.audioCtx(), b = ctx.createBuffer(1, this.n, this.track.sr);
+    b.copyToChannel(this.track.pcm, 0);
+    return (this.buf = this.track.buffer || b);
+  },
+  async startSound() {
+    if (!this.track) return false;
+    const ctx = this.audioCtx();
+    try { await ctx.resume(); } catch (e) { return false; }
+    if (ctx.state !== 'running') return false;
+    const t = this.time();
+    this.node = ctx.createBufferSource(); this.node.buffer = this.audioBuffer(); this.node.loop = true;
+    this.node.connect(ctx.destination); this.node.start(0, t % this.dur);
+    this.ctxStart = ctx.currentTime; this.offset = t; this.audible = true;
+    return true;
+  },
+  stopSound() {
+    if (!this.audible) return;
+    const t = this.time();
+    try { this.node.stop(); } catch (e) { /* 已停止 */ }
+    this.node = null; this.audible = false; this.offset = t; this.perfStart = performance.now() / 1000;
+  },
+  /* 内置曲目才有真实拍点：按循环展开到时间线需要的范围 */
+  truthIn(a, b) {
+    const out = [];
+    if (!this.track || !this.track.beats.length) return out;
+    for (let L = Math.floor(a / this.dur); L * this.dur <= b; L++) {
+      for (const x of this.track.beats) { const t = x.t + L * this.dur; if (t >= a && t <= b) out.push({ ...x, t }); }
+    }
+    return out;
+  },
+  nearestTruth(t) { let best = null; for (const x of this.truthIn(t - 1, t + 1)) if (!best || Math.abs(x.t - t) < Math.abs(best.t - t)) best = x; return best; },
+  tick(nowMs) {
+    if (!this.track) return;
+    const t = this.time(), dt = clamp(t - this.lastT, 0, .1); this.lastT = t;
+    const pcm = this.track.pcm, n = this.n, sr = this.track.sr;
+    // —— 分析线程：分析到 t + 提前量
+    const until = Math.floor((t + this.lead) * sr);
+    let guard = 0;
+    while (this.next <= until && guard++ < 120) {
+      const end = this.next;
+      for (let i = 0; i < FFT_N; i++) this.win[i] = pcm[((end - FFT_N + i) % n + n) % n];
+      const f = this.analysis.run(this.win, sr, 1000 / 30);
+      f.pts = end / sr;
+      // 跨过循环点：下一段是同一首歌，速度留着
+      if (Math.floor((end - this.hop) / n) < Math.floor(end / n)) this.tracker.newStream(Math.floor(end / n) * this.dur, true);
+      this.tracker.push(f);
+      if (f.kick) this.clock.pushKick(f.pts - BT.detect);
+      this.queue.push(f);
+      // 现在：一出来就上屏
+      this.now.feed(f);
+      if (f.kick) {
+        this.nowEvents.push(t);
+        const nb = this.nearestTruth(t); if (nb) { this.nowErr.push(t - nb.t); if (this.nowErr.length > 24) this.nowErr.shift(); }
+      }
+      this.next += this.hop;
+    }
+    if (this.next <= until) this.next = until;   // 标签页在后台停了很久：直接跳到现在
+    // —— 界面：按听到的位置取帧和拍子（跟拍校准：正数让画面晚一点）
+    const tu = t - this.calib / 1000;
+    while (this.queue.length && this.queue[0].pts <= tu + BT.detect) this.nu.feed(this.queue.shift());
+    if (this.queue.length > 90) this.queue.splice(0, this.queue.length - 90);
+    const g = this.tracker.gridAt(tu);
+    const e = this.clock.update(tu, dt, g);
+    if (e) {
+      this.nu.onBeat(e, g.bpm);
+      this.newEvents.push({ t: e.t, down: e.down, kind: e.kind });
+      // 画面实际起拍的时刻 = 网格拍点 + 校准
+      const shown = e.t + this.calib / 1000, nb = this.nearestTruth(shown);
+      if (nb) { this.newErr.push(shown - nb.t); if (this.newErr.length > 24) this.newErr.shift(); }
+    }
+    this.now.step(dt); this.nu.step(dt, this.clock, tu);
+    const keep = t - 3;
+    while (this.nowEvents.length && this.nowEvents[0] < keep) this.nowEvents.shift();
+    while (this.newEvents.length && this.newEvents[0].t < keep) this.newEvents.shift();
+    this.t = t; this.tu = tu;
+  },
+};
+const median = a => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+/* sim/run.js 生成 */
+const SIM_RESULTS = [
+ {
+  "label": "律动 · 104 BPM",
+  "bpm": "104.9（实际 104）",
+  "hit": "47/48",
+  "miss": "1",
+  "err": "-14 / 34 ms",
+  "now": "+73 ms"
+ },
+ {
+  "label": "电子 · 128 BPM",
+  "bpm": "128.5（实际 128）",
+  "hit": "55/64",
+  "miss": "7",
+  "err": "-11 / 19 ms",
+  "now": "+196 ms"
+ },
+ {
+  "label": "慢歌 · 76 BPM",
+  "bpm": "76.5（实际 76）",
+  "hit": "31/32",
+  "miss": "1",
+  "err": "-21 / 27 ms",
+  "now": "+274 ms"
+ },
+ {
+  "label": "氛围 · 无固定节拍",
+  "bpm": "置信度始终 < 0.5，不起网格",
+  "hit": "—",
+  "miss": "28 次半力度回应",
+  "err": "—",
+  "now": "28 次闪动"
+ }
+];
+/* ================= 页面：表格、原型控件、时间线、统计、海报墙示意 ================= */
+const TRACK_SONG = { groove: 0, four: 2, ballad: 1, ambient: 0 };
+const TRACK_TITLE = { groove: '内置 · 律动', four: '内置 · 电子', ballad: '内置 · 慢歌', ambient: '内置 · 氛围' };
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+/* ---------- 相位表：画面上的一次反应离最近的拍点多远（正数 = 比拍点晚） ---------- */
+function phaseTable() {
+  const bpms = [76, 90, 104, 128, 140], det = 25;
+  const off = (leadMs, bpm) => { const L = 60000 / bpm; let e = ((det - leadMs) % L + L) % L; if (e > L / 2) e -= L; return e; };
+  const head = `<thead><tr><th>输出设备 · 提前量</th>${bpms.map(b => `<th>${b} BPM<br>一拍 ${(60 / b).toFixed(2)} s</th>`).join('')}</tr></thead>`;
+  const rows = Object.values(DEVICES).map(d => {
+    const lead = BUFFER_MS + d.ms;
+    return `<tr><td class="k">${d.label} · ${(lead / 1000).toFixed(2)} s</td>${bpms.map(b => {
+      const e = off(lead, b), ok = e >= -125 && e <= 45;
+      return `<td class="v ${ok ? 'ok' : 'bad'}">${e > 0 ? '+' : ''}${e.toFixed(0)}ms<small>${ok ? '不易察觉' : e > 0 ? '看着晚' : '看着早'}</small></td>`;
+    }).join('')}</tr>`;
+  }).join('');
+  $('#phaseTable').innerHTML = head + `<tbody>${rows}</tbody>`;
+}
+
+/* ---------- 仿真结果（sim/run.js，提前量 0.53 s，统计第二遍） ---------- */
+function simTable() {
+  const R = SIM_RESULTS;
+  $('#simTable').innerHTML = `<thead><tr><th>曲目</th><th>跟踪到的速度</th><th>命中</th><th>误拍</th><th>改后偏差 中位 / |p90|</th><th>现在离最近拍（中位）</th></tr></thead><tbody>${R.map(r =>
+    `<tr><td class="k">${r.label}</td><td>${r.bpm}</td><td>${r.hit}</td><td>${r.miss}</td><td class="v">${r.err}</td><td class="v bad">${r.now}</td></tr>`).join('')}</tbody>`;
+}
+
+/* ---------- 机制图：起拍曲线、网格、起势包络 ---------- */
+function clockFigure() {
+  const P = 62, x0 = 270 - 2.3 * P;
+  let g = '';
+  for (let k = -4; k <= 7; k++) {
+    const x = x0 + k * P;
+    if (x < 90 || x > 735) continue;
+    const past = x <= 270, seen = x <= 570;
+    g += `<path d="M${x} 92 v-${k % 2 ? 18 : 30}" stroke="var(--fg)" stroke-width="3" opacity="${seen ? .75 : .25}" stroke-linecap="round"/>`;
+    g += `<circle cx="${x}" cy="118" r="${(k + 8) % 4 === 0 ? 8 : 5.5}" ${past ? 'class="aa"' : `fill="none" stroke="var(--accent)" stroke-width="2"${seen ? '' : ' stroke-dasharray="3 3"'}`}/>`;
+  }
+  for (let x = 96; x < 570; x += 7) g += `<path d="M${x} 200 v-5" stroke="var(--muted)" opacity=".5"/>`;
+  // 最靠近“此刻”的那一拍的起势和回落：峰值正好落在拍上
+  const b = x0 + 2 * P, pre = 14;
+  g += `<path d="M${b} 60 V 190" stroke="var(--accent)" stroke-dasharray="2 3" opacity=".6"/>`;
+  $('#clkTicks').innerHTML = g;
+  let d = `M${b - pre - 60} 190`;
+  for (let x = b - pre - 60; x <= b + 120; x += 2) {
+    const v = x < b - pre ? 0 : x < b ? smooth01((x - b + pre) / pre) : Math.exp(-(x - b) / 32);
+    d += ` L${x} ${(190 - v * 48).toFixed(1)}`;
+  }
+  $('#clkEnv').setAttribute('d', d);
+}
+
+/* ---------- 原型 ---------- */
+const UI = {
+  visible: true, tracks: {}, cur: 'groove',
+  build() {
+    this.sNow = new Stage($('#stNow'), Live.now);
+    this.sNew = new Stage($('#stNew'), Live.nu);
+    $('#trackSeg').innerHTML = Object.keys(TRACKS).map(k => `<button type="button" data-k="${k}" aria-pressed="${k === this.cur}">${TRACKS[k].label.split(' · ')[0]} ${TRACKS[k].periodic ? TRACKS[k].bpm : ''}</button>`).join('')
+      + `<label class="btn">本机音乐…<input type="file" id="pick" accept="audio/*" aria-label="选一首本机音乐"></label>`;
+    $('#trackSeg').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (b) this.useTrack(b.dataset.k); });
+    $('#devSeg').innerHTML = Object.entries(DEVICES).map(([k, d]) => `<button type="button" data-k="${k}" aria-pressed="${k === Live.device}">${d.label}</button>`).join('');
+    $('#devSeg').addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      Live.device = b.dataset.k; Live.nowErr = [];
+      $$('#devSeg button').forEach(x => x.setAttribute('aria-pressed', x === b));
+      $('#leadPill').textContent = `早 ${Live.lead.toFixed(2)} s`;
+    });
+    $('#intSeg').addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      Live.nu.level = b.dataset.v;
+      $$('#intSeg button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    });
+    $('#calib').addEventListener('input', e => { Live.calib = +e.target.value; $('#calibOut').textContent = `${Live.calib > 0 ? '+' : ''}${Live.calib} ms`; Live.newErr = []; });
+    $('#snd').addEventListener('click', async () => {
+      if (Live.audible) Live.stopSound();
+      else if (!await Live.startSound()) $('#srcline').textContent = '浏览器没有允许播放声音，画面仍按静音时钟运行。';
+      this.syncSound();
+    });
+    $('#pick').addEventListener('change', async e => {
+      const file = e.target.files[0]; if (!file) return;
+      $('#srcline').textContent = `正在解码 ${file.name}…`;
+      try {
+        const buf = await Live.audioCtx().decodeAudioData(await file.arrayBuffer());
+        const mono = new Float32Array(buf.length);
+        for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) mono[i] += d[i] / buf.numberOfChannels; }
+        const name = file.name.replace(/\.[^.]+$/, '');
+        this.cur = 'file';
+        $$('#trackSeg button').forEach(x => x.setAttribute('aria-pressed', false));
+        this.load({ pcm: mono, sr: buf.sampleRate, dur: buf.duration, beats: [], bpm: 0, label: name, buffer: buf }, SONGS[0], name, '本机音乐 · 没有真实拍点');
+        await Live.startSound();
+      } catch (err) {
+        $('#srcline').textContent = `无法解码 ${file.name}，换一个 mp3 / m4a / flac 文件试试。`;
+        return;
+      }
+      this.syncSound();
+    });
+    new IntersectionObserver(([e]) => { this.visible = e.isIntersecting; }).observe($('#proto'));
+    this.useTrack('groove');
+  },
+  useTrack(k) {
+    this.cur = k;
+    $$('#trackSeg button').forEach(x => x.setAttribute('aria-pressed', x.dataset.k === k));
+    const tr = this.tracks[k] || (this.tracks[k] = synthTrack(k));
+    this.load(tr, SONGS[TRACK_SONG[k]], TRACK_TITLE[k], TRACKS[k].periodic ? `${TRACKS[k].bpm} BPM · 合成` : '无固定节拍 · 合成');
+    this.syncSound();
+  },
+  load(tr, song, title, sub) {
+    Live.load(tr);
+    song.shape = song.shape || 'Cookie9Sided';
+    this.sNow.setSong(song, title, sub); this.sNew.setSong(song, title, sub);
+  },
+  syncSound() {
+    $('#snd').textContent = Live.audible ? '静音' : '播放声音';
+    $('#snd').setAttribute('aria-pressed', Live.audible);
+    $('#srcline').textContent = Live.track ? `${Live.track.label} · ${Live.audible ? '正在播放' : '静音'}` : '';
+  },
+  frame(nowMs) {
+    if (!this.visible || !Live.track) return;
+    const pos = ((Live.t % Live.dur) + Live.dur) % Live.dur;
+    this.sNow.draw(pos, Live.dur, nowMs); this.sNew.draw(pos, Live.dur, nowMs);
+    this.timeline();
+    if (!this.lastStats || nowMs - this.lastStats > 250) { this.lastStats = nowMs; this.stats(); }
+  },
+  stats() {
+    const g = Live.tracker.grid(), has = Live.track.beats.length > 0, lock = Live.clock.lock > .5;
+    const ms = v => isNaN(v) ? '—' : `${v > 0 ? '+' : ''}${(v * 1000).toFixed(0)} ms`;
+    const nowE = median(Live.nowErr), newE = median(Live.newErr);
+    const pos = lock && Live.clock.lastIdx !== null ? ((Live.clock.lastIdx - g.down) % 4 + 4) % 4 + 1 : null;
+    const items = [
+      ['跟踪到的速度', g.bpm && g.conf > .2 ? `${g.bpm.toFixed(1)} BPM` : '—', lock ? `置信 ${g.conf.toFixed(2)}${pos ? ` · 第 ${pos} 拍` : ''}` : g.bpm ? `置信 ${g.conf.toFixed(2)} · 没有稳定的拍子` : '还在听（约 4 秒）', lock ? 'ok' : ''],
+      ['现在：画面比声音早', `${(Live.lead - .025).toFixed(2)} s`, `缓冲 0.50 s + ${DEVICES[Live.device].label} ${DEVICES[Live.device].ms}ms − 检测 25ms`, 'hot'],
+      ['现在：离最近的拍', has ? ms(nowE) : '—', has ? (isNaN(nowE) ? '' : nowE > .045 ? '看着比拍点晚' : nowE < -.125 ? '看着比拍点早' : '恰好不易察觉') : '本机音乐没有真实拍点', has && !isNaN(nowE) && (nowE > .045 || nowE < -.125) ? 'hot' : ''],
+      ['改后：离真实拍点', has ? ms(newE) : '—', has ? (Live.calib ? `含校准 ${Live.calib > 0 ? '+' : ''}${Live.calib}ms` : '中位，最近 24 拍') : '本机音乐没有真实拍点', has && !isNaN(newE) && Math.abs(newE) < .045 ? 'ok' : ''],
+      ['整屏亮度逐帧最大变化', `${(this.sNow.flicker * 100).toFixed(1)}% · ${(this.sNew.flicker * 100).toFixed(1)}%`, '现在 · 改后，最近 3 秒；约束是 3%', ''],
+    ];
+    $('#stats').innerHTML = items.map(([a, b, c, cls]) => `<div><span>${a}</span><b class="${cls}">${b}</b><em>${c}</em></div>`).join('');
+    $('#roNow').innerHTML = `<span>检测到的鼓点一出来就上屏</span><span><b>${Live.nowEvents.length}</b> 次 / 3 秒</span>`;
+    $('#roNew').innerHTML = `<span>${lock ? '按拍子网格起拍' : Live.clock.lock > .05 ? '网格在淡出' : '没有网格：低频起拍，力度减半'}</span><span><b>${Live.newEvents.length}</b> 次 / 3 秒</span>`;
+  },
+  timeline() {
+    const cv = $('#tl'), dpr = Math.min(2, devicePixelRatio || 1), W = cv.clientWidth, H = cv.clientHeight;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const c = cv.getContext('2d');
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+    const fg = css('--fg'), muted = css('--muted'), hot = css('--hot'), acc = css('--accent'), board = css('--board');
+    const narrow = W < 560, lx = narrow ? 58 : 92, x0 = lx + 8, x1 = W - 6;
+    const t = Live.t, back = narrow ? 1.6 : 2.2, ahead = narrow ? 1.0 : 1.3, a = t - back, b = t + ahead;
+    const X = v => x0 + (v - a) / (b - a) * (x1 - x0);
+    const rows = [{ y: 44, l: '声音里的拍' }, { y: 92, l: '现在 · 画面' }, { y: 140, l: '改后 · 画面' }];
+    c.font = `600 ${narrow ? 11 : 12.5}px ${css('--body')}`; c.textBaseline = 'middle';
+    for (const r of rows) {
+      c.fillStyle = board; c.beginPath(); c.roundRect(x0, r.y - 19, x1 - x0, 38, 10); c.fill();
+      c.fillStyle = muted; c.fillText(r.l, 0, r.y);
+    }
+    // 提前量：已经分析、还没播到
+    c.fillStyle = hexA(acc.startsWith('#') ? acc : '#006B5F', .12);
+    c.fillRect(X(t), 22, Math.max(0, Math.min(x1, X(t + Live.lead)) - X(t)), 140);
+    // 真实拍点
+    for (const x of Live.truthIn(a, b)) {
+      const hgt = x.kick ? 30 : x.snare ? 20 : 11;
+      c.strokeStyle = x.quiet ? muted : fg; c.globalAlpha = x.quiet ? .45 : x.t <= t ? .9 : .55; c.lineWidth = 3; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(X(x.t), 44 + 15); c.lineTo(X(x.t), 44 + 15 - hgt); c.stroke();
+    }
+    c.globalAlpha = 1;
+    if (!Live.track.beats.length) { c.fillStyle = muted; c.font = `500 12px ${css('--body')}`; c.fillText('本机音乐没有标注拍点，只看下面两行', x0 + 12, 44); }
+    // 现在
+    c.fillStyle = hot;
+    for (const e of Live.nowEvents) { if (e < a) continue; c.beginPath(); c.arc(X(e), 92, 6, 0, TAU); c.fill(); }
+    // 改后：已起的拍
+    const sh = Live.calib / 1000;
+    c.fillStyle = acc; c.strokeStyle = acc; c.lineWidth = 2;
+    for (const e of Live.newEvents) {
+      const x = X(e.t + sh); if (e.t + sh < a) continue;
+      c.globalAlpha = e.kind === 'grid' ? 1 : .5;
+      c.beginPath(); c.arc(x, 140, e.down ? 8 : 6, 0, TAU); c.fill();
+    }
+    c.globalAlpha = 1;
+    // 改后：已经分析过、还没播到的拍（跟踪器此刻的网格）
+    const g = Live.tracker.grid();
+    if (g.period && g.conf >= BC.lockOn) {
+      for (let k = Math.ceil((Live.tu - g.t0) / g.period); ; k++) {
+        const bt = g.t0 + k * g.period; if (bt + sh > b || bt > Live.tu + Live.lead + .05) break;
+        if (bt <= Live.tu) continue;
+        const down = ((g.k0 + k - g.down) % 4 + 4) % 4 === 0;
+        c.beginPath(); c.arc(X(bt + sh), 140, down ? 8 : 6, 0, TAU); c.stroke();
+      }
+    }
+    // 此刻
+    c.strokeStyle = fg; c.lineWidth = 2; c.beginPath(); c.moveTo(X(t), 18); c.lineTo(X(t), 164); c.stroke();
+    c.fillStyle = fg; c.font = `600 12px ${css('--body')}`;
+    if (narrow) {
+      // 窄屏上两条线挨得近：“此刻”往左写，“分析”往右写
+      c.textAlign = 'right'; c.fillText('此刻听到', X(t) - 4, 10);
+      c.fillStyle = acc; c.textAlign = 'left'; c.fillText('分析到这', Math.min(x1 - 48, X(t) + 4), 10);
+    } else {
+      c.textAlign = 'center'; c.fillText('此刻听到', X(t), 10);
+      c.fillStyle = acc; c.fillText('分析走到这里', Math.min(x1 - 40, X(t + Live.lead)), 10);
+    }
+    c.textAlign = 'left';
+    c.strokeStyle = acc; c.setLineDash([4, 4]); c.beginPath(); c.moveTo(X(t + Live.lead), 18); c.lineTo(X(t + Live.lead), 164); c.stroke(); c.setLineDash([]);
+  },
+};
+
+/* ---------- 海报墙示意：大卡在中间，小节首拍时亮度一圈圈传开 ---------- */
+const WallDemo = {
+  build() { this.cv = $('#wallDemo'); this.c = this.cv.getContext('2d'); this.wave = []; this.lastCount = 0; this.spin = 0; this.vel = 0; this.target = 0; this.lastFired = null; },
+  frame() {
+    const cv = this.cv; if (!cv || !UI.visibleWall) return;
+    const dpr = Math.min(2, devicePixelRatio || 1), W = cv.clientWidth, H = cv.clientHeight;
+    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const c = this.c, clock = Live.clock, t = Live.tu, m = Live.nu;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.fillStyle = '#101215'; c.fillRect(0, 0, W, H);
+    // 小节首拍：从大卡往外传的亮度波
+    if (clock.count !== this.lastCount) {
+      this.lastCount = clock.count;
+      if (clock.down && m.level === 'standard' && clock.lock > .5) this.wave.push(clock.last);
+      if (clock.lock > .5 && Live.tracker.grid().bpm) this.target += TAU / (SPIN_S * Live.tracker.grid().bpm / 60);
+    }
+    this.wave = this.wave.filter(w => t - w < 1.2);
+    const wsp = TAU * 3.2, z = .55, dt = 1 / 60;
+    if (clock.lock > .5) { this.vel += (-wsp * wsp * (this.spin - this.target) - 2 * z * wsp * this.vel) * dt; this.spin += this.vel * dt; }
+    else { this.spin += dt * TAU / SPIN_S; this.target = this.spin; }
+    const cols = 6, rows = 4, gap = 4, u = Math.min((W - gap * (cols + 1)) / cols, (H - gap * (rows + 1)) / rows);
+    const ox = (W - (u * cols + gap * (cols - 1))) / 2, oy = (H - (u * rows + gap * (rows - 1))) / 2;
+    const gx = 2, gy = 1; // 大卡占 (2..3, 1..2)
+    let i = 0;
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+      if (x >= gx && x <= gx + 1 && y >= gy && y <= gy + 1) continue;
+      const dist = Math.max(Math.abs(x - (gx + .5)) - .5, Math.abs(y - (gy + .5)) - .5);
+      let lift = 0;
+      for (const w of this.wave) { const age = t - w - (dist - 1) * .06; if (age > 0 && dist <= 3) lift = Math.max(lift, .06 * Math.exp(-age / .25) * smooth01(age / .04)); }
+      const s = SONGS[i++ % 3], px = ox + x * (u + gap), py = oy + y * (u + gap);
+      c.save(); c.beginPath(); c.roundRect(px, py, u, u, 8); c.clip(); c.drawImage(s.img, px, py, u, u);
+      c.fillStyle = `rgba(0,0,0,${(.35 - lift * 2.5).toFixed(3)})`; c.fillRect(px, py, u, u); c.restore();
+    }
+    // 大卡
+    const song = UI.sNew.song || SONGS[0], gw = u * 2 + gap, px = ox + gx * (u + gap), py = oy + gy * (u + gap);
+    const glow = m.e.glow * NEW[m.level].glow;
+    c.save(); c.shadowColor = hexA(song.pal.p, clamp(.25 + glow * 2.2, 0, .9)); c.shadowBlur = 18 + 30 * glow;
+    c.beginPath(); c.roundRect(px, py, gw, gw, 18); c.fillStyle = '#000'; c.fill(); c.restore();
+    c.save(); c.beginPath(); c.roundRect(px, py, gw, gw, 18); c.clip(); c.drawImage(song.img, px, py, gw, gw);
+    const sc = c.createLinearGradient(0, py + gw * .45, 0, py + gw); sc.addColorStop(0, 'rgba(0,0,0,0)'); sc.addColorStop(1, 'rgba(0,0,0,.65)');
+    c.fillStyle = sc; c.fillRect(px, py, gw, gw); c.restore();
+    // Cookie 播放键：每拍转一格
+    const bx = px + gw - gw * .2, by = py + gw - gw * .2, br = gw * .12;
+    c.save(); c.fillStyle = song.pal.p; c.fill(shapePath(SHAPES.Cookie12Sided, this.spin, br, bx, by)); c.restore();
+    c.fillStyle = song.pal.op; c.beginPath(); c.moveTo(bx - br * .28, by - br * .38); c.lineTo(bx + br * .42, by); c.lineTo(bx - br * .28, by + br * .38); c.closePath(); c.fill();
+  },
+};
+
+/* ---------- 启动 ---------- */
+phaseTable(); simTable(); clockFigure();
+UI.build(); WallDemo.build();
+new IntersectionObserver(([e]) => { UI.visibleWall = e.isIntersecting; }).observe($('#wall'));
+let lastFrame = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  lastFrame = now;
+  if (UI.visible || UI.visibleWall) Live.tick(now);
+  UI.frame(now);
+  WallDemo.frame();
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
