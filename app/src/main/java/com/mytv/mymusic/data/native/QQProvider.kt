@@ -1,6 +1,7 @@
 package com.mytv.mymusic.data.native
 
 import com.mytv.mymusic.data.CollectionResult
+import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
@@ -9,6 +10,7 @@ import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.QRSession
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -53,6 +55,7 @@ private val QQ_INFO = ProviderInfo(
     topLists = true,
     topListSongs = true,
     hotSongs = true,
+    listeningModes = true,
 )
 
 class QQProvider : BaseNativeProvider(QQ_INFO) {
@@ -822,6 +825,142 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             else -> limit
         }
         return fetchTopListSongs(cookie, QQ_HOT_SONG_TOP_LIST_ID, safeLimit)
+    }
+
+    /** 电台分类即听歌模式：热门 / 心情 / 主题 / 场景 / 曲风 / 语言 / 人群 / 乐器 / 陪你听 / 厂牌。 */
+    override suspend fun listeningModes(cookie: String): List<ListeningMode> {
+        val payload = buildJsonObject {
+            putJsonObject("comm") {
+                put("ct", 24)
+                put("cv", 0)
+                put("uin", "0")
+                put("format", "json")
+            }
+            putJsonObject("radiolist") {
+                put("module", "pf.radiosvr")
+                put("method", "GetRadiolist")
+                putJsonObject("param") { put("ct", "24") }
+            }
+        }
+        val body = NativeHttp.postJson(
+            QQ_MUSICU_API,
+            payload.toString(),
+            headers = mapOf("Referer" to "https://y.qq.com/"),
+            cookie = cookie,
+            randomIp = true,
+            userAgent = QQ_USER_AGENT,
+        )
+        val parsed = json.decodeFromString<QQRadioListResponse>(body.body)
+        if (parsed.code != 0 || parsed.radiolist.code != 0) {
+            throw IllegalStateException("qq radio list api error code: ${parsed.code}/${parsed.radiolist.code}")
+        }
+        // 同一个电台会同时出现在“热门”和它自己的分组里，这里保留分组归属，不去重
+        return parsed.radiolist.data.radioList.flatMap { group ->
+            val groupName = group.title.trim().ifBlank { "电台" }
+            group.list.mapNotNull { item ->
+                val name = item.title.trim()
+                if (item.id <= 0 || name.isEmpty()) return@mapNotNull null
+                ListeningMode(
+                    id = "radio:${item.id}",
+                    name = name,
+                    cover = item.picUrl.trim(),
+                    // listenDesc 在没有真实收听数时是“0人在收听”，不如不显示
+                    subtitle = when {
+                        item.listenNum >= 10_000 -> "${item.listenNum / 10_000} 万人在听"
+                        item.listenNum > 0 -> "${item.listenNum} 人在听"
+                        else -> ""
+                    },
+                    source = info.id,
+                    group = groupName,
+                    extra = buildMap {
+                        put("radio_id", item.id.toString())
+                        if (item.listenNum > 0) put("listen_num", item.listenNum.toString())
+                    },
+                )
+            }
+        }
+    }
+
+    /** 每次调用返回约 5 首新歌；凑几轮给队列一个起播长度，后续由播放器在队列尾部续取。 */
+    override suspend fun listeningModeSongs(cookie: String, mode: ListeningMode): List<Song> {
+        val radioId = mode.extra["radio_id"]?.trim()?.takeIf { it.all { ch -> ch in '0'..'9' } }
+            ?: mode.id.substringAfter(':').takeIf { it.all { ch -> ch in '0'..'9' } }
+            ?: throw IllegalArgumentException("invalid qq radio id: ${mode.id}")
+        val songs = mutableListOf<Song>()
+        val seen = mutableSetOf<String>()
+        for (round in 0 until QQ_RADIO_ROUNDS) {
+            val batch = runCatching { fetchRadioTracks(cookie, radioId) }.getOrElse {
+                if (it is CancellationException) throw it
+                if (songs.isEmpty()) throw it else break
+            }
+            batch.forEach { song ->
+                if (seen.add(song.id)) songs += song
+            }
+            if (batch.isEmpty()) break
+        }
+        if (songs.isEmpty()) {
+            throw IllegalStateException(if (cookie.isBlank()) "「${mode.name}」需要登录后播放" else "「${mode.name}」暂时没有歌曲")
+        }
+        return songs
+    }
+
+    private suspend fun fetchRadioTracks(cookie: String, radioId: String): List<Song> {
+        val payload = buildJsonObject {
+            putJsonObject("comm") {
+                put("ct", 24)
+                put("cv", 0)
+                put("uin", "0")
+                put("format", "json")
+            }
+            putJsonObject("songlist") {
+                put("module", "mb_track_radio_svr")
+                put("method", "get_radio_track")
+                putJsonObject("param") {
+                    put("id", radioId.toIntOrNull() ?: 0)
+                    put("firstplay", 1)
+                    put("num", QQ_RADIO_BATCH)
+                }
+            }
+        }
+        val body = NativeHttp.postJson(
+            QQ_MUSICU_API,
+            payload.toString(),
+            headers = mapOf("Referer" to "https://y.qq.com/"),
+            cookie = cookie,
+            randomIp = true,
+            userAgent = QQ_USER_AGENT,
+        )
+        val parsed = json.decodeFromString<QQRadioTracksResponse>(body.body)
+        if (parsed.code != 0 || parsed.songlist.code != 0) {
+            throw IllegalStateException("qq radio tracks api error code: ${parsed.code}/${parsed.songlist.code}")
+        }
+        return parsed.songlist.data.tracks.mapNotNull { track ->
+            val mid = track.mid.trim()
+            val name = track.name.trim().ifBlank { track.title.trim() }
+            if (mid.isEmpty() || name.isEmpty()) return@mapNotNull null
+            val artistNames = track.singer.map { it.name.trim() }.filter { it.isNotEmpty() }
+            val (fileSize, bitrate) = pickFileSize(track.file.size128mp3, track.file.size320mp3, track.file.sizeFlac, track.interval)
+            val mediaMid = track.file.mediaMid.trim().ifBlank { mid }
+            Song(
+                id = mid,
+                name = name,
+                artist = artistNames.joinToString(", "),
+                album = track.album.name.trim(),
+                albumId = track.album.mid.trim(),
+                duration = track.interval,
+                size = fileSize,
+                bitrate = bitrate,
+                source = info.id,
+                cover = track.album.mid.trim().takeIf { it.isNotEmpty() }?.let(::coverUrl).orEmpty(),
+                link = "https://y.qq.com/n/ryqq/songDetail/$mid",
+                extra = buildMap {
+                    put("songmid", mid)
+                    put("song_id", track.id.toString())
+                    if (track.album.mid.isNotBlank()) put("album_mid", track.album.mid.trim())
+                    if (mediaMid != mid) put("media_mid", mediaMid)
+                },
+            )
+        }
     }
 
     override suspend fun createLogin(type: String): QRCreateResult {
@@ -2325,6 +2464,10 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         const val QQ_HOT_SONG_TOP_LIST_ID = "26"
         const val QQ_TOP_LIST_PAGE_SIZE = 50
 
+        /** 电台接口每次只回 5 首，起播时连取几轮凑够一个队列。 */
+        const val QQ_RADIO_BATCH = 5
+        const val QQ_RADIO_ROUNDS = 3
+
         const val QQ_FAVORITE_PLAYLIST_ID = "profile:favorites"
         const val QQ_PROFILE_DIR_PREFIX = "profile:dir:"
 
@@ -2781,6 +2924,81 @@ private data class QQProfileDirResponse(
     val code: JsonElement? = null,
     val msg: String = "",
     @SerialName("SongList") val songList: List<JsonObject> = emptyList(),
+)
+
+@Serializable
+private data class QQRadioListResponse(
+    val code: Int = 0,
+    val radiolist: QQRadioListNode = QQRadioListNode(),
+)
+
+@Serializable
+private data class QQRadioListNode(
+    val code: Int = 0,
+    val data: QQRadioListData = QQRadioListData(),
+)
+
+@Serializable
+private data class QQRadioListData(
+    @SerialName("radio_list") val radioList: List<QQRadioGroup> = emptyList(),
+)
+
+@Serializable
+private data class QQRadioGroup(
+    val id: Long = 0,
+    val title: String = "",
+    val list: List<QQRadioItem> = emptyList(),
+)
+
+@Serializable
+private data class QQRadioItem(
+    val id: Long = 0,
+    val title: String = "",
+    @SerialName("pic_url") val picUrl: String = "",
+    @SerialName("listenNum") val listenNum: Long = 0,
+)
+
+@Serializable
+private data class QQRadioTracksResponse(
+    val code: Int = 0,
+    val songlist: QQRadioTracksNode = QQRadioTracksNode(),
+)
+
+@Serializable
+private data class QQRadioTracksNode(
+    val code: Int = 0,
+    val data: QQRadioTracksData = QQRadioTracksData(),
+)
+
+@Serializable
+private data class QQRadioTracksData(
+    val tracks: List<QQRadioTrack> = emptyList(),
+)
+
+@Serializable
+private data class QQRadioTrack(
+    val id: Long = 0,
+    val mid: String = "",
+    val name: String = "",
+    val title: String = "",
+    val singer: List<QQSinger> = emptyList(),
+    val album: QQRadioAlbum = QQRadioAlbum(),
+    val interval: Int = 0,
+    val file: QQRadioFile = QQRadioFile(),
+)
+
+@Serializable
+private data class QQRadioAlbum(
+    val mid: String = "",
+    val name: String = "",
+)
+
+@Serializable
+private data class QQRadioFile(
+    @SerialName("media_mid") val mediaMid: String = "",
+    @SerialName("size_128mp3") val size128mp3: Long = 0,
+    @SerialName("size_320mp3") val size320mp3: Long = 0,
+    @SerialName("size_flac") val sizeFlac: Long = 0,
 )
 
 @Serializable

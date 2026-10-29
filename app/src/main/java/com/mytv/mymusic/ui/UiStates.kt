@@ -4,6 +4,7 @@ import com.mytv.mymusic.aggregate.CanonicalCollection
 import com.mytv.mymusic.aggregate.CanonicalTrack
 import com.mytv.mymusic.aggregate.ProviderSearchState
 import com.mytv.mymusic.aggregate.SearchStatus
+import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.PlaylistEntity
@@ -12,7 +13,7 @@ import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 
-enum class PlaylistMode { Recommend, Category }
+enum class PlaylistMode { Recommend, Category, Listening }
 
 data class ChartsUiState(
     val providerId: String = "",
@@ -46,7 +47,22 @@ data class PlaylistsUiState(
     val categoryLoading: Boolean = false,
     val categoryError: String = "",
     val categoryOpen: Boolean = false,
-)
+    val canListen: Boolean = false,
+    val listenModes: List<ListeningMode> = emptyList(),
+    val listenLoading: Boolean = false,
+    val listenError: String = "",
+    val listenGroup: String = "全部",
+    /** 正在播放的听歌模式 id，卡片上给一个“正在播放”标记。 */
+    val listenActive: String = "",
+    /** 正在起播的模式 id，卡片上显示转圈。 */
+    val listenStarting: String = "",
+    val quickListenStarting: Boolean = false,
+) {
+    val listenGroups: List<String> get() = listenModes.map { it.group }.filter { it.isNotBlank() }.distinct()
+    val visibleListenModes: List<ListeningMode>
+        get() = if (listenGroup.isBlank() || listenGroup == "全部") listenModes
+        else listenModes.filter { it.group == listenGroup }
+}
 
 data class SearchUiState(
     val query: String = "",

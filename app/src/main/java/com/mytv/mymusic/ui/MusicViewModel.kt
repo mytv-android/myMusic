@@ -38,6 +38,7 @@ import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.data.LyricsBackgroundMode
 import com.mytv.mymusic.data.RhythmIntensity
+import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.PlaylistEntity
@@ -173,6 +174,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var chartsGeneration = 0
     private var playlistsGeneration = 0
     private var categoryGeneration = 0
+    private var listenGeneration = 0
+
+    /** 正在播放的听歌模式；非空时播放器在队列尾部自动续一批。 */
+    private var activeFeed: ActiveFeed? = null
+
+    private data class ActiveFeed(
+        val providerId: String,
+        val mode: ListeningMode,
+        val cookie: String,
+        var appending: Boolean = false,
+    )
     private var collectionGeneration = 0
     private var failoverInProgress = false
     private var updateDownloadJob: Job? = null
@@ -464,10 +476,123 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setPlaylistMode(mode: PlaylistMode) {
         val current = _playlists.value
         if (mode == PlaylistMode.Category && !current.canCategorize) return
+        if (mode == PlaylistMode.Listening && !current.canListen) return
         _playlists.value = current.copy(mode = mode)
         if (mode == PlaylistMode.Category && current.categoryPlaylists.isEmpty() && !current.categoryLoading) {
             loadCategory(current.selectedCategoryId, page = 1)
         }
+        if (mode == PlaylistMode.Listening && current.listenModes.isEmpty() && !current.listenLoading) {
+            loadListeningModes()
+        }
+    }
+
+    fun selectListenGroup(group: String) {
+        _playlists.update { it.copy(listenGroup = group) }
+    }
+
+    fun refreshListeningModes() = loadListeningModes()
+
+    private fun loadListeningModes() {
+        val current = _playlists.value
+        val providerId = current.providerId.ifBlank { settingsState.value.provider }
+        if (!current.canListen) return
+        val generation = ++listenGeneration
+        _playlists.update { it.copy(listenLoading = true, listenError = "") }
+        viewModelScope.launch {
+            val result = runCatching { app.repository.listeningModes(providerId, cookieFor(providerId)) }
+            if (generation != listenGeneration) return@launch
+            result.onSuccess { modes ->
+                _playlists.update {
+                    it.copy(
+                        listenModes = modes,
+                        listenLoading = false,
+                        listenError = "",
+                        listenGroup = it.listenGroup.takeIf { group -> group == "全部" || modes.any { mode -> mode.group == group } } ?: "全部",
+                    )
+                }
+            }.onFailure { error ->
+                if (generation == listenGeneration) {
+                    _playlists.update {
+                        it.copy(
+                            listenLoading = false,
+                            listenError = error.message ?: "听歌模式加载失败",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** 点一个听歌模式：取一批歌直接开播，队列末尾由播放器自动续取。 */
+    fun playListeningMode(mode: ListeningMode) {
+        val providerId = mode.source.ifBlank { _playlists.value.providerId.ifBlank { settingsState.value.provider } }
+        // 会取消掉正在跑的「随便听听」，把它的转圈一起收掉
+        _playlists.update { it.copy(listenStarting = mode.id, quickListenStarting = false) }
+        directPlayJob?.cancel()
+        directPlayJob = viewModelScope.launch {
+            val cookie = cookieFor(providerId)
+            val error = startListeningFeed(providerId, mode, cookie)
+            _playlists.update { it.copy(listenStarting = "") }
+            if (error != null) message(error, error = true)
+        }
+    }
+
+    /** 推荐页的「随便听听」：不用先选模式，按顺序试到第一个真能出歌的。 */
+    fun quickListen() {
+        val current = _playlists.value
+        if (!current.canListen) return
+        val providerId = current.providerId.ifBlank { settingsState.value.provider }
+        _playlists.update { it.copy(quickListenStarting = true) }
+        directPlayJob?.cancel()
+        directPlayJob = viewModelScope.launch {
+            val cookie = cookieFor(providerId)
+            val modes = current.listenModes.ifEmpty {
+                val loaded = runCatching { app.repository.listeningModes(providerId, cookie) }.getOrElse {
+                    if (it is CancellationException) throw it
+                    _playlists.update { state -> state.copy(quickListenStarting = false) }
+                    message(it.message ?: "听歌模式读取失败", error = true)
+                    return@launch
+                }
+                _playlists.update {
+                    it.copy(listenModes = loaded, listenLoading = false, listenError = "")
+                }
+                loaded
+            }
+            // 未登录时部分平台（猜你喜欢、私人漫游）会直接不出歌，往后试几个
+            var lastError = "这个平台暂时没有听歌模式"
+            for (mode in quickListenCandidates(modes).take(QUICK_LISTEN_TRIES)) {
+                val error = startListeningFeed(providerId, mode, cookie)
+                if (error == null) {
+                    _playlists.update { it.copy(quickListenStarting = false) }
+                    return@launch
+                }
+                lastError = error
+            }
+            _playlists.update { it.copy(quickListenStarting = false) }
+            message(lastError, error = true)
+        }
+    }
+
+    /** 场景类入口更适合直接开播；没有场景就按服务端给的顺序来。 */
+    private fun quickListenCandidates(modes: List<ListeningMode>): List<ListeningMode> {
+        val scenes = modes.filter { it.group.contains("场景") }
+        return scenes + modes.filterNot { it.group.contains("场景") }
+    }
+
+    /** 起播一个听歌模式；失败返回可以直接展示的错误文案。 */
+    private suspend fun startListeningFeed(providerId: String, mode: ListeningMode, cookie: String): String? {
+        val songs = runCatching { app.repository.listeningModeSongs(providerId, cookie, mode) }.getOrElse {
+            if (it is CancellationException) throw it
+            return it.message ?: "听歌模式读取失败"
+        }
+        if (songs.isEmpty()) return "「${mode.name}」暂时没有歌曲"
+        // 给队列里的歌打上模式标记：换队列后靠它判断还要不要继续续流
+        val marked = songs.map { it.copy(extra = it.extra + (FEED_MARK to mode.id)) }
+        play(marked.first(), marked)
+        activeFeed = ActiveFeed(providerId, mode, cookie)
+        _playlists.update { it.copy(listenActive = mode.id) }
+        message("已开启「${mode.name}」")
+        return null
     }
 
     fun setCategoryGroup(group: String) {
@@ -516,15 +641,31 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             ?: candidates.firstOrNull()
             ?: providers.first()
         val generation = ++playlistsGeneration
+        val sameProvider = _playlists.value.providerId == target.id
         _playlists.value = PlaylistsUiState(
             providerId = target.id,
             providerName = target.name,
             canRecommend = target.recommendedPlaylists,
             canCategorize = target.playlistCategories,
-            mode = _playlists.value.mode.takeIf { _playlists.value.providerId == target.id } ?: PlaylistMode.Recommend,
+            canListen = target.listeningModes,
+            // 换源后听歌模式要重新拉：不同平台的模式列表完全不是一回事
+            listenModes = _playlists.value.listenModes.takeIf { sameProvider }.orEmpty(),
+            listenGroup = _playlists.value.listenGroup.takeIf { sameProvider } ?: "全部",
+            listenActive = _playlists.value.listenActive.takeIf { sameProvider }.orEmpty(),
+            // 换源时尽量停在当前这种浏览方式上，目标平台支持才保留
+            mode = _playlists.value.mode
+                .takeIf { it != PlaylistMode.Category || target.playlistCategories }
+                ?.takeIf { it != PlaylistMode.Listening || target.listeningModes }
+                ?: PlaylistMode.Recommend,
             recommendationsLoading = target.recommendedPlaylists,
             categoriesLoading = target.playlistCategories,
         )
+        if (_playlists.value.mode == PlaylistMode.Listening &&
+            _playlists.value.listenModes.isEmpty() &&
+            !_playlists.value.listenLoading
+        ) {
+            loadListeningModes()
+        }
         viewModelScope.launch {
             val cookie = cookieFor(target.id)
             val recommendationCached = recommendationCache[target.id]
@@ -1716,6 +1857,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     // ---------- playback ----------
 
     fun play(song: Song, queue: List<Song> = listOf(song)) {
+        // 换队列时听歌模式就结束了，否则会在普通歌单尾部继续续推荐流
+        activeFeed = null
+        _playlists.update { if (it.listenActive.isEmpty()) it else it.copy(listenActive = "") }
         val selected = canonicalForSong(song)
         val tracks = queue.map { canonicalForSong(it) }.ifEmpty { listOf(selected) }
         val ordered = listOf(selected) + tracks.filter { it.id != selected.id }
@@ -2279,6 +2423,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val source = track?.sources?.find { it.song.key == song.key }
             base.value = base.value.copy(currentTrack = track, currentSource = source)
             staleErrorRetried = -1
+            extendFeedIfNeeded(index)
             if (song.url.isNotBlank()) {
                 skipNotice = null
                 unplayableSkips = 0
@@ -2343,6 +2488,41 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 rememberCanonical(result.track)
                 remember("history", historySong(resolved))
                 loadLyrics(resolved)
+            }
+        }
+
+        /**
+         * 听歌模式是服务端实时生成的流，队列快放完时在尾部续一批。
+         * 续取失败就让队列自然结束，不弹错——用户下次点模式会重新开始。
+         */
+        private fun extendFeedIfNeeded(index: Int) {
+            val feed = activeFeed ?: return
+            val queue = base.value.queue
+            // 只有当前这首确实是这个流里的，才继续续；用户换成别的队列就停
+            if (queue.getOrNull(index)?.extra?.get(FEED_MARK) != feed.mode.id) return
+            if (queue.size - index > FEED_EXTEND_THRESHOLD || feed.appending) return
+            feed.appending = true
+            viewModelScope.launch {
+                val more = runCatching {
+                    app.repository.listeningModeSongs(feed.providerId, feed.cookie, feed.mode)
+                }.getOrElse {
+                    feed.appending = false
+                    return@launch
+                }
+                feed.appending = false
+                if (activeFeed !== feed) return@launch
+                val known = base.value.queue.map { it.key }.toSet()
+                val fresh = more.filter { it.key !in known }
+                if (fresh.isEmpty()) return@launch
+                val player = controller ?: return@launch
+                val marked = fresh.map { it.copy(extra = it.extra + (FEED_MARK to feed.mode.id)) }
+                val tracks = marked.map { canonicalForSong(it) }
+                val queued = tracks.map { preferredSong(it) }
+                player.addMediaItems(queued.map(::mediaItem))
+                base.value = base.value.copy(
+                    queue = base.value.queue + queued,
+                    canonicalQueue = base.value.canonicalQueue + tracks,
+                )
             }
         }
 
@@ -2907,6 +3087,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val BROWSE_CACHE_MS = 10L * 60 * 1000
+
+        /** 听歌模式队列剩这么多首时开始续取，避免放到最后一首才去请求。 */
+        const val FEED_EXTEND_THRESHOLD = 3
+
+        /** 「随便听听」最多试几个模式，避免一个都出不了歌时连打太多请求。 */
+        const val QUICK_LISTEN_TRIES = 3
+
+        /** 听歌模式队列的标记，写在 Song.extra 里。 */
+        const val FEED_MARK = "listening_mode"
         val LINK_PATTERN = Regex("""https?://\S+""", RegexOption.IGNORE_CASE)
     }
 }

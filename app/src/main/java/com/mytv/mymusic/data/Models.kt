@@ -26,6 +26,7 @@ data class ProviderInfo(
     @SerialName("TopLists") val topLists: Boolean = false,
     @SerialName("TopListSongs") val topListSongs: Boolean = false,
     @SerialName("HotSongs") val hotSongs: Boolean = false,
+    @SerialName("ListeningModes") val listeningModes: Boolean = false,
     @SerialName("Unstable") val unstable: String = "",
     @SerialName("Note") val note: String = "",
 )
@@ -65,6 +66,21 @@ data class Playlist(
     val description: String = "",
     val source: String = "",
     val link: String = "",
+    val extra: Map<String, String> = emptyMap(),
+)
+
+/**
+ * 听歌模式：平台按场景 / 心情 / 风格预置的入口，点进去是服务端实时生成的推荐流，
+ * 不是固定曲目表。和歌单的区别在于没有确定的歌曲列表，每次开播都会重新出歌。
+ */
+@Serializable
+data class ListeningMode(
+    val id: String = "",
+    val name: String = "",
+    val cover: String = "",
+    val subtitle: String = "",
+    val source: String = "",
+    val group: String = "",
     val extra: Map<String, String> = emptyMap(),
 )
 

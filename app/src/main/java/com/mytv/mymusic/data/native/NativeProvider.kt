@@ -1,6 +1,7 @@
 package com.mytv.mymusic.data.native
 
 import com.mytv.mymusic.data.CollectionResult
+import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
@@ -68,6 +69,14 @@ interface NativeProvider {
 
     suspend fun recommendedPlaylists(cookie: String): List<Playlist> =
         throw UnsupportedOperationException("${info.name} 暂不支持推荐歌单")
+
+    /** 听歌模式入口：场景 / 心情 / 风格驱动的推荐流，不是歌单。 */
+    suspend fun listeningModes(cookie: String): List<ListeningMode> =
+        throw UnsupportedOperationException("${info.name} 暂不支持听歌模式")
+
+    /** 取某个听歌模式的一批歌曲；同一模式每次调用返回的歌曲不同。 */
+    suspend fun listeningModeSongs(cookie: String, mode: ListeningMode): List<Song> =
+        throw UnsupportedOperationException("${info.name} 暂不支持听歌模式")
 
     suspend fun searchAlbums(cookie: String, keyword: String): List<Playlist> =
         throw UnsupportedOperationException("${info.name} 暂不支持专辑搜索")

@@ -1,6 +1,7 @@
 package com.mytv.mymusic.data.native
 
 import com.mytv.mymusic.data.CollectionResult
+import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
@@ -49,6 +50,7 @@ private val NETEASE_INFO = ProviderInfo(
     topLists = true,
     topListSongs = true,
     hotSongs = true,
+    listeningModes = true,
 )
 
 /** 分享文本里的链接；取到后去掉紧跟在链接后的中文/英文标点。 */
@@ -442,6 +444,87 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             else -> limit
         }
         return fetchTopListSongs(cookie, HOT_SONG_TOP_LIST_ID, safeLimit)
+    }
+
+    /** 私人漫游（原私人 FM）：默认 / 熟悉 / 探索三种口味，外加场景子模式。 */
+    override suspend fun listeningModes(cookie: String): List<ListeningMode> {
+        val roam = listOf(
+            Triple("DEFAULT", "默认模式", "按你的口味推荐"),
+            Triple("FAMILIAR", "熟悉模式", "多放你常听的歌"),
+            Triple("EXPLORE", "探索模式", "多放没听过的歌"),
+        )
+        val scenes = listOf(
+            "EXERCISE" to "运动",
+            "FOCUS" to "专注",
+            "NIGHT_EMO" to "夜间 emo",
+        )
+        return roam.map { (mode, name, subtitle) ->
+            ListeningMode(
+                id = "fm:$mode",
+                name = name,
+                subtitle = subtitle,
+                source = info.id,
+                group = "私人漫游",
+                extra = mapOf("fm_mode" to mode),
+            )
+        } + scenes.map { (submode, name) ->
+            ListeningMode(
+                id = "fm:SCENE_RCMD:$submode",
+                name = name,
+                subtitle = "场景电台",
+                source = info.id,
+                group = "场景模式",
+                extra = mapOf("fm_mode" to "SCENE_RCMD", "fm_submode" to submode),
+            )
+        }
+    }
+
+    /** 私人漫游每次只回几首，连取几轮凑够起播长度；未登录时服务端不出歌。 */
+    override suspend fun listeningModeSongs(cookie: String, mode: ListeningMode): List<Song> {
+        val fmMode = mode.extra["fm_mode"]?.trim().orEmpty().ifBlank { mode.id.substringAfter(':').substringBefore(':') }
+        val submode = mode.extra["fm_submode"]?.trim().orEmpty()
+        if (fmMode.isBlank()) throw IllegalArgumentException("invalid netease listening mode: ${mode.id}")
+        val songs = mutableListOf<Song>()
+        val seen = mutableSetOf<String>()
+        for (round in 0 until NETEASE_FM_ROUNDS) {
+            val body = buildJsonObject {
+                put("csrf_token", "")
+                put("mode", fmMode)
+                if (submode.isNotBlank()) put("submode", submode)
+                put("limit", NETEASE_FM_BATCH)
+            }
+            val response = weapiPost(PERSONAL_FM_API, body, cookie)
+            val data = runCatching { json.decodeFromString<NeteaseRadioResponse>(response.body) }.getOrNull() ?: break
+            if (data.code != 200) {
+                if (songs.isEmpty()) throw IllegalStateException("netease radio api error code: ${data.code}")
+                break
+            }
+            data.data.forEach { item ->
+                val id = item.id.toString()
+                if (item.id <= 0 || item.name.isBlank() || !seen.add(id)) return@forEach
+                val duration = (item.duration / 1000).toInt()
+                songs += Song(
+                    id = id,
+                    name = item.name,
+                    artist = item.artists.joinToString("、") { it.name },
+                    album = item.album.name,
+                    albumId = item.album.id.toString().takeIf { item.album.id > 0 }.orEmpty(),
+                    duration = duration,
+                    source = info.id,
+                    cover = item.album.picUrl.ifBlank { item.album.blurPicUrl },
+                    link = "https://music.163.com/#/song?id=$id",
+                    extra = buildMap {
+                        put("song_id", id)
+                        item.privilege.bestLevel().trim().lowercase().takeIf { it.isNotBlank() }?.let { put("netease_level", it) }
+                    },
+                )
+            }
+            if (songs.size >= NETEASE_FM_ROUNDS * NETEASE_FM_BATCH) break
+        }
+        if (songs.isEmpty()) {
+            throw IllegalStateException(if (cookie.isBlank()) "「${mode.name}」需要登录后播放" else "「${mode.name}」暂时没有歌曲")
+        }
+        return songs
     }
 
     override suspend fun createLogin(type: String): QRCreateResult {
@@ -892,6 +975,9 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         const val USER_ACCOUNT_API = "https://music.163.com/weapi/nuser/account/get"
         const val VIP_INFO_API = "https://music.163.com/weapi/music-vip-membership/front/vip/info"
         const val RECOMMENDED_API = "https://music.163.com/weapi/personalized/playlist"
+        const val PERSONAL_FM_API = "https://music.163.com/weapi/v1/radio/get"
+        const val NETEASE_FM_BATCH = 6
+        const val NETEASE_FM_ROUNDS = 3
         const val LYRIC_API = "https://music.163.com/weapi/song/lyric"
         const val TOP_LIST_API = "https://music.163.com/api/toplist"
         const val HOT_SONG_TOP_LIST_ID = "3778678"
@@ -1064,6 +1150,30 @@ private data class NeteaseSearchAlbum(
     val publishTime: Long = 0,
     val artist: NeteaseArtist = NeteaseArtist(),
     val artists: List<NeteaseArtist> = emptyList(),
+)
+
+@Serializable
+private data class NeteaseRadioResponse(
+    val code: Int = 0,
+    val data: List<NeteaseRadioSong> = emptyList(),
+)
+
+@Serializable
+private data class NeteaseRadioSong(
+    val id: Long = 0,
+    val name: String = "",
+    val artists: List<NeteaseArtist> = emptyList(),
+    val album: NeteaseRadioAlbum = NeteaseRadioAlbum(),
+    val duration: Long = 0,
+    val privilege: NeteasePrivilege = NeteasePrivilege(),
+)
+
+@Serializable
+private data class NeteaseRadioAlbum(
+    val id: Long = 0,
+    val name: String = "",
+    val picUrl: String = "",
+    val blurPicUrl: String = "",
 )
 
 @Serializable

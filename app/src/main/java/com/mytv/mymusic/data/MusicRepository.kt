@@ -45,6 +45,12 @@ class MusicRepository {
     suspend fun recommended(provider: String, cookie: String): List<Playlist> =
         requireProvider(provider).recommendedPlaylists(cookie)
 
+    suspend fun listeningModes(provider: String, cookie: String): List<ListeningMode> =
+        requireProvider(provider).listeningModes(cookie)
+
+    suspend fun listeningModeSongs(provider: String, cookie: String, mode: ListeningMode): List<Song> =
+        requireProvider(provider).listeningModeSongs(cookie, mode)
+
     suspend fun searchAlbums(provider: String, cookie: String, keyword: String): List<Playlist> =
         requireProvider(provider).searchAlbums(cookie, keyword)
 

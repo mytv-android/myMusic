@@ -1,6 +1,7 @@
 package com.mytv.mymusic.data.native
 
 import com.mytv.mymusic.data.CollectionResult
+import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
@@ -8,7 +9,12 @@ import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URLDecoder
@@ -35,6 +41,7 @@ private val MIGU_INFO = ProviderInfo(
     topLists = true,
     topListSongs = true,
     hotSongs = true,
+    listeningModes = true,
 )
 
 class MiguProvider : BaseNativeProvider(MIGU_INFO) {
@@ -356,6 +363,147 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
             else -> limit
         }
         return fetchTopListSongs(cookie, HOT_SONG_TOP_LIST_ID, safeLimit)
+    }
+
+    /** 畅听页：上半是听歌模式，下半是场景选择，都是服务端算出来的推荐入口。 */
+    override suspend fun listeningModes(cookie: String): List<ListeningMode> {
+        val body = miguGet(
+            LISTEN_FREELY_TAB_URL,
+            emptyMap(),
+            cookie,
+            userAgent = ANDROID_UA,
+            referer = "https://music.migu.cn/",
+        )
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+            ?: throw IllegalStateException("咪咕听歌模式返回了无法解析的内容")
+        val blocks = root["data"] as? JsonArray ?: throw IllegalStateException("咪咕听歌模式没有数据")
+        val modes = mutableListOf<ListeningMode>()
+        blocks.forEach { blockElement ->
+            val block = blockElement as? JsonObject ?: return@forEach
+            val groupName = block.stringOrEmpty("title").ifBlank { "听歌模式" }
+            val entries = block["content"] as? JsonArray ?: return@forEach
+            entries.forEach { entryElement ->
+                val entry = entryElement as? JsonObject ?: return@forEach
+                val modelId = entry.stringOrEmpty("modelId").trim()
+                val name = entry.stringOrEmpty("title").trim()
+                if (modelId.isEmpty() || name.isEmpty()) return@forEach
+                modes += ListeningMode(
+                    id = "model:$modelId",
+                    name = name,
+                    cover = entry.stringOrEmpty("img").trim(),
+                    subtitle = entry.stringOrEmpty("subTitle").trim(),
+                    source = info.id,
+                    group = groupName,
+                    extra = mapOf("model_id" to modelId),
+                )
+            }
+        }
+        if (modes.isEmpty()) throw IllegalStateException("咪咕暂时没有可用的听歌模式")
+        return modes
+    }
+
+    /** 每次 5 首；未登录时服务端只回空壳，按需要登录提示。 */
+    override suspend fun listeningModeSongs(cookie: String, mode: ListeningMode): List<Song> {
+        val modelId = mode.extra["model_id"]?.trim()?.takeIf { it.all { ch -> ch in '0'..'9' } }
+            ?: mode.id.substringAfter(':').takeIf { it.all { ch -> ch in '0'..'9' } }
+            ?: throw IllegalArgumentException("invalid migu listening mode: ${mode.id}")
+        val body = miguGet(
+            LISTEN_FREELY_SONG_URL,
+            mapOf("modelId" to modelId),
+            cookie,
+            userAgent = ANDROID_UA,
+            referer = "https://music.migu.cn/",
+        )
+        val songs = extractListenSongs(body)
+        if (songs.isEmpty()) {
+            throw IllegalStateException(if (cookie.isBlank()) "「${mode.name}」需要登录后播放" else "「${mode.name}」暂时没有歌曲")
+        }
+        return songs
+    }
+
+    /**
+     * 畅听出歌的返回结构没有公开文档，按候选路径找歌曲数组；
+     * 找不到时退回全树搜索，挑第一个看起来像歌曲列表的数组。
+     */
+    private fun extractListenSongs(body: String): List<Song> {
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return emptyList()
+        if (root.stringOrEmpty("code").isNotBlank() && root.stringOrEmpty("code") != "000000") return emptyList()
+        val data = root["data"] ?: return emptyList()
+        val candidates = listOf("songList", "songs", "resourceList", "list", "songlist", "items")
+        val lists = if (data is JsonObject) {
+            candidates.mapNotNull { key -> data[key] as? JsonArray }
+        } else if (data is JsonArray) {
+            listOf(data)
+        } else {
+            emptyList()
+        }
+        val songs = lists.firstNotNullOfOrNull { array ->
+            decodeListenArray(array).takeIf { it.isNotEmpty() }
+        }
+        if (songs != null) return songs
+        return findSongArray(data)?.let(::decodeListenArray).orEmpty()
+    }
+
+    private fun decodeListenArray(array: JsonArray): List<Song> = array.mapNotNull { element ->
+        (element as? JsonObject)?.let { item ->
+            runCatching { json.decodeFromJsonElement<MiguSongItem>(item) }.getOrNull()
+        }
+    }.mapNotNull(::convertListenItem)
+
+    /** 全树找第一个整组都是歌曲对象的数组。 */
+    private fun findSongArray(element: JsonElement): JsonArray? {
+        val array = element as? JsonArray
+        if (array != null) {
+            val objects = array.filterIsInstance<JsonObject>()
+            val looksLikeSongs = objects.isNotEmpty() && objects.size == array.size && objects.all { item ->
+                item.containsKey("contentId") || item.containsKey("songName") || item.containsKey("songId")
+            }
+            if (looksLikeSongs) return array
+        }
+        val children: List<JsonElement> = when (element) {
+            is JsonObject -> element.values.toList()
+            is JsonArray -> element.toList()
+            else -> emptyList()
+        }
+        for (child in children) {
+            findSongArray(child)?.let { return it }
+        }
+        return null
+    }
+
+    private fun JsonObject.stringOrEmpty(key: String): String =
+        (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
+
+    /** 畅听队列拿不到格式表，按默认 PQ 组装；播放地址在真正播放时再解析。 */
+    private fun convertListenItem(item: MiguSongItem): Song? {
+        val contentId = firstNonEmpty(item.contentId, item.copyrightId, item.id)
+        val songName = firstNonEmpty(item.name, item.songName)
+        if (contentId.isBlank() || songName.isBlank()) return null
+        val albumName = item.albums.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: item.album
+        val cover = normalizeImage(
+            pickImage(item.imgItems).ifBlank { pickImage(item.albumImgs) }
+                .ifBlank { item.img1 }.ifBlank { item.img2 }.ifBlank { item.img3 },
+        )
+        val extra = buildMap {
+            put("content_id", contentId)
+            put("resource_type", "2")
+            put("format_type", "PQ")
+            if (item.copyrightId.isNotBlank()) put("copyright_id", item.copyrightId)
+            if (item.songId.isNotBlank()) put("song_id", item.songId)
+            if (item.albumId.isNotBlank()) put("album_id", item.albumId)
+        }
+        return Song(
+            id = "$contentId|2|PQ",
+            name = songName,
+            artist = collectArtistNames(item).joinToString(" / "),
+            album = albumName,
+            albumId = item.albumId.ifBlank { item.albums.firstOrNull()?.id.orEmpty() },
+            duration = item.duration,
+            source = info.id,
+            cover = cover,
+            link = "https://music.migu.cn/v3/music/song/$contentId",
+            extra = extra,
+        )
     }
 
     private suspend fun searchMiguPlaylists(cookie: String, keyword: String, page: Int, limit: Int): List<Playlist> {
@@ -812,6 +960,8 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
         const val PLAYLIST_SONGS_URL = "https://app.c.nf.migu.cn/MIGUM3.0/resource/playlist/song/v2.0"
         const val ALBUM_SONGS_URL = "https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/queryAlbumSong"
         const val LISTEN_URL = "https://c.musicapp.migu.cn/MIGUM2.0/v2.1/content/listen-url"
+        const val LISTEN_FREELY_TAB_URL = "https://app.c.nf.migu.cn/bmw/page/view/listen-freely/v1.0"
+        const val LISTEN_FREELY_SONG_URL = "https://app.c.nf.migu.cn/resource-dataloader/recommend/listen-freely/v2.0"
         const val TOP_LIST_SONGS_API = "https://app.c.nf.migu.cn/bmw/rank/rank-info/v1.0"
         const val HOT_SONG_TOP_LIST_ID = "83048887"
         val TOP_LIST_INDEX_APIS = listOf(
