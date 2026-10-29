@@ -177,7 +177,6 @@ fun PlayerScreen(
             playing = state.playing,
             mode = state.lyricsBackground,
             intensity = state.rhythmIntensity,
-            trackKey = song.key,
             wide = wideBackdrop,
             pulse = pulse,
             // 光环从封面中心散开，坐标按各布局里封面的位置（宽高比例）。电视按实际位置在摆放时写给 pulse，这里只是第一帧前的兜底

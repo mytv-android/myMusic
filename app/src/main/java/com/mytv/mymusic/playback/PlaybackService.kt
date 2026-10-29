@@ -79,9 +79,12 @@ private class RhythmRenderersFactory(
         context: Context,
         enableFloatOutput: Boolean,
         enableAudioOutputPlaybackParams: Boolean,
-    ): AudioSink = DefaultAudioSink.Builder(context)
-        .setEnableFloatOutput(enableFloatOutput)
-        .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
-        .setAudioProcessors(arrayOf(TeeAudioProcessor(analyzer.audioBufferSink)))
-        .build()
+    ): AudioSink = RhythmAudioSink(
+        DefaultAudioSink.Builder(context)
+            .setEnableFloatOutput(enableFloatOutput)
+            .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
+            .setAudioProcessors(arrayOf(TeeAudioProcessor(analyzer.audioBufferSink)))
+            .build(),
+        analyzer,
+    )
 }

@@ -30,6 +30,15 @@ data class RhythmFrame(
      * 主线程卡顿超过一个分析帧时单帧的 [kick] 会丢；按序号前进判断就不会漏。重置和切代时保持不变。
      */
     val kickCount: Int = 0,
+    /**
+     * 分析窗口末尾那个样本的媒体时刻（微秒，渲染器时间轴，和 [PlaybackClock] 同一条轴），由 [RhythmAnalyzer] 填写。
+     * 界面等耳朵听到这个位置才用这一帧；分析比耳朵早一个 AudioTrack 缓冲（约半秒）。
+     */
+    val ptsUs: Long = 0L,
+    /** 0–690 Hz 的谱通量（只算变强的部分），按频点数平均；给节拍跟踪用。 */
+    val fluxBass: Float = 0f,
+    /** 690–4000 Hz 的谱通量，按频点数平均：军鼓、拍手那一路。中频频点比低频多得多，不平均的话拍手会比底鼓还“响”。 */
+    val fluxMid: Float = 0f,
 )
 
 class RhythmAnalysis {
@@ -46,6 +55,7 @@ class RhythmAnalysis {
     private val trebleAgc = AgcTracker()
     private val onset = OnsetDetector(bins = RHYTHM_FFT_SIZE / 2)
     private val kickOnset = OnsetDetector(bins = RHYTHM_FFT_SIZE / 2, refractoryMs = KICK_REFRACTORY_MS)
+    private val midFlux = BandFlux()
     private var smoothEnergy = 0f
 
     /** Raw all-band level, retained for diagnostics; the soft preset drives energy from bass. */
@@ -58,6 +68,7 @@ class RhythmAnalysis {
         trebleAgc.reset()
         onset.reset()
         kickOnset.reset()
+        midFlux.reset()
         smoothEnergy = 0f
         lastRawEnergy = 0f
     }
@@ -102,6 +113,7 @@ class RhythmAnalysis {
         // Convert the 14 kHz cutoff instead of reusing the upstream analyser's bin count.
         val onsetResult = onset.push(spectrum, dtMs, binLimit = trebleEnd)
         val kickResult = kickOnset.push(spectrum, dtMs, sensitivity = KICK_SENSITIVITY, binLimit = bassEnd)
+        val fluxMid = midFlux.push(spectrum, bassEnd, midEnd)
 
         val rawBass = average(spectrum, 0, bassEnd)
         val rawMid = average(spectrum, bassEnd, midEnd)
@@ -124,6 +136,8 @@ class RhythmAnalysis {
             beat = onsetResult.onset,
             loudness = loudness,
             kick = kickResult.onset,
+            fluxBass = if (bassEnd > 0) kickResult.flux / bassEnd else 0f,
+            fluxMid = fluxMid,
         )
     }
 
@@ -250,6 +264,35 @@ internal class AgcTracker {
         min = min.coerceIn(0f, 255f - AGC_FLOOR_SPAN)
         span = maxOf(AGC_FLOOR_SPAN, max - min)
         max = minOf(255f, min + span)
+    }
+}
+
+/** 一段频点的谱通量（只算变强的部分），按频点数平均。第一帧和频段变了的那一帧没有上一帧可比，记 0。 */
+internal class BandFlux {
+    private var previous: FloatArray? = null
+    private var from = -1
+
+    fun reset() {
+        previous = null
+        from = -1
+    }
+
+    fun push(spectrum: FloatArray, from: Int, to: Int): Float {
+        val count = minOf(to, spectrum.size) - from
+        if (count <= 0) return 0f
+        val old = previous
+        if (old == null || old.size != count || this.from != from) {
+            previous = spectrum.copyOfRange(from, from + count)
+            this.from = from
+            return 0f
+        }
+        var flux = 0f
+        for (i in 0 until count) {
+            val difference = spectrum[from + i] - old[i]
+            if (difference > 0f) flux += difference
+            old[i] = spectrum[from + i]
+        }
+        return flux / count
     }
 }
 

@@ -22,11 +22,24 @@ internal fun rhythmHopSamples(sampleRateHz: Int): Int =
 /**
  * Taps decoded playback PCM without using the microphone or modifying the samples.
  * FFT work stays off ExoPlayer's audio thread; at most one analysis job is queued.
+ *
+ * 取样点在 AudioTrack 之前，分析比耳朵早一个缓冲（约半秒）。每个分析帧带上窗口末尾的媒体时刻 [RhythmFrame.ptsUs]，
+ * 放进 [timeline]；界面按 [clock] 推算的“此刻听到的位置”取帧，画面就和声音对上了。
+ * pts 的推算：[RhythmAudioSink] 在每次 handleBuffer 前报上这个缓冲的 pts；TeeAudioProcessor 每次清空（跳转、换格式）后
+ * 收到的第一个样本就是那时正在交给 AudioSink 的缓冲的第一个样本，以它为锚，之后按样本数往后数。和 DefaultAudioSink 自己算位置的办法一样。
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 class RhythmAnalyzer {
     private val _frames = MutableStateFlow(RhythmFrame())
+
+    /** 最新的一帧，不管播没播到；界面按听到的位置取帧请用 [timeline]。 */
     val frames: StateFlow<RhythmFrame> = _frames.asStateFlow()
+
+    /** 此刻听到的位置，由 [RhythmAudioSink] 在音频渲染线程上更新。 */
+    val clock = PlaybackClock()
+
+    /** 带 pts 的分析帧，界面播到才取。 */
+    val timeline = RhythmTimeline()
 
     @Volatile
     private var active = false
@@ -57,9 +70,20 @@ class RhythmAnalyzer {
     private var hopSamples = 1
     private var samplesUntilHop = 1
 
+    // 下面这些只在音频渲染线程上读写：pts 锚点和无缝衔接的分界
+    private var inputPtsUs = 0L
+    private var needAnchor = true
+    private var anchorPtsUs = 0L
+    private var streamFrames = 0L
+    private var outputOffsetUs = Long.MIN_VALUE
+    private var streamChanged = false
+    private var boundaryPtsUs = NO_BOUNDARY
+    private var streamSerial = 0
+
     // Only the analysis executor accesses these three fields.
     private val analysis = RhythmAnalysis()
     private var analysisGeneration = -1
+    private var analysisStream = 0
     private var lastAnalysisAtNs = 0L
 
     @Synchronized
@@ -73,8 +97,26 @@ class RhythmAnalyzer {
     fun reset() {
         synchronized(frameLock) {
             generation.incrementAndGet()
+            timeline.clear()
             _frames.value = RhythmFrame(kickCount = kickCount)
         }
+    }
+
+    /** [RhythmAudioSink]：AudioSink 正要处理 pts 为 [ptsUs] 的缓冲（同一个缓冲分几次交时每次都报）。 */
+    internal fun onSinkInput(ptsUs: Long) {
+        inputPtsUs = ptsUs
+        // 输出换到了下一段（无缝接到下一首、单曲循环），而且这次没有清空：这个缓冲就是新一段的开头
+        if (streamChanged && !needAnchor) {
+            streamChanged = false
+            boundaryPtsUs = ptsUs
+        }
+    }
+
+    /** [RhythmAudioSink]：渲染器换了输出段的偏移。第一次和换到另一项时偏移会变，同一项里跳转不变。 */
+    internal fun onOutputStreamOffset(offsetUs: Long) {
+        if (offsetUs == outputOffsetUs) return
+        outputOffsetUs = offsetUs
+        streamChanged = true
     }
 
     val audioBufferSink = object : TeeAudioProcessor.AudioBufferSink {
@@ -83,11 +125,14 @@ class RhythmAnalyzer {
             this@RhythmAnalyzer.channelCount = channelCount
             this@RhythmAnalyzer.encoding = encoding
             hopSamples = rhythmHopSamples(sampleRateHz)
+            // 处理链清空了：下一个样本是那时交给 AudioSink 的缓冲的第一个样本，重新取锚
+            needAnchor = true
+            streamFrames = 0L
             reset()
         }
 
         override fun handleBuffer(buffer: ByteBuffer) {
-            if (!active || sampleRateHz <= 0 || channelCount <= 0) return
+            if (sampleRateHz <= 0 || channelCount <= 0) return
             val bytesPerSample = when (encoding) {
                 C.ENCODING_PCM_16BIT -> 2
                 C.ENCODING_PCM_FLOAT -> 4
@@ -95,6 +140,20 @@ class RhythmAnalyzer {
             }
             val frameBytes = bytesPerSample * channelCount
             if (frameBytes <= 0) return
+            if (needAnchor) {
+                needAnchor = false
+                anchorPtsUs = inputPtsUs
+                streamFrames = 0L
+                // 清空后的第一段：换到了别的歌就换一个段号；同一首里跳转保持段号
+                if (streamChanged) streamSerial++
+                streamChanged = false
+                boundaryPtsUs = NO_BOUNDARY
+            }
+            // 不分析时也要数样本，锚点才一直有效
+            if (!active) {
+                streamFrames += buffer.remaining() / frameBytes
+                return
+            }
             val currentGeneration = generation.get()
             if (ringGeneration != currentGeneration) {
                 ringGeneration = currentGeneration
@@ -117,6 +176,7 @@ class RhythmAnalyzer {
     }
 
     private fun appendSample(sample: Float, currentGeneration: Int) {
+        streamFrames++
         ring[ringWrite] = sample
         ringWrite = (ringWrite + 1) % ring.size
         if (ringSize < ring.size) ringSize++
@@ -127,7 +187,14 @@ class RhythmAnalyzer {
     }
 
     private fun scheduleAnalysis(currentGeneration: Int) {
+        // 窗口末尾的媒体时刻：锚点加上之后数过的样本。分界要在排队前判断，分析任务排不上时也不能漏掉
+        val ptsUs = anchorPtsUs + streamFrames * 1_000_000L / sampleRateHz
+        if (boundaryPtsUs != NO_BOUNDARY && ptsUs >= boundaryPtsUs) {
+            boundaryPtsUs = NO_BOUNDARY
+            streamSerial++
+        }
         if (!queued.compareAndSet(false, true)) return
+        val stream = streamSerial
         val oldest = (ringWrite - ring.size + ring.size) % ring.size
         repeat(ring.size) { index ->
             analysisInput[index] = ring[(oldest + index) % ring.size]
@@ -137,9 +204,11 @@ class RhythmAnalyzer {
             analysisExecutor().execute {
                 try {
                     if (!active || generation.get() != currentGeneration) return@execute
-                    if (analysisGeneration != currentGeneration) {
+                    // 跳转、切歌（清空过处理链）或者无缝接到了下一段：上一段的增益历史作废
+                    if (analysisGeneration != currentGeneration || analysisStream != stream) {
                         analysis.reset()
                         analysisGeneration = currentGeneration
+                        analysisStream = stream
                         lastAnalysisAtNs = 0L
                     }
                     val now = System.nanoTime()
@@ -154,7 +223,9 @@ class RhythmAnalyzer {
                         // Stale-generation results are dropped without being counted.
                         if (active && generation.get() == currentGeneration) {
                             if (result.kick) kickCount++
-                            _frames.value = result.copy(kickCount = kickCount)
+                            val frame = result.copy(kickCount = kickCount, ptsUs = ptsUs)
+                            timeline.push(frame)
+                            _frames.value = frame
                         }
                     }
                 } finally {
@@ -176,4 +247,7 @@ class RhythmAnalyzer {
             }
         }.also { executor = it }
 
+    private companion object {
+        const val NO_BOUNDARY = Long.MIN_VALUE
+    }
 }

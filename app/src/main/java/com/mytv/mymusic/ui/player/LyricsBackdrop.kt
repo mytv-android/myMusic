@@ -69,7 +69,9 @@ import com.materialkolor.material3.rememberDynamicColorScheme
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.data.LyricsBackgroundMode
 import com.mytv.mymusic.data.RhythmIntensity
+import com.mytv.mymusic.playback.PlaybackClock
 import com.mytv.mymusic.playback.RhythmAnalyzer
+import com.mytv.mymusic.playback.RhythmTimeline
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import com.mytv.mymusic.ui.theme.LocalSeedColor
@@ -132,7 +134,6 @@ fun LyricsBackdrop(
     playing: Boolean,
     mode: LyricsBackgroundMode,
     intensity: RhythmIntensity,
-    trackKey: String,
     wide: Boolean,
     pulse: BackdropPulse,
     rippleOrigin: Offset,
@@ -163,7 +164,8 @@ fun LyricsBackdrop(
     val motion = remember { FlowFieldMotion(moving) }
     // 帧计数只在绘制 / 图层回调里读，60/120Hz 推进时只重画背景，不重组播放页
     val tick = remember { mutableIntStateOf(0) }
-    if (reactive && analyzer != null) RhythmFeed(analyzer, playing, trackKey, motion)
+    val feed = remember(analyzer) { analyzer?.let(::RhythmFeedReader) }
+    if (reactive && analyzer != null) RhythmFeed(analyzer, playing)
 
     val covers = remember { CoverSwap() }
     LaunchedEffect(cover) {
@@ -196,6 +198,7 @@ fun LyricsBackdrop(
             while (true) {
                 val settled = withFrameNanos { now ->
                     if (tv && !TvFrameGate.due(now)) return@withFrameNanos false
+                    if (reactive) feed?.feedUntil(now, motion)
                     motion.advanceTo(now)
                     pulse.bass = motion.bass
                     pulse.swell = motion.swell
@@ -348,9 +351,13 @@ private fun Modifier.reducedResolution(factor: Int): Modifier = layout { measura
 
 private fun ceilDiv(value: Int, divisor: Int): Int = ((value + divisor - 1) / divisor).coerceAtLeast(1)
 
-/** 律动模式下的分析器：只在播放且页面在前台时取样，切歌时清掉上一首的增益历史，分析帧交给 [motion]。 */
+/**
+ * 律动模式下的分析器：只在播放且页面在前台时取样。分析帧由帧循环通过 [RhythmFeedReader] 按听到的位置取走。
+ * 切歌不用在这里重置：跳转、换歌由 [com.mytv.mymusic.playback.RhythmAudioSink] 在音频线程上判断，
+ * 无缝衔接时分析比界面先进入下一首，界面这边知道换歌时新歌的前半秒已经分析过了。
+ */
 @Composable
-private fun RhythmFeed(analyzer: RhythmAnalyzer, playing: Boolean, trackKey: String, motion: FlowFieldMotion) {
+private fun RhythmFeed(analyzer: RhythmAnalyzer, playing: Boolean) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, analyzer, playing) {
         fun updateCapture() {
@@ -366,9 +373,20 @@ private fun RhythmFeed(analyzer: RhythmAnalyzer, playing: Boolean, trackKey: Str
             analyzer.setActive(false)
         }
     }
-    // 同步重置不需要协程；带 key 的 SideEffect 保留切歌执行顺序且不引入挂起开销
-    SideEffect(analyzer, trackKey) { analyzer.reset() }
-    LaunchedEffect(analyzer, motion) { analyzer.frames.collect { motion.feed(it) } }
+}
+
+/**
+ * 帧循环每帧调用：取走 pts 不晚于“此刻听到的位置”的分析帧交给 [FlowFieldMotion]。
+ * 还不知道听到哪儿（刚跳转、还没出声）时什么都不取，等下一帧。
+ */
+internal class RhythmFeedReader(private val analyzer: RhythmAnalyzer) {
+    private val cursor = RhythmTimeline.Cursor()
+
+    fun feedUntil(frameNanos: Long, motion: FlowFieldMotion) {
+        val audible = analyzer.clock.audibleUs(frameNanos)
+        if (audible == PlaybackClock.UNSET) return
+        analyzer.timeline.drain(cursor, audible) { motion.feed(it) }
+    }
 }
 
 /**
