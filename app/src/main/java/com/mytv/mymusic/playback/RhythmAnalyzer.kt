@@ -41,6 +41,11 @@ class RhythmAnalyzer {
     /** 带 pts 的分析帧，界面播到才取。 */
     val timeline = RhythmTimeline()
 
+    /** 节拍跟踪的结果，界面按听到的位置取网格（[BeatState.gridAt]）。跳转、切歌、停止分析时清空。 */
+    @Volatile
+    var beats: BeatState = BeatState.EMPTY
+        private set
+
     @Volatile
     private var active = false
 
@@ -79,12 +84,17 @@ class RhythmAnalyzer {
     private var streamChanged = false
     private var boundaryPtsUs = NO_BOUNDARY
     private var streamSerial = 0
+    private var streamStartUs = 0L
 
     // Only the analysis executor accesses these three fields.
     private val analysis = RhythmAnalysis()
     private var analysisGeneration = -1
     private var analysisStream = 0
-    private var lastAnalysisAtNs = 0L
+    private var lastAnalysisPtsUs = NO_BOUNDARY
+    private val tracker = BeatTracker()
+    private var trackerRevision = -1
+    private var previousGrid: BeatGrid? = null
+    private var previousUntilS = Double.NEGATIVE_INFINITY
 
     @Synchronized
     fun setActive(value: Boolean) {
@@ -98,6 +108,7 @@ class RhythmAnalyzer {
         synchronized(frameLock) {
             generation.incrementAndGet()
             timeline.clear()
+            beats = BeatState.EMPTY
             _frames.value = RhythmFrame(kickCount = kickCount)
         }
     }
@@ -146,6 +157,7 @@ class RhythmAnalyzer {
                 streamFrames = 0L
                 // 清空后的第一段：换到了别的歌就换一个段号；同一首里跳转保持段号
                 if (streamChanged) streamSerial++
+                streamStartUs = inputPtsUs
                 streamChanged = false
                 boundaryPtsUs = NO_BOUNDARY
             }
@@ -190,11 +202,14 @@ class RhythmAnalyzer {
         // 窗口末尾的媒体时刻：锚点加上之后数过的样本。分界要在排队前判断，分析任务排不上时也不能漏掉
         val ptsUs = anchorPtsUs + streamFrames * 1_000_000L / sampleRateHz
         if (boundaryPtsUs != NO_BOUNDARY && ptsUs >= boundaryPtsUs) {
+            streamStartUs = boundaryPtsUs
             boundaryPtsUs = NO_BOUNDARY
             streamSerial++
         }
         if (!queued.compareAndSet(false, true)) return
         val stream = streamSerial
+        val streamStart = streamStartUs
+        val hop = hopSamples
         val oldest = (ringWrite - ring.size + ring.size) % ring.size
         repeat(ring.size) { index ->
             analysisInput[index] = ring[(oldest + index) % ring.size]
@@ -207,18 +222,31 @@ class RhythmAnalyzer {
                     // 跳转、切歌（清空过处理链）或者无缝接到了下一段：上一段的增益历史作废
                     if (analysisGeneration != currentGeneration || analysisStream != stream) {
                         analysis.reset()
+                        tracker.configure(rate.toDouble() / hop)
+                        if (analysisGeneration != currentGeneration) {
+                            // 清空过处理链：同一首里跳转（段号没变）留着速度，换了歌整个重来
+                            tracker.reset(keepTempo = analysisStream == stream)
+                            previousGrid = null
+                        } else {
+                            // 无缝接到下一段：分析先进了新的一段，界面播到分界之前继续用旧网格
+                            previousGrid = tracker.grid()
+                            previousUntilS = streamStart / 1e6
+                            tracker.reset(keepTempo = false)
+                        }
+                        trackerRevision = -1
                         analysisGeneration = currentGeneration
                         analysisStream = stream
-                        lastAnalysisAtNs = 0L
+                        lastAnalysisPtsUs = NO_BOUNDARY
                     }
-                    val now = System.nanoTime()
-                    val dtMs = if (lastAnalysisAtNs == 0L) {
+                    // 按媒体时间算间隔：起播和跳转后 AudioSink 一口气灌满缓冲，墙上时钟的间隔不代表音乐走了多久
+                    val dtMs = if (lastAnalysisPtsUs == NO_BOUNDARY) {
                         1000f / RHYTHM_TARGET_FPS
                     } else {
-                        ((now - lastAnalysisAtNs) / 1_000_000f).coerceIn(1f, 200f)
+                        ((ptsUs - lastAnalysisPtsUs) / 1_000f).coerceIn(1f, 200f)
                     }
-                    lastAnalysisAtNs = now
+                    lastAnalysisPtsUs = ptsUs
                     val result = analysis.analyzePcm(analysisInput, rate, dtMs)
+                    tracker.push(ptsUs / 1e6, result.fluxBass, result.fluxMid)
                     synchronized(frameLock) {
                         // Stale-generation results are dropped without being counted.
                         if (active && generation.get() == currentGeneration) {
@@ -226,6 +254,10 @@ class RhythmAnalyzer {
                             val frame = result.copy(kickCount = kickCount, ptsUs = ptsUs)
                             timeline.push(frame)
                             _frames.value = frame
+                            if (tracker.revision != trackerRevision) {
+                                trackerRevision = tracker.revision
+                                beats = BeatState(tracker.grid(), previousGrid, previousUntilS)
+                            }
                         }
                     }
                 } finally {
