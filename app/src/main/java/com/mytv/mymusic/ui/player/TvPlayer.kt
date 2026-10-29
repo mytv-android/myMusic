@@ -44,7 +44,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -134,7 +133,8 @@ internal fun TvPlayer(
     val fade = animateFloatAsState(if (ambient) 1f else 0f, motion.defaultEffectsSpec(), label = "tvFade")
     val chromeAlpha = remember(fade) { { 1f - fade.value } }
     val waveScale = remember(pulse) { { pulseWaveScale(pulse) } }
-    val policy = remember(stage, ambient, ambientClock, pulse) { TvStagePolicy(stage, ambient, ambientClock, pulse) }
+    val waveBpm = remember(pulse) { { pulseWaveBpm(pulse) } }
+    val policy = remember(stage, ambient, ambientClock) { TvStagePolicy(stage, ambient, ambientClock) }
 
     Layout(
         contents = listOf<@Composable () -> Unit>(
@@ -193,6 +193,7 @@ internal fun TvPlayer(
                     playFocus = playFocus,
                     rowFocus = dockRow,
                     waveScale = waveScale,
+                    waveBpm = waveBpm,
                     alpha = chromeAlpha,
                     onOpenQueue = onOpenQueue,
                     onOpenTimer = onOpenTimer,
@@ -280,6 +281,7 @@ private fun TvDock(
     playFocus: FocusRequester,
     rowFocus: FocusRequester,
     waveScale: () -> Float,
+    waveBpm: () -> Float,
     alpha: () -> Float,
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
@@ -345,6 +347,7 @@ private fun TvDock(
                 modifier = Modifier.weight(1f).tvFocusRing(RoundedCornerShape(16.dp), scale = 1f),
                 showTimes = false,
                 amplitudeScale = waveScale,
+                waveBpm = waveBpm,
             )
             Text(formatTime(duration), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -433,13 +436,11 @@ private fun TvClock(fade: State<Float>) {
 /**
  * 电视播放页的摆放：过渡进度 [stage]（0 控制条显示，1 环境模式）只在测量和摆放阶段读，逐帧不重组。
  * 封面按环境模式的大小测量一次，默认模式用图层缩小，过渡中不重新排版封面；歌词栏逐帧改高度（只重新测量列表）。
- * 封面中心按实际位置写给 [pulse]，背景的鼓点光环从这里散开，任何屏幕尺寸都对得上。
  */
 private class TvStagePolicy(
     private val stage: State<Float>,
     private val ambient: Boolean,
     private val clock: Boolean,
-    private val pulse: BackdropPulse,
 ) : MultiContentMeasurePolicy {
     override fun MeasureScope.measure(measurables: List<List<Measurable>>, constraints: Constraints): MeasureResult {
         val width = constraints.maxWidth
@@ -469,7 +470,6 @@ private class TvStagePolicy(
         val clockText = measurables[SlotClock].firstOrNull()?.measure(Constraints())
 
         return layout(width, height) {
-            pulse.rippleOrigin = frame.coverCenter(p, width.toFloat(), height.toFloat())
             val coverScale = frame.coverSize(p) / coverSide.coerceAtLeast(1)
             cover.placeWithLayer((TvDp.CoverStart * unit).roundToInt(), frame.coverY(p).roundToInt()) {
                 scaleX = coverScale
@@ -521,12 +521,6 @@ internal class TvStageFrame(
         max(lerp(TvDp.LyricsTop, TvDp.LyricsTopAmbient, p) * unit, metaBottom + TvDp.MetaGap * unit)
 
     fun lyricsBottom(p: Float): Float = lerp(lyricsDefaultBottom, lyricsAmbientBottom, p)
-
-    /** 封面中心占屏幕宽高的比例（背景光环的散开点，摆放时写给 [BackdropPulse.rippleOrigin]）。 */
-    fun coverCenter(p: Float, width: Float, height: Float): Offset {
-        val half = coverSize(p) / 2f
-        return Offset((TvDp.CoverStart * unit + half) / width, (coverY(p) + half) / height)
-    }
 }
 
 /**

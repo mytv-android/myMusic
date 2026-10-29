@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialShapes
@@ -42,7 +43,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -83,12 +86,13 @@ import kotlin.random.Random
  * - 旋转：播放时外轮廓 40 秒一圈（没有封面图时转的是首字占位的轮廓），画面本身保持正向；暂停时停下并随形变转回正向。
  *   减少动画时不转、形变直接切换。电视上旋转和背景共用 30 帧节拍（[TvFrameGate]）。
  * - [collapsed]：收成圆形（手机歌词页左上角的小封面），光晕淡出，手势和读屏描述交给调用方。
+ * - 跟拍（[pulse]）：封面弹一下、光晕亮一下并放大一点，封面轮廓往外散开同形状的光环（画在光晕后面）。
  *
  * 形变和旋转都只在绘制阶段读：遮罩路径按 Morph 进度缓存，旋转是画布变换，逐帧不触发重组和布局。
  * 尺寸由 [modifier] 决定（正方形）；光晕画在边界外，父布局不要裁剪。
  *
  * @param trackKey 歌曲 key：随机形状按它记忆，封面图按 [cover] 地址交叉淡入。
- * @param pulse 律动信号；光晕随低频慢包络变亮。没有背景律动时传 null。
+ * @param pulse 律动信号；光晕随低频慢包络变亮，封面、光晕和光环跟拍。没有背景律动时传 null。
  * @param onSkip 横滑切歌（-1 上一首，1 下一首）；null 时不响应横滑。
  * @param onDoubleTap 双击（收藏）；null 时不响应双击。
  * @param sharedElement 是否参与迷你播放器 ↔ 播放页的共享封面转场（只有手机播放页需要）。
@@ -207,6 +211,9 @@ fun CoverStage(
                 },
             ),
     ) {
+        if (halo && pulse != null) {
+            CoverRipples(stage, pulse, haloAlpha, offset = { drag.offset }, fadeDistance = { currentThreshold * 4 })
+        }
         if (halo) {
             CoverHalo(cover, pulse, haloAlpha, offset = { drag.offset }, fadeDistance = { currentThreshold * 4 })
         }
@@ -219,6 +226,10 @@ fun CoverStage(
                 .graphicsLayer {
                     translationX = drag.offset
                     alpha = 1f - (abs(drag.offset) / (currentThreshold * 4)).coerceIn(0f, 0.5f)
+                    // 跟拍弹一下；收成小圆时不弹
+                    val pop = if (collapsed) 1f else pulse?.coverScale ?: 1f
+                    scaleX = pop
+                    scaleY = pop
                     // 离屏合成后用 DstOut 擦掉形状以外的部分：低版本上 clipPath 没有抗锯齿，大封面的边缘会有锯齿
                     compositingStrategy = CompositingStrategy.Offscreen
                 }
@@ -329,7 +340,96 @@ private class CoverImageSwap(initial: String) {
 }
 
 /**
- * 封面后的光晕：同一张图放大到 1.03 倍（原型的内缩 4% 再放大 1.12），饱和度 1.4，透明度 0.62，律动时随低频慢包络变亮。
+ * 封面轮廓散开的形状光环（见 [BackdropPulse.rippleGrow]）：从轮廓外 2% 起往外扩，描边随扩散变细，跟着外轮廓一起转。
+ * 原型画在背景里、遮罩下面；这里画在封面层，透明度按封面附近遮罩的深浅（约 25%）先压一下。
+ * 节点按 1/[RIPPLE_DOWNSCALE] 布局再用图层放大，Android 12+ 再做一点模糊（原型是封面半径的 5%）。
+ * 没有光环时什么都不画；有光环时跟着背景的帧循环每帧重画。
+ */
+@Composable
+private fun CoverRipples(
+    stage: CoverStageState,
+    pulse: BackdropPulse,
+    visible: State<Float>,
+    offset: () -> Float,
+    fadeDistance: () -> Float,
+) {
+    val color = MaterialTheme.colorScheme.primary
+    Spacer(
+        Modifier
+            .layout { measurable, constraints ->
+                val width = constraints.maxWidth
+                val height = constraints.maxHeight
+                val small = ceil(width * RIPPLE_SIDE / RIPPLE_DOWNSCALE).toInt().coerceAtLeast(1)
+                val placeable = measurable.measure(Constraints.fixed(small, small))
+                layout(width, height) {
+                    placeable.placeWithLayer((width - small) / 2, (height - small) / 2) {
+                        scaleX = RIPPLE_DOWNSCALE
+                        scaleY = RIPPLE_DOWNSCALE
+                        translationX = offset()
+                        val dragFade = 1f - (abs(offset()) / fadeDistance()).coerceIn(0f, 0.5f)
+                        alpha = (visible.value * dragFade).coerceIn(0f, 1f)
+                    }
+                }
+            }
+            .then(
+                if (Build.VERSION.SDK_INT >= 31) {
+                    Modifier.graphicsLayer {
+                        val sigma = size.width / RIPPLE_SIDE / 2f * RIPPLE_BLUR
+                        val radius = ((sigma - 0.5f) / 0.57735f).coerceAtLeast(1f)
+                        renderEffect = BlurEffect(radius, radius, TileMode.Decal)
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .drawWithCache {
+                // 封面在这个图层里的边长；形状路径按它建，只随形变重建
+                val side = size.width / RIPPLE_SIDE
+                val shape = Path()
+                val scratch = MutableCubic()
+                var builtMorph: Morph? = null
+                var builtProgress = Float.NaN
+                // 描边按年龄分档缓存，逐帧不新建
+                val strokes = arrayOfNulls<Stroke>(RIPPLE_STROKE_STEPS)
+                val maxGrow = FlowFieldMotion.rippleGrow(FlowFieldMotion.RIPPLE_LIFE_S)
+                onDrawBehind {
+                    pulse.rippleFrame
+                    val count = pulse.rippleCount
+                    if (count == 0) return@onDrawBehind
+                    val morph = stage.morph
+                    val progress = stage.drawProgress
+                    if (morph !== builtMorph || progress != builtProgress) {
+                        morph.fillPath(progress, shape, scratch, side, side)
+                        builtMorph = morph
+                        builtProgress = progress
+                    }
+                    val angle = stage.angle
+                    for (i in 0 until count) {
+                        val grow = pulse.rippleGrow[i]
+                        val alpha = pulse.rippleAlpha[i] * RIPPLE_UNDER_SCRIM
+                        if (alpha <= 0f) continue
+                        val scale = RIPPLE_START + grow
+                        // 描边宽度按封面半径算，路径放大了 scale 倍，宽度先除掉
+                        val width = side / 2f * (RIPPLE_WIDTH - RIPPLE_THIN * grow.coerceAtMost(1f)) / scale
+                        withTransform({
+                            translate(size.width / 2f, size.height / 2f)
+                            scale(scale, scale, Offset.Zero)
+                            rotate(angle, Offset.Zero)
+                            translate(-side / 2f, -side / 2f)
+                        }) {
+                            val step = (grow / maxGrow * RIPPLE_STROKE_STEPS).toInt().coerceIn(0, RIPPLE_STROKE_STEPS - 1)
+                            val stroke = strokes[step] ?: Stroke(width).also { strokes[step] = it }
+                            drawPath(shape, color, alpha = alpha.coerceAtMost(1f), style = stroke)
+                        }
+                    }
+                }
+            },
+    )
+}
+
+/**
+ * 封面后的光晕：同一张图放大到 1.03 倍（原型的内缩 4% 再放大 1.12），饱和度 1.4，透明度 0.62，律动时随低频慢包络变亮，
+ * 跟拍再亮一下、放大一点（[BackdropPulse.haloBoost]、[BackdropPulse.haloScale]）。
  * 节点按 1/[HALO_DOWNSCALE] 布局再用图层放大：Android 12+ 用 RenderEffect 模糊，模糊只在小图层上做；
  * 更低版本没有模糊，改用 24px 的小图放大，再用径向渐变把边缘渐隐成圆形，本身就足够柔和。
  */
@@ -364,10 +464,11 @@ private fun CoverHalo(
                 val placeable = measurable.measure(Constraints.fixed(small, small))
                 layout(width, height) {
                     placeable.placeWithLayer((width - small) / 2, (height - small) / 2) {
-                        scaleX = HALO_DOWNSCALE
-                        scaleY = HALO_DOWNSCALE
+                        val grow = pulse?.haloScale ?: 1f
+                        scaleX = HALO_DOWNSCALE * grow
+                        scaleY = HALO_DOWNSCALE * grow
                         translationX = offset()
-                        val bright = pulse?.let { FlowIntensity.of(it.intensity).cover * it.swell } ?: 0f
+                        val bright = pulse?.haloBoost ?: 0f
                         val dragFade = 1f - (abs(offset()) / fadeDistance()).coerceIn(0f, 0.5f)
                         alpha = ((HALO_ALPHA + bright) * visible.value * dragFade).coerceIn(0f, 1f)
                     }
@@ -606,3 +707,11 @@ private const val HALO_SATURATION = 1.4f
 private const val HALO_DOWNSCALE = 4f
 private const val HALO_BLUR_PX = 96
 private const val HALO_TINY_PX = 24
+private const val RIPPLE_SIDE = 2.4f
+private const val RIPPLE_DOWNSCALE = 4f
+private const val RIPPLE_START = 1.02f
+private const val RIPPLE_WIDTH = 0.16f
+private const val RIPPLE_THIN = 0.1f
+private const val RIPPLE_BLUR = 0.05f
+private const val RIPPLE_UNDER_SCRIM = 0.75f
+private const val RIPPLE_STROKE_STEPS = 24

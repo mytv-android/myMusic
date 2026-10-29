@@ -19,12 +19,16 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -36,14 +40,19 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.data.LyricsBackgroundMode
+import com.mytv.mymusic.data.RHYTHM_OFFSET_MAX_MS
 import com.mytv.mymusic.data.RhythmIntensity
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
@@ -55,6 +64,7 @@ import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.player.label
 import com.mytv.mymusic.ui.player.polygon
+import com.mytv.mymusic.ui.player.rhythmDebugAvailable
 
 internal val LyricsBackgroundMode.label: String
     get() = when (this) {
@@ -67,10 +77,11 @@ internal val RhythmIntensity.label: String
     get() = when (this) {
         RhythmIntensity.Soft -> "柔和"
         RhythmIntensity.Standard -> "标准"
+        RhythmIntensity.Strong -> "强烈"
     }
 
 /**
- * 设置 → 播放页（枚举仍叫 Lyrics）：封面形状、歌词背景、律动强度，电视上再加环境模式时钟。
+ * 设置 → 播放页（枚举仍叫 Lyrics）：封面形状、歌词背景、律动强度和跟拍校准，电视上再加环境模式时钟。
  * 都只存在本机，改了立即生效。
  */
 @Composable
@@ -82,6 +93,7 @@ fun LyricsSettingsScreen(
 ) {
     val window = LocalAppWindow.current
     val mode = state.lyricsBackground
+    val debuggable = rhythmDebugAvailable()
     SettingsPage(SettingsSection.Lyrics, embedded, onBack) {
         item(key = "shapeHead", contentType = "sectionHeader") { SectionLabel("封面形状") }
         item(key = "shapes", contentType = "coverShapes") {
@@ -109,7 +121,7 @@ fun LyricsSettingsScreen(
                     when (mode) {
                         LyricsBackgroundMode.Off -> "播放页使用纯色背景，封面和歌词内容不受影响。"
                         LyricsBackgroundMode.Ambient -> "取自封面颜色的几团光在背景里缓慢漂移，不随音乐变化。"
-                        LyricsBackgroundMode.Reactive -> "音乐调节光团的漂移速度和光量：响的段落流得快、亮一些，安静时慢下来。画面不再跟着鼓点晃动，也不会闪白。"
+                        LyricsBackgroundMode.Reactive -> "段落的强弱调节光团的流速和光量；听得出拍子时，光晕、封面和流光按拍子律动，和你听到的声音对齐。整屏不会跟着鼓点闪白。"
                     },
                 )
             }
@@ -123,12 +135,28 @@ fun LyricsSettingsScreen(
                     selected = state.rhythmIntensity,
                     onSelect = actions::setRhythmIntensity,
                     label = { it.label },
-                    // 双栏里两档按钮和上面三档的单个按钮差不多宽，不拉满整栏
-                    modifier = Modifier.widthIn(max = if (window.twoPane) 320.dp else 480.dp).fillMaxWidth(),
+                    modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
                 )
             }
             item(key = "intensityNote", contentType = "note") {
-                SettingsNote("柔和只改流速和光量，没有鼓点光环。标准下光团随低频胀缩，鼓点时从封面散开一圈很淡的光环。")
+                SettingsNote("柔和只有光晕和流光跟拍。标准再加上封面弹跳，小节首拍从封面轮廓散开一圈光。强烈弹得更明显，每一拍都有光环。")
+            }
+            item(key = "offsetHead", contentType = "sectionHeader") { SectionLabel("跟拍校准") }
+            item(key = "offset", contentType = "rhythmOffset") { RhythmOffsetRow(state.rhythmOffsetMs, actions::setRhythmOffset) }
+            item(key = "offsetNote", contentType = "note") {
+                SettingsNote("律动总比鼓点早或晚一点时在这里调（蓝牙耳机、外接音箱常见）：正数让画面晚一点，负数提前。只影响本机。")
+            }
+            if (debuggable) {
+                item(key = "rhythmDebug", contentType = "switch") {
+                    SwitchRow(
+                        title = "显示跟拍调试信息",
+                        checked = state.rhythmDebug,
+                        onCheckedChange = actions::setRhythmDebug,
+                        index = 0,
+                        count = 1,
+                        summary = "播放页左上角显示速度、置信度、分析领先量，每拍闪一下",
+                    )
+                }
             }
             item(key = "reactiveNote", contentType = "note") {
                 SettingsNote(
@@ -153,6 +181,48 @@ fun LyricsSettingsScreen(
         }
     }
 }
+
+/**
+ * 跟拍校准：−200..+200ms，一次 10ms。用两个按钮而不是滑块：电视遥控器上一下一格，手机上也能点到精确的值。
+ * 到头了按钮也不禁用（只是不再变），电视上焦点不会因为按钮变灰而跳走。
+ */
+@Composable
+private fun RhythmOffsetRow(value: Int, onChange: (Int) -> Unit) {
+    Row(
+        Modifier
+            .widthIn(max = 480.dp)
+            .fillMaxWidth()
+            .clip(segmentShape(0, 1))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilledTonalIconButton(
+            onClick = { onChange((value - RHYTHM_OFFSET_STEP_MS).coerceAtLeast(-RHYTHM_OFFSET_MAX_MS)) },
+            modifier = Modifier.tvFocusRing(CircleShape),
+        ) { Icon(Icons.Filled.Remove, contentDescription = "画面提前 10 毫秒") }
+        Text(
+            rhythmOffsetLabel(value),
+            Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+        )
+        FilledTonalIconButton(
+            onClick = { onChange((value + RHYTHM_OFFSET_STEP_MS).coerceAtMost(RHYTHM_OFFSET_MAX_MS)) },
+            modifier = Modifier.tvFocusRing(CircleShape),
+        ) { Icon(Icons.Filled.Add, contentDescription = "画面推迟 10 毫秒") }
+        TextButton(onClick = { onChange(0) }, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("归零") }
+    }
+}
+
+internal fun rhythmOffsetLabel(ms: Int): String = when {
+    ms > 0 -> "画面晚 $ms 毫秒"
+    ms < 0 -> "画面早 ${-ms} 毫秒"
+    else -> "不调整"
+}
+
+private const val RHYTHM_OFFSET_STEP_MS = 10
 
 /**
  * 形状选择器：手机和平板是卡片里的 4 列网格，电视一行 7 个（窄窗口的强制电视布局会自动换行）。

@@ -93,15 +93,4 @@ class TvStageLayoutTest {
         assertEquals(800f, f.textX(0f), 0.01f)
         assertEquals(272f, f.lyricsTop(0f, metaBottom = 232f), 0.01f)
     }
-
-    @Test
-    fun coverCentreFractionsForTheBackdropRipple() {
-        val f = frame()
-        val default = f.coverCenter(0f, width, height)
-        assertEquals(212f / 960f, default.x, 0.001f)
-        assertEquals(190f / 540f, default.y, 0.001f)
-        val ambient = f.coverCenter(1f, width, height)
-        assertEquals(222f / 960f, ambient.x, 0.001f)
-        assertEquals(210f / 540f, ambient.y, 0.001f)
-    }
 }

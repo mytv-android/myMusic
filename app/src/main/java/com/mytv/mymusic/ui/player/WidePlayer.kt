@@ -146,6 +146,7 @@ internal fun WidePlayer(
     val defaultChrome = remember(fade, chrome) { { chrome.value * (1f - fade.value) } }
     val focusChrome = remember(fade, chrome) { { chrome.value * fade.value } }
     val waveScale = remember(pulse) { { pulseWaveScale(pulse) } }
+    val waveBpm = remember(pulse) { { pulseWaveBpm(pulse) } }
     val focusTarget = rememberUpdatedState(lyricsMode)
     val density = LocalDensity.current
 
@@ -184,7 +185,7 @@ internal fun WidePlayer(
                 {
                     if (showDefault) {
                         WideGuard(idle, lyricsMode, Modifier.graphicsLayer { alpha = defaultChrome() }) {
-                            WavySeekBar(position, duration, playing, actions::seek, Modifier.fillMaxWidth(), amplitudeScale = waveScale)
+                            WavySeekBar(position, duration, playing, actions::seek, Modifier.fillMaxWidth(), amplitudeScale = waveScale, waveBpm = waveBpm)
                         }
                     }
                 },
@@ -219,7 +220,7 @@ internal fun WidePlayer(
                 {
                     if (showFocus) {
                         WideGuard(null, !lyricsMode, Modifier.graphicsLayer { alpha = focusAlpha() }) {
-                            WavySeekBar(position, duration, playing, actions::seek, Modifier.fillMaxWidth(), amplitudeScale = waveScale)
+                            WavySeekBar(position, duration, playing, actions::seek, Modifier.fillMaxWidth(), amplitudeScale = waveScale, waveBpm = waveBpm)
                         }
                     }
                 },

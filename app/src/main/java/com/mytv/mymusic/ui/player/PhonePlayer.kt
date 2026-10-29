@@ -123,6 +123,7 @@ internal fun PhonePlayer(
     val lyricsAlpha = remember(pageFade) { { pageFade.value } }
     val chromeAlpha = remember(pageFade, chrome) { { chrome.value * (1f - pageFade.value) } }
     val waveScale = remember(pulse) { { pulseWaveScale(pulse) } }
+    val waveBpm = remember(pulse) { { pulseWaveBpm(pulse) } }
     // 没有同步歌词时两行预览不占位。解析中 lyrics 还是上一份结果，占位保持不变，结果出来只变一次；
     // 刚打开播放页就在解析时先按有歌词留着，绝大多数歌都有，免得打开后再撑开一次
     val previewHeld = remember { booleanArrayOf(lyrics.synced || lyricsLoading) }
@@ -158,6 +159,7 @@ internal fun PhonePlayer(
                         blocked = lyricsMode,
                         alpha = chromeAlpha,
                         waveScale = waveScale,
+                        waveBpm = waveBpm,
                         onLyricsMode = onLyricsMode,
                         onOpenQueue = onOpenQueue,
                         onOpenTimer = onOpenTimer,
@@ -185,6 +187,7 @@ internal fun PhonePlayer(
                         blocked = !lyricsMode,
                         alpha = lyricsAlpha,
                         waveScale = waveScale,
+                        waveBpm = waveBpm,
                         onLyricsMode = onLyricsMode,
                         onOpenQueue = onOpenQueue,
                         onSkip = onSkip,
@@ -420,6 +423,7 @@ private fun PhoneControls(
     blocked: Boolean,
     alpha: () -> Float,
     waveScale: () -> Float,
+    waveBpm: () -> Float,
     onLyricsMode: (Boolean) -> Unit,
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
@@ -436,6 +440,7 @@ private fun PhoneControls(
                 actions::seek,
                 Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                 amplitudeScale = waveScale,
+                waveBpm = waveBpm,
             )
             TransportButtonGroup(
                 playing = playing,
@@ -495,6 +500,7 @@ private fun PhoneLyricsPage(
     blocked: Boolean,
     alpha: () -> Float,
     waveScale: () -> Float,
+    waveBpm: () -> Float,
     onLyricsMode: (Boolean) -> Unit,
     onOpenQueue: () -> Unit,
     onSkip: (Int) -> Unit,
@@ -540,7 +546,7 @@ private fun PhoneLyricsPage(
         IdleGuard(idle, false, Modifier.padding(start = 20.dp, end = 16.dp, bottom = 8.dp).graphicsLayer { this.alpha = chrome.value }) {
             val awake = !idle.idle
             Column {
-                WavySeekBar(position, duration, playing && awake, actions::seek, Modifier.padding(start = 4.dp, end = 8.dp), amplitudeScale = waveScale)
+                WavySeekBar(position, duration, playing && awake, actions::seek, Modifier.padding(start = 4.dp, end = 8.dp), amplitudeScale = waveScale, waveBpm = waveBpm)
                 Row(
                     Modifier.fillMaxWidth().padding(top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,

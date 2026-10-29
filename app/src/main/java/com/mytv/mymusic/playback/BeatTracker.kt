@@ -55,6 +55,9 @@ class BeatState internal constructor(
     }
 }
 
+/** 起拍落在窗口里的平均位置：检测到的帧比真实起拍晚这么多（秒，原型仿真标定）。界面把低频起拍交给拍子时钟时也扣掉它。 */
+internal const val ONSET_DETECT_LAG_S = 0.03
+
 /**
  * 节拍跟踪，跑在分析线程上（单线程使用）。输入每个分析帧的 pts 和两路谱通量，输出 [BeatGrid]。
  *
@@ -63,7 +66,7 @@ class BeatState internal constructor(
  *   在 60–180 BPM 间每 0.25 BPM 算错开一拍和两拍的自相关，乘一个偏向 100 BPM 的先验，取峰值再插值。
  *   换速度要连续几次都明显更好（刚锁上 6 秒内门槛放低）；差 3% 以内只微调。
  * - 相位：最近 4 秒里找一组等间隔的位置让落上的起拍最多，近的拍权重大；网格每次只往测量值拉 35%，拍号保持连续。
- * - 置信度：错开一拍（或两拍）后的相关程度 × 相位梳的峰有多突出 × 网格位置上有起拍的比例；没有拍的音乐前两者都平，
+ * - 置信度：错开一拍（或两拍、一小节）后的相关程度 × 相位梳的峰有多突出 × 网格位置上有起拍的比例；没有拍的音乐前两者都平，
  *   随机的打击声偶尔凑巧等距时靠第三项压住（原型之外加的一项，随机起拍序列的误锁从 3–15% 降到 1.5% 以内）。
  * - 小节首拍：每拍附近的低频起拍强度按拍号对 4 取余累加，最重的一组。
  * - 跳转：同一首里往回走或一下跳出两秒，速度留着，1.5 秒后只重新对相位。
@@ -321,8 +324,10 @@ internal class BeatTracker(fps: Double = RHYTHM_TARGET_FPS.toDouble()) {
                 }
             }
         }
-        // 没有拍的音乐这个相关在 0.2 上下
-        val r = max(rho(period), rho(2 * period))
+        // 没有拍的音乐这个相关在 0.2 上下。说唱、切分重的律动常常一拍、两拍错开都不像，要错开一整小节才像
+        // （真机录的说唱一拍 0 上下、一小节 0.4–0.46），所以也看一小节；错开后重叠不到 4 秒就不看，太短不可信
+        val bar = if (4 * period * fps <= smoothedCount - RECENT_S * fps) rho(4 * period) else 0.0
+        val r = maxOf(rho(period), rho(2 * period), bar)
         tempoConf = smooth01((r - 0.22) / (0.42 - 0.22))
         updatePhase()
         updateConf()
@@ -377,7 +382,7 @@ internal class BeatTracker(fps: Double = RHYTHM_TARGET_FPS.toDouble()) {
             comb[bestJ],
             comb[(bestJ + 1) % PHASE_STEPS],
         )
-        val measured = ptsOf(last - (bestJ + off) / PHASE_STEPS * p) - DETECT_LAG_S
+        val measured = ptsOf(last - (bestJ + off) / PHASE_STEPS * p) - ONSET_DETECT_LAG_S
         if (fresh) {
             t0 = measured
             k0 = 0L
@@ -425,7 +430,7 @@ internal class BeatTracker(fps: Double = RHYTHM_TARGET_FPS.toDouble()) {
         var kFrom = if (counted == NOT_COUNTED) kTo - floor(3.0 / period).toLong() else counted - k0 + 1
         kFrom = max(kFrom, kTo - STRENGTH_KEPT)
         for (k in kFrom..kTo) {
-            val x = frameOf(t0 + k * period + DETECT_LAG_S)
+            val x = frameOf(t0 + k * period + ONSET_DETECT_LAG_S)
             var s = 0.0
             for (d in -2..2) s = max(s, value(x + d, bass))
             val index = k0 + k
@@ -481,8 +486,6 @@ internal class BeatTracker(fps: Double = RHYTHM_TARGET_FPS.toDouble()) {
         const val PRIOR_BPM = 100.0
         const val PRIOR_WIDTH = 0.7
 
-        /** 起拍落在窗口里的平均位置：检测到的帧比真实起拍晚这么多（秒，原型仿真标定）。 */
-        const val DETECT_LAG_S = 0.03
 
         /** 军鼓、拍手那一路只帮着定拍，不让钢琴八分音符、拍手把速度拉成两倍或一半。 */
         const val MID_WEIGHT = 0.3f

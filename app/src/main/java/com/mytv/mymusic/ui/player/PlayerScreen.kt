@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,7 +53,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -179,13 +179,7 @@ fun PlayerScreen(
             intensity = state.rhythmIntensity,
             wide = wideBackdrop,
             pulse = pulse,
-            // 光环从封面中心散开，坐标按各布局里封面的位置（宽高比例）。电视按实际位置在摆放时写给 pulse，这里只是第一帧前的兜底
-            rippleOrigin = when {
-                window.isTv -> Offset(0.23f, 0.37f)
-                wideBackdrop -> if (lyricsMode) Offset(0.06f, 0.21f) else Offset(0.22f, 0.29f)
-                lyricsMode -> Offset(0.13f, 0.08f)
-                else -> Offset(0.5f, 0.3f)
-            },
+            rhythmOffsetMs = state.rhythmOffsetMs,
             // 手机歌词页、平板专注歌词整体压暗一些；电视底部额外加深，给控制条和细进度留对比度
             scrim = when {
                 window.isTv -> BackdropScrim.Tv
@@ -276,6 +270,9 @@ fun PlayerScreen(
             )
         }
         HeartBurst(burst, Modifier.align(Alignment.Center))
+        if (state.rhythmDebug && rhythmDebugAvailable()) {
+            RhythmDebugOverlay(pulse, state.rhythmOffsetMs, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp))
+        }
     }
 }
 
@@ -337,13 +334,20 @@ internal fun MoreMenu(
 }
 
 /**
- * 进度条波幅倍数：只在律动“标准”档下随低频强弱“呼吸”，其余情况固定 1；设计稿规定最大 1 倍。
+ * 进度条波幅倍数：只在律动“标准”“强烈”档下随低频强弱“呼吸”，其余情况固定 1；设计稿规定最大 1 倍。
  * 跟的是低频慢包络 [BackdropPulse.swell]（0.3s 起、1s 落），不是逐帧低频：指示器把波幅变化做成 500ms 补间，
  * 补间进行中不接新值，逐帧低频交给它只会变成每半秒随机抽一个样，和节拍对不上；慢包络本身就比 500ms 慢，抽样也跟得住。
  * 繁忙段落的包络在 0.5–0.7，加上 0.3 后接近满幅，安静段落落到一半左右。只在绘制阶段调用（WavySeekBar 的 amplitudeScale）。
  */
 internal fun pulseWaveScale(pulse: BackdropPulse): Float =
-    if (pulse.reactive && pulse.intensity == RhythmIntensity.Standard) (0.3f + pulse.swell).coerceAtMost(1f) else 1f
+    if (pulse.reactive && pulse.intensity != RhythmIntensity.Soft) (0.3f + pulse.swell).coerceAtMost(1f) else 1f
+
+/**
+ * 进度条的波速跟拍子：“标准”“强烈”档锁上拍子后每拍走一个波长，其余情况 0（用指示器默认的每秒一个波长）。
+ * [BackdropPulse.bpm] 只在变化超过 2% 时更新，可以在组合阶段读（WavySeekBar 的 waveBpm）。
+ */
+internal fun pulseWaveBpm(pulse: BackdropPulse): Float =
+    if (pulse.reactive && pulse.intensity != RhythmIntensity.Soft) pulse.bpm else 0f
 
 /**
  * 收藏切换按钮（M3E）：48dp，未收藏是透明底的圆，收藏后变成 14dp 圆角的 primaryContainer 方块，

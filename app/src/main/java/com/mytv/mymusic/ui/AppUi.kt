@@ -205,6 +205,8 @@ class MusicActions(private val model: MusicViewModel) {
     fun setRhythmIntensity(value: com.mytv.mymusic.data.RhythmIntensity) = model.setRhythmIntensity(value)
     fun setCoverShape(value: com.mytv.mymusic.data.CoverShapeChoice) = model.setCoverShape(value)
     fun setTvAmbientClock(value: Boolean) = model.setTvAmbientClock(value)
+    fun setRhythmOffset(value: Int) = model.setRhythmOffset(value)
+    fun setRhythmDebug(value: Boolean) = model.setRhythmDebug(value)
     fun startSleepTimer(minutes: Int) = model.startSleepTimer(minutes)
     fun sleepAfterCurrent() = model.sleepAfterCurrent()
     fun cancelSleepTimer() = model.cancelSleepTimer()

@@ -8,9 +8,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 internal const val RHYTHM_TARGET_FPS = 30
@@ -21,7 +21,11 @@ internal fun rhythmHopSamples(sampleRateHz: Int): Int =
 
 /**
  * Taps decoded playback PCM without using the microphone or modifying the samples.
- * FFT work stays off ExoPlayer's audio thread; at most one analysis job is queued.
+ * FFT work stays off ExoPlayer's audio thread.
+ *
+ * AudioSink 是一块一块灌数据的：起播、跳转后一口气灌满半秒的缓冲，平时一次几十毫秒，一块里常有好几个分析点。
+ * 每个分析点的窗口都按顺序排队交给分析线程（[WINDOW_POOL] 个窗口轮着用），节拍跟踪要的是连续的起拍曲线；
+ * 只在分析线程落后太多、窗口用完时才丢帧，丢掉的帧跟踪器按空帧补。
  *
  * 取样点在 AudioTrack 之前，分析比耳朵早一个缓冲（约半秒）。每个分析帧带上窗口末尾的媒体时刻 [RhythmFrame.ptsUs]，
  * 放进 [timeline]；界面按 [clock] 推算的“此刻听到的位置”取帧，画面就和声音对上了。
@@ -59,16 +63,18 @@ class RhythmAnalyzer {
     private var encoding = C.ENCODING_PCM_16BIT
 
     private val generation = AtomicInteger()
+    private val song = AtomicInteger()
     private val frameLock = Any()
 
     // Guarded by frameLock. Never cleared on reset, so the UI never sees the count move and mistake a reset for a kick.
     private var kickCount = 0
-    private val queued = AtomicBoolean(false)
     private var executor: ExecutorService? = null
 
-    // The ring is audio-thread confined; analysisInput is handed to one queued worker at a time.
+    // The ring is audio-thread confined; each queued job owns one window from the pool until it finishes.
     private val ring = FloatArray(RHYTHM_FFT_SIZE)
-    private val analysisInput = FloatArray(RHYTHM_FFT_SIZE)
+    private val windows = ArrayBlockingQueue<FloatArray>(WINDOW_POOL).apply {
+        repeat(WINDOW_POOL) { add(FloatArray(RHYTHM_FFT_SIZE)) }
+    }
     private var ringGeneration = -1
     private var ringWrite = 0
     private var ringSize = 0
@@ -90,6 +96,7 @@ class RhythmAnalyzer {
     private val analysis = RhythmAnalysis()
     private var analysisGeneration = -1
     private var analysisStream = 0
+    private var analysisSong = 0
     private var lastAnalysisPtsUs = NO_BOUNDARY
     private val tracker = BeatTracker()
     private var trackerRevision = -1
@@ -111,6 +118,14 @@ class RhythmAnalyzer {
             beats = BeatState.EMPTY
             _frames.value = RhythmFrame(kickCount = kickCount)
         }
+    }
+
+    /**
+     * 播放器换了一首（点歌、上一首 / 下一首、换队列）。这种跳转渲染器的偏移不变，音频线程上和同一首里拖进度分不出来；
+     * 不说的话节拍跟踪会沿用上一首的速度、跳转后一秒多就按旧速度锁上。分析线程处理下一帧时把速度清掉。
+     */
+    fun onNewSong() {
+        song.incrementAndGet()
     }
 
     /** [RhythmAudioSink]：AudioSink 正要处理 pts 为 [ptsUs] 的缓冲（同一个缓冲分几次交时每次都报）。 */
@@ -206,13 +221,13 @@ class RhythmAnalyzer {
             boundaryPtsUs = NO_BOUNDARY
             streamSerial++
         }
-        if (!queued.compareAndSet(false, true)) return
+        val window = windows.poll() ?: return
         val stream = streamSerial
         val streamStart = streamStartUs
         val hop = hopSamples
         val oldest = (ringWrite - ring.size + ring.size) % ring.size
         repeat(ring.size) { index ->
-            analysisInput[index] = ring[(oldest + index) % ring.size]
+            window[index] = ring[(oldest + index) % ring.size]
         }
         val rate = sampleRateHz
         try {
@@ -238,6 +253,14 @@ class RhythmAnalyzer {
                         analysisStream = stream
                         lastAnalysisPtsUs = NO_BOUNDARY
                     }
+                    // 换了一首：不管上面是不是按跳转留了速度，都从头来（播放器的通知可能比清空处理链早，也可能晚一点）
+                    val currentSong = song.get()
+                    if (currentSong != analysisSong) {
+                        analysisSong = currentSong
+                        tracker.reset(keepTempo = false)
+                        previousGrid = null
+                        trackerRevision = -1
+                    }
                     // 按媒体时间算间隔：起播和跳转后 AudioSink 一口气灌满缓冲，墙上时钟的间隔不代表音乐走了多久
                     val dtMs = if (lastAnalysisPtsUs == NO_BOUNDARY) {
                         1000f / RHYTHM_TARGET_FPS
@@ -245,7 +268,7 @@ class RhythmAnalyzer {
                         ((ptsUs - lastAnalysisPtsUs) / 1_000f).coerceIn(1f, 200f)
                     }
                     lastAnalysisPtsUs = ptsUs
-                    val result = analysis.analyzePcm(analysisInput, rate, dtMs)
+                    val result = analysis.analyzePcm(window, rate, dtMs)
                     tracker.push(ptsUs / 1e6, result.fluxBass, result.fluxMid)
                     synchronized(frameLock) {
                         // Stale-generation results are dropped without being counted.
@@ -261,12 +284,12 @@ class RhythmAnalyzer {
                         }
                     }
                 } finally {
-                    queued.set(false)
+                    windows.offer(window)
                 }
             }
         } catch (_: RuntimeException) {
             // Analysis is visual-only; executor rejection must not interrupt playback.
-            queued.set(false)
+            windows.offer(window)
         }
     }
 
@@ -281,5 +304,8 @@ class RhythmAnalyzer {
 
     private companion object {
         const val NO_BOUNDARY = Long.MIN_VALUE
+
+        /** 排队中的分析窗口上限：16 帧约半秒，盖得住起播时一口气灌进来的缓冲。 */
+        const val WINDOW_POOL = 16
     }
 }

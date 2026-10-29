@@ -2,6 +2,7 @@ package com.mytv.mymusic.playback
 
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -43,6 +44,19 @@ class PlaybackService : MediaSessionService() {
         }
         app?.let { builder.setRenderersFactory(RhythmRenderersFactory(this, it.rhythmAnalyzer)) }
         val player = builder.build()
+        app?.rhythmAnalyzer?.let { analyzer ->
+            player.addListener(object : Player.Listener {
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    // 点歌、上一首 / 下一首、换了队列：渲染器的偏移不变，音频这边看着和同一首里跳转一样，得从这里告诉节拍跟踪。
+                    // 自动接下一首由输出段偏移判断；单曲循环本来就该留着速度
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK ||
+                        reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED
+                    ) {
+                        analyzer.onNewSong()
+                    }
+                }
+            })
+        }
         equalizer = app?.equalizer
         equalizer?.let { controller ->
             val sessionId = player.audioSessionId

@@ -44,7 +44,6 @@ import androidx.compose.ui.graphics.RenderEffect
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -69,8 +68,10 @@ import com.materialkolor.material3.rememberDynamicColorScheme
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.data.LyricsBackgroundMode
 import com.mytv.mymusic.data.RhythmIntensity
+import com.mytv.mymusic.playback.ONSET_DETECT_LAG_S
 import com.mytv.mymusic.playback.PlaybackClock
 import com.mytv.mymusic.playback.RhythmAnalyzer
+import com.mytv.mymusic.playback.RhythmFrame
 import com.mytv.mymusic.playback.RhythmTimeline
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.theme.LocalAppearance
@@ -78,19 +79,22 @@ import com.mytv.mymusic.ui.theme.LocalSeedColor
 import com.mytv.mymusic.ui.theme.coverColorCacheKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * 歌词背景每帧写出的律动信号，给封面光晕、进度条波幅这类跟节奏的 UI 用。
+ * 歌词背景每帧写出的律动信号，给封面、光晕、进度条这类跟节奏的 UI 用。
  *
  * 播放页里用 [rememberBackdropPulse] 建一次，同一个实例传给 [LyricsBackdrop] 和要读它的组件。
- * [bass]、[swell] 每帧都在变，只能在绘制阶段读：`drawBehind {}`、`drawWithCache {}` 里的 `onDraw*` 或
- * `graphicsLayer {}` 的 lambda；放在组合阶段读会让整个播放页跟着每帧重组。[reactive] 和 [intensity]
- * 只随设置变化，在哪读都行。
+ * [bass]、[swell]、[beat]、[glow] 和由它们算出的 [coverScale]、[haloBoost]、[haloScale] 每帧都在变，只能在绘制阶段读：
+ * `drawBehind {}`、`drawWithCache {}` 里的 `onDraw*` 或 `graphicsLayer {}` 的 lambda；放在组合阶段读会让整个播放页
+ * 跟着每帧重组。[reactive]、[intensity] 只随设置变化，[bpm] 只在锁上、换速度时变，在哪读都行。
  *
- * 和背景保持同一套幅度：
- * - 封面光晕：不透明度加 `FlowIntensity.of(intensity).cover * swell`（柔和最多 +0.03，标准 +0.05）。
- * - 进度条波幅：只在 `reactive && intensity == RhythmIntensity.Standard` 时跟 [swell] 起伏（见 pulseWaveScale，最多 1.0 倍），否则固定。
+ * 和背景保持同一套幅度（[FlowIntensity]）：
+ * - 封面：跟拍弹一下（[coverScale]，标准 3%、强烈 5%）。
+ * - 封面光晕：不透明度加段落的慢包络和拍子（[haloBoost]），跟拍放大一点（[haloScale]）。
+ * - 形状光环：从封面轮廓散开（[rippleCount] 圈，见 [rippleGrow]、[rippleAlpha]），画在封面后面。
+ * - 进度条：标准和强烈档波幅跟 [swell] 起伏（见 pulseWaveScale），锁上拍子后每拍走一个波长（见 pulseWaveBpm）。
  */
 @Stable
 class BackdropPulse internal constructor() {
@@ -102,6 +106,18 @@ class BackdropPulse internal constructor() {
     var swell by mutableFloatStateOf(0f)
         internal set
 
+    /** 拍子包络 0..1（已乘上力度）：拍前 50ms 起势、0.16s 回落，封面弹跳用。不跟拍时为 0。 */
+    var beat by mutableFloatStateOf(0f)
+        internal set
+
+    /** 拍子包络 0..1：0.28s 回落，光晕用。 */
+    var glow by mutableFloatStateOf(0f)
+        internal set
+
+    /** 拍子网格锁住时的速度（BPM），没锁上是 0；变化不到 2% 不更新。 */
+    var bpm by mutableFloatStateOf(0f)
+        internal set
+
     /** 背景此刻是否在跟音乐律动：选了律动、没开减少动画、分析器可用。 */
     var reactive by mutableStateOf(false)
         internal set
@@ -110,12 +126,60 @@ class BackdropPulse internal constructor() {
     var intensity by mutableStateOf(RhythmIntensity.Standard)
         internal set
 
-    /**
-     * 鼓点光环的散开点（按宽高的比例），由知道封面实际位置的布局在摆放阶段写入；null 时用 [LyricsBackdrop] 的 rippleOrigin。
-     * 不是快照状态：光环只在帧循环推进时画，下一帧自然读到新值，写它不必让背景重画。
-     */
-    internal var rippleOrigin: Offset? = null
+    private val flow: FlowIntensity get() = FlowIntensity.of(intensity)
+
+    /** 封面的缩放倍数。 */
+    val coverScale: Float get() = 1f + flow.pop * beat
+
+    /** 光晕不透明度在 0.62 之上加多少。 */
+    val haloBoost: Float get() = flow.cover * swell + flow.glow * glow
+
+    /** 光晕的缩放倍数。 */
+    val haloScale: Float get() = 1f + flow.halo * glow
+
+    // 形状光环：帧循环每帧抄一份，读的一方先读 rippleFrame（快照状态）再读数组，光环在的时候跟着每帧重画
+    internal val rippleGrow = FloatArray(FlowFieldMotion.MAX_RIPPLES)
+    internal val rippleAlpha = FloatArray(FlowFieldMotion.MAX_RIPPLES)
+    internal var rippleCount = 0
+        private set
+    internal var rippleFrame by mutableIntStateOf(0)
+        private set
+
+    internal fun publish(motion: FlowFieldMotion) {
+        bass = motion.bass
+        swell = motion.swell
+        beat = motion.beat
+        glow = motion.glow
+        val count = motion.rippleCount
+        if (count > 0 || rippleCount > 0) {
+            for (i in 0 until count) {
+                val age = motion.rippleAge(i)
+                rippleGrow[i] = FlowFieldMotion.rippleGrow(age)
+                rippleAlpha[i] = FlowFieldMotion.rippleAlpha(age, motion.rippleAmplitude(i))
+            }
+            rippleCount = count
+            rippleFrame++
+        }
+        val locked = motion.lockedBpm
+        val shown = bpm
+        // 进度条的波速是组合阶段的参数：只在锁上、解锁或速度变了 2% 以上时改
+        if ((locked == 0f) != (shown == 0f) || (shown > 0f && abs(locked / shown - 1f) > BPM_HYSTERESIS)) bpm = locked
+    }
+
+    internal fun clear() {
+        bass = 0f
+        swell = 0f
+        beat = 0f
+        glow = 0f
+        bpm = 0f
+        if (rippleCount > 0) {
+            rippleCount = 0
+            rippleFrame++
+        }
+    }
 }
+
+private const val BPM_HYSTERESIS = 0.02f
 
 /** 见 [BackdropPulse]：每个播放页只建一个。 */
 @Composable
@@ -123,9 +187,10 @@ fun rememberBackdropPulse(): BackdropPulse = remember { BackdropPulse() }
 
 /**
  * 播放页背景。关闭时是纯色；“动态”和“律动”共用流光场：放大慢转的封面、四团封面色光、固定遮罩。
- * 律动时音乐只调流速、光团大小和光量，标准档在鼓点时从 [rippleOrigin]（按宽高的比例）散开一圈淡光环。
+ * 律动时段落的强弱调流速、光团大小和光量；拍子按此刻听到的位置起拍（[rhythmOffsetMs] 是跟拍校准，正数让画面晚一点），
+ * 推一把流光，并通过 [pulse] 让封面弹跳、光晕跟拍、封面轮廓散开光环。
  * 减少动画（应用设置或系统“移除动画”）时定格成静止的流光场，不跑帧循环也不做分析。
- * 封面、光团和光环画在 1/2（电视 1/4）分辨率的离屏图层里再放大，只有 [scrim] 遮罩按全分辨率画在最上面；
+ * 封面和光团画在 1/2（电视 1/4）分辨率的离屏图层里再放大，只有 [scrim] 遮罩按全分辨率画在最上面；
  * 换遮罩样式（如进入歌词页）时淡变过去。
  */
 @Composable
@@ -136,8 +201,8 @@ fun LyricsBackdrop(
     intensity: RhythmIntensity,
     wide: Boolean,
     pulse: BackdropPulse,
-    rippleOrigin: Offset,
     modifier: Modifier = Modifier,
+    rhythmOffsetMs: Int = 0,
     scrim: BackdropScrim = if (wide) BackdropScrim.Wide else BackdropScrim.Phone,
 ) {
     // 系统“移除动画”（动画时长缩放为 0）按应用里的“减少动画”处理：原来的 rememberInfiniteTransition 会自己停，帧循环不会
@@ -149,10 +214,7 @@ fun LyricsBackdrop(
     SideEffect {
         pulse.reactive = reactive
         pulse.intensity = intensity
-        if (mode == LyricsBackgroundMode.Off || reduceMotion) {
-            pulse.bass = 0f
-            pulse.swell = 0f
-        }
+        if (mode == LyricsBackgroundMode.Off || reduceMotion) pulse.clear()
     }
     if (mode == LyricsBackgroundMode.Off) {
         Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
@@ -166,6 +228,7 @@ fun LyricsBackdrop(
     val tick = remember { mutableIntStateOf(0) }
     val feed = remember(analyzer) { analyzer?.let(::RhythmFeedReader) }
     if (reactive && analyzer != null) RhythmFeed(analyzer, playing)
+    val offsetUs = rhythmOffsetMs * 1_000L
 
     val covers = remember { CoverSwap() }
     LaunchedEffect(cover) {
@@ -193,15 +256,14 @@ fun LyricsBackdrop(
         }
     }
     if (!reduceMotion) {
-        LaunchedEffect(motion, moving, reactive, covers.current, palette.to, tv) {
+        LaunchedEffect(motion, moving, reactive, covers.current, palette.to, tv, offsetUs) {
             // 电视上限 30 帧，和封面旋转、逐字歌词落在同一批垂直同步上（见 TvFrameGate）
             while (true) {
                 val settled = withFrameNanos { now ->
                     if (tv && !TvFrameGate.due(now)) return@withFrameNanos false
-                    if (reactive) feed?.feedUntil(now, motion)
+                    if (reactive && feed != null) feed.feedUntil(now, offsetUs, motion) else motion.beatTimeS = Double.NaN
                     motion.advanceTo(now)
-                    pulse.bass = motion.bass
-                    pulse.swell = motion.swell
+                    pulse.publish(motion)
                     if (motion.coverFade >= 1f && covers.previous != null) covers.dropPrevious()
                     tick.intValue++
                     motion.isSettled
@@ -218,7 +280,6 @@ fun LyricsBackdrop(
     LaunchedEffect(scrimBlend, scrim) { scrimBlend.animateTo(scrim, scrimSpec) }
 
     val surface = scheme.surface
-    val rippleColor = scheme.primary
     val downscale = if (tv) TV_FIELD_DOWNSCALE else FIELD_DOWNSCALE
     // 流光层已经缩小 downscale 倍，封面节点相对屏幕仍是 1/COVER_DOWNSCALE，模糊半径不变
     val coverDownscale = COVER_DOWNSCALE / downscale
@@ -231,7 +292,6 @@ fun LyricsBackdrop(
                     val m = size.maxDimension
                     val colors = palette.to
                     val blobBrushes = colors.map(::blobBrush)
-                    val rings = arrayOfNulls<RippleRing>(RIPPLE_STEPS)
                     onDrawWithContent {
                         // 底色也画进离屏图层：图层不透明，光团的 Screen 混合和直接叠在底色、封面上时一样
                         drawRect(surface)
@@ -247,29 +307,6 @@ fun LyricsBackdrop(
                                 scale(scale, scale, Offset.Zero)
                             }) {
                                 drawCircle(brush, UNIT, Offset.Zero, alpha = motion.blobAlpha(i), blendMode = BlendMode.Screen)
-                            }
-                        }
-                        val anchor = pulse.rippleOrigin ?: rippleOrigin
-                        val origin = Offset(size.width * anchor.x, size.height * anchor.y)
-                        for (i in 0 until motion.rippleCount) {
-                            val age = motion.rippleAge(i)
-                            val step = (age / FlowFieldMotion.RIPPLE_LIFE_S * RIPPLE_STEPS).toInt().coerceIn(0, RIPPLE_STEPS - 1)
-                            val ring = rings[step]
-                                ?: rippleRing(rippleColor, (step + 0.5f) / RIPPLE_STEPS * FlowFieldMotion.RIPPLE_LIFE_S)
-                                    .also { rings[step] = it }
-                            val scale = m * (FlowFieldMotion.rippleRadius(age) + RIPPLE_OUTER) / UNIT
-                            withTransform({
-                                translate(origin.x, origin.y)
-                                scale(scale, scale, Offset.Zero)
-                            }) {
-                                drawCircle(
-                                    ring.brush,
-                                    ring.radius,
-                                    Offset.Zero,
-                                    alpha = FlowFieldMotion.rippleAlpha(age),
-                                    style = ring.stroke,
-                                    blendMode = BlendMode.Screen,
-                                )
                             }
                         }
                     }
@@ -376,16 +413,44 @@ private fun RhythmFeed(analyzer: RhythmAnalyzer, playing: Boolean) {
 }
 
 /**
- * 帧循环每帧调用：取走 pts 不晚于“此刻听到的位置”的分析帧交给 [FlowFieldMotion]。
- * 还不知道听到哪儿（刚跳转、还没出声）时什么都不取，等下一帧。
+ * 帧循环每帧调用：按“此刻听到的位置 − 跟拍校准”给 [FlowFieldMotion] 定跟拍时间和网格，再交出已经播到的分析帧。
+ * 拍子时钟在拍前 [BeatClock.PRE_S] 起势，低频起拍要提前这么多交给它，所以多取这一点；电平只用 pts 不晚于跟拍时间的帧，
+ * 早取的留到下一帧。还不知道听到哪儿（刚跳转、还没出声）时什么都不取，跟拍时间记成 NaN。
  */
 internal class RhythmFeedReader(private val analyzer: RhythmAnalyzer) {
     private val cursor = RhythmTimeline.Cursor()
+    private val pending = ArrayDeque<RhythmFrame>()
+    private var lastKickCount = NO_KICK
 
-    fun feedUntil(frameNanos: Long, motion: FlowFieldMotion) {
+    fun feedUntil(frameNanos: Long, offsetUs: Long, motion: FlowFieldMotion) {
         val audible = analyzer.clock.audibleUs(frameNanos)
-        if (audible == PlaybackClock.UNSET) return
-        analyzer.timeline.drain(cursor, audible) { motion.feed(it) }
+        if (audible == PlaybackClock.UNSET) {
+            motion.beatTimeS = Double.NaN
+            return
+        }
+        val nowUs = audible - offsetUs
+        val nowS = nowUs / 1e6
+        motion.beatTimeS = nowS
+        motion.beatGrid = analyzer.beats.gridAt(nowS)
+        val aheadUs = nowUs + PRE_US
+        // 往回跳（拖进度、单曲循环）后，留着的帧都在新位置后面，作废
+        if (pending.isNotEmpty() && pending.first().ptsUs > aheadUs) pending.clear()
+        analyzer.timeline.drain(cursor, aheadUs) { frame ->
+            // 第一帧只记序号，不把分析器之前攒下的计数当成新鼓点
+            if (lastKickCount != NO_KICK && frame.kickCount > lastKickCount) {
+                motion.beats.pushKick(frame.ptsUs / 1e6 - ONSET_DETECT_LAG_S)
+            }
+            lastKickCount = frame.kickCount
+            pending.addLast(frame)
+        }
+        var latest: RhythmFrame? = null
+        while (pending.isNotEmpty() && pending.first().ptsUs <= nowUs) latest = pending.removeFirst()
+        latest?.let(motion::feed)
+    }
+
+    private companion object {
+        const val NO_KICK = -1
+        val PRE_US = (BeatClock.PRE_S * 1e6).toLong()
     }
 }
 
@@ -527,26 +592,6 @@ private fun blobBrush(color: Color): Brush = Brush.radialGradient(
     radius = UNIT,
 )
 
-/** 光环只描内外径之间的一圈，不给透明的圆心着色；渐变和描边按年龄分档缓存。 */
-private class RippleRing(val brush: Brush, val radius: Float, val stroke: Stroke)
-
-/** 外径为 [UNIT] 的光环：内径以内透明，往外渐亮、0.72 处最亮再淡出；内外径之比只随年龄变。 */
-private fun rippleRing(color: Color, age: Float): RippleRing {
-    val radius = FlowFieldMotion.rippleRadius(age)
-    val inner = ((radius - RIPPLE_INNER) / (radius + RIPPLE_OUTER)).coerceAtLeast(0f)
-    val clear = color.copy(alpha = 0f)
-    val brush = Brush.radialGradient(
-        0f to clear,
-        inner to clear,
-        inner + 0.72f * (1f - inner) to color,
-        1f to clear,
-        center = Offset.Zero,
-        radius = UNIT,
-    )
-    // 描边的中线在内外径正中，宽度正好从内径盖到外径
-    return RippleRing(brush, UNIT * (1f + inner) / 2f, Stroke(width = UNIT * (1f - inner)))
-}
-
 /**
  * 流光场上面的固定遮罩，保证文字对比度，不随音乐变化。数值对照原型：
  * - [Phone]：竖向往下压暗。
@@ -654,9 +699,6 @@ private const val COVER_DOWNSCALE = 8f
 private const val FIELD_DOWNSCALE = 2
 private const val TV_FIELD_DOWNSCALE = 4
 private const val UNIT = 256f
-private const val RIPPLE_STEPS = 18
-private const val RIPPLE_INNER = 0.14f
-private const val RIPPLE_OUTER = 0.04f
 private const val MIN_BLOB_TONE = 30.0
 private const val MAX_BLOB_TONE = 72.0
 private const val SCRIM_MIDDLE_AT = 0.46f

@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.WavyProgressIndicatorDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -70,6 +71,7 @@ import com.mytv.mymusic.ui.theme.LocalAppearance
  * 进度只在动画/绘制 lambda 中读取；时间文字按秒降频，无障碍语义按 10 秒播报。
  * [amplitudeScale] 是波幅倍数（0..1），只在指示器的绘制阶段读。指示器把波幅变化做成 500ms 补间、补间途中不接新值，
  * 所以这里只适合给变化比 500ms 慢的值（播放页给的是低频慢包络）；逐帧变化的值只会被随机抽样。
+ * [waveBpm] 大于 0 时波浪每拍走一个波长（播放页锁上拍子时给），否则每秒一个波长；在这里的组合阶段读，变了只重组进度条。
  */
 @Composable
 fun WavySeekBar(
@@ -82,6 +84,7 @@ fun WavySeekBar(
     trackColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f),
     showTimes: Boolean = true,
     amplitudeScale: () -> Float = { 1f },
+    waveBpm: () -> Float = { 0f },
 ) {
     val reduceMotion = LocalAppearance.current.reduceMotion
     var dragging by remember { mutableStateOf(false) }
@@ -153,6 +156,8 @@ fun WavySeekBar(
                 trackColor = trackColor,
                 // 这个值的变化按 500ms 补间过去，见上面 amplitudeScale 的说明
                 amplitude = { if (playing && !dragging && !reduceMotion) amplitudeScale().coerceIn(0f, 1f) else 0f },
+                wavelength = WavyProgressIndicatorDefaults.LinearDeterminateWavelength,
+                waveSpeed = WavyProgressIndicatorDefaults.LinearDeterminateWavelength * waveSpeedFactor(waveBpm()),
             )
         }
         if (showTimes) {
@@ -185,6 +190,9 @@ private fun ProgressTimes(
         Text(formatTime(duration), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+/** 波速是波长的几倍：每拍一个波长；没有拍子时每秒一个。 */
+internal fun waveSpeedFactor(bpm: Float): Float = if (bpm > 0f) bpm / 60f else 1f
 
 /** 读屏播报按 10 秒取整，避免每 500ms 的进度更新一直打断朗读。 */
 internal fun spokenPositionBucket(positionMs: Long): Long = positionMs / 10_000L * 10_000L

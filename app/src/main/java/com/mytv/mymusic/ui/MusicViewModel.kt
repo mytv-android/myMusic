@@ -114,6 +114,8 @@ data class MusicUiState(
     val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,
     val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
     val tvAmbientClock: Boolean = true,
+    val rhythmOffsetMs: Int = 0,
+    val rhythmDebug: Boolean = false,
     val coverSeed: Int = 0,
     val sleepFade: Boolean = true,
     val cacheLimitMb: Int = 512,
@@ -276,6 +278,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             rhythmIntensity = settings.rhythmIntensity,
             coverShape = settings.coverShape,
             tvAmbientClock = settings.tvAmbientClock,
+            rhythmOffsetMs = settings.rhythmOffsetMs,
+            rhythmDebug = settings.rhythmDebug,
             sleepFade = settings.sleepFade,
             cacheLimitMb = settings.cacheLimitMb.takeIf { it > 0 } ?: app.defaultCacheLimitMb(),
             reduceMotion = settings.reduceMotion,
@@ -2701,6 +2705,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setRhythmIntensity(value: RhythmIntensity) = viewModelScope.launch { app.settings.rhythmIntensity(value) }
     fun setCoverShape(value: CoverShapeChoice) = viewModelScope.launch { app.settings.coverShape(value) }
     fun setTvAmbientClock(value: Boolean) = viewModelScope.launch { app.settings.tvAmbientClock(value) }
+    fun setRhythmOffset(value: Int) = viewModelScope.launch { app.settings.rhythmOffsetMs(value) }
+    fun setRhythmDebug(value: Boolean) = viewModelScope.launch { app.settings.rhythmDebug(value) }
     fun setShowBottomNav(value: Boolean) = viewModelScope.launch { app.settings.showBottomNav(value) }
 
     fun toggleAggregateProvider(id: String) = viewModelScope.launch {

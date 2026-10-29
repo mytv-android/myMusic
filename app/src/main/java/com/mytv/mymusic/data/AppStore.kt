@@ -49,13 +49,19 @@ enum class LyricsBackgroundMode { Off, Ambient, Reactive }
 private fun String?.toLyricsBackgroundMode(): LyricsBackgroundMode =
     LyricsBackgroundMode.entries.firstOrNull { it.name == this } ?: LyricsBackgroundMode.Ambient
 
-/** 歌词背景“律动”的幅度：柔和只改流速和光量；标准还让光团随低频胀缩，鼓点时散开一圈光环。 */
-enum class RhythmIntensity { Soft, Standard }
+/**
+ * 歌词背景“律动”跟拍的幅度：柔和只有光晕和流光跟拍；标准再加上封面弹跳和小节首拍的光环；强烈弹得更明显、每拍都有光环。
+ * 旧版存的 Soft / Standard 照常读出。
+ */
+enum class RhythmIntensity { Soft, Standard, Strong }
 
 private fun String?.toRhythmIntensity(): RhythmIntensity =
     RhythmIntensity.entries.firstOrNull { it.name == this } ?: RhythmIntensity.Standard
 
 /** 播放页封面形状：随机（每次切歌换一种，不和上一首重复）或固定成某一种 MaterialShapes。 */
+/** 跟拍校准的范围（毫秒）。 */
+const val RHYTHM_OFFSET_MAX_MS = 200
+
 enum class CoverShapeChoice { Random, Cookie12, Cookie9, Cookie7, Sunny, SoftBurst, Clover8 }
 
 private fun String?.toCoverShapeChoice(): CoverShapeChoice =
@@ -97,6 +103,8 @@ class SettingsStore(private val context: Context) {
     private val rhythmIntensityKey = stringPreferencesKey("rhythm_intensity")
     private val coverShapeKey = stringPreferencesKey("cover_shape")
     private val tvAmbientClockKey = booleanPreferencesKey("tv_ambient_clock")
+    private val rhythmOffsetKey = intPreferencesKey("rhythm_offset_ms")
+    private val rhythmDebugKey = booleanPreferencesKey("rhythm_debug")
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -122,6 +130,8 @@ class SettingsStore(private val context: Context) {
             rhythmIntensity = values[rhythmIntensityKey].toRhythmIntensity(),
             coverShape = values[coverShapeKey].toCoverShapeChoice(),
             tvAmbientClock = values[tvAmbientClockKey] ?: true,
+            rhythmOffsetMs = (values[rhythmOffsetKey] ?: 0).coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS),
+            rhythmDebug = values[rhythmDebugKey] ?: false,
             equalizer = EqualizerSettings(
                 enabled = values[equalizerEnabledKey] ?: false,
                 presetId = values[equalizerPresetKey] ?: "flat",
@@ -170,6 +180,9 @@ class SettingsStore(private val context: Context) {
     suspend fun rhythmIntensity(value: RhythmIntensity) = context.dataStore.edit { it[rhythmIntensityKey] = value.name }
     suspend fun coverShape(value: CoverShapeChoice) = context.dataStore.edit { it[coverShapeKey] = value.name }
     suspend fun tvAmbientClock(value: Boolean) = context.dataStore.edit { it[tvAmbientClockKey] = value }
+    suspend fun rhythmOffsetMs(value: Int) =
+        context.dataStore.edit { it[rhythmOffsetKey] = value.coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS) }
+    suspend fun rhythmDebug(value: Boolean) = context.dataStore.edit { it[rhythmDebugKey] = value }
     suspend fun lastSeed(value: Int) = context.dataStore.edit { it[lastSeedKey] = value }
     suspend fun sleepFade(value: Boolean) = context.dataStore.edit { it[sleepFadeKey] = value }
     suspend fun cacheLimitMb(value: Int) = context.dataStore.edit { it[cacheLimitKey] = value }
@@ -300,6 +313,10 @@ data class AppSettings(
     val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
     /** 电视环境模式右上角是否显示时钟。 */
     val tvAmbientClock: Boolean = true,
+    /** 跟拍校准：律动画面相对“听到的位置”再晚多少毫秒（负数提前），−200..200。 */
+    val rhythmOffsetMs: Int = 0,
+    /** 播放页角落显示跟拍调试信息（只在可调试的安装包里能打开）。 */
+    val rhythmDebug: Boolean = false,
     val equalizer: EqualizerSettings = EqualizerSettings(),
     val searchHistory: List<String> = emptyList(),
     val lastUpdateCheck: Long = 0L,

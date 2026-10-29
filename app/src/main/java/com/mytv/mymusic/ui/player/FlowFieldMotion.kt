@@ -1,6 +1,7 @@
 package com.mytv.mymusic.ui.player
 
 import com.mytv.mymusic.data.RhythmIntensity
+import com.mytv.mymusic.playback.BeatGrid
 import com.mytv.mymusic.playback.RhythmFrame
 import kotlin.math.PI
 import kotlin.math.cos
@@ -8,15 +9,23 @@ import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.math.sin
 
+/** 跟拍的形状光环什么时候出：柔和不出，标准只在小节首拍，强烈每拍都出（首拍更亮）。 */
+internal enum class BeatRipple { None, Downbeat, Every }
+
 /**
- * 律动强度的幅度表。两档共用平滑参数，只是幅度不同；柔和档没有鼓点光环。
+ * 律动强度的幅度表。
  *
- * 整体亮度的起伏主要来自三处，都按“标准档逐帧亮度变化不超过约 3%、比动态多出的起伏不超过约 6 个百分点”压过：
- * - 光团半径：光团是屏幕混合的大片渐变，半径涨 14% 面积就涨三成，原来跟着 70ms 起音的低频走，一拍就是一次整屏提亮。
- *   现在半径跟慢包络 [FlowFieldMotion.swell]（0.3s 起 / 1s 落），随段落的低频强弱呼吸，不在单拍上跳。
- * - 鼓点：半径和光量同时在 50ms 里胀开，又和低频起音、光环叠在同一帧上，是逐帧跳变的主要来源，幅度减半。
- * - 封面层和光晕的不透明度：也改跟慢包络，幅度减小。
- * [bass] 是光团光量里仍跟逐帧低频的一小部分，保留拍点上的一点亮。
+ * 段落的起伏（流速、光团半径和光量、封面层亮度）跟慢包络 [FlowFieldMotion.swell]，三档只是幅度不同，
+ * 按“标准档逐帧亮度变化不超过约 3%”压过：光团是屏幕混合的大片渐变，半径或光量在单拍上跳，就是一次整屏提亮。
+ * [bass] 是光团光量里仍跟逐帧低频的一小部分。
+ *
+ * 拍子由 [BeatClock] 按听到的位置起拍，不再改光团，换成形状、运动和局部的光（数值对照 docs/beat-sync.html 的原型，
+ * 原型实测强烈档整屏逐帧亮度变化 ≤0.52%）：
+ * - [pop]：封面弹一下，拍前 50ms 起势、0.16s 回落。
+ * - [glow]、[halo]：封面后的光晕亮一下、放大一点，0.28s 回落。
+ * - [shove]：流光往前推一把，流速最多乘到 1 + shove，0.4s 回落。
+ * - [ripple]：从封面轮廓散开一圈同形状的光，见 [BeatRipple]。
+ * 外轮廓不踩拍，始终 40 秒一圈。
  */
 internal class FlowIntensity private constructor(
     val speed: Float,
@@ -24,18 +33,22 @@ internal class FlowIntensity private constructor(
     val mid: Float,
     val treble: Float,
     val bass: Float,
-    val bloomRadius: Float,
-    val bloomAlpha: Float,
     val cover: Float,
-    val ripple: Boolean,
+    val pop: Float,
+    val glow: Float,
+    val halo: Float,
+    val shove: Float,
+    val ripple: BeatRipple,
 ) {
     companion object {
-        private val Soft = FlowIntensity(0.5f, 0.06f, 0.05f, 0.03f, 0.02f, 0.03f, 0.01f, 0.03f, ripple = false)
-        private val Standard = FlowIntensity(1.3f, 0.12f, 0.08f, 0.06f, 0.03f, 0.05f, 0.02f, 0.05f, ripple = true)
+        private val Soft = FlowIntensity(0.5f, 0.06f, 0.05f, 0.03f, 0.02f, 0.03f, 0f, 0.1f, 0.012f, 1.4f, BeatRipple.None)
+        private val Standard = FlowIntensity(1.3f, 0.12f, 0.08f, 0.06f, 0.03f, 0.05f, 0.03f, 0.18f, 0.025f, 2.6f, BeatRipple.Downbeat)
+        private val Strong = FlowIntensity(1.3f, 0.12f, 0.08f, 0.06f, 0.03f, 0.05f, 0.05f, 0.26f, 0.035f, 3.4f, BeatRipple.Every)
 
         fun of(intensity: RhythmIntensity): FlowIntensity = when (intensity) {
             RhythmIntensity.Soft -> Soft
             RhythmIntensity.Standard -> Standard
+            RhythmIntensity.Strong -> Strong
         }
     }
 }
@@ -64,11 +77,20 @@ internal val FlowBlobs = listOf(
 /**
  * 流光场的运动状态，不依赖 Compose，方便单测。
  * 音乐只改速度、半径和光量；所有位置都由相位积分得到，所以不会跟着音量来回跳，暂停时慢慢停住而不是跳回原位。
+ * 拍子来自内嵌的 [beats]：帧循环每帧推进前写入 [beatTimeS] 和 [beatGrid]，低频起拍由读帧的一方直接交给 [beats]。
  */
 internal class FlowFieldMotion(moving: Boolean) {
     var intensity = RhythmIntensity.Standard
     var reactive = false
     var playing = moving
+
+    /** 此刻按哪个媒体时间（秒）跟拍：听到的位置减去跟拍校准。NaN 表示还不知道听到哪儿（刚跳转、还没出声）。 */
+    var beatTimeS = Double.NaN
+
+    /** 此刻该用的拍子网格。 */
+    var beatGrid: BeatGrid = BeatGrid.NONE
+
+    val beats = BeatClock()
 
     var bass = 0f
         private set
@@ -82,9 +104,18 @@ internal class FlowFieldMotion(moving: Boolean) {
     /** 低频的慢包络（0.3s 起、1s 落）：光团半径、封面层和光晕亮度、进度条波幅跟它，随段落的低频强弱起伏，不在单拍上跳。 */
     var swell = 0f
         private set
-    var bloom = 0f
+
+    /** 拍子包络 0..1（已乘上这一拍的力度）：封面弹跳用，0.16s 回落。 */
+    var beat = 0f
         private set
-    private var kickEnvelope = 0f
+
+    /** 拍子包络：光晕用，0.28s 回落。 */
+    var glow = 0f
+        private set
+
+    /** 拍子包络：流光推进用，0.4s 回落。 */
+    var shove = 0f
+        private set
 
     /** 0..1 的流动倍率：播放时趋向 1，暂停时趋向 0。 */
     var run = if (moving) 1f else 0f
@@ -102,8 +133,9 @@ internal class FlowFieldMotion(moving: Boolean) {
     var angle = 0.0
         private set
 
-    // 按出生先后排列，最多 2 圈
+    // 按出生先后排列，最多 3 圈
     private val rippleAges = FloatArray(MAX_RIPPLES)
+    private val rippleAmplitudes = FloatArray(MAX_RIPPLES)
     var rippleCount = 0
         private set
 
@@ -118,22 +150,13 @@ internal class FlowFieldMotion(moving: Boolean) {
 
     private val flow: FlowIntensity get() = FlowIntensity.of(intensity)
 
-    // 上一次看到的鼓点序号；NO_KICK 表示还没收到过帧，第一帧只记序号，不把分析器之前攒下的计数当成新鼓点
-    private var lastKickCount = NO_KICK
-
-    /** 分析帧：序号前进就算一次鼓点（中间被合并掉几帧也只闪一次）；不在律动时只记序号。 */
+    /** 已经播到的分析帧：只取各频段的电平，拍子另走 [beats]。不在律动时忽略。 */
     fun feed(frame: RhythmFrame) {
-        val kicked = lastKickCount != NO_KICK && frame.kickCount > lastKickCount
-        lastKickCount = frame.kickCount
         if (!live) return
         targetBass = frame.bass
         targetMid = frame.mid
         targetTreble = frame.treble
         targetLoudness = frame.loudness
-        if (kicked) {
-            kickEnvelope = 1f
-            if (flow.ripple) addRipple()
-        }
     }
 
     fun startCoverFade() {
@@ -168,18 +191,31 @@ internal class FlowFieldMotion(moving: Boolean) {
         mid = follow(mid, targetMid, dt, 0.12f, 0.6f)
         treble = follow(treble, targetTreble, dt, 0.2f, 0.5f)
         loudness = follow(loudness, targetLoudness, dt, 0.5f, 1.2f)
-        kickEnvelope *= exp(-dt / 0.45f)
-        bloom = follow(bloom, kickEnvelope, dt, 0.05f, 0.3f)
         run = follow(run, if (playing) 1f else 0f, dt, 0.5f, 0.5f)
 
-        val speed = run * (1f + flow.speed * loudness) * TAU / 26.0
+        // 播放且知道听到哪儿时按网格起拍；暂停、刚跳转、不在律动时不起拍，包络按真实时间继续回落
+        val time = beatTimeS
+        if (live && !time.isNaN()) {
+            if (beats.update(time, dt, beatGrid)) onBeat()
+        } else {
+            beats.idle(dt)
+        }
+        beat = beats.envelope(POP_TAU_S)
+        glow = beats.envelope(GLOW_TAU_S)
+        shove = beats.envelope(SHOVE_TAU_S)
+
+        val speed = run * (1f + flow.speed * loudness) * (1f + flow.shove * shove) * TAU / 26.0
         for (i in phases.indices) phases[i] = (phases[i] + dt * speed * (0.7 + i * 0.13)) % PHASE_PERIOD
         angle = (angle + dt * run * (1f + 0.5f * loudness) * TAU / 70.0) % TAU
 
         var kept = 0
         for (i in 0 until rippleCount) {
             val age = rippleAges[i] + dt
-            if (age < RIPPLE_LIFE_S) rippleAges[kept++] = age
+            if (age < RIPPLE_LIFE_S) {
+                rippleAges[kept] = age
+                rippleAmplitudes[kept] = rippleAmplitudes[i]
+                kept++
+            }
         }
         rippleCount = kept
 
@@ -188,20 +224,22 @@ internal class FlowFieldMotion(moving: Boolean) {
         if (isSettled) settle()
     }
 
-    /** 暂停后流动和光量都已经落到看不出的程度，帧循环可以停了。 */
+    /** 暂停后流动、光量和拍子都已经落到看不出的程度，帧循环可以停了。 */
     val isSettled: Boolean
         get() = !playing && run < EPSILON && bass < EPSILON && swell < EPSILON && mid < EPSILON && treble < EPSILON &&
-            bloom < EPSILON && rippleCount == 0 && coverFade >= 1f && colorFade >= 1f
+            beat < EPSILON && glow < EPSILON && shove < EPSILON && rippleCount == 0 && coverFade >= 1f && colorFade >= 1f
 
-    /** 原地停住：相位和角度保留，只把残留的光量、光环和过渡清掉（减少动画时也用它定格）。 */
+    /** 原地停住：相位和角度保留，只把残留的光量、拍子、光环和过渡清掉（减少动画时也用它定格）。 */
     fun settle() {
         bass = 0f
         swell = 0f
         mid = 0f
         treble = 0f
         loudness = 0f
-        bloom = 0f
-        kickEnvelope = 0f
+        beat = 0f
+        glow = 0f
+        shove = 0f
+        beats.reset()
         run = if (playing) run else 0f
         targetBass = 0f
         targetMid = 0f
@@ -212,12 +250,29 @@ internal class FlowFieldMotion(moving: Boolean) {
         colorFade = 1f
     }
 
-    private fun addRipple() {
+    /** 网格锁住时的速度，给进度条定波速；没锁上是 0。 */
+    val lockedBpm: Float
+        get() = if (beats.lock > 0.5f && beatGrid.periodS > 0.0) beatGrid.bpm.toFloat() else 0f
+
+    private fun onBeat() {
+        val downbeat = beats.lastDownbeat
+        val wanted = when (flow.ripple) {
+            BeatRipple.None -> false
+            BeatRipple.Downbeat -> downbeat
+            BeatRipple.Every -> true
+        }
+        if (wanted) addRipple(if (downbeat) DOWNBEAT_RIPPLE else BEAT_RIPPLE)
+    }
+
+    private fun addRipple(amplitude: Float) {
         if (rippleCount == MAX_RIPPLES) {
             rippleAges.copyInto(rippleAges, 0, 1, MAX_RIPPLES)
+            rippleAmplitudes.copyInto(rippleAmplitudes, 0, 1, MAX_RIPPLES)
             rippleCount--
         }
-        rippleAges[rippleCount++] = 0f
+        rippleAges[rippleCount] = 0f
+        rippleAmplitudes[rippleCount] = amplitude
+        rippleCount++
     }
 
     fun phase(index: Int): Double = phases[index]
@@ -236,8 +291,7 @@ internal class FlowFieldMotion(moving: Boolean) {
     fun blobY(index: Int): Float = FlowBlobs[index].let { it.cy + it.ay * sin(phases[index] * it.fy + it.q).toFloat() }
 
     /** 光团半径，画面长边的比例。 */
-    fun blobRadius(index: Int): Float =
-        FlowBlobs[index].radius * (1f + flow.radius * swell + flow.bloomRadius * bloom)
+    fun blobRadius(index: Int): Float = FlowBlobs[index].radius * (1f + flow.radius * swell)
 
     /** 第二团跟中频、第四团跟高频，其余跟低频。 */
     fun blobAlpha(index: Int): Float {
@@ -246,31 +300,37 @@ internal class FlowFieldMotion(moving: Boolean) {
             3 -> flow.treble * treble
             else -> flow.bass * bass
         }
-        return (FlowBlobs[index].alpha + signal + flow.bloomAlpha * bloom).coerceIn(0f, MAX_BLOB_ALPHA)
+        return (FlowBlobs[index].alpha + signal).coerceIn(0f, MAX_BLOB_ALPHA)
     }
 
     fun rippleAge(index: Int): Float = rippleAges[index]
 
+    fun rippleAmplitude(index: Int): Float = rippleAmplitudes[index]
+
     companion object {
-        const val RIPPLE_LIFE_S = 0.9f
-        private const val MAX_RIPPLES = 2
+        const val RIPPLE_LIFE_S = 1.1f
+        const val MAX_RIPPLES = 3
+        private const val DOWNBEAT_RIPPLE = 0.16f
+        private const val BEAT_RIPPLE = 0.1f
+        private const val RIPPLE_RISE_S = 0.08f
+        private const val POP_TAU_S = 0.16
+        private const val GLOW_TAU_S = 0.28
+        private const val SHOVE_TAU_S = 0.4
         private const val FADE_S = 0.45f
         private const val MAX_STEP_S = 0.1f
         private const val MAX_BLOB_ALPHA = 0.7f
         private const val EPSILON = 2e-3f
-        private const val NO_KICK = -1
         private const val SWELL_UP_S = 0.3f
         private const val SWELL_DOWN_S = 1f
-        private const val RIPPLE_RISE_S = 0.12f
         private const val TAU = 2.0 * PI
         private const val PHASE_PERIOD = 20.0 * PI
 
-        /** 光环半径，画面长边的比例。 */
-        fun rippleRadius(age: Float): Float = 0.16f + age * 0.7f
+        /** 形状光环往外扩了多少（封面半径的倍数，从轮廓外 2% 起算）。 */
+        fun rippleGrow(age: Float): Float = age * 1.05f
 
-        /** 光环不透明度：0.12 秒淡入到 0.06 再随年龄淡出。一出生就满亮的话，鼓点那一帧会和光团胀开叠成一次跳亮。 */
-        fun rippleAlpha(age: Float): Float =
-            0.06f * (age / RIPPLE_RISE_S).coerceIn(0f, 1f) * (1f - age / RIPPLE_LIFE_S).coerceAtLeast(0f).pow(1.5f)
+        /** 形状光环的不透明度：0.08 秒淡入到 [amplitude]，再随年龄淡出。 */
+        fun rippleAlpha(age: Float, amplitude: Float): Float =
+            amplitude * (age / RIPPLE_RISE_S).coerceIn(0f, 1f) * (1f - age / RIPPLE_LIFE_S).coerceAtLeast(0f).pow(1.6f)
     }
 }
 
