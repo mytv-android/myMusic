@@ -56,11 +56,14 @@ class PosterWallStateTest {
     @Test
     fun metricsDependOnTheWindowShortSide() {
         assertEquals(WallMetrics.Phone, wallMetricsFor(false, 360, 800))
-        assertEquals(WallMetrics.Tablet, wallMetricsFor(false, 1280, 800))
         assertEquals(WallMetrics.Tablet, wallMetricsFor(false, 800, 1280))
+        assertEquals(WallMetrics.Tablet, wallMetricsFor(false, 1366, 1024))
+        // 横屏平板 800 高：606 的大卡加上下浮层和播放条放不下，用 451 的
+        assertEquals(WallMetrics.ShortTablet, wallMetricsFor(false, 1280, 800))
         // 600dp 宽算平板，但放不下 606 的大卡
-        assertEquals(WallMetrics.Phone, wallMetricsFor(false, 600, 960))
+        assertEquals(WallMetrics.ShortTablet, wallMetricsFor(false, 600, 960))
         assertEquals(WallMetrics.Phone, wallMetricsFor(false, 800, 400))
+        assertEquals(WallMetrics.Phone, wallMetricsFor(false, 915, 412))
         assertEquals(WallMetrics.Tv, wallMetricsFor(true, 960, 540))
     }
 

@@ -72,6 +72,7 @@ import com.mytv.mymusic.ui.theme.LocalAppearance
  * [amplitudeScale] 是波幅倍数（0..1），只在指示器的绘制阶段读。指示器把波幅变化做成 500ms 补间、补间途中不接新值，
  * 所以这里只适合给变化比 500ms 慢的值（播放页给的是低频慢包络）；逐帧变化的值只会被随机抽样。
  * [waveBpm] 大于 0 时波浪每拍走一个波长（播放页锁上拍子时给），否则每秒一个波长；在这里的组合阶段读，变了只重组进度条。
+ * [waveTravel] 为 false 时波浪停在原地不平移（海报墙的大卡）：平移是指示器自己按屏幕刷新率跑的动画，停下来后只在进度变化时重画。
  */
 @Composable
 fun WavySeekBar(
@@ -85,6 +86,7 @@ fun WavySeekBar(
     showTimes: Boolean = true,
     amplitudeScale: () -> Float = { 1f },
     waveBpm: () -> Float = { 0f },
+    waveTravel: Boolean = true,
 ) {
     val reduceMotion = LocalAppearance.current.reduceMotion
     var dragging by remember { mutableStateOf(false) }
@@ -157,7 +159,7 @@ fun WavySeekBar(
                 // 这个值的变化按 500ms 补间过去，见上面 amplitudeScale 的说明
                 amplitude = { if (playing && !dragging && !reduceMotion) amplitudeScale().coerceIn(0f, 1f) else 0f },
                 wavelength = WavyProgressIndicatorDefaults.LinearDeterminateWavelength,
-                waveSpeed = WavyProgressIndicatorDefaults.LinearDeterminateWavelength * waveSpeedFactor(waveBpm()),
+                waveSpeed = if (waveTravel) WavyProgressIndicatorDefaults.LinearDeterminateWavelength * waveSpeedFactor(waveBpm()) else 0.dp,
             )
         }
         if (showTimes) {

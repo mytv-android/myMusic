@@ -290,6 +290,7 @@ private fun CollectionPoster(
         ops = posterOps,
         sourceName = sourceName,
         extra = save,
+        sourceSettings = ops.openPlaybackSettings,
         message = message,
         resetKey = collection.kind to collection.id,
         holdAwake = holdAwake,

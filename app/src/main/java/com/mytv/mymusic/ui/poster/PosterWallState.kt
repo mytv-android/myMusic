@@ -68,16 +68,23 @@ internal fun fieldChange(old: WallField, new: WallField): FieldChange = when {
 }
 
 /**
- * 按设备取格距。电视固定 [WallMetrics.Tv]；其余看窗口短边放不放得下平板的 606dp 大卡（左右各留 24dp），
- * 放不下（手机、竖屏小平板、横屏手机）用手机格距。窗口宽度 ≥ 600 就算平板，但 600dp 宽装不下 606 的大卡。
+ * 按设备取格距。电视固定 [WallMetrics.Tv]；其余看窗口放不放得下平板的 606dp 大卡：左右各留 24dp，
+ * 竖直方向还要让出状态栏、详情页顶上的胶囊和底下的工具栏、底部播放条和手势条（合计约 [TABLET_CHROME_HEIGHT]）。
+ * 放不下但装得下 451dp 的大卡（横屏平板、600dp 宽的小平板）用 [WallMetrics.ShortTablet]，再小（手机、横屏手机）用手机格距。
  */
 internal fun wallMetricsFor(isTv: Boolean, widthDp: Int, heightDp: Int): WallMetrics = when {
     isTv -> WallMetrics.Tv
-    min(widthDp, heightDp) >= WallMetrics.Tablet.grownSize + 2 * TABLET_SIDE_MARGIN -> WallMetrics.Tablet
+    min(widthDp, heightDp) >= WallMetrics.Tablet.grownSize + 2 * TABLET_SIDE_MARGIN &&
+        heightDp >= WallMetrics.Tablet.grownSize + TABLET_CHROME_HEIGHT -> WallMetrics.Tablet
+    min(widthDp, heightDp) >= WallMetrics.ShortTablet.grownSize + 2 * TABLET_SIDE_MARGIN &&
+        heightDp >= WallMetrics.ShortTablet.grownSize + TABLET_CHROME_HEIGHT -> WallMetrics.ShortTablet
     else -> WallMetrics.Phone
 }
 
 private const val TABLET_SIDE_MARGIN = 24f
+
+/** 平板详情页的海报视图竖直方向要让出的高度：状态栏 ~32 + 胶囊一排 64 + 工具栏一排 92 + 底部播放条 ~80 + 手势条 ~48。 */
+private const val TABLET_CHROME_HEIGHT = 320f
 
 /**
  * 这张歌单没在放时的镜头：不放大任何格，对准第一块，第 1 位（总在块的左上角）在左上附近。

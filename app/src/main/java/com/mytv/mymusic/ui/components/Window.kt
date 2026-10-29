@@ -1,14 +1,20 @@
 package com.mytv.mymusic.ui.components
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.MutableIntState
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -60,6 +66,40 @@ fun RequestDarkBars(active: Boolean) {
         if (active) requests.intValue++
         onDispose { if (active) requests.intValue-- }
     }
+}
+
+/**
+ * 整页固定深色的页面（详情页的海报视图）的配色，交给外壳：手机底栏、平板导航栏和底部播放条换成它，
+ * 不在深色的墙旁边露一块浅色。最后登记的页面生效；页面离开组合时只撤回自己登记的那份。
+ */
+@Stable
+class PageChromeScheme {
+    private var owner: Any? = null
+    var scheme by mutableStateOf<ColorScheme?>(null)
+        private set
+
+    fun set(owner: Any, scheme: ColorScheme) {
+        this.owner = owner
+        this.scheme = scheme
+    }
+
+    fun clear(owner: Any) {
+        if (this.owner !== owner) return
+        this.owner = null
+        scheme = null
+    }
+}
+
+/** 外壳提供（AppNavigation）；没有外壳（预览、测试）时为 null，[ShareChromeScheme] 什么也不做。 */
+val LocalPageChromeScheme = staticCompositionLocalOf<PageChromeScheme?> { null }
+
+/** 页面把自己的 [scheme] 交给外壳（见 [PageChromeScheme]），离开组合时撤回。 */
+@Composable
+fun ShareChromeScheme(scheme: ColorScheme) {
+    val holder = LocalPageChromeScheme.current ?: return
+    val owner = remember { Any() }
+    SideEffect { holder.set(owner, scheme) }
+    DisposableEffect(holder) { onDispose { holder.clear(owner) } }
 }
 
 @Composable

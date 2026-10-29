@@ -122,7 +122,7 @@ internal enum class TileStyle(
 internal fun tileStyleFor(metrics: WallMetrics): TileStyle = when (metrics) {
     WallMetrics.Phone -> TileStyle.Phone
     WallMetrics.Tablet -> TileStyle.Tablet
-    WallMetrics.Tv -> TileStyle.Tv
+    WallMetrics.Tv, WallMetrics.ShortTablet -> TileStyle.Tv
 }
 
 /** 序号小牌上的字：两位起，不够补零。 */

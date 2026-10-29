@@ -16,7 +16,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,6 +39,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -58,6 +59,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -80,6 +82,8 @@ import com.mytv.mymusic.ui.components.LocalCoverVisibilityScope
 import com.mytv.mymusic.ui.components.LocalSharedTransitionScope
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
+import com.mytv.mymusic.ui.components.LocalPageChromeScheme
+import com.mytv.mymusic.ui.components.PageChromeScheme
 import com.mytv.mymusic.ui.components.rememberAppWindow
 import com.mytv.mymusic.ui.library.libraryRoutes
 import com.mytv.mymusic.ui.player.PlayerScreen
@@ -135,6 +139,7 @@ fun MyMusicApp(model: MusicViewModel) {
     val nav = rememberNavController()
     val window = rememberAppWindow(state.appearance.layout)
     val hazeState = rememberHazeState()
+    val pageChrome = remember { PageChromeScheme() }
     var selectedTab by rememberSaveable { mutableStateOf(TopTab.Charts.route) }
     var queueOpen by rememberSaveable { mutableStateOf(false) }
     var timerOpen by rememberSaveable { mutableStateOf(false) }
@@ -159,15 +164,14 @@ fun MyMusicApp(model: MusicViewModel) {
     val app = remember(nav, model, actions) { AppNav(nav, model, actions, ::openTab, ::openSettings) }
     LaunchedEffect(window.showNowPlayingPane) { model.setAutoOpenPlayer(!window.showNowPlayingPane) }
 
-    // 选中的入口跟着返回栈走：设置在手机上归到“我的”，在平板和电视上是导航栏底部的“设置”
+    // 选中的入口跟着返回栈走：详情页这类不是入口的页面归到栈里它下面最近的入口，
+    // 从详情页进设置再返回时选中的回到原来的入口，不停在设置上
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     LaunchedEffect(route, window.isPhone) {
-        when {
-            route == null -> Unit
-            TopTab.entries.any { it.route == route } -> selectedTab = route
-            route.startsWith("settings") -> selectedTab = if (window.isPhone) TopTab.Library.route else "settings"
-        }
+        if (route == null) return@LaunchedEffect
+        val owner = nav.currentBackStack.value.asReversed().firstNotNullOfOrNull { tabOf(it.destination.route, window.isPhone) }
+        if (owner != null) selectedTab = owner
     }
 
     // 每次回到前台都通知一次：从“安装未知来源”设置页授权返回后要靠它继续安装
@@ -225,9 +229,16 @@ fun MyMusicApp(model: MusicViewModel) {
     val enterSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     val exitSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
 
-    CompositionLocalProvider(LocalAppWindow provides window, LocalHazeState provides hazeState, LocalAppSnackbar provides snackbar) {
-        // 共享元素：手机上正在播放的封面从迷你播放器飞到播放页
-        SharedTransitionLayout(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+    CompositionLocalProvider(
+        LocalAppWindow provides window,
+        LocalHazeState provides hazeState,
+        LocalAppSnackbar provides snackbar,
+        LocalPageChromeScheme provides pageChrome,
+    ) {
+        // 共享元素：手机上正在播放的封面从迷你播放器飞到播放页。
+        // 底色跟着页面的外壳配色走：平板右侧播放栏顶上状态栏那一条露的是它，深色页面（海报视图）时状态栏图标是浅色的
+        val shellSurface = MaterialTheme.colorScheme.surface
+        SharedTransitionLayout(Modifier.fillMaxSize().drawBehind { drawRect(pageChrome.scheme?.surface ?: shellSurface) }) {
         CompositionLocalProvider(LocalSharedTransitionScope provides this) {
         Box(Modifier.fillMaxSize()) {
             // 手机横屏（≥600dp 走平板布局）时导航栏、挖孔在左右两侧，内容不能伸到下面
@@ -248,11 +259,13 @@ fun MyMusicApp(model: MusicViewModel) {
                         onSettings = { openSettings("settings") },
                         onOpenNowPlaying = actions::openNowPlaying,
                     )
-                    window.showRail -> TabletNavRail(
-                        selected = selectedTab,
-                        onSelect = ::openTab,
-                        onSettings = { openSettings("settings") },
-                    )
+                    window.showRail -> ShellChromeTheme(pageChrome) {
+                        TabletNavRail(
+                            selected = selectedTab,
+                            onSelect = ::openTab,
+                            onSettings = { openSettings("settings") },
+                        )
+                    }
                 }
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     Box(Modifier.weight(1f)) {
@@ -280,19 +293,23 @@ fun MyMusicApp(model: MusicViewModel) {
                             exit = fadeOut(),
                         ) {
                             CompositionLocalProvider(LocalCoverVisibilityScope provides this) {
-                                PhoneBottomBar(
-                                    state = state,
-                                    position = position,
-                                    selected = selectedTab,
-                                    actions = actions,
-                                    onSelect = ::openTab,
-                                    onOpenQueue = { queueOpen = true },
-                                )
+                                ShellChromeTheme(pageChrome) {
+                                    PhoneBottomBar(
+                                        state = state,
+                                        position = position,
+                                        selected = selectedTab,
+                                        actions = actions,
+                                        onSelect = ::openTab,
+                                        onOpenQueue = { queueOpen = true },
+                                    )
+                                }
                             }
                         }
                     }
                     if (window.showBottomPlayerBar && state.current != null) {
-                        BottomPlayerBar(state, position, actions, onOpenQueue = { queueOpen = true }, visible = !covered)
+                        ShellChromeTheme(pageChrome) {
+                            BottomPlayerBar(state, position, actions, onOpenQueue = { queueOpen = true }, visible = !covered)
+                        }
                     }
                 }
                 if (window.showNowPlayingPane) {
@@ -416,5 +433,31 @@ fun TvExitBackHandler() {
                 snackbar.showSnackbar("再按一次返回键退出应用")
             }
         }
+    }
+}
+
+/**
+ * 外壳的手机底栏、平板导航栏和底部播放条：整页深色的页面（详情页海报视图）登记了配色就换成它，否则沿用当前主题。
+ * 始终包这一层，切换时里面的内容不重建；配色只在这里读，过渡期间只重组这一小块。
+ */
+/** 返回栈里这一页对应的入口：顶层页就是它自己；设置在手机上归到“我的”，在平板和电视上是导航栏底部的“设置”；别的页面不算。 */
+private fun tabOf(route: String?, phone: Boolean): String? = when {
+    route == null -> null
+    TopTab.entries.any { it.route == route } -> route
+    route.startsWith("settings") -> if (phone) TopTab.Library.route else "settings"
+    else -> null
+}
+
+@Composable
+private fun ShellChromeTheme(page: PageChromeScheme, content: @Composable () -> Unit) {
+    val scheme = page.scheme
+    val outerContent = LocalContentColor.current
+    MaterialExpressiveTheme(
+        colorScheme = scheme ?: MaterialTheme.colorScheme,
+        motionScheme = MaterialTheme.motionScheme,
+        shapes = MaterialTheme.shapes,
+        typography = MaterialTheme.typography,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides (scheme?.onSurface ?: outerContent), content = content)
     }
 }

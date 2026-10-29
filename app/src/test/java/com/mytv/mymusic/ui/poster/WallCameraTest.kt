@@ -18,7 +18,7 @@ class WallCameraTest {
 
     private fun viewOf(m: WallMetrics) = when (m) {
         WallMetrics.Phone -> phoneView
-        WallMetrics.Tablet -> tabletView
+        WallMetrics.Tablet, WallMetrics.ShortTablet -> tabletView
         WallMetrics.Tv -> tvView
     }
 

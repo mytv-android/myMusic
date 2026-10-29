@@ -9,7 +9,6 @@ import androidx.compose.ui.platform.LocalContext
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.data.LyricsBackgroundMode
 import com.mytv.mymusic.data.RhythmIntensity
-import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.player.BackdropPulse
 import com.mytv.mymusic.ui.player.FlowFieldMotion
 import com.mytv.mymusic.ui.player.RhythmFeed
@@ -35,7 +34,6 @@ internal fun rememberPosterPulse(
 ): BackdropPulse {
     val pulse = rememberBackdropPulse()
     val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
-    val tv = LocalAppWindow.current.isTv
     val context = LocalContext.current
     val analyzer = remember(context) { (context.applicationContext as? MyMusicApp)?.rhythmAnalyzer }
     val reactive = visible && mode == LyricsBackgroundMode.Reactive && !reduceMotion && analyzer != null
@@ -55,11 +53,11 @@ internal fun rememberPosterPulse(
     RhythmFeed(analyzer, playing)
     val feed = remember(analyzer) { RhythmFeedReader(analyzer) }
     val offsetUs = rhythmOffsetMs * 1_000L
-    LaunchedEffect(motion, feed, playing, tv, offsetUs) {
-        // 电视限 30 帧，和墙、逐字歌词落在同一批垂直同步上
+    LaunchedEffect(motion, feed, playing, offsetUs) {
+        // 限 30 帧，和大卡上的花瓣旋转、跳动的条落在同一批垂直同步上
         while (true) {
             val settled = withFrameNanos { now ->
-                if (tv && !TvFrameGate.due(now)) return@withFrameNanos false
+                if (!wallFrameDue(now)) return@withFrameNanos false
                 feed.feedUntil(now, offsetUs, motion)
                 motion.advanceTo(now)
                 pulse.publish(motion)
@@ -72,3 +70,9 @@ internal fun rememberPosterPulse(
     }
     return pulse
 }
+
+/**
+ * 海报墙上一直在动的小东西（大卡的花瓣旋转、跳动的条、跟拍弹跳）在所有设备上都限 30 帧：和电视用同一个节拍，
+ * 几个循环落在同一批垂直同步上，墙不跟着屏幕刷新率一直满帧重画。运动都按真实帧间隔积分，速度不变。
+ */
+internal fun wallFrameDue(frameNanos: Long): Boolean = TvFrameGate.due(frameNanos)

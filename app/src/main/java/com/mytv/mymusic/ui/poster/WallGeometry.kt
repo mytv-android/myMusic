@@ -71,6 +71,7 @@ internal data class WallViewport(
 /**
  * 每种设备的格距和圆角（dp）。格距 = 一格 + 一道缝，放大卡 6 格要放得进屏幕：
  * 手机 6×56−4 = 332，平板 6×102−6 = 606，电视 6×76−5 = 451（顶部让出 80 后正好放下）。
+ * 矮平板（横屏、小平板）放不下 606 的大卡再加上下浮层，用电视的格距，但焦点安全区和平板一样。
  * 圆角三档：短边 2 格 / 短边 3 格以上 / 放大卡，取原型 TILE_STYLE；电视焦点时再加 [FOCUS_RADIUS_BOOST]。
  * [feedRows] 是听歌模式带子的高度（块），[safeMargin] 是方向键焦点的安全区内缩。
  */
@@ -85,7 +86,8 @@ internal enum class WallMetrics(
 ) {
     Phone(pitch = 56f, gap = 4f, feedRows = 2, radiusSmall = 8f, radiusLarge = 10f, radiusGrown = 24f, safeMargin = 24f),
     Tablet(pitch = 102f, gap = 6f, feedRows = 1, radiusSmall = 12f, radiusLarge = 16f, radiusGrown = 28f, safeMargin = 24f),
-    Tv(pitch = 76f, gap = 5f, feedRows = 1, radiusSmall = 10f, radiusLarge = 14f, radiusGrown = 24f, safeMargin = 40f);
+    Tv(pitch = 76f, gap = 5f, feedRows = 1, radiusSmall = 10f, radiusLarge = 14f, radiusGrown = 24f, safeMargin = 40f),
+    ShortTablet(pitch = 76f, gap = 5f, feedRows = 1, radiusSmall = 10f, radiusLarge = 14f, radiusGrown = 24f, safeMargin = 24f);
 
     val blockWidth: Float get() = WallLayout.BLOCK_W * pitch
     val blockHeight: Float get() = WallLayout.BLOCK_H * pitch

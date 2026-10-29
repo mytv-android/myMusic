@@ -11,7 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
 import com.mytv.mymusic.ui.theme.LocalAppearance
 
-/** 外壳的共享元素作用域；只有手机上迷你播放器 ↔ 播放页之间用到。 */
+/** 外壳的共享元素作用域；只有手机上迷你播放器 / 海报墙大卡 ↔ 播放页之间用到。 */
 @OptIn(ExperimentalSharedTransitionApi::class)
 val LocalSharedTransitionScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
 
@@ -36,9 +36,31 @@ fun Modifier.sharedNowPlayingCover(clip: Shape): Modifier {
         this@sharedNowPlayingCover.sharedElement(
             sharedContentState = rememberSharedContentState(NowPlayingCoverKey),
             animatedVisibilityScope = visibility,
-            // 与播放页展开同一条空间弹簧（阻尼 0.8，刚度 380）
-            boundsTransform = BoundsTransform { _, _ -> spring(dampingRatio = 0.8f, stiffness = 380f) },
+            boundsTransform = NowPlayingCoverBounds,
             clipInOverlayDuringTransition = OverlayClip(clip),
         )
     }
 }
+
+/**
+ * 海报墙大卡这一侧：墙在播放页底下一直开着，没有跟着播放页进出的 AnimatedVisibility，
+ * 由调用方按 [visible]（播放页没盖上来）自己管显隐。打开播放页时封面从大卡飞过去，关上时飞回大卡。
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun Modifier.sharedNowPlayingCover(clip: Shape, visible: Boolean): Modifier {
+    val shared = LocalSharedTransitionScope.current ?: return this
+    if (LocalAppearance.current.reduceMotion) return this
+    return with(shared) {
+        this@sharedNowPlayingCover.sharedElementWithCallerManagedVisibility(
+            sharedContentState = rememberSharedContentState(NowPlayingCoverKey),
+            visible = visible,
+            boundsTransform = NowPlayingCoverBounds,
+            clipInOverlayDuringTransition = OverlayClip(clip),
+        )
+    }
+}
+
+/** 与播放页展开同一条空间弹簧（阻尼 0.8，刚度 380）。 */
+@OptIn(ExperimentalSharedTransitionApi::class)
+private val NowPlayingCoverBounds = BoundsTransform { _, _ -> spring(dampingRatio = 0.8f, stiffness = 380f) }

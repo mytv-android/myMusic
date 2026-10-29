@@ -74,6 +74,7 @@ import com.mytv.mymusic.ui.charts.SongAction
 import com.mytv.mymusic.ui.charts.SongActionsSheet
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.components.sharedNowPlayingCover
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.player.AmbientClock
 import com.mytv.mymusic.ui.player.rememberScreenReaderOn
@@ -190,9 +191,10 @@ internal fun PosterWallScreen(
             insetTop = insetTop,
             insetBottom = insetBottom,
             onLongPress = { index -> songs.getOrNull(index)?.let { actionSong = it } },
-            onGrownConfirm = { _, isCurrent ->
-                // 正在播放的卡：OK 就是播放 / 暂停；别的歌：焦点交进卡里，再选“播放 / 下一首播放 / 更多”
-                if (isCurrent) actions.transport("play") else runCatching { primaryFocus.requestFocus() }
+            onGrownConfirm = { _, _ ->
+                // 焦点交进卡里：正在播放的卡落在播放键上（再按 OK 播放 / 暂停，左右键到上一首、下一首、打开播放页和进度条），
+                // 别的歌落在“播放”上，再选“播放 / 下一首播放 / 更多”；返回键回到墙上
+                runCatching { primaryFocus.requestFocus() }
             },
             autoFocus = false,
             active = active,
@@ -231,6 +233,12 @@ internal fun PosterWallScreen(
                         focused = wall.grownFocused,
                         primaryFocusRequester = primaryFocus,
                         coverPlaceholderKey = wall.grownCoverKey,
+                        // 手机上正在播放的大卡和播放页的封面是同一个共享元素：打开播放页飞过去，关上飞回来
+                        coverModifier = if (isCurrent && window.isPhone) {
+                            Modifier.sharedNowPlayingCover(RoundedCornerShape(metrics.radiusGrown.dp), visible = active)
+                        } else {
+                            Modifier
+                        },
                         lyricsLoading = isCurrent && !lyricsReady,
                         lightsOut = state.poster.lightsOut,
                     )
@@ -298,7 +306,7 @@ internal fun wallSubtitle(feed: ListeningFeedUi?, count: Int, currentIndex: Int)
  */
 internal fun wallInsets(metrics: WallMetrics, safeTop: Dp, safeBottom: Dp, heightDp: Int): Pair<Dp, Dp> = when (metrics) {
     WallMetrics.Tv -> TvTopRowHeight to 0.dp
-    WallMetrics.Tablet -> 0.dp to 0.dp
+    WallMetrics.Tablet, WallMetrics.ShortTablet -> 0.dp to 0.dp
     WallMetrics.Phone -> {
         val top = safeTop + PhonePillTop + PillHeight
         val bottom = safeBottom + PosterWallBottomChrome

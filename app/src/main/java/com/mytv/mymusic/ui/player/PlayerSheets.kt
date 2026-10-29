@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Repeat
@@ -40,8 +41,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.RepeatMode
@@ -99,19 +100,23 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val repeat = state.repeat
+            // 一行要放下两个模式键、海报墙和清空：电视侧边面板和窄手机上只有三百来 dp，模式键收紧内边距，
+            // 随机开没开看填充色（读屏读状态），文字不跟着变长
             FilledTonalButton(
                 onClick = { actions.transport("shuffle") },
-                modifier = Modifier.tvFocusRing(),
+                modifier = Modifier.tvFocusRing().semantics { stateDescription = if (state.shuffle) "已开" else "已关" },
                 colors = if (state.shuffle) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
+                contentPadding = QueueModePadding,
             ) {
                 Icon(Icons.Filled.Shuffle, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(if (state.shuffle) "随机已开" else "随机")
+                Text("随机", maxLines = 1)
             }
             FilledTonalButton(
                 onClick = { actions.transport("repeat") },
                 modifier = Modifier.tvFocusRing(),
                 colors = if (repeat != RepeatMode.Off) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
+                contentPadding = QueueModePadding,
             ) {
                 Icon(if (repeat == RepeatMode.One) Icons.Filled.RepeatOne else Icons.Filled.Repeat, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
@@ -121,6 +126,7 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
                         RepeatMode.All -> "列表循环"
                         RepeatMode.One -> "单曲循环"
                     },
+                    maxLines = 1,
                 )
             }
             Spacer(Modifier.weight(1f))
@@ -132,8 +138,12 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
             ) {
                 Icon(Icons.Filled.GridView, "海报墙")
             }
-            TextButton(onClick = { actions.clearQueue(); onDismiss() }, modifier = Modifier.tvFocusRing()) {
-                Text("清空", Modifier.semantics { contentDescription = "清空播放队列" })
+            IconButton(
+                onClick = { actions.clearQueue(); onDismiss() },
+                modifier = Modifier.tvFocusRing(CircleShape),
+                enabled = state.queue.isNotEmpty(),
+            ) {
+                Icon(Icons.Filled.DeleteSweep, "清空播放队列")
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -247,3 +257,6 @@ fun SleepTimerSheet(state: MusicUiState, sleep: SleepTimerState, actions: MusicA
         }
     }
 }
+
+/** 播放队列顶上两个模式键的内边距：比默认的 24dp 收紧，一行放得下海报墙和清空。 */
+private val QueueModePadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)

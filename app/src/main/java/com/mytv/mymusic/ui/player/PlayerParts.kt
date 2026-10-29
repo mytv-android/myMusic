@@ -594,7 +594,8 @@ private fun LyricRow(
 /**
  * 逐字卡拉OK行：底层暗字、上层亮字按各字起止时间裁剪。播放进度 500ms 才刷新一次，
  * 播放中用帧时钟在两次校准之间线性外推；时间只在 draw 阶段读取，逐帧变化不触发列表重组。
- * 电视上和背景、封面旋转共用 30 帧节拍（[TvFrameGate]），十英尺外看不出填色少了一半帧。
+ * 电视上和背景、封面旋转共用 30 帧节拍（[TvFrameGate]），十英尺外看不出填色少了一半帧；
+ * [capFrames] 为 true 时（海报墙的大卡）手机、平板上也限 30 帧。
  * [playing] 为 false 时停在当前进度，不跑帧循环。
  */
 @Composable
@@ -603,10 +604,10 @@ internal fun KaraokeLine(
     position: State<Long>,
     playing: Boolean,
     style: TextStyle,
+    capFrames: Boolean = LocalAppWindow.current.isTv,
 ) {
     val now = remember { mutableLongStateOf(0L) }
-    val tv = LocalAppWindow.current.isTv
-    LaunchedEffect(position.value, playing, tv) {
+    LaunchedEffect(position.value, playing, capFrames) {
         if (!playing) {
             now.longValue = position.value
             return@LaunchedEffect
@@ -615,7 +616,7 @@ internal fun KaraokeLine(
         val startNanos = withFrameNanos { it }
         while (true) {
             withFrameNanos { frameNanos ->
-                if (!tv || TvFrameGate.due(frameNanos)) now.longValue = base + (frameNanos - startNanos) / 1_000_000
+                if (!capFrames || TvFrameGate.due(frameNanos)) now.longValue = base + (frameNanos - startNanos) / 1_000_000
             }
         }
     }

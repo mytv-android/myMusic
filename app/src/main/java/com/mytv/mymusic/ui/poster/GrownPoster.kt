@@ -103,7 +103,6 @@ import com.mytv.mymusic.ui.components.TintedGradient
 import com.mytv.mymusic.ui.components.WavySeekBar
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.player.CookiePlayButton
-import com.mytv.mymusic.ui.player.TvFrameGate
 import com.mytv.mymusic.ui.player.ambientSpinEnabled
 import com.mytv.mymusic.ui.player.rememberParsedLyrics
 import com.mytv.mymusic.ui.player.rememberSystemAnimationsOff
@@ -145,7 +144,7 @@ internal enum class GrownPosterStyle(
         fun of(metrics: WallMetrics): GrownPosterStyle = when (metrics) {
             WallMetrics.Phone -> Phone
             WallMetrics.Tablet -> Tablet
-            WallMetrics.Tv -> Tv
+            WallMetrics.Tv, WallMetrics.ShortTablet -> Tv
         }
     }
 }
@@ -604,14 +603,14 @@ private fun NowControls(
     val tv = LocalAppWindow.current.isTv
     val angle = remember { mutableFloatStateOf(0f) }
     val spin = settled && ambientSpinEnabled(playing, reduceMotion)
-    LaunchedEffect(spin, tv) {
+    LaunchedEffect(spin) {
         // 暂停时停在当前角度：12 瓣花瓣转到哪儿都是正的
         if (!spin) return@LaunchedEffect
         var last = withFrameNanos { it }
         while (true) {
             withFrameNanos { now ->
-                // 电视上和封面旋转、逐字填色共用 30 帧节拍，按真实间隔累加，转速不变
-                if (!tv || TvFrameGate.due(now)) {
+                // 和跳动的条、跟拍弹跳共用 30 帧节拍（见 wallFrameDue），按真实间隔累加，转速不变
+                if (wallFrameDue(now)) {
                     angle.floatValue = advanceCookieSpin(angle.floatValue, now - last)
                     last = now
                 }
@@ -645,6 +644,8 @@ private fun NowControls(
                 CardIconButton(Icons.Filled.SkipNext, "下一首", onNext)
             }
         }
+        // 电视上进度条把左右键当快退快进，焦点从它那儿右移不出去：“打开播放页”挪到进度条前面
+        if (tv) CardIconButton(Icons.AutoMirrored.Filled.OpenInNew, "打开播放页", onOpenPlayer, Modifier.padding(start = 10.dp))
         WavySeekBar(
             position = position,
             duration = duration,
@@ -655,8 +656,10 @@ private fun NowControls(
                 .weight(1f)
                 .padding(horizontal = 10.dp)
                 .tvFocusRing(SeekFocusShape, scale = 1f),
+            // 波浪不平移：M3 的波浪按屏幕刷新率自己跑，会让整面墙一直 60 帧重画；进度每 500ms 才动一下
+            waveTravel = false,
         )
-        CardIconButton(Icons.AutoMirrored.Filled.OpenInNew, "打开播放页", onOpenPlayer)
+        if (!tv) CardIconButton(Icons.AutoMirrored.Filled.OpenInNew, "打开播放页", onOpenPlayer)
     }
 }
 
@@ -784,14 +787,13 @@ private fun PosterChip(
 @Composable
 private fun EqBars(animate: Boolean, color: Color) {
     val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
-    val tv = LocalAppWindow.current.isTv
     val clock = remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(animate, reduceMotion, tv) {
+    LaunchedEffect(animate, reduceMotion) {
         if (!animate || reduceMotion) return@LaunchedEffect
         var last = withFrameNanos { it }
         while (true) {
             withFrameNanos { now ->
-                if (!tv || TvFrameGate.due(now)) {
+                if (wallFrameDue(now)) {
                     clock.floatValue = (clock.floatValue + (now - last) / 1_000_000_000f) % (EqHalfPeriodS * 2)
                     last = now
                 }

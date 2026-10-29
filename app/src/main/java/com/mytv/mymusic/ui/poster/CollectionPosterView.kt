@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -87,6 +88,7 @@ import com.mytv.mymusic.ui.components.DeviceKind
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.RequestDarkBars
+import com.mytv.mymusic.ui.components.ShareChromeScheme
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.player.AmbientClock
 import com.mytv.mymusic.ui.theme.LocalAppearance
@@ -147,6 +149,7 @@ internal fun CollectionPosterView(
     ops: CollectionPosterOps,
     sourceName: (Song) -> String,
     extra: PosterExtraAction? = null,
+    sourceSettings: (() -> Unit)? = null,
     message: (@Composable () -> Unit)? = null,
     resetKey: Any? = null,
     holdAwake: Boolean = false,
@@ -244,9 +247,9 @@ internal fun CollectionPosterView(
                 insetBottom = insetBottom,
                 onLongPress = ops.songActions,
                 grownContent = grown,
-                onGrownConfirm = { _, current ->
-                    // 正在播放的大卡：OK 播放 / 暂停；别的歌：焦点交进卡里，落在“播放”上
-                    if (current) actions.transport("play") else runCatching { cardFocus.requestFocus() }
+                onGrownConfirm = { _, _ ->
+                    // 焦点交进卡里：正在播放的大卡落在播放键上，别的歌落在“播放”上；返回键回到墙上
+                    runCatching { cardFocus.requestFocus() }
                 },
                 autoFocus = false,
                 active = shown,
@@ -270,6 +273,8 @@ internal fun CollectionPosterView(
                     playLabel = playLabel,
                     canShuffle = hasSongs,
                     extra = extra,
+                    // 榜单的换源设置：电视放在顶排工具栏里（胶囊拿不到焦点），手机、平板放在胶囊右端
+                    sourceSettings = sourceSettings.takeIf { chrome.toolbarOnTop },
                     canLocate = currentIndex >= 0,
                     locateHot = currentIndex >= 0 && !wall.currentGrown,
                     playFocus = playFocus,
@@ -315,6 +320,7 @@ internal fun CollectionPosterView(
                     title,
                     subtitle,
                     onBack = if (chrome.showBack) ops.back else null,
+                    onSourceSettings = sourceSettings,
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(start = chrome.side.dp, end = chrome.side.dp, top = statusTop + chrome.top.dp)
@@ -431,7 +437,8 @@ internal fun posterCurrentIndex(songs: List<Song>, currentKey: String?, sourceKe
 /**
  * 海报视图的配色：和队列海报墙、播放页一样固定深色（播放页风格，参数同 PlayerTheme），不跟浅色主题走——
  * 浅色 surface 盖在封面上整面墙会发白。这张歌单没在放时用歌单封面的种子色，在放时跟正在播放的封面走；
- * 两者之间走全局同样的 450ms 过渡，墙在绘制阶段读，过渡期间不重组格子。系统栏图标同时变浅（[RequestDarkBars]）。
+ * 两者之间走全局同样的 450ms 过渡，墙在绘制阶段读，过渡期间不重组格子。系统栏图标同时变浅（[RequestDarkBars]），
+ * 外壳的底栏、导航栏、播放条也换成这套配色（[ShareChromeScheme]）。
  */
 @Composable
 private fun CollectionPosterTheme(
@@ -454,6 +461,8 @@ private fun CollectionPosterTheme(
         specVersion = ColorSpec.SpecVersion.SPEC_2025,
     )
     val scheme = if (appearance.reduceMotion) target else animateColorScheme(target, animationSpec = { tween(COLOR_TRANSITION_MS) })
+    // 手机底栏、平板导航栏和底部播放条跟着用这套深色
+    ShareChromeScheme(scheme)
     MaterialExpressiveTheme(colorScheme = scheme) {
         CompositionLocalProvider(LocalContentColor provides scheme.onSurface, content = content)
     }
@@ -461,9 +470,15 @@ private fun CollectionPosterTheme(
 
 private const val COLOR_TRANSITION_MS = 450
 
-/** 顶部胶囊：返回钮（电视没有）+ 标题和副标题，surfaceContainerHigh 86%。 */
+/** 顶部胶囊：返回钮（电视没有）+ 标题和副标题 + 榜单的换源设置，surfaceContainerHigh 86%。 */
 @Composable
-private fun TitlePill(title: String, subtitle: String, onBack: (() -> Unit)?, modifier: Modifier = Modifier) {
+private fun TitlePill(
+    title: String,
+    subtitle: String,
+    onBack: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    onSourceSettings: (() -> Unit)? = null,
+) {
     Surface(
         modifier = modifier.heightIn(min = PILL_HEIGHT.dp),
         shape = CircleShape,
@@ -471,7 +486,7 @@ private fun TitlePill(title: String, subtitle: String, onBack: (() -> Unit)?, mo
         shadowElevation = 3.dp,
     ) {
         Row(
-            Modifier.padding(start = if (onBack != null) 4.dp else 20.dp, end = 18.dp),
+            Modifier.padding(start = if (onBack != null) 4.dp else 20.dp, end = if (onSourceSettings != null) 4.dp else 18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onBack != null) {
@@ -480,7 +495,12 @@ private fun TitlePill(title: String, subtitle: String, onBack: (() -> Unit)?, mo
                 }
                 Spacer(Modifier.width(4.dp))
             }
-            Column(Modifier.padding(vertical = 6.dp).semantics(mergeDescendants = true) { heading() }) {
+            Column(
+                Modifier
+                    .weight(1f, fill = false)
+                    .padding(vertical = 6.dp)
+                    .semantics(mergeDescendants = true) { heading() },
+            ) {
                 Text(
                     title.ifBlank { "详情" },
                     style = MaterialTheme.typography.titleSmall,
@@ -498,6 +518,13 @@ private fun TitlePill(title: String, subtitle: String, onBack: (() -> Unit)?, mo
                     )
                 }
             }
+            if (onSourceSettings != null) {
+                Spacer(Modifier.width(8.dp))
+                // 底部工具栏的调节钮是“海报墙设置”，这里用换源的图标区分
+                IconButton(onClick = onSourceSettings, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Filled.SwapHoriz, "换源设置")
+                }
+            }
         }
     }
 }
@@ -512,6 +539,7 @@ private fun PosterToolbar(
     playLabel: String,
     canShuffle: Boolean,
     extra: PosterExtraAction?,
+    sourceSettings: (() -> Unit)?,
     canLocate: Boolean,
     locateHot: Boolean,
     playFocus: FocusRequester,
@@ -556,6 +584,7 @@ private fun PosterToolbar(
         }
         ToolButton(Icons.Filled.MyLocation, "定位正在播放", onLocate, width, height, enabled = canLocate, selected = locateHot)
         ToolButton(Icons.AutoMirrored.Filled.ViewList, "切回列表视图", onList, width, height)
+        if (sourceSettings != null) ToolButton(Icons.Filled.SwapHoriz, "换源设置", sourceSettings, width, height)
         ToolButton(Icons.Filled.Tune, "海报墙设置", onSettings, width, height)
     }
 }

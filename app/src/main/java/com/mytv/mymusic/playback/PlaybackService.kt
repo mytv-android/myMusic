@@ -44,6 +44,16 @@ class PlaybackService : MediaSessionService() {
         }
         app?.let { builder.setRenderersFactory(RhythmRenderersFactory(this, it.rhythmAnalyzer)) }
         val player = builder.build()
+        // 随机顺序跟着队列改动走：随机时“下一首播放”照样下一首放，解析完换地址也不会跳到别的歌
+        player.setShuffleOrder(QueueShuffleOrder())
+        player.addListener(object : Player.Listener {
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                // 打开随机时从正在放的这首重新打乱；不然它可能排在随机顺序中间，不循环时排在它前面的就轮不到了
+                if (shuffleModeEnabled) {
+                    player.setShuffleOrder(QueueShuffleOrder().cloneAndSet(player.mediaItemCount, player.currentMediaItemIndex))
+                }
+            }
+        })
         app?.rhythmAnalyzer?.let { analyzer ->
             player.addListener(object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
