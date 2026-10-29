@@ -211,6 +211,11 @@ fun AboutScreen(
                 )
             }
         }
+        item(key = "sodam", contentType = "creditCard") {
+            Box(Modifier.padding(top = 12.dp)) {
+                SodamCredit(note = "汽水会员整曲的签名服务与协议来自 SodaM（AGPL-3.0）")
+            }
+        }
         item(key = "links", contentType = "linksCard") { LinksCard(openUri) }
         item(key = "note", contentType = "infoNote") {
             Box(Modifier.padding(top = 16.dp)) {

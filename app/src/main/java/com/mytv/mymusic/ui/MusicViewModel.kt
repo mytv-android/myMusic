@@ -121,6 +121,7 @@ data class MusicUiState(
     val cookies: Map<String, String> = emptyMap(),
     val sodaSignerUrl: String = "",
     val sodaSignerToken: String = "",
+    val sodaSignerEnabled: Boolean = true,
     val aggregation: AggregationSettings = AggregationSettings(),
     val searchHistory: List<String> = emptyList(),
     val skippedUpdateCode: Long = 0L,
@@ -270,6 +271,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             cookies = settings.cookies,
             sodaSignerUrl = settings.sodaSignerUrl,
             sodaSignerToken = settings.sodaSignerToken,
+            sodaSignerEnabled = settings.sodaSignerEnabled,
             aggregation = settings.aggregation,
             searchHistory = settings.searchHistory,
             skippedUpdateCode = settings.skippedUpdateCode,
@@ -661,15 +663,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun openCollection(playlist: Playlist, kind: CollectionKind) {
         val source = playlist.source.ifBlank { settingsState.value.provider }
+        // 歌手名就是标题，副标题不再重复“歌手”
         val fallback = when (kind) {
             CollectionKind.Album -> "专辑"
-            CollectionKind.Artist -> "歌手"
+            CollectionKind.Artist -> ""
             else -> "歌单"
         }
         val subtitle = listOf(
             playlist.creator.ifBlank { fallback },
-            "${playlist.trackCount} 首".takeIf { playlist.trackCount > 0 },
-        ).filterNotNull().joinToString(" / ")
+            "${playlist.trackCount} 首".takeIf { playlist.trackCount > 0 } ?: "",
+        ).filter { it.isNotBlank() }.joinToString(" / ")
         _collection.value = CollectionUiState(
             kind = kind,
             id = playlist.id,
@@ -2629,11 +2632,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveSodaSigner(url: String, token: String) = viewModelScope.launch {
+    fun saveSodaSigner(url: String, token: String, enabled: Boolean = true) = viewModelScope.launch {
         resolver.clearCache()
-        app.settings.sodaSigner(url, token)
-        SodaProvider.configureSigner(url, token)
-        message(if (url.isBlank()) "已关闭汽水签名器" else "汽水签名器已保存")
+        app.settings.sodaSigner(url, token, enabled)
+        SodaProvider.configureSigner(url, token, enabled)
+        message(
+            when {
+                !enabled -> "已关闭汽水签名器，会员整曲只会返回试听片段"
+                url.isBlank() -> "已启用 SodaM 公共签名服务"
+                else -> "汽水签名器已保存"
+            },
+        )
     }
 
     fun logout(providerId: String = settingsState.value.provider) = viewModelScope.launch {
@@ -2859,10 +2868,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             appendLine("设备：${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
             appendLine("Android：${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
             appendLine("启用平台：$enabled")
+            appendLine("汽水签名器：${signerStatus()}")
             appendLine("同步：${syncState.value.message.ifBlank { syncState.value.error.ifBlank { syncState.value.status.name } }}")
             appendLine("更新：${updateState.value.error.ifBlank { updateState.value.message.ifBlank { updateState.value.phase.name } }}")
             append("本信息不包含 Cookie、令牌或播放地址。")
         }
+    }
+
+    /** 诊断信息里的签名器状态：只说公共 / 自定义 / 关闭，不带地址和 Token。 */
+    private fun signerStatus(): String = when {
+        !settingsState.value.sodaSignerEnabled -> "已关闭"
+        settingsState.value.sodaSignerUrl.isBlank() -> "SodaM 公共签名服务"
+        else -> "自定义"
     }
 
     private fun message(text: String, error: Boolean = false) {

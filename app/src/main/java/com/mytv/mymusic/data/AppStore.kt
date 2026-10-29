@@ -71,6 +71,7 @@ class SettingsStore(private val context: Context) {
     private val cookieUpdatedAtKey = stringPreferencesKey("cookie_updated_at")
     private val sodaSignerUrlKey = stringPreferencesKey("soda_signer_url")
     private val sodaSignerTokenKey = stringPreferencesKey("soda_signer_token")
+    private val sodaSignerEnabledKey = booleanPreferencesKey("soda_signer_enabled")
     private val aggregationKey = stringPreferencesKey("aggregation")
     private val dynamicColorKey = booleanPreferencesKey("dynamic_color")
     private val reduceMotionKey = booleanPreferencesKey("reduce_motion")
@@ -110,6 +111,7 @@ class SettingsStore(private val context: Context) {
                 .getOrDefault(emptyMap()),
             sodaSignerUrl = values[sodaSignerUrlKey] ?: "",
             sodaSignerToken = values[sodaSignerTokenKey] ?: "",
+            sodaSignerEnabled = values[sodaSignerEnabledKey] ?: true,
             aggregation = runCatching {
                 json.decodeFromString<AggregationSettings>(values[aggregationKey] ?: "")
             }.getOrDefault(AggregationSettings()),
@@ -172,9 +174,10 @@ class SettingsStore(private val context: Context) {
     suspend fun sleepFade(value: Boolean) = context.dataStore.edit { it[sleepFadeKey] = value }
     suspend fun cacheLimitMb(value: Int) = context.dataStore.edit { it[cacheLimitKey] = value }
 
-    suspend fun sodaSigner(url: String, token: String) = context.dataStore.edit {
+    suspend fun sodaSigner(url: String, token: String, enabled: Boolean = true) = context.dataStore.edit {
         it[sodaSignerUrlKey] = url.trim()
         it[sodaSignerTokenKey] = token.trim()
+        it[sodaSignerEnabledKey] = enabled
     }
 
     suspend fun cookie(provider: String, cookie: String) = context.dataStore.edit {
@@ -281,9 +284,13 @@ data class AppSettings(
     /** 界面布局：Auto / Phone / Tablet / Tv。 */
     val layoutMode: String = "Auto",
     val cookies: Map<String, String> = emptyMap(),
-    /** 汽水签名器（sodam / libmssdk 的 /sign 协议），留空表示只用公开试听流。 */
+    /**
+     * 汽水签名器（sodam / libmssdk 的 /sign 协议）。地址和 Token 留空表示用内置的
+     * SodaM 公共签名服务；[sodaSignerEnabled] 关掉后只用公开试听流。
+     */
     val sodaSignerUrl: String = "",
     val sodaSignerToken: String = "",
+    val sodaSignerEnabled: Boolean = true,
     val aggregation: AggregationSettings = AggregationSettings(),
     val dynamicColor: Boolean = false,
     val reduceMotion: Boolean = false,

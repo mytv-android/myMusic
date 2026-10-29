@@ -585,7 +585,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val webQuality = webInfo?.let { qualityRank(it.quality, it.format, it.bitrate) } ?: 0
 
         // 整曲流走 App 端点（POST /luna/pc/track_v2），逐请求签名头 x-helios/x-medusa
-        // 由外部签名器生成；未配置签名器时保持只走公开 web/SEO 端点。
+        // 由外部签名器生成；默认连 SodaM 的公共签名服务，关闭签名器时保持只走公开 web/SEO 端点。
         if (isSignerConfigured() && cookie.isNotBlank()) {
             val skipPc = webInfo != null && !isVipTrack && !webIsPreview && webQuality >= 60
             val shouldTryPc = !skipPc && (isVipTrack || webIsPreview || webQuality < 100)
@@ -654,7 +654,8 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     }
 
     // ---------------------------------------------------------------------
-    // 签名器：协议与 sodam / libresoda / libmssdk 的 POST /sign 一致
+    // 签名器：协议与 sodam / libresoda / libmssdk 的 POST /sign 一致，
+    // 默认使用 SodaM 的公共签名服务（见 DEFAULT_SIGNER_URL）
     // ---------------------------------------------------------------------
 
     /**
@@ -666,7 +667,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         body: String,
         headers: Map<String, String>,
     ): SignedRequest {
-        val endpoint = signerUrl.trim()
+        val endpoint = effectiveSignerUrl()
         if (endpoint.isEmpty()) throw IllegalStateException(VIP_SIGNER_REQUIRED_MESSAGE)
         val payload = buildJsonObject {
             put("url", requestUrl)
@@ -681,7 +682,8 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             "Content-Type" to "application/json; charset=utf-8",
             "Accept" to "application/json",
         )
-        if (signerToken.isNotBlank()) signerHeaders["Authorization"] = "Bearer $signerToken"
+        val token = effectiveSignerToken()
+        if (token.isNotBlank()) signerHeaders["Authorization"] = "Bearer $token"
         val response = try {
             NativeHttp.postJson(endpoint, payload, signerHeaders, userAgent = SODA_USER_AGENT)
         } catch (error: CancellationException) {
@@ -739,7 +741,8 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         var fp = ""
         try {
             val headers = linkedMapOf("Accept" to "application/json")
-            if (signerToken.isNotBlank()) headers["Authorization"] = "Bearer $signerToken"
+            val token = effectiveSignerToken()
+            if (token.isNotBlank()) headers["Authorization"] = "Bearer $token"
             val body = NativeHttp.get(signerConfigUrl(), headers, userAgent = SODA_USER_AGENT)
             val root = SODA_JSON.parseToJsonElement(body) as? JsonObject
             if (root != null) {
@@ -769,7 +772,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     }
 
     private fun signerConfigUrl(): String {
-        var base = signerUrl.trim()
+        var base = effectiveSignerUrl()
         for (suffix in listOf("/sign", "/sign/")) {
             if (base.endsWith(suffix)) {
                 base = base.dropLast(suffix.length)
@@ -2351,17 +2354,27 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     private data class SignedRequest(val url: String, val headers: Map<String, String>)
 
     companion object {
-        /** 签名器地址，例如 http://192.168.1.10:8899/sign；空表示未配置。 */
+        /**
+         * 内置的 SodaM 公共签名服务：[SodaM](https://github.com/sodahub-org/sodam) 作者提供的默认实例，
+         * 桌面版默认就连这一个。用户自己填了地址和 Token 就以填的为准。
+         */
+        const val DEFAULT_SIGNER_URL = "http://103.236.75.83:8899/sign"
+        const val DEFAULT_SIGNER_TOKEN = "b356ad402bc31ee9e5a99cfdbf41eaa39961a562251c3359"
+
+        /** 签名器总开关；关掉后回到只走公开试听流的行为。 */
+        @Volatile private var signerEnabled = true
+        /** 用户自填的签名器地址，例如 http://192.168.1.10:8899/sign；空表示用内置公共服务。 */
         @Volatile private var signerUrl = ""
         @Volatile private var signerToken = ""
         @Volatile private var signerCredentials: SodaAppCredentials? = null
 
-        fun configureSigner(url: String, token: String) {
+        fun configureSigner(url: String, token: String, enabled: Boolean = true) {
             val nextUrl = normalizeSignerUrl(url)
             val nextToken = token.trim()
-            if (nextUrl == signerUrl && nextToken == signerToken) return
+            if (nextUrl == signerUrl && nextToken == signerToken && enabled == signerEnabled) return
             signerUrl = nextUrl
             signerToken = nextToken
+            signerEnabled = enabled
             signerCredentials = null
         }
 
@@ -2376,7 +2389,16 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             return trimmed
         }
 
-        fun isSignerConfigured(): Boolean = signerUrl.isNotBlank()
+        /** 生效的签名服务地址：没自填就用内置的 SodaM 公共签名服务。 */
+        fun effectiveSignerUrl(): String = signerUrl.ifBlank { DEFAULT_SIGNER_URL }
+
+        /** 生效的 Token：公共服务的 Token 随 DEFAULT_SIGNER_URL 一起内置。 */
+        fun effectiveSignerToken(): String = signerToken.ifBlank { DEFAULT_SIGNER_TOKEN }
+
+        /** 是否在用内置的 SodaM 公共签名服务（用户没自填地址）。 */
+        fun isUsingDefaultSigner(): Boolean = signerUrl.isBlank()
+
+        fun isSignerConfigured(): Boolean = signerEnabled && effectiveSignerUrl().isNotBlank()
 
         private const val SODA_SOURCE = "soda"
         const val SODA_USER_AGENT =
@@ -2404,7 +2426,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         const val CATEGORY_PLAYLIST_MIN_ROUNDS = 2
         const val CATEGORY_PLAYLIST_MAX_ROUNDS = 5
         const val VIP_SIGNER_REQUIRED_MESSAGE =
-            "会员整曲需要汽水签名器：请在设置 › 平台账号 › 汽水播放签名器里填写地址"
+            "会员整曲需要汽水签名器：默认使用 SodaM 公共签名服务，若已关闭请在设置 › 平台账号 › 汽水播放签名器里重新启用"
         const val HEX_UPPER = "0123456789ABCDEF"
         const val SODA_CACHE_DIR = "soda"
         const val SODA_CACHE_FILE_LIMIT = 24

@@ -867,12 +867,17 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                         index = 0,
                         count = 1,
                         onClick = { signerOpen = true },
-                        icon = Icons.Filled.Shield,
-                        summary = if (state.sodaSignerUrl.isBlank()) {
-                            "未配置 · 会员整曲只会返回试听片段"
-                        } else {
-                            "已配置 · ${signerLabel(state.sodaSignerUrl)}"
+                        // 图标用 SodaM 官方 logo：默认连的就是它的公共签名服务
+                        leading = {
+                            Box(
+                                Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                                contentAlignment = Alignment.Center,
+                            ) { SodamLogo(40.dp, Modifier.clip(CircleShape)) }
                         },
+                        summary = signerSummary(state),
                     )
                 }
             }
@@ -890,8 +895,9 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
         SodaSignerDialog(
             initialUrl = state.sodaSignerUrl,
             initialToken = state.sodaSignerToken,
-            onSave = { url, token ->
-                actions.saveSodaSigner(url, token)
+            initialEnabled = state.sodaSignerEnabled,
+            onSave = { url, token, enabled ->
+                actions.saveSodaSigner(url, token, enabled)
                 signerOpen = false
             },
             onDismiss = { signerOpen = false },
@@ -1176,6 +1182,13 @@ private fun CookieDialog(provider: ProviderInfo, initial: String, onSave: (Strin
     )
 }
 
+/** 签名器行的副标题：默认连 SodaM 公共服务，自填地址或关掉都要说清楚。 */
+private fun signerSummary(state: MusicUiState): String = when {
+    !state.sodaSignerEnabled -> "已关闭 · 会员整曲只会返回试听片段"
+    state.sodaSignerUrl.isBlank() -> "SodaM 公共签名服务 · 会员整曲可用"
+    else -> "自定义 · ${signerLabel(state.sodaSignerUrl)}"
+}
+
 private fun signerLabel(url: String): String {
     val parsed = runCatching { java.net.URI(url.trim()) }.getOrNull() ?: return url
     val host = parsed.host ?: return url
@@ -1185,53 +1198,90 @@ private fun signerLabel(url: String): String {
 /**
  * 汽水签名器：协议与 sodam / libresoda / libmssdk 的 POST /sign 一致，
  * 签名器需要看到即将发出的 URL、body 和全部请求头。
+ * 默认用 SodaM 的公共签名服务，也可以换成自建实例。
  */
 @Composable
 private fun SodaSignerDialog(
     initialUrl: String,
     initialToken: String,
-    onSave: (String, String) -> Unit,
+    initialEnabled: Boolean,
+    onSave: (String, String, Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var enabled by remember { mutableStateOf(initialEnabled) }
+    var custom by remember { mutableStateOf(initialUrl.isNotBlank()) }
     var url by remember { mutableStateOf(initialUrl) }
     var token by remember { mutableStateOf(initialToken) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("汽水播放签名器") },
         text = {
-            Column {
-                Text(
-                    "会员整曲要逐请求的 x-helios / x-medusa 签名，只能由官方客户端组件生成。" +
-                        "在一台电脑（Windows / macOS / Linux）上运行 sodam / libmssdk 的签名服务，" +
-                        "手机或电视通过局域网访问，把 POST /sign 地址填在这里。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    label = { Text("签名服务地址") },
-                    placeholder = { Text("http://192.168.1.10:8899/sign") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    label = { Text("Token（可选）") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true,
-                )
-                Text(
-                    "签名器会看到这次请求的完整请求头（含 Cookie），只填写自己信任的实例。留空保存表示关闭。",
-                    Modifier.padding(top = 8.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                SodamCredit(note = "会员整曲的逐请求签名由 SodaM 提供，点按查看项目")
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("启用签名器", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (enabled) "会员账号可播放整曲与无损音质" else "关闭后会员曲目只有公开试听片段",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = enabled, onCheckedChange = { enabled = it })
+                }
+                if (enabled) {
+                    Text(
+                        "签名服务",
+                        Modifier.padding(top = 14.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    ConnectedToggleGroup(
+                        options = listOf(false, true),
+                        selected = custom,
+                        onSelect = { custom = it },
+                        label = { if (it) "自定义服务" else "SodaM 公共" },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                    if (custom) {
+                        OutlinedTextField(
+                            value = url,
+                            onValueChange = { url = it },
+                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                            label = { Text("签名服务地址") },
+                            placeholder = { Text("http://192.168.1.10:8899/sign") },
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = token,
+                            onValueChange = { token = it },
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            label = { Text("Token（可选）") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                        )
+                    } else {
+                        Text(
+                            "SodaM 作者提供的公共实例，桌面版默认就连这一个。签名请求会带着 Cookie " +
+                                "和完整请求头发过去，只在自己信任的网络环境下使用。",
+                            Modifier.padding(top = 10.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(url, token) }) { Text("保存") } },
+        confirmButton = {
+            TextButton(
+                // 选公共服务时清掉自填地址，回落到内置的 SodaM 公共签名服务
+                onClick = {
+                    onSave(if (custom) url else "", if (custom) token else "", enabled)
+                },
+            ) { Text("保存") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
@@ -1381,6 +1431,7 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
     val thirdParty = listOf(
         "music-lib" to "平台能力来源。当前纳入 commit 7cc4467，保留 Go 源码用于移植参考与许可证说明。",
         "music-lib / Kotlin 移植" to "使用 OkHttp、原生加密工具与 Kotlin 实现，不引入 GoMobile、AAR 或额外后端。",
+        "SodaM / libresoda" to "汽水签名服务协议（POST /sign、GET /config、x-helios / x-medusa）、取流链路与加密流解密逻辑的来源（AGPL-3.0）。应用默认连接 SodaM 的公共签名服务，可在设置里换成自建实例。",
         "AndroidX、Media3、Coil、Room、WorkManager" to "均按其 Apache-2.0 或对应开源许可使用；完整列表随应用和仓库提供。",
         "二维码生成" to "扫码登录的二维码按 Nayuki QR Code generator（MIT）的算法在本机生成。",
         "MaterialKolor、Haze" to "动态配色（MIT）与模糊效果（Apache-2.0）。",
@@ -1425,7 +1476,7 @@ fun PrivacyScreen(onBack: () -> Unit, embedded: Boolean = false) {
         "留在本机" to "最近播放、下载文件、播放进度和匹配缓存只保存在设备上。同步令牌使用 Android Keystore 加密，只保存在本机。",
         "歌词背景音频分析" to "“律动”只分析 ExoPlayer 已解码、正在输出的 PCM，不读取麦克风，不申请录音权限，也不保存或上传音频及频谱。暂停或离开播放页后停止分析。",
         "写入你选择的云端" to "启用同步后，自建歌单、收藏和平台账号 Cookie 会写入你的 GitHub Gist 或 Gitee 代码片段。Cookie 以明文保存，请勿公开文件链接；同步文件不包含同步令牌、播放地址和下载文件。",
-        "网络请求" to "应用直接请求音乐平台上游接口、更新清单和同步服务，没有 myMusic 自建中转服务器。配置汽水签名器后，取流请求会额外发给你填写的签名服务。第三方仍会看到其服务所需的常规请求信息。扫码登录的二维码在本机生成。",
+        "网络请求" to "应用直接请求音乐平台上游接口、更新清单和同步服务，没有 myMusic 自建中转服务器。汽水播放签名器默认使用 SodaM 的公共签名服务（可在设置里关闭或换成自建实例），会员整曲的取流请求会带着 Cookie 和完整请求头发给该服务。第三方仍会看到其服务所需的常规请求信息。扫码登录的二维码在本机生成。",
         "诊断信息" to "复制诊断只包含版本、设备型号、Android 版本、启用平台和最近错误；不包含 Cookie、令牌或完整播放 URL。",
     )
     SettingsPage(SettingsSection.Privacy, embedded, onBack) {

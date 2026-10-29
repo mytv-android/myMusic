@@ -14,6 +14,8 @@ The vendored Go source is retained as the reference for the Kotlin native port i
 - Upstream: https://github.com/sodahub-org/sodam and https://github.com/sodahub-org/libresoda
 - License: GNU Affero General Public License v3.0
 - Usage: reference for the Soda Music signer service protocol (`POST /sign`, `GET /config`, `x-helios` / `x-medusa`, `X-SS-STUB`), the signed `POST /luna/pc/track_v2` stream flow, and the local spade / CENC AES-CTR decryption. The Kotlin implementations in `data/native/SodaProvider.kt` and `data/native/SodaDecrypt.kt` are derivative works distributed under AGPL-3.0.
+- Default signer service: myMusic ships with SodaM's public signer instance as its default (`SodaProvider.DEFAULT_SIGNER_URL` / `DEFAULT_SIGNER_TOKEN`, the same instance the SodaM desktop client uses by default), used with the author's permission. The setting can be pointed at a self-hosted instance or switched off in `设置 › 平台账号 › 汽水播放签名器`.
+- Brand asset: the SodaM logo in `app/src/main/res/drawable-*/ic_sodam_logo.png` and `docs/images/sodam-logo.png` is the upstream `crates/sodam/assets/brand/sodam-logo.svg`, used for the "Powered by SodaM" attribution in the app and README.
 
 ## libmssdk (protocol only)
 

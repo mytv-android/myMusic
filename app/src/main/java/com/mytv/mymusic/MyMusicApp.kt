@@ -52,8 +52,10 @@ class MyMusicApp : Application() {
             }
         }
         appScope.launch(Dispatchers.IO) {
-            settings.state.map { it.sodaSignerUrl to it.sodaSignerToken }.distinctUntilChanged()
-                .collect { (url, token) -> SodaProvider.configureSigner(url, token) }
+            settings.state
+                .map { Triple(it.sodaSignerUrl, it.sodaSignerToken, it.sodaSignerEnabled) }
+                .distinctUntilChanged()
+                .collect { (url, token, enabled) -> SodaProvider.configureSigner(url, token, enabled) }
         }
         secretStore = SecretStore(this)
         equalizer = EqualizerController(this, settings)
