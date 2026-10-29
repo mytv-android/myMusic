@@ -3005,6 +3005,7 @@ private data class KugouSingerInfo(
     @SerialName("imgurl") val imgUrl: String = "",
 )
 
+@Serializable
 private data class KugouAlbumSongsResponse(
     val status: Int = 0,
     val errcode: Int = 0,

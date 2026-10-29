@@ -54,7 +54,10 @@ object CollectionMatcher {
                     SearchKind.Album, SearchKind.Artist -> 0.88f
                     else -> 0.98f
                 }
-                if (bestGroup != null && bestScore >= threshold) {
+                // 同一个平台的搜索结果本来就是不同条目（如网易云同时返回“周杰伦”和
+                // “周杰伦.”），不能因为名字相近并成一条，否则点开进的是另一个账号
+                val sameProvider = bestGroup?.sources?.any { it.providerId == providerId } == true
+                if (bestGroup != null && bestScore >= threshold && !sameProvider) {
                     bestGroup.sources += CollectionSource(providerId, providerNames[providerId] ?: providerId, playlist, bestScore)
                     bestGroup.confidence = max(bestGroup.confidence, bestScore)
                 } else {

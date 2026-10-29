@@ -871,9 +871,7 @@ private fun ResultsList(ctx: SearchCtx, rowWidth: Dp) {
     val window = LocalAppWindow.current
     // 在调用惰性 DSL 的组合层按结果缓存，列表内容重建时不再重复 drop / 去重。
     val groups = ctx.groups.value
-    val collections = ctx.collections.value
     val songResults = remember(groups) { buildSongResultsCache(groups) }
-    val collectionKeys = remember(collections) { collectionRowKeys(collections) }
     var altExpanded by rememberSaveable { mutableStateOf(false) }
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -891,7 +889,7 @@ private fun ResultsList(ctx: SearchCtx, rowWidth: Dp) {
                 item("history", contentType = "history") { Column { HistorySection(ctx, big = false) } }
             }
         } else {
-            collectionItems(ctx, collectionKeys)
+            collectionItems(ctx)
         }
     }
 }
@@ -1745,8 +1743,11 @@ private fun StateBlock(
 
 /* ---------------- 歌单 / 专辑结果 ---------------- */
 
-private fun LazyListScope.collectionItems(ctx: SearchCtx, keys: List<String>, stateFocus: FocusRequester? = null) {
+private fun LazyListScope.collectionItems(ctx: SearchCtx, stateFocus: FocusRequester? = null) {
     val items = ctx.collections.value
+    // key 必须和 items 同一拍计算：外面缓存的 key 表会在切分类清空结果时落后一拍，
+    // 列表按新的空数据取旧 key 表的第 0 项直接越界崩溃
+    val keys = collectionRowKeys(items)
     item("status", contentType = "status") { StatusArea(ctx) }
     if (items.isEmpty()) {
         if (ctx.loading.value) {
@@ -2101,8 +2102,10 @@ private fun TvSongResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit, rowWidth: D
 @Composable
 private fun TvCollectionResults(ctx: SearchCtx, onEdit: (Boolean) -> Unit) {
     val items = ctx.collections.value
-    // key 表按数据缓存；焦点 ID 只保存 key，详情由独立的子组合读取，焦点移动不重建列表。
-    val keys = remember(items) { collectionRowKeys(items) }
+    // 焦点 ID 只保存 key，详情由独立的子组合读取，焦点移动不重建列表。
+    // key 直接由当前结果计算，不能用 remember 缓存：切分类清空结果时缓存会落后一拍，
+    // 列表按空结果取旧 key 表越界。
+    val keys = collectionRowKeys(items)
     val target = remember { FocusRequester() }
     var focusedQuery by rememberSaveable { mutableStateOf("") }
     val focusedId = remember { mutableStateOf("") }

@@ -80,6 +80,22 @@ class CollectionMatcherTest {
     }
 
     @Test
+    fun doesNotMergeArtistsFromTheSameProvider() {
+        val groups = CollectionMatcher.group(
+            mapOf(
+                "netease" to listOf(
+                    playlist("1", "周杰伦", "Jay Chou", 589, "netease"),
+                    playlist("2", "周杰伦.", "", 20, "netease"),
+                ),
+            ),
+            names,
+            SearchKind.Artist,
+            priority,
+        )
+        assertEquals(2, groups.size)
+    }
+
+    @Test
     fun doesNotGroupArtistsWithDifferentNames() {
         val groups = CollectionMatcher.group(
             mapOf(

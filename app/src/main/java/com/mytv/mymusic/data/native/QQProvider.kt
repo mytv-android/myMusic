@@ -484,12 +484,15 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     }
 
     override suspend fun searchArtists(cookie: String, keyword: String): List<Playlist> {
-        val url = QQ_SEARCH_API + "?" + qqQuery(
+        // search_for_qq_cp 的 t=9 会被忽略并退回单曲结果，歌手走 client_search_cp
+        val url = QQ_CLIENT_SEARCH_API + "?" + qqQuery(
             "format" to "json",
             "p" to "1",
             "n" to "10",
             "w" to keyword,
             "t" to "9",
+            "cr" to "1",
+            "g_tk" to "5381",
         )
         val body = NativeHttp.get(
             url,
@@ -2308,6 +2311,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
 
         const val QQ_MUSICU_API = "https://u.y.qq.com/cgi-bin/musicu.fcg"
         const val QQ_SEARCH_API = "http://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp"
+        const val QQ_CLIENT_SEARCH_API = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
         const val QQ_SINGER_SONG_LIMIT = 500
         const val QQ_SONG_DETAIL_API = "https://c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg"
         const val QQ_PLAYLIST_SEARCH_API = "http://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist"
