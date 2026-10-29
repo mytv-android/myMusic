@@ -2,6 +2,7 @@ package com.mytv.mymusic.data.native
 
 import android.net.Uri
 import com.mytv.mymusic.data.CollectionResult
+import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
@@ -57,6 +58,7 @@ private val SODA_INFO = ProviderInfo(
     userPlaylists = true,
     qrLogin = false,
     playlistCategories = true,
+    listeningModes = true,
     topLists = true,
     topListSongs = true,
     hotSongs = true,
@@ -333,6 +335,115 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
     override suspend fun hotSongs(cookie: String, limit: Int): List<Song> =
         fetchTopListSongs(cookie, HOT_SONG_TOP_LIST_ID, normalizeHotSongLimit(limit))
+
+    /**
+     * 听歌模式：`feed_mode_block` 是一组场景（官方 PC 端 45 个），
+     * `feed_mode_bar` 里是「推荐」这类偏好模式。两部分拼成一个列表，用 group 区分。
+     */
+    override suspend fun listeningModes(cookie: String): List<ListeningMode> {
+        val body = NativeHttp.postJson(
+            "$FEED_MODE_API?${buildQuery(pcAppParams())}",
+            "{}",
+            headers = pcHeaders(),
+            cookie = cookie,
+            userAgent = PC_APP_USER_AGENT,
+        ).body
+        val resp = decodeSodaJson<SodaFeedModeResponse>(body, "soda feed mode json parse error")
+        if (resp.statusCode != 0) {
+            val message = resp.statusInfo.statusMsg.trim()
+            throw IllegalStateException(
+                if (message.isBlank()) "汽水听歌模式读取失败" else "汽水听歌模式读取失败：$message",
+            )
+        }
+        val modes = mutableListOf<ListeningMode>()
+        val seen = mutableSetOf<String>()
+        // 偏好模式（推荐）排在最前，和客户端的模式条一致
+        resp.feedModeBar.feedMode.forEach { entry ->
+            if (entry.type != "preference_mode") return@forEach
+            val preference = entry.entity.preferenceMode.mode.trim()
+            if (preference.isEmpty() || !seen.add("pref:$preference")) return@forEach
+            modes += ListeningMode(
+                id = "pref:$preference",
+                name = entry.text.trim().ifBlank { "推荐" },
+                subtitle = "按你的口味推荐",
+                cover = modeCover(entry.urlInfo),
+                source = info.id,
+                group = "推荐",
+                extra = mapOf("preference_mode" to preference),
+            )
+        }
+        resp.feedModeBlock.forEach { block ->
+            val groupName = block.title.trim().ifBlank { "场景音乐" }
+            block.feedMode.forEach { entry ->
+                val scene = entry.entity.sceneMode
+                val name = entry.text.trim()
+                if (scene.sceneModeId < 0 || name.isEmpty()) return@forEach
+                val key = "scene:${scene.sceneModeId}"
+                if (!seen.add(key)) return@forEach
+                modes += ListeningMode(
+                    id = key,
+                    name = name,
+                    cover = modeCover(entry.urlInfo),
+                    source = info.id,
+                    group = groupName,
+                    extra = buildMap {
+                        put("scene_mode_id", scene.sceneModeId.toString())
+                        if (scene.subQueueType.isNotBlank()) put("sub_queue_type", scene.subQueueType)
+                    },
+                )
+            }
+        }
+        if (modes.isEmpty()) throw IllegalStateException("汽水暂时没有可用的听歌模式")
+        return modes
+    }
+
+    /** 模式图标：没有 uri 的条目（偏好模式）只有图片域名，不能当封面用。 */
+    private fun modeCover(image: SodaImage): String =
+        if (image.uri.trim().isEmpty()) "" else buildImageUrl(image, "")
+
+    /** 场景队列：`feed/song-tab` 带 `feed_preference`，服务端每次给一小批。 */
+    override suspend fun listeningModeSongs(cookie: String, mode: ListeningMode): List<Song> {
+        val sceneId = mode.extra["scene_mode_id"]?.trim()?.toLongOrNull()
+        val preference = mode.extra["preference_mode"]?.trim().orEmpty()
+        if (sceneId == null && preference.isEmpty()) {
+            throw IllegalArgumentException("invalid soda listening mode: ${mode.id}")
+        }
+        val payload = buildString {
+            append("{")
+            append("\"played_media\":[],")
+            append("\"is_first_request\":true,")
+            append("\"is_did_first_request\":true,")
+            append("\"feed_counts\":{\"mix_session_count\":1},")
+            append("\"feed_preference\":")
+            if (sceneId != null) {
+                append("{\"scene_mode_id\":")
+                append(sceneId)
+                append("}")
+            } else {
+                append("{\"preference_mode\":")
+                append(JsonPrimitive(preference).toString())
+                append("}")
+            }
+            append(",\"count\":")
+            append(SODA_FEED_BATCH)
+            append("}")
+        }
+        val body = NativeHttp.postJson(
+            "$FEED_SONG_TAB_API?${buildQuery(pcAppParams())}",
+            payload,
+            headers = pcHeaders(),
+            cookie = cookie,
+            userAgent = PC_APP_USER_AGENT,
+        ).body
+        val resp = decodeSodaJson<SodaFeedTabResponse>(body, "soda feed song tab json parse error")
+        val songs = resp.items
+            .filter { it.type == "track" }
+            .map { buildSongFromTrack(it.entity.trackWrapper.track) }
+            .filter { it.id.isNotBlank() }
+            .distinctBy { it.id }
+        if (songs.isEmpty()) throw IllegalStateException("「${mode.name}」暂时没有歌曲")
+        return songs
+    }
 
     // ---------------------------------------------------------------------
     // HTTP helpers
@@ -2413,6 +2524,9 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         const val TOP_LIST_API = "https://api.qishui.com/luna/pc/charts"
         const val TOP_LIST_FALLBACK_API = "https://api5-lf.qishui.com/luna/charts"
         const val RECOMMEND_PLAYLISTS_API = "https://api.qishui.com/luna/pc/discover/mix"
+        const val FEED_MODE_API = "https://api.qishui.com/luna/pc/feed/mode"
+        const val FEED_SONG_TAB_API = "https://api.qishui.com/luna/pc/feed/song-tab"
+        const val SODA_FEED_BATCH = 10
         const val HOT_SONG_TOP_LIST_ID = "7036274230471712007"
         const val DEFAULT_HOT_SONG_LIMIT = 100
         const val MAX_HOT_SONG_LIMIT = 200
@@ -2656,6 +2770,62 @@ private data class SodaUserPlaylistItem(
     val type: Int = 0,
     @SerialName("resource_cnt") val resourceCnt: SodaResourceCount = SodaResourceCount(),
     val stats: SodaPlaylistStats = SodaPlaylistStats(),
+)
+
+@Serializable
+private data class SodaFeedModeResponse(
+    @SerialName("status_code") val statusCode: Int = 0,
+    @SerialName("status_info") val statusInfo: SodaStatusInfo = SodaStatusInfo(),
+    @SerialName("feed_mode_block") val feedModeBlock: List<SodaFeedModeBlock> = emptyList(),
+    @SerialName("feed_mode_bar") val feedModeBar: SodaFeedModeBar = SodaFeedModeBar(),
+)
+
+@Serializable
+private data class SodaFeedModeBar(
+    @SerialName("feed_mode") val feedMode: List<SodaFeedModeEntry> = emptyList(),
+)
+
+@Serializable
+private data class SodaFeedModeBlock(
+    val title: String = "",
+    @SerialName("type") val type: String = "",
+    @SerialName("feed_mode") val feedMode: List<SodaFeedModeEntry> = emptyList(),
+)
+
+@Serializable
+private data class SodaFeedModeEntry(
+    @SerialName("type") val type: String = "",
+    val text: String = "",
+    val entity: SodaFeedModeEntity = SodaFeedModeEntity(),
+    @SerialName("url_info") val urlInfo: SodaImage = SodaImage(),
+)
+
+@Serializable
+private data class SodaFeedModeEntity(
+    @SerialName("feed_scene_mode") val sceneMode: SodaFeedSceneMode = SodaFeedSceneMode(),
+    @SerialName("feed_preference_mode") val preferenceMode: SodaPreferenceMode = SodaPreferenceMode(),
+)
+
+@Serializable
+private data class SodaFeedSceneMode(
+    @SerialName("scene_mode_id") val sceneModeId: Long = -1,
+    @SerialName("sub_queue_type") val subQueueType: String = "",
+)
+
+@Serializable
+private data class SodaPreferenceMode(val mode: String = "")
+
+@Serializable
+private data class SodaFeedTabResponse(
+    val items: List<SodaFeedItem> = emptyList(),
+    @SerialName("has_more") val hasMore: Boolean = false,
+)
+
+@Serializable
+private data class SodaFeedItem(
+    val id: String = "",
+    @SerialName("type") val type: String = "",
+    val entity: SodaMediaEntity = SodaMediaEntity(),
 )
 
 @Serializable

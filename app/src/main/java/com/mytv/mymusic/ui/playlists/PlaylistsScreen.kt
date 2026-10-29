@@ -466,7 +466,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.listeningContent(
     }
     val modes = playlists.visibleListenModes
     when {
-        modes.isEmpty() && (playlists.listenLoading || playlists.listenModes.isEmpty()) -> item(key = "listenSkeleton", contentType = "skeleton") {
+        modes.isEmpty() && playlists.listenLoading -> item(key = "listenSkeleton", contentType = "skeleton") {
             SkeletonCardGrid(columns, rows = 2, modifier = Modifier.padding(horizontal = gutter, vertical = 12.dp))
         }
         modes.isEmpty() && playlists.listenError.isNotBlank() -> item(key = "listenError", contentType = "error") {
@@ -1000,7 +1000,7 @@ private fun androidx.compose.foundation.layout.RowScope.TvListeningGrid(playlist
         }
         Box(Modifier.weight(1f)) {
             when {
-                modes.isEmpty() && (playlists.listenLoading || playlists.listenModes.isEmpty()) -> SkeletonCardGrid(3, rows = 2)
+                modes.isEmpty() && playlists.listenLoading -> SkeletonCardGrid(3, rows = 2)
                 modes.isEmpty() && playlists.listenError.isNotBlank() -> DiscoverErrorState(
                     title = "听歌模式没有加载出来",
                     message = "${playlists.providerName}：${playlists.listenError}",
