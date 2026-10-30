@@ -13,13 +13,17 @@ import com.mytv.mymusic.data.TopList
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import java.io.File
@@ -79,6 +83,58 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         val response = cloudSearch(cookie, keyword, 1, 10)
         val root = json.decodeFromString<NeteaseSearchResponse>(response.body)
         return root.result?.songs.orEmpty().map(::songOf)
+    }
+
+    /**
+     * 听歌识曲。指纹由 ncm-afp 的 WASM 生成，必须是 3 秒 8kHz 单声道 PCM；
+     * 接口匿名可用，不需要登录，但属于非官方协议。
+     */
+    suspend fun matchAudio(fingerprint: String, durationSeconds: Int = 3): List<Song> {
+        val response = NativeHttp.postForm(
+            AUDIO_MATCH_API,
+            form = mapOf(
+                "sessionId" to java.util.UUID.randomUUID().toString(),
+                "algorithmCode" to "shazam_v2",
+                "duration" to durationSeconds.toString(),
+                "rawdata" to fingerprint,
+                "times" to "2",
+                "decrypt" to "1",
+            ),
+            headers = mapOf("Origin" to MATCH_ORIGIN),
+            userAgent = MATCH_USER_AGENT,
+        )
+        return parseAudioMatchResponse(response.body)
+    }
+
+    internal fun parseAudioMatchResponse(body: String): List<Song> {
+        val root = json.parseToJsonElement(body).jsonObject
+        val results = (root["data"] as? JsonObject)?.get("result") as? JsonArray ?: return emptyList()
+        return results.mapNotNull { element ->
+            val song = (element as? JsonObject)?.get("song") as? JsonObject ?: return@mapNotNull null
+            val id = (song["id"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val name = (song["name"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            val artists = (song["artists"] as? JsonArray)
+                ?.mapNotNull { artist -> ((artist as? JsonObject)?.get("name") as? JsonPrimitive)?.contentOrNull }
+                ?.joinToString("、")
+                .orEmpty()
+            val album = song["album"] as? JsonObject
+            val cover = (album?.get("picUrl") as? JsonPrimitive)?.contentOrNull.orEmpty()
+            val duration = ((song["duration"] as? JsonPrimitive)?.longOrNull ?: 0L) / 1000
+            val fee = (song["fee"] as? JsonPrimitive)?.intOrNull ?: 0
+            Song(
+                id = id,
+                name = name,
+                artist = artists,
+                album = (album?.get("name") as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                albumId = (album?.get("id") as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                duration = duration.toInt(),
+                source = "netease",
+                cover = cover,
+                link = "https://music.163.com/#/song?id=$id",
+                extra = mapOf("song_id" to id),
+                isVip = fee != 0,
+            )
+        }
     }
 
     override suspend fun parseSong(cookie: String, link: String): Song {
@@ -962,6 +1018,10 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         const val SHORT_LINK_HOST = "163cn.tv"
         const val REFERER = "http://music.163.com/"
         const val SEARCH_API = "http://music.163.com/api/linux/forward"
+        const val AUDIO_MATCH_API = "https://interface.music.163.com/api/music/audio/match"
+        const val MATCH_ORIGIN = "chrome-extension://pgphbbekcgpfaekhcbjamjjkegcclhhd"
+        const val MATCH_USER_AGENT =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         const val ARTIST_SONGS_API = "https://music.163.com/weapi/v1/artist/songs"
         const val ARTIST_SONG_LIMIT = 500
         const val DOWNLOAD_API = "http://music.163.com/weapi/song/enhance/player/url"

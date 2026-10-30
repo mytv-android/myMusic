@@ -73,6 +73,56 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         return SongSearchPage(songs, safePage, songs.size >= safeLimit)
     }
 
+    /**
+     * 听歌识曲。body 是 8kHz 单声道 16bit 小端 PCM，10–20 秒识别效果最好；
+     * 未命中时接口返回 `data: {}` 而不是数组。
+     */
+    suspend fun matchAudio(cookie: String, pcm: ByteArray): List<Song> {
+        if (pcm.isEmpty()) return emptyList()
+        val cookieMap = parseKugouCookie(cookie)
+        val clienttime = nowSeconds()
+        val dfid = firstNonEmpty(
+            cookieMap["dfid"].orEmpty(),
+            cookieMap["KUGOU_API_DFID"].orEmpty(),
+            cookieMap["kg_dfid"].orEmpty(),
+            randomKugouDfid(),
+        )
+        val mid = firstNonEmpty(
+            cookieMap["KUGOU_API_MID"].orEmpty(),
+            cookieMap["kg_mid"].orEmpty(),
+            cookieMap["mid"].orEmpty(),
+            randomKugouMid(),
+        )
+        val params = linkedMapOf(
+            "fpid" to System.currentTimeMillis().toString(),
+            "area_code" to "1",
+            "include_unpublish" to "1",
+            "useid" to firstNonEmpty(cookieMap["userid"].orEmpty(), "0"),
+            "multi_result" to "1",
+            "dfid" to dfid,
+            "mid" to mid,
+            "uuid" to "-",
+            "appid" to KUGOU_LITE_APP_ID,
+            "clientver" to KUGOU_LITE_VER,
+            "clienttime" to clienttime,
+        )
+        val url = MATCH_API + "?" + query(params + ("signature" to matchSignature(params, pcm)))
+        val response = NativeHttp.postBytes(
+            url,
+            pcm,
+            headers = androidHeaders(dfid, mid, clienttime),
+            cookie = cookie,
+            userAgent = MATCH_USER_AGENT,
+        )
+        return parseMatchResponse(response.body)
+    }
+
+    internal fun parseMatchResponse(body: String): List<Song> {
+        val root = json.parseToJsonElement(body).jsonObject
+        val data = root["data"] as? JsonArray ?: return emptyList()
+        return data.mapNotNull { element -> mapKugouMatch(element as? JsonObject ?: return@mapNotNull null) }
+    }
+
     private suspend fun searchSongsInternal(cookie: String, keyword: String, page: Int, limit: Int): List<Song> {
         val params = mapOf(
             "keyword" to keyword,
@@ -2473,6 +2523,61 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
     private fun randomKugouDfid(): String =
         NativeCrypto.md5Hex(System.nanoTime().toString()).uppercase().take(24)
 
+    private fun randomKugouMid(): String = randomKugouDfid()
+
+    private fun mapKugouMatch(item: JsonObject): Song? {
+        val name = cleanKugouText(item.findString("songname"))
+        val artist = cleanKugouText(item.findString("singername"))
+        val hash128 = item.findString("hash_128")
+        val hash320 = item.findString("hash_320")
+        val hashFlac = item.findString("hash_flac")
+        val hashHigh = item.findString("hash_high")
+        val id = firstNonEmpty(hash128, hash320, hashFlac, hashHigh)
+        if (name.isBlank() || !isValidHash(id)) return null
+        val album = (item["album"] as? JsonArray)?.firstOrNull() as? JsonObject
+        val albumId = album?.findString("albumid").orEmpty().ifBlank { item.findString("album_id") }
+        val duration = (item.findLong(
+            "timelength_128",
+            "timelength_320",
+            "timelength_flac",
+            "timelength_high",
+        ) / 1000).toInt()
+        val size = item.findLong("filesize_128", "filesize_320", "filesize_flac", "filesize_high")
+        val bitrate = if (duration > 0 && size > 0) (size * 8 / 1000 / duration).toInt() else 0
+        val img = album?.findString("img").orEmpty()
+        val cover = if (img.isNotBlank()) {
+            "http://imge.kugou.com/stdmusic/240/$img"
+        } else {
+            item.findString("union_cover").replace("{size}", "240")
+        }
+        val privilege = item.findInt("privilege")
+        return Song(
+            id = id,
+            name = name,
+            artist = artist,
+            album = album?.findString("albumname").orEmpty(),
+            albumId = albumId,
+            duration = duration,
+            size = size,
+            bitrate = bitrate,
+            source = "kugou",
+            cover = cover,
+            link = "https://www.kugou.com/song/#hash=$id",
+            extra = buildMap {
+                put("hash", id)
+                if (hash128.isNotBlank()) put("file_hash", hash128)
+                if (hash320.isNotBlank()) put("hq_hash", hash320)
+                if (hashFlac.isNotBlank()) put("sq_hash", hashFlac)
+                if (hashHigh.isNotBlank()) put("res_hash", hashHigh)
+                if (albumId.isNotBlank()) put("album_id", albumId)
+                val albumAudioId = item.findString("mixsongid")
+                if (albumAudioId.isNotBlank()) put("album_audio_id", albumAudioId)
+                put("privilege", privilege.toString())
+            },
+            isVip = privilege == 10,
+        )
+    }
+
     private fun isValidHash(hash: String): Boolean =
         hash.isNotEmpty() && hash != "00000000000000000000000000000000"
 
@@ -2674,6 +2779,15 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
     private fun signAndroidParams(params: Map<String, String>, data: String): String =
         NativeCrypto.md5Hex(KUGOU_LITE_SIGN + signedPairs(params) + data + KUGOU_LITE_SIGN)
 
+    /** 识曲接口的请求体是二进制 PCM，签名必须按原始字节算，不能转成字符串。 */
+    internal fun matchSignature(params: Map<String, String>, data: ByteArray): String =
+        NativeCrypto.md5Hex(
+            KUGOU_LITE_SIGN.toByteArray(Charsets.UTF_8),
+            params.keys.sorted().joinToString("") { "$it=${params[it]}" }.toByteArray(Charsets.UTF_8),
+            data,
+            KUGOU_LITE_SIGN.toByteArray(Charsets.UTF_8),
+        )
+
     private fun signedPairs(params: Map<String, String>): String =
         params.entries.map { "${it.key}=${it.value}" }.sorted().joinToString("")
 
@@ -2721,6 +2835,8 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         const val PC_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
         const val KUGOU_ANDROID_UA = "Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi"
+        const val MATCH_API = "https://gateway.kugou.com/fingerprint.service/v1/music_trackid_mulit"
+        const val MATCH_USER_AGENT = "KuGou/11490 (Android)"
         const val MOBILE_REFERER = "http://m.kugou.com"
         const val VIP_INFO_API = "https://vip.kugou.com/recharge/roleinfo"
         const val KUGOU_SIGN_KEY = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"

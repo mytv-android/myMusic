@@ -23,6 +23,13 @@ object NativeCrypto {
         upper = false,
     )
 
+    /** 分片喂给同一个 MD5，用于签名里夹带二进制请求体（酷狗识曲的 PCM）。 */
+    fun md5Hex(vararg parts: ByteArray): String {
+        val digest = MessageDigest.getInstance("MD5")
+        parts.forEach(digest::update)
+        return bytesToHex(digest.digest(), upper = false)
+    }
+
     fun hexToBytes(value: String): ByteArray {
         val clean = value.trim()
         require(clean.length % 2 == 0) { "invalid hex string" }

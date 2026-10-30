@@ -56,12 +56,22 @@ import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.TrackOverrideEntity
+import com.mytv.mymusic.data.native.KugouProvider
+import com.mytv.mymusic.data.native.NativeProviders
+import com.mytv.mymusic.data.native.NetEaseProvider
 import com.mytv.mymusic.data.native.SodaProvider
 import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.data.update.InstallResult
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
 import com.mytv.mymusic.playback.PlaybackService
+import com.mytv.mymusic.recognize.AudioResampler
+import com.mytv.mymusic.recognize.MicRecorder
+import com.mytv.mymusic.recognize.NeteaseFingerprinter
+import com.mytv.mymusic.recognize.RecognitionMerger
+import com.mytv.mymusic.recognize.RecognitionPhase
+import com.mytv.mymusic.recognize.RecognitionUiState
+import com.mytv.mymusic.recognize.RecordedAudio
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -253,6 +263,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), updateState.value.copy(progress = 0f))
     val equalizerState = app.equalizer.state
     val sleepTimer = app.sleepTimer.state
+
+    private val _recognition = MutableStateFlow(RecognitionUiState())
+    val recognitionState: StateFlow<RecognitionUiState> = _recognition
+    private var recognitionJob: Job? = null
+    private val neteaseFingerprinter by lazy { NeteaseFingerprinter(app) }
+    private val neteaseMatcher = NativeProviders.get("netease") as? NetEaseProvider
+    private val kugouMatcher = NativeProviders.get("kugou") as? KugouProvider
 
     private val chartCache = mutableMapOf<String, CachedCharts>()
     private val recommendationCache = mutableMapOf<String, CachedRecommendations>()
@@ -2250,6 +2267,104 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun clearNotice() {
         base.value = base.value.copy(playbackNotice = "", deepLink = "")
     }
+
+    // ---------- 听歌识曲 ----------
+
+    fun startRecognition() {
+        if (recognitionJob?.isActive == true) return
+        recognitionJob = viewModelScope.launch {
+            _recognition.value = RecognitionUiState(
+                phase = RecognitionPhase.Listening,
+                secondsLeft = MicRecorder.DEFAULT_SECONDS,
+            )
+            // 麦克风录音时先暂停，避免把自己的外放录进去；录完立即恢复
+            val wasPlaying = controller?.isPlaying == true
+            if (wasPlaying) controller?.pause()
+            val recorded = try {
+                MicRecorder.record(MicRecorder.DEFAULT_SECONDS) { progress, level ->
+                    _recognition.update {
+                        it.copy(
+                            progress = progress,
+                            level = level,
+                            secondsLeft = ((1f - progress) * MicRecorder.DEFAULT_SECONDS).toInt().coerceAtLeast(0),
+                        )
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                _recognition.value = recognitionError(error.message ?: "录音失败")
+                return@launch
+            } finally {
+                if (wasPlaying) controller?.play()
+            }
+            if (!isActive) return@launch
+
+            _recognition.value = RecognitionUiState(phase = RecognitionPhase.Matching)
+            val matches = try {
+                matchRecorded(recorded)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                _recognition.value = recognitionError(error.message ?: "识别失败")
+                return@launch
+            }
+            _recognition.value = if (matches.isEmpty()) {
+                recognitionError("没有识别到歌曲，请靠近音源再试")
+            } else {
+                RecognitionUiState(phase = RecognitionPhase.Done, results = matches)
+            }
+        }
+    }
+
+    fun dismissRecognition() {
+        recognitionJob?.cancel()
+        recognitionJob = null
+        _recognition.value = RecognitionUiState()
+    }
+
+    private fun recognitionError(message: String) = RecognitionUiState(
+        phase = RecognitionPhase.Error,
+        message = message.ifBlank { "识别失败，请稍后重试" },
+    )
+
+    /** 网易云吃 3 秒指纹，酷狗吃整段 PCM；两个请求并行，结果按来源轮流合并。 */
+    private suspend fun matchRecorded(recorded: RecordedAudio): List<Song> {
+        val samples = withContext(Dispatchers.Default) { AudioResampler.toMono8k(recorded) }
+        if (samples.isEmpty()) return emptyList()
+        val neteasePcm = samples.copyOfRange(0, minOf(samples.size, MicRecorder.TARGET_RATE * 3))
+        val fingerprint = ignoreFailure {
+            withContext(Dispatchers.Main) { neteaseFingerprinter.fingerprint(neteasePcm) }
+        }
+        val kugouPcm = withContext(Dispatchers.Default) { AudioResampler.toPcm16(samples) }
+        val cookie = settingsState.value.cookies["kugou"].orEmpty()
+        return coroutineScope {
+            val netease = async(Dispatchers.IO) {
+                if (fingerprint == null || neteaseMatcher == null) {
+                    emptyList()
+                } else {
+                    ignoreFailure { neteaseMatcher.matchAudio(fingerprint) }.orEmpty()
+                }
+            }
+            val kugou = async(Dispatchers.IO) {
+                if (kugouMatcher == null) {
+                    emptyList()
+                } else {
+                    ignoreFailure { kugouMatcher.matchAudio(cookie, kugouPcm) }.orEmpty()
+                }
+            }
+            RecognitionMerger.merge(netease.await().take(3), kugou.await().take(5))
+        }
+    }
+
+    private suspend fun <T> ignoreFailure(block: suspend () -> T): T? =
+        try {
+            block()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            null
+        }
 
     fun transport(action: String) {
         val player = controller ?: return

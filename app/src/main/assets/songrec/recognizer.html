@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<script src="afp.wasm.js"></script>
+<script src="afp.js"></script>
+<script>
+  async function run(base64Pcm) {
+    try {
+      const binary = atob(base64Pcm);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const samples = new Float32Array(bytes.buffer);
+      const fingerprint = await GenerateFP(samples);
+      NativeBridge.onResult(fingerprint);
+    } catch (error) {
+      NativeBridge.onError(String(error));
+    }
+  }
+</script>

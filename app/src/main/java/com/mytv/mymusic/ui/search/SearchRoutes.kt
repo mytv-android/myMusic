@@ -14,12 +14,14 @@ fun NavGraphBuilder.searchRoutes(app: AppNav) {
         val search by app.model.searchState.collectAsState()
         val favorites by app.model.favorites.collectAsState()
         val playlists by app.model.localPlaylists.collectAsState()
+        val recognition by app.model.recognitionState.collectAsState()
         SearchScreen(
             state = state,
             search = search,
             favorites = favorites,
             playlists = playlists,
             actions = app.actions,
+            recognition = recognition,
             onOpenSearchSettings = { app.openSettings("settings/search") },
         )
     }

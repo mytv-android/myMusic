@@ -23,6 +23,18 @@ The vendored Go source is retained as the reference for the Kotlin native port i
 - License: MIT License (the repository's own source); the official `bdms.node` / `metasecml.dll` binaries are proprietary and are not included or redistributed by myMusic.
 - Usage: reference for the signer service HTTP contract and device identity (`/sign`, `/config`). No libmssdk code or binary is bundled.
 
+## ncm-afp / NeteaseCloudMusicApi (NetEase song recognition)
+
+- Upstream demo: https://github.com/c55403225/ncm-afp (the original mos9527/ncm-afp repository is no longer available)
+- Bundled copies: `app/src/main/assets/songrec/afp.js` and `afp.wasm.js`, taken verbatim from NeteaseCloudMusicApi's `public/audio_match_demo/` (NeteaseCloudMusicApi: MIT License, https://github.com/Binaryify/NeteaseCloudMusicApi).
+- License: the fingerprint JavaScript / WASM assets carry no explicit license declaration upstream. They are included unmodified for the NetEase song-recognition feature.
+- Usage: computes the NetEase audio-match fingerprint (`algorithmCode=shazam_v2`) from exactly 3 seconds of 8 kHz mono PCM inside an off-screen WebView (`recognize/NeteaseFingerprinter.kt`). The matcher endpoint itself is an unofficial API reverse-engineered from NetEase's official browser extension.
+
+## KuGouMusicApi / MoeKoeMusic (Kugou song recognition protocol)
+
+- Upstream: https://github.com/MakcRe/KuGouMusicApi (MIT License), https://github.com/MoeKoeMusic/MoeKoeMusic
+- Usage: reference for the `fingerprint.service/v1/music_trackid_mulit` request format (8 kHz 16-bit mono PCM body plus the Android signature). The Kotlin implementation in `data/native/KugouProvider.kt` (`matchAudio`) is written against the protocol; no upstream code or binary is bundled.
+
 ## YesPlayMusic (lyrics background rhythm)
 
 - Upstream: https://github.com/ijoji42/YesPlayMusic

@@ -104,6 +104,23 @@ object NativeHttp {
         return execute(request)
     }
 
+    suspend fun postBytes(
+        url: String,
+        bytes: ByteArray,
+        headers: Map<String, String> = emptyMap(),
+        cookie: String = "",
+        randomIp: Boolean = false,
+        userAgent: String = DEFAULT_USER_AGENT,
+        contentType: String = "application/octet-stream",
+    ): NativeResponse {
+        val request = Request.Builder()
+            .url(url)
+            .post(bytes.toRequestBody(contentType.toMediaType()))
+            .applyCommonHeaders(headers, cookie, randomIp, userAgent)
+            .build()
+        return execute(request)
+    }
+
     private fun Request.Builder.applyCommonHeaders(
         headers: Map<String, String>,
         cookie: String,

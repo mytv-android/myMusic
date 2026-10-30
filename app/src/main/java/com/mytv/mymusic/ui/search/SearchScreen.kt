@@ -2,7 +2,11 @@
 
 package com.mytv.mymusic.ui.search
 
-import androidx.activity.compose.BackHandler
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -62,6 +66,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Merge
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
@@ -99,6 +104,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -113,6 +119,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -120,6 +127,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -145,6 +153,8 @@ import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.recognize.RecognitionPhase
+import com.mytv.mymusic.recognize.RecognitionUiState
 import com.mytv.mymusic.ui.Cover
 import com.mytv.mymusic.ui.CoverBox
 import com.mytv.mymusic.ui.LocalPlaylistSummary
@@ -178,6 +188,7 @@ import com.mytv.mymusic.ui.providerMark
 import com.mytv.mymusic.ui.providerName
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.coroutines.cancellation.CancellationException
 
 private val FailedStatuses = setOf(ProviderStatus.Timeout, ProviderStatus.Error, ProviderStatus.Skipped)
 private val SearchKinds = listOf(SearchKind.Song, SearchKind.Playlist, SearchKind.Album, SearchKind.Artist)
@@ -283,6 +294,7 @@ fun SearchScreen(
     favorites: List<SavedSong>,
     playlists: List<LocalPlaylistSummary>,
     actions: MusicActions,
+    recognition: RecognitionUiState,
     onOpenSearchSettings: () -> Unit,
 ) {
     val window = LocalAppWindow.current
@@ -345,19 +357,59 @@ fun SearchScreen(
     }
     val onEdit: (Boolean) -> Unit = remember(editing) { { editing.value = it } }
 
-    BackHandler(enabled = editing.value && !ctx.landing) {
-        editing.value = false
-        focusManager.clearFocus()
+    val context = LocalContext.current
+    val recognitionPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            actions.startRecognition()
+        } else {
+            scope.launch { snackbar.showSnackbar("需要麦克风权限才能听歌识曲") }
+        }
+    }
+    // 电视通常没有麦克风，入口只在有麦克风的手机 / 平板上出现
+    val recognitionEnabled = remember(window.isTv, context) {
+        !window.isTv && context.packageManager.hasSystemFeature(PackageManager.FEATURE_MICROPHONE)
+    }
+    val onRecognize: (() -> Unit)? = if (recognitionEnabled) {
+        {
+            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                actions.startRecognition()
+            } else {
+                recognitionPermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    } else {
+        null
+    }
+
+    // 编辑态返回：手势过程中首页内容跟手淡出上移，松手才收起编辑、回到结果
+    var editingBack by remember { mutableFloatStateOf(0f) }
+    PredictiveBackHandler(enabled = editing.value && !ctx.landing) { events ->
+        try {
+            events.collect { event -> editingBack = event.progress }
+            editing.value = false
+            focusManager.clearFocus()
+        } catch (_: CancellationException) {
+        } finally {
+            editingBack = 0f
+        }
     }
     // 换关键词或换结果类型后旧的选择没有意义；多选优先于收起键盘的返回行为
     LaunchedEffect(search.submittedQuery, search.kind) { ctx.selection.exit() }
     SelectionPredictiveBack(ctx.selection)
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .graphicsLayer {
+                alpha = 1f - 0.7f * editingBack
+                translationY = -16.dp.toPx() * editingBack
+            },
+    ) {
         if (window.isTv) {
             TvSearch(ctx, showHome, onEdit = onEdit)
         } else {
-            TouchSearch(ctx, showHome, editing.value, onEdit = onEdit)
+            TouchSearch(ctx, showHome, editing.value, onEdit = onEdit, onRecognize = onRecognize)
         }
     }
 
@@ -401,12 +453,30 @@ fun SearchScreen(
             onDismiss = { ctx.pickerOpen = false },
         )
     }
+    if (recognition.phase != RecognitionPhase.Idle) {
+        RecognitionSheet(
+            state = recognition,
+            providerNames = state.providers.associate { it.id to it.name },
+            onPlay = { song ->
+                actions.play(song, listOf(song))
+                actions.dismissRecognition()
+            },
+            onRetry = { actions.startRecognition() },
+            onDismiss = { actions.dismissRecognition() },
+        )
+    }
 }
 
 /* ======================== 手机 / 平板 ======================== */
 
 @Composable
-private fun TouchSearch(ctx: SearchCtx, showHome: Boolean, editing: Boolean, onEdit: (Boolean) -> Unit) {
+private fun TouchSearch(
+    ctx: SearchCtx,
+    showHome: Boolean,
+    editing: Boolean,
+    onEdit: (Boolean) -> Unit,
+    onRecognize: (() -> Unit)?,
+) {
     val window = LocalAppWindow.current
     val landing = ctx.submittedQuery.value.isBlank()
     val focusManager = LocalFocusManager.current
@@ -435,6 +505,7 @@ private fun TouchSearch(ctx: SearchCtx, showHome: Boolean, editing: Boolean, onE
                 onValueChange = ctx.actions::setSearchQuery,
                 onSubmit = { ctx.submit(ctx.query.value) },
                 onVoiceResult = { text -> ctx.submit(text) },
+                onRecognize = onRecognize,
                 onClear = if (ctx.query.value.isNotEmpty() || ctx.hasQuery) {
                     {
                         ctx.actions.clearSearch()
@@ -489,6 +560,7 @@ private fun SearchField(
     focusRequester: FocusRequester,
     onFocused: () -> Unit,
     onVoiceResult: ((String) -> Unit)? = null,
+    onRecognize: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val tv = LocalAppWindow.current.isTv
@@ -542,6 +614,11 @@ private fun SearchField(
                 }
             },
         )
+        if (onRecognize != null) {
+            IconButton(onClick = onRecognize, modifier = Modifier.tvFocusRing(CircleShape)) {
+                Icon(Icons.Filled.GraphicEq, "听歌识曲", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         if (onVoiceResult != null && voice.available) {
             IconButton(onClick = voice.start, modifier = Modifier.tvFocusRing(CircleShape)) {
                 Icon(Icons.Filled.Mic, "语音搜索", tint = MaterialTheme.colorScheme.onSurfaceVariant)

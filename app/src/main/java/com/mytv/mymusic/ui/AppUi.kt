@@ -162,6 +162,8 @@ class MusicActions(private val model: MusicViewModel) {
     fun playSavedSongs(records: List<com.mytv.mymusic.data.SavedSong>) = model.playSavedSongs(records)
     fun playTrack(track: CanonicalTrack, queue: List<CanonicalTrack>) = model.playTrack(track, queue)
     fun transport(action: String) = model.transport(action)
+    fun startRecognition() = model.startRecognition()
+    fun dismissRecognition() = model.dismissRecognition()
     fun seek(position: Long) = model.seek(position)
     fun openPlayer() = model.openPlayer(true)
     fun closePlayer() = model.openPlayer(false)
