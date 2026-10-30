@@ -52,6 +52,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+
+            <!-- TCL 灵控桌面「我的应用」全幅卡片：306×196 的整卡图，应用名已烧进图里。
+                 缓存键是 <包名>_<activity名>，换图后需 pm clear 才会刷新。 -->
+            <meta-data
+                android:name="beidouui_icon"
+                android:value="tcl_launcher_card.png" />
         </activity>
         <service
             android:name=".playback.PlaybackService"
