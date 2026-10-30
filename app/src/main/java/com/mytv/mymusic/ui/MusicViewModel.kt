@@ -2981,7 +2981,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             base.value = base.value.copy(login = created, loginStatus = "等待扫码", loginProviderId = providerId)
-            repeat(40) {
+            // 轮询到二维码自己的有效期为止：短于 TTL 会先停轮询、把用户后来的扫码关在门外。
+            val deadline = System.currentTimeMillis() + QR_POLL_WINDOW_MS
+            while (System.currentTimeMillis() < deadline) {
                 delay(3000)
                 val result = try {
                     app.repository.checkLogin(created.sessionId, created.session.key)
@@ -2989,7 +2991,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     throw error
                 } catch (transient: Exception) {
                     // 单次轮询失败多半是网络抖动，继续等下一轮
-                    return@repeat
+                    continue
                 }
                 when (result.status) {
                     "success" -> if (result.cookie.isNotBlank()) {
@@ -3233,6 +3235,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
 private const val AUTO_MATCH_TIMEOUT_MS = 8_000L
 private const val MAX_UNPLAYABLE_SKIPS = 10
+
+/** 扫码登录的轮询窗口：要盖住二维码自己的有效期（实测 3～5 分钟），否则后到的扫码没人接。 */
+private const val QR_POLL_WINDOW_MS = 310_000L
 
 /**
  * “下一首播放”要把第 [from] 首挪到哪一位（播放器 moveMediaItem 的 newIndex，即挪完后的位置）。
