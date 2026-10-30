@@ -68,11 +68,28 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onPause() {
-        super.onPause()
-        // 电视通常不当背景音乐播放器：失去前台就暂停；旋转等重建不算离开
-        if (!isChangingConfigurations) {
-            ViewModelProvider(this)[MusicViewModel::class.java].onAppBackgrounded()
-        }
+    /**
+     * 电视通常不当背景音乐播放器：用户主动离开（按 Home、切到别的应用、从最近任务切换）时才暂停，
+     * 手机和平板保留后台播放。
+     *
+     * 只在 onPause 里判断是不够的：系统屏保（DreamService）盖上来、息屏、系统弹窗都会让 activity
+     * 走一遍 onPause，人其实还留在应用里，那时候停音乐会变成「放一会儿屏保一弹就不响了」。
+     * onUserLeaveHint 只在用户自己离开应用时回调，屏保和息屏都不会触发它。
+     */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        pauseOnLeave()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // 电视根页面连按两次返回是 finish()：activity 直接结束，不算「用户离开」，onUserLeaveHint 不会来
+        if (isFinishing) pauseOnLeave()
+    }
+
+    private fun pauseOnLeave() {
+        // 旋转等配置变更只是重建 activity，人还在应用里
+        if (isChangingConfigurations) return
+        ViewModelProvider(this)[MusicViewModel::class.java].onAppBackgrounded()
     }
 }
