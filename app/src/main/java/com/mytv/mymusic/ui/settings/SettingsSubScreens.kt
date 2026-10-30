@@ -1,7 +1,7 @@
 package com.mytv.mymusic.ui.settings
 
 import android.os.Build
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
@@ -145,6 +145,7 @@ import com.mytv.mymusic.ui.theme.LocalAppearance
 import com.mytv.mymusic.ui.theme.SchemeStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 
 // ======================= 外观 =======================
@@ -600,7 +601,14 @@ fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
 private fun PriorityList(priority: List<String>, providers: List<ProviderInfo>, onMove: (String, Int) -> Unit) {
     val tv = LocalAppWindow.current.isTv
     var moving by remember { mutableStateOf<String?>(null) }
-    BackHandler(enabled = moving != null) { moving = null }
+    // 移动模式没有可预览的画面，手势仍然走预测性返回：松手才取消，划到一半可以反悔
+    PredictiveBackHandler(enabled = moving != null) { events ->
+        try {
+            events.collect { }
+            moving = null
+        } catch (_: CancellationException) {
+        }
+    }
     SegmentedGroup {
         priority.forEachIndexed { index, id ->
             // key 保证移动后还是同一个节点，电视上焦点跟着这一行走

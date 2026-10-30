@@ -1,7 +1,7 @@
 package com.mytv.mymusic.ui.library
 
 import android.content.ActivityNotFoundException
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -84,6 +84,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -96,6 +97,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -140,6 +143,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
@@ -918,11 +922,30 @@ internal fun CountTag(text: String) {
 /** 手机：FAB menu。打开时背景压暗，返回键收起。 */
 @Composable
 private fun BoxScope.LibraryFabMenu(expanded: Boolean, onExpandedChange: (Boolean) -> Unit, menu: NewMenu) {
-    BackHandler(expanded) { onExpandedChange(false) }
+    // 新建菜单的返回：手势过程中菜单从右下角跟手缩小淡出，松手才收起
+    var backProgress by remember { mutableFloatStateOf(0f) }
+    PredictiveBackHandler(enabled = expanded) { events ->
+        try {
+            events.collect { event -> backProgress = event.progress }
+            onExpandedChange(false)
+        } catch (_: CancellationException) {
+        } finally {
+            backProgress = 0f
+        }
+    }
     val bottom = LocalOverlayPadding.current.calculateBottomPadding()
     FloatingActionButtonMenu(
         expanded = expanded,
-        modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = bottom),
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .padding(bottom = bottom)
+            .graphicsLayer {
+                val scale = 1f - 0.08f * backProgress
+                alpha = 1f - backProgress
+                scaleX = scale
+                scaleY = scale
+                transformOrigin = TransformOrigin(1f, 1f)
+            },
         button = {
             ToggleFloatingActionButton(
                 checked = expanded,

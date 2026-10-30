@@ -1,6 +1,5 @@
 package com.mytv.mymusic.ui.settings
 
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -212,7 +211,14 @@ internal fun SettingsTwoPane(
             backProgress = 0f
         }
     }
-    BackHandler(enabled = tv && detailFocused && selected.parent == null) { focusList(listed) }
+    // 电视：焦点在右栏时返回先回到左栏列表，没有手势，按键返回直接完成
+    PredictiveBackHandler(enabled = tv && detailFocused && selected.parent == null) { events ->
+        try {
+            events.collect { }
+            focusList(listed)
+        } catch (_: CancellationException) {
+        }
+    }
 
     Row(Modifier.fillMaxSize().then(if (tv) Modifier else Modifier.statusBarsPadding())) {
         Column(

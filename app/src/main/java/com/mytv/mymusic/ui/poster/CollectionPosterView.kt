@@ -1,6 +1,6 @@
 package com.mytv.mymusic.ui.poster
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +48,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -94,6 +95,7 @@ import com.mytv.mymusic.ui.player.AmbientClock
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import com.mytv.mymusic.ui.theme.LocalSeedColor
 import kotlinx.coroutines.flow.collectLatest
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.max
 
 /**
@@ -187,9 +189,17 @@ internal fun CollectionPosterView(
 
     // 电视默认焦点在“播放全部”，和列表视图一致；墙不自己抢焦点（autoFocus = false）
     TvDefaultFocus(playFocus)
-    // 先交给墙（弹回、交回焦点、收起别的大卡、清焦点），墙这层没事可做了才离开页面
-    BackHandler(enabled = shown) {
-        if (!wall.handleBack()) ops.back()
+    // 先交给墙（弹回、交回焦点、收起别的大卡、清焦点），墙这层没事可做了才离开页面。
+    // 预测性返回：手势过程中整页跟手缩小下移淡出，走到一半可以反悔
+    var backProgress by remember { mutableFloatStateOf(0f) }
+    PredictiveBackHandler(enabled = shown) { events ->
+        try {
+            events.collect { event -> backProgress = event.progress }
+            if (!wall.handleBack()) ops.back()
+        } catch (_: CancellationException) {
+        } finally {
+            backProgress = 0f
+        }
     }
 
     val tv = window.isTv
@@ -236,7 +246,19 @@ internal fun CollectionPosterView(
     }
 
     CollectionPosterTheme(cover, actions, followPlaying = currentIndex >= 0) {
-        Box(Modifier.fillMaxSize().posterWallWake(wall)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .posterWallWake(wall)
+                .graphicsLayer {
+                    val progress = backProgress
+                    val scale = 1f - 0.05f * progress
+                    scaleX = scale
+                    scaleY = scale
+                    translationY = 24.dp.toPx() * progress
+                    alpha = 1f - 0.5f * progress
+                },
+        ) {
             PosterWall(
                 state = wall,
                 songs = songs,

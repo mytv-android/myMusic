@@ -2,7 +2,7 @@ package com.mytv.mymusic.ui
 
 import android.app.Activity
 import android.os.SystemClock
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.platform.LocalContext
@@ -70,6 +70,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
+import kotlin.coroutines.cancellation.CancellationException
 import com.mytv.mymusic.ui.adaptive.BottomPlayerBar
 import com.mytv.mymusic.ui.adaptive.BottomPlayerBarHeight
 import com.mytv.mymusic.ui.adaptive.NowPlayingPane
@@ -421,16 +422,21 @@ fun TvExitBackHandler() {
     val snackbar = LocalAppSnackbar.current
     val scope = rememberCoroutineScope()
     var lastBackAt by remember { mutableStateOf(0L) }
-    BackHandler {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastBackAt in 1L..EXIT_BACK_WINDOW_MS) {
-            (context as? Activity)?.finish()
-        } else {
-            lastBackAt = now
-            scope.launch {
-                snackbar.currentSnackbarData?.dismiss()
-                snackbar.showSnackbar("再按一次返回键退出应用")
+    // 电视没有手势，按键返回时事件流直接完成；统一走预测性返回，和触摸设备同一套分发
+    PredictiveBackHandler { events ->
+        try {
+            events.collect { }
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastBackAt in 1L..EXIT_BACK_WINDOW_MS) {
+                (context as? Activity)?.finish()
+            } else {
+                lastBackAt = now
+                scope.launch {
+                    snackbar.currentSnackbarData?.dismiss()
+                    snackbar.showSnackbar("再按一次返回键退出应用")
+                }
             }
+        } catch (_: CancellationException) {
         }
     }
 }

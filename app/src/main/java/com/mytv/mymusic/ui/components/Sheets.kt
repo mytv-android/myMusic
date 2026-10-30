@@ -1,6 +1,6 @@
 package com.mytv.mymusic.ui.components
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.fadeIn
@@ -34,16 +34,21 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * 自适应面板：手机是底部面板；平板是右侧 400dp 的浮动侧边面板（后面的内容仍可见）；
@@ -77,7 +82,17 @@ fun AdaptiveSheet(
     ) {
         val visible = remember { MutableTransitionState(false) }
         LaunchedEffect(Unit) { visible.targetState = true }
-        BackHandler(onBack = onDismiss)
+        // 面板的返回：手势过程中面板跟手右移淡出，松手才关闭
+        var backProgress by remember { mutableFloatStateOf(0f) }
+        PredictiveBackHandler { events ->
+            try {
+                events.collect { event -> backProgress = event.progress }
+                onDismiss()
+            } catch (_: CancellationException) {
+            } finally {
+                backProgress = 0f
+            }
+        }
         Box(Modifier.fillMaxSize()) {
             Box(
                 Modifier
@@ -98,7 +113,11 @@ fun AdaptiveSheet(
                     modifier = Modifier
                         .fillMaxHeight()
                         .width(if (tv) 360.dp else 400.dp)
-                        .then(if (tv) Modifier else Modifier.statusBarsPadding().navigationBarsPadding().padding(12.dp)),
+                        .then(if (tv) Modifier else Modifier.statusBarsPadding().navigationBarsPadding().padding(12.dp))
+                        .graphicsLayer {
+                            alpha = 1f - backProgress
+                            translationX = size.width * 0.6f * backProgress
+                        },
                     shape = if (tv) RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp) else RoundedCornerShape(28.dp),
                     color = if (tv) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                     shadowElevation = 6.dp,

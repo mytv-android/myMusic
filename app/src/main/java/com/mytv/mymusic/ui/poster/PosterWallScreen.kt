@@ -1,6 +1,6 @@
 package com.mytv.mymusic.ui.poster
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -85,6 +86,7 @@ import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * 队列海报墙：播放队列铺成的墙（[PosterWall]）加上浮层——顶栏胶囊（返回 + 标题）、“定位”和设置。
@@ -145,8 +147,17 @@ internal fun PosterWallScreen(
     val insets = WindowInsets.safeDrawing.asPaddingValues()
     val (insetTop, insetBottom) = wallInsets(metrics, insets.calculateTopPadding(), insets.calculateBottomPadding(), window.heightDp)
 
-    BackHandler(enabled = active) {
-        if (!wall.handleBack()) actions.closePosterWall()
+    // 先交给墙（弹回、交回焦点、收起别的大卡、清焦点），墙这层没事可做了才离开页面。
+    // 预测性返回：手势过程中整页跟手缩小下移淡出，走到一半可以反悔
+    var backProgress by remember { mutableFloatStateOf(0f) }
+    PredictiveBackHandler(enabled = active) { events ->
+        try {
+            events.collect { event -> backProgress = event.progress }
+            if (!wall.handleBack()) actions.closePosterWall()
+        } catch (_: CancellationException) {
+        } finally {
+            backProgress = 0f
+        }
     }
     if (tv) {
         LaunchedEffect(wall, active) {
@@ -185,7 +196,15 @@ internal fun PosterWallScreen(
             .then(if (active) Modifier else Modifier.clearAndSetSemantics {})
             .focusProperties { onEnter = { if (!active) cancelFocusChange() } }
             .focusGroup()
-            .posterWallWake(wall),
+            .posterWallWake(wall)
+            .graphicsLayer {
+                val progress = backProgress
+                val scale = 1f - 0.05f * progress
+                scaleX = scale
+                scaleY = scale
+                translationY = 24.dp.toPx() * progress
+                alpha = 1f - 0.5f * progress
+            },
     ) {
         PosterWall(
             state = wall,

@@ -1,6 +1,6 @@
 package com.mytv.mymusic.ui.library
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -99,6 +99,7 @@ import com.mytv.mymusic.ui.components.SwitchRow
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.relativeTime
+import kotlin.coroutines.cancellation.CancellationException
 
 // ======================= 同步中心 =======================
 
@@ -613,7 +614,14 @@ fun SyncConnectScreen(
         if (sync.initialMerge != null) actions.cancelInitial()
         onBack()
     }
-    BackHandler(enabled = sync.initialMerge != null) { leave() }
+    // 合并方式对话框盖在上面时返回 = 取消首次合并并离开；对话框窗口里没有可跟手的画面，手势只在完成后生效
+    PredictiveBackHandler(enabled = sync.initialMerge != null) { events ->
+        try {
+            events.collect { }
+            leave()
+        } catch (_: CancellationException) {
+        }
+    }
     if (!useQrSetup) TvDefaultFocus(tokenFocus, provider)
 
     val providerPicker: @Composable () -> Unit = {

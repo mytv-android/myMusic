@@ -1,6 +1,6 @@
 package com.mytv.mymusic.ui.library
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,6 +57,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -67,6 +68,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -122,6 +124,7 @@ import com.mytv.mymusic.ui.providerName
 import com.mytv.mymusic.ui.relativeTime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlin.coroutines.cancellation.CancellationException
 
 /** detailFlow 发出 null 表示歌单不存在；还没发出时是加载中。 */
 private class Loaded(val detail: LocalPlaylistDetail?)
@@ -185,7 +188,17 @@ fun LocalPlaylistScreen(
         if (name.isBlank()) nameDraft = playlist?.name.orEmpty()
         editing = false
     }
-    BackHandler(editing) { finishEdit() }
+    // 编辑模式返回：手势过程中编辑界面跟手淡出上移，松手才退出编辑
+    var editingBack by remember { mutableFloatStateOf(0f) }
+    PredictiveBackHandler(enabled = editing) { events ->
+        try {
+            events.collect { event -> editingBack = event.progress }
+            finishEdit()
+        } catch (_: CancellationException) {
+        } finally {
+            editingBack = 0f
+        }
+    }
     // 编辑中总是列表：海报视图里点“编辑”只打开编辑模式，不改记住的视图
     val posterView = state.collectionView == CollectionView.Poster && !editing
     val showPoster: () -> Unit = remember(actions, selection) {
@@ -389,7 +402,14 @@ fun LocalPlaylistScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                alpha = 1f - 0.7f * editingBack
+                translationY = -16.dp.toPx() * editingBack
+            },
+    ) {
         when {
             posterView && (load == null || playlist != null) -> LocalPlaylistPoster(
                 state = state,
