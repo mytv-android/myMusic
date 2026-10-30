@@ -13,6 +13,8 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 private val QIANQIAN_INFO = ProviderInfo(
     id = "qianqian",
@@ -33,6 +35,7 @@ private val QIANQIAN_INFO = ProviderInfo(
 
 class QianqianProvider : BaseNativeProvider(QIANQIAN_INFO) {
     private val json = NativeHttp.json
+    private val volumeCache = ConcurrentHashMap<String, Map<String, String>>()
 
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         val body = getSigned(
@@ -87,6 +90,34 @@ class QianqianProvider : BaseNativeProvider(QIANQIAN_INFO) {
         if (song.url.isNotEmpty()) return song.url
         val tsid = song.extra["tsid"].orEmpty().ifEmpty { song.id }
         return fetchDownloadUrl(cookie, tsid)
+    }
+
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+        val url = song.url.ifBlank { downloadUrl(cookie, song) }
+        val hasVolume = song.extra.containsKey("qianqian_mean_volume") ||
+            song.extra.containsKey("qianqian_replay_gain")
+        val extra = if (hasVolume) {
+            emptyMap()
+        } else {
+            fetchVolume(cookie, song.extra["tsid"].orEmpty().ifEmpty { song.id })
+        }
+        return PlayableStream(
+            url = url,
+            ext = extensionFromUrl(url).ifBlank { song.ext },
+            bitrate = song.bitrate,
+            extra = extra,
+        )
+    }
+
+    private suspend fun fetchVolume(cookie: String, tsid: String): Map<String, String> {
+        volumeCache[tsid]?.let { return it }
+        val item = runCatching { fetchSongInfo(cookie, tsid) }.getOrNull() ?: return emptyMap()
+        val extra = buildMap { putVolume(item.replayGain, item.meanVolume, item.maxVolume) }
+        if (extra.isNotEmpty()) {
+            if (volumeCache.size > 500) volumeCache.clear()
+            volumeCache[tsid] = extra
+        }
+        return extra
     }
 
     override suspend fun lyrics(cookie: String, song: Song): String {
