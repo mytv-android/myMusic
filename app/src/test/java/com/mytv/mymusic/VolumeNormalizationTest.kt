@@ -3,6 +3,8 @@ package com.mytv.mymusic
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.playback.VolumeNormalization
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VolumeNormalizationTest {
@@ -95,5 +97,32 @@ class VolumeNormalizationTest {
     fun `boost and cut are clamped`() {
         assertEquals(6f, VolumeNormalization.gainDb(song("qq", "qq_gain" to "20")), 0.01f)
         assertEquals(-20f, VolumeNormalization.gainDb(song("qq", "qq_gain" to "-50")), 0.01f)
+    }
+
+    @Test
+    fun `metadata presence decides the fallback`() {
+        assertFalse(VolumeNormalization.hasMetadata(null))
+        assertFalse(VolumeNormalization.hasMetadata(song("kuwo")))
+        assertTrue(VolumeNormalization.hasMetadata(song("qq", "qq_gain" to "0.0")))
+        assertTrue(
+            VolumeNormalization.hasMetadata(
+                song("netease", "netease_gain" to "0.0", "netease_peak" to "1.0")
+            )
+        )
+        assertFalse(
+            VolumeNormalization.hasMetadata(
+                song(
+                    "qianqian",
+                    "qianqian_mean_volume" to "0.0",
+                    "qianqian_replay_gain" to "0.0",
+                )
+            )
+        )
+        assertTrue(
+            VolumeNormalization.hasMetadata(
+                song("qianqian", "qianqian_mean_volume" to "-20.0")
+            )
+        )
+        assertFalse(VolumeNormalization.hasMetadata(song("kugou", "kugou_volume" to "0.0")))
     }
 }

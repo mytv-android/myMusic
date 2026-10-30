@@ -59,6 +59,27 @@ class VolumeGainAudioProcessorTest {
         processor.reset()
     }
 
+    @Test
+    fun `fallback boosts quiet audio and limits loud peaks`() {
+        VolumeNormalizationState.update(true, 0f, "fallback", fallback = true)
+        val processor = VolumeGainAudioProcessor()
+        processor.configure(AudioProcessor.AudioFormat(8000, 1, C.ENCODING_PCM_16BIT))
+        val quiet = drain(processor, pcm16(1638, 8000))
+        assertTrue("quiet audio should be boosted", quiet.last() > 2500)
+        val loud = drain(processor, pcm16(29491, 8000))
+        assertTrue("peaks must stay below the ceiling", loud.max() <= 32113)
+        processor.reset()
+    }
+
+    private fun drain(processor: VolumeGainAudioProcessor, input: ByteBuffer): ShortArray {
+        processor.queueInput(input)
+        val output = processor.getOutput().order(ByteOrder.LITTLE_ENDIAN)
+        val samples = ShortArray(output.remaining() / 2)
+        var index = 0
+        while (output.hasRemaining()) samples[index++] = output.short
+        return samples
+    }
+
     private fun pcm16(value: Short, count: Int): ByteBuffer {
         val buffer = ByteBuffer.allocateDirect(count * 2).order(ByteOrder.LITTLE_ENDIAN)
         repeat(count) { buffer.putShort(value) }

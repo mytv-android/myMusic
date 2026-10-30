@@ -47,6 +47,26 @@ object VolumeNormalization {
         }
     }
 
+    /** 是否有平台响度数据；全为 0 的千千/酷狗字段视为没有数据。 */
+    fun hasMetadata(song: Song?): Boolean {
+        val extra = song?.extra ?: return false
+        return when (song.source) {
+            "netease" -> extra.containsKey("netease_gain") || extra.containsKey("netease_peak")
+            "kugou" -> nonZero(extra, "kugou_volume", "kugou_volume_gain", "kugou_volume_peak")
+            "qq" -> extra.containsKey("qq_gain") || extra.containsKey("qq_peak")
+            "qianqian" -> nonZero(
+                extra,
+                "qianqian_mean_volume",
+                "qianqian_replay_gain",
+                "qianqian_max_volume",
+            )
+            else -> false
+        }
+    }
+
+    private fun nonZero(extra: Map<String, String>, vararg keys: String): Boolean =
+        keys.any { (extra[it]?.toFloatOrNull() ?: 0f) != 0f }
+
     internal fun effective(gain: Float?, peak: Float?): Float {
         if (gain == null || !gain.isFinite()) return 0f
         var value = gain.coerceIn(MAX_CUT_DB, MAX_BOOST_DB)

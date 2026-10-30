@@ -282,6 +282,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 enabled = enabled,
                 gainDb = if (enabled) VolumeNormalization.gainDb(song) else 0f,
                 key = song?.key,
+                fallback = enabled && !VolumeNormalization.hasMetadata(song),
             )
         }
     }

@@ -100,7 +100,7 @@ private fun VolumeNormalizationCard(enabled: Boolean, onToggle: (Boolean) -> Uni
         Column(Modifier.weight(1f)) {
             Text("音量均衡", style = MaterialTheme.typography.titleMedium)
             Text(
-                "用网易云、酷狗、QQ、千千提供的响度数据把不同歌曲的音量拉齐；没有数据的歌曲保持原样。",
+                "有平台响度数据时按数据调整；没有数据的歌曲用实时压缩和峰值限幅兜底。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
