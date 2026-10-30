@@ -67,7 +67,10 @@ class QianqianProvider : BaseNativeProvider(QIANQIAN_INFO) {
             source = SOURCE,
             cover = item.pic,
             link = songLink(tsid),
-            extra = mapOf("tsid" to tsid),
+            extra = buildMap {
+                put("tsid", tsid)
+                putVolume(item.replayGain, item.meanVolume, item.maxVolume)
+            },
         )
         val url = try {
             fetchDownloadUrl(cookie, tsid)
@@ -302,7 +305,11 @@ class QianqianProvider : BaseNativeProvider(QIANQIAN_INFO) {
             source = SOURCE,
             cover = item.pic,
             link = songLink(item.tsid),
-            extra = mapOf("tsid" to item.tsid, "album_id" to albumId),
+            extra = buildMap {
+                put("tsid", item.tsid)
+                put("album_id", albumId)
+                putVolume(item.replayGain, item.meanVolume, item.maxVolume)
+            },
         )
     }
 
@@ -713,6 +720,16 @@ private data class QianqianSearchData(
     val typeTrack: List<QianqianSearchTrack> = emptyList(),
 )
 
+private fun MutableMap<String, String>.putVolume(
+    replayGain: Float?,
+    meanVolume: Float?,
+    maxVolume: Float?,
+) {
+    replayGain?.let { put("qianqian_replay_gain", it.toString()) }
+    meanVolume?.let { put("qianqian_mean_volume", it.toString()) }
+    maxVolume?.let { put("qianqian_max_volume", it.toString()) }
+}
+
 @Serializable
 private data class QianqianSearchTrack(
     @SerialName("TSID") val tsid: String = "",
@@ -725,6 +742,9 @@ private data class QianqianSearchTrack(
     val artist: List<QianqianArtistDto> = emptyList(),
     val rateFileInfo: Map<String, QianqianRateFileInfoDto> = emptyMap(),
     val isVip: Int = 0,
+    @SerialName("afReplayGain") val replayGain: Float? = null,
+    val meanVolume: Float? = null,
+    val maxVolume: Float? = null,
 )
 
 @Serializable
@@ -860,6 +880,9 @@ private data class QianqianSongInfoItem(
     val duration: Int = 0,
     val artist: List<QianqianArtistDto> = emptyList(),
     val lyric: String = "",
+    @SerialName("afReplayGain") val replayGain: Float? = null,
+    val meanVolume: Float? = null,
+    val maxVolume: Float? = null,
 )
 
 @Serializable

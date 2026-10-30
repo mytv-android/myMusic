@@ -65,6 +65,8 @@ import com.mytv.mymusic.data.update.InstallResult
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
 import com.mytv.mymusic.playback.PlaybackService
+import com.mytv.mymusic.playback.VolumeNormalization
+import com.mytv.mymusic.playback.VolumeNormalizationState
 import com.mytv.mymusic.recognize.AudioResampler
 import com.mytv.mymusic.recognize.MicRecorder
 import com.mytv.mymusic.recognize.NeteaseFingerprinter
@@ -140,6 +142,7 @@ data class MusicUiState(
     val sleepFade: Boolean = true,
     val cacheLimitMb: Int = 512,
     val reduceMotion: Boolean = false,
+    val volumeNormalization: Boolean = false,
     val showBottomNav: Boolean = true,
     val cookies: Map<String, String> = emptyMap(),
     val sodaSignerUrl: String = "",
@@ -271,6 +274,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val neteaseMatcher = NativeProviders.get("netease") as? NetEaseProvider
     private val kugouMatcher = NativeProviders.get("kugou") as? KugouProvider
 
+    private val volumeNormalizationObserver = viewModelScope.launch {
+        combine(settingsState, base) { settings, ui ->
+            settings.volumeNormalization to ui.current
+        }.distinctUntilChanged().collect { (enabled, song) ->
+            VolumeNormalizationState.update(
+                enabled = enabled,
+                gainDb = if (enabled) VolumeNormalization.gainDb(song) else 0f,
+                key = song?.key,
+            )
+        }
+    }
+
     private val chartCache = mutableMapOf<String, CachedCharts>()
     private val recommendationCache = mutableMapOf<String, CachedRecommendations>()
     private val categoryCache = mutableMapOf<String, CachedCategory>()
@@ -327,6 +342,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             sleepFade = settings.sleepFade,
             cacheLimitMb = settings.cacheLimitMb.takeIf { it > 0 } ?: app.defaultCacheLimitMb(),
             reduceMotion = settings.reduceMotion,
+            volumeNormalization = settings.volumeNormalization,
             showBottomNav = settings.showBottomNav,
             cookies = settings.cookies,
             sodaSignerUrl = settings.sodaSignerUrl,
@@ -2949,6 +2965,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun cancelSleepTimer() = app.sleepTimer.cancel()
     fun setSleepFade(value: Boolean) = viewModelScope.launch { app.settings.sleepFade(value) }
     fun setReduceMotion(value: Boolean) = viewModelScope.launch { app.settings.reduceMotion(value) }
+    fun setVolumeNormalization(value: Boolean) =
+        viewModelScope.launch { app.settings.volumeNormalization(value) }
     fun setLyricsBackground(value: LyricsBackgroundMode) = viewModelScope.launch { app.settings.lyricsBackground(value) }
     fun setRhythmIntensity(value: RhythmIntensity) = viewModelScope.launch { app.settings.rhythmIntensity(value) }
     fun setCoverShape(value: CoverShapeChoice) = viewModelScope.launch { app.settings.coverShape(value) }

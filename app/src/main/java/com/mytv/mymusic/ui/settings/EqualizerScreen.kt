@@ -24,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -82,6 +83,32 @@ import kotlin.math.roundToInt
  * 均衡器：总开关 + 预设 + 竖向滑杆。双栏时滑杆加高到 220dp。
  * 遥控器和键盘：左右键在频段之间移动（两端再按会离开滑杆组），上下键每次调 1 dB。
  */
+@Composable
+private fun VolumeNormalizationCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .widthIn(max = 560.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .toggleable(value = enabled, role = Role.Switch, onValueChange = onToggle)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("音量均衡", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "用网易云、酷狗、QQ、千千提供的响度数据把不同歌曲的音量拉齐；没有数据的歌曲保持原样。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = enabled, onCheckedChange = null)
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EqualizerScreen(
@@ -97,6 +124,9 @@ fun EqualizerScreen(
     val presets: List<EqPreset> = EqPresets.all + EqPreset("custom", "自定义")
     SettingsPage(SettingsSection.Equalizer, embedded, onBack) {
         item(key = "status", contentType = "eqStatus") { EqualizerStatusCard(equalizer) { actions.setEqEnabled(it) } }
+        item(key = "normalization", contentType = "eqStatus") {
+            VolumeNormalizationCard(state.volumeNormalization) { actions.setVolumeNormalization(it) }
+        }
         item(key = "presetHead", contentType = "sectionHeader") { SectionLabel("预设") }
         item(key = "presets", contentType = "chips") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

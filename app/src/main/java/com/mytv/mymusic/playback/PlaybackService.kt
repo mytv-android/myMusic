@@ -107,7 +107,12 @@ private class RhythmRenderersFactory(
         DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
-            .setAudioProcessors(arrayOf(TeeAudioProcessor(analyzer.audioBufferSink)))
+            .setAudioProcessors(
+                arrayOf(
+                    TeeAudioProcessor(analyzer.audioBufferSink),
+                    VolumeGainAudioProcessor(),
+                )
+            )
             .build(),
         analyzer,
     )

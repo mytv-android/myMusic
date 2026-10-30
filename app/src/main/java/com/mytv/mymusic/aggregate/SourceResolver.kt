@@ -18,6 +18,7 @@ class SourceResolver(
         val at: Long,
         val ext: String = "",
         val bitrate: Int = 0,
+        val extra: Map<String, String> = emptyMap(),
     )
 
     private val urlCache = object : LinkedHashMap<String, CachedUrl>(32, 0.75f, true) {}
@@ -112,7 +113,7 @@ class SourceResolver(
             val now = System.currentTimeMillis()
             val cached = synchronized(lock) { urlCache[source.song.key] }
             if (cached != null && now - cached.at < URL_TTL_MS) {
-                val cachedSource = source.withQuality(cached.ext, cached.bitrate)
+                val cachedSource = source.withQuality(cached.ext, cached.bitrate, cached.extra)
                 return Resolution.Ready(cachedSource, cached.url, cached.preview, cached.at)
             }
             if (cached != null) synchronized(lock) { urlCache.remove(source.song.key) }
@@ -141,7 +142,11 @@ class SourceResolver(
                 continue
             }
             val preview = source.isPreview || isPreviewSource(source.providerId, source.song)
-            val resolvedSource = source.withQuality(stream?.ext.orEmpty(), stream?.bitrate ?: 0)
+            val resolvedSource = source.withQuality(
+                stream?.ext.orEmpty(),
+                stream?.bitrate ?: 0,
+                stream?.extra.orEmpty(),
+            )
             synchronized(lock) {
                 urlCache[source.song.key] = CachedUrl(
                     url = url,
@@ -149,6 +154,7 @@ class SourceResolver(
                     at = System.currentTimeMillis(),
                     ext = resolvedSource.song.ext,
                     bitrate = resolvedSource.song.bitrate,
+                    extra = stream?.extra.orEmpty(),
                 )
             }
             return Resolution.Ready(resolvedSource, url, preview)
@@ -158,14 +164,18 @@ class SourceResolver(
         return Resolution.None(attempts, deepLink)
     }
 
-    private fun TrackSource.withQuality(ext: String, bitrate: Int): TrackSource =
-        copy(song = song.withQuality(ext, bitrate))
+    private fun TrackSource.withQuality(
+        ext: String,
+        bitrate: Int,
+        extra: Map<String, String> = emptyMap(),
+    ): TrackSource = copy(song = song.withQuality(ext, bitrate, extra))
 
-    private fun Song.withQuality(ext: String, bitrate: Int): Song {
+    private fun Song.withQuality(ext: String, bitrate: Int, extra: Map<String, String> = emptyMap()): Song {
         val resolvedExt = ext.ifBlank { this.ext }
         val resolvedBitrate = bitrate.takeIf { it > 0 } ?: this.bitrate
-        return if (resolvedExt == this.ext && resolvedBitrate == this.bitrate) this
-        else copy(ext = resolvedExt, bitrate = resolvedBitrate)
+        val resolvedExtra = if (extra.isEmpty()) this.extra else this.extra + extra
+        return if (resolvedExt == this.ext && resolvedBitrate == this.bitrate && resolvedExtra == this.extra) this
+        else copy(ext = resolvedExt, bitrate = resolvedBitrate, extra = resolvedExtra)
     }
 
     fun invalidate(source: TrackSource) {

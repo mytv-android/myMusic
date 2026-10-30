@@ -91,6 +91,7 @@ class SettingsStore(private val context: Context) {
     private val aggregationKey = stringPreferencesKey("aggregation")
     private val dynamicColorKey = booleanPreferencesKey("dynamic_color")
     private val reduceMotionKey = booleanPreferencesKey("reduce_motion")
+    private val volumeNormalizationKey = booleanPreferencesKey("volume_normalization")
     private val showBottomNavKey = booleanPreferencesKey("show_bottom_nav")
     private val equalizerEnabledKey = booleanPreferencesKey("equalizer_enabled")
     private val equalizerPresetKey = stringPreferencesKey("equalizer_preset")
@@ -143,6 +144,7 @@ class SettingsStore(private val context: Context) {
             }.getOrDefault(AggregationSettings()),
             dynamicColor = values[dynamicColorKey] ?: false,
             reduceMotion = values[reduceMotionKey] ?: false,
+            volumeNormalization = values[volumeNormalizationKey] ?: false,
             showBottomNav = values[showBottomNavKey] ?: true,
             lyricsBackground = values[lyricsBackgroundKey].toLyricsBackgroundMode(),
             rhythmIntensity = values[rhythmIntensityKey].toRhythmIntensity(),
@@ -187,6 +189,7 @@ class SettingsStore(private val context: Context) {
     suspend fun layoutMode(value: String) = context.dataStore.edit { it[layoutModeKey] = value }
     suspend fun dynamicColor(value: Boolean) = context.dataStore.edit { it[dynamicColorKey] = value }
     suspend fun reduceMotion(value: Boolean) = context.dataStore.edit { it[reduceMotionKey] = value }
+    suspend fun volumeNormalization(value: Boolean) = context.dataStore.edit { it[volumeNormalizationKey] = value }
     suspend fun showBottomNav(value: Boolean) = context.dataStore.edit { it[showBottomNavKey] = value }
     suspend fun colorSource(value: String) = context.dataStore.edit { it[colorSourceKey] = value }
     suspend fun customSeed(value: Int) = context.dataStore.edit { it[customSeedKey] = value }
@@ -348,6 +351,7 @@ data class AppSettings(
     val aggregation: AggregationSettings = AggregationSettings(),
     val dynamicColor: Boolean = false,
     val reduceMotion: Boolean = false,
+    val volumeNormalization: Boolean = false,
     val showBottomNav: Boolean = true,
     val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
     val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,

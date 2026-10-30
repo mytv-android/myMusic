@@ -14,17 +14,20 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.net.URI
 import java.net.URLDecoder
 import java.util.Base64
@@ -62,6 +65,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     private val json = NativeHttp.json
     private val vipCache = ConcurrentHashMap<String, Boolean>()
     private val loginSessions = ConcurrentHashMap<String, QQLoginState>()
+    private val volumeCache = ConcurrentHashMap<String, CachedVolume>()
 
     override val supportsSearchPagination: Boolean = true
 
@@ -178,6 +182,55 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         }
         throw IllegalStateException("no valid download url found or vip required")
     }
+
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+        val url = song.url.ifBlank { downloadUrl(cookie, song) }
+        val songMid = song.extra["songmid"]?.takeIf { it.isNotBlank() } ?: song.id
+        val extra = if (songMid.isBlank()) {
+            emptyMap()
+        } else {
+            runCatching { fetchSongVolume(cookie, songMid) }.getOrDefault(emptyMap())
+        }
+        return PlayableStream(
+            url = url,
+            ext = extensionFromUrl(url).ifBlank { song.ext },
+            bitrate = song.bitrate,
+            extra = extra,
+        )
+    }
+
+    /** 播放地址响应里没有响度，音量数据在歌曲详情里；按 songmid 缓存，避免每次切歌都请求。 */
+    private suspend fun fetchSongVolume(cookie: String, songMid: String): Map<String, String> {
+        val now = System.currentTimeMillis()
+        volumeCache[songMid]?.takeIf { now - it.at < VOLUME_TTL_MS }?.let { return it.extra }
+        val url = QQ_SONG_DETAIL_API + "?" + qqQuery(
+            "songmid" to songMid,
+            "format" to "json",
+            "platform" to "yqq",
+            "needNewCode" to "0",
+        )
+        val body = NativeHttp.get(
+            url,
+            headers = mapOf("Referer" to QQ_DOWNLOAD_REFERER),
+            cookie = cookie,
+            randomIp = true,
+            userAgent = QQ_USER_AGENT,
+        )
+        val volume = ((json.parseToJsonElement(body).jsonObject["data"] as? JsonArray)
+            ?.firstOrNull() as? JsonObject)
+            ?.get("volume") as? JsonObject
+            ?: return emptyMap()
+        val extra = buildMap {
+            (volume["gain"] as? JsonPrimitive)?.doubleOrNull?.let { put("qq_gain", it.toString()) }
+            (volume["lra"] as? JsonPrimitive)?.doubleOrNull?.let { put("qq_lra", it.toString()) }
+            (volume["peak"] as? JsonPrimitive)?.doubleOrNull?.let { put("qq_peak", it.toString()) }
+        }
+        if (volumeCache.size > 300) volumeCache.clear()
+        volumeCache[songMid] = CachedVolume(extra, now)
+        return extra
+    }
+
+    private data class CachedVolume(val extra: Map<String, String>, val at: Long)
 
     override suspend fun accountInfo(cookie: String): AccountInfo? {
         if (cookie.isBlank()) return null
@@ -2453,6 +2506,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         const val QQ_CLIENT_SEARCH_API = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
         const val QQ_SINGER_SONG_LIMIT = 500
         const val QQ_SONG_DETAIL_API = "https://c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg"
+        const val VOLUME_TTL_MS = 6 * 60 * 60 * 1000L
         const val QQ_PLAYLIST_SEARCH_API = "http://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist"
         const val QQ_CATEGORY_API = "https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_tag_conf.fcg"
         const val QQ_CATEGORY_PLAYLIST_API = "https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_by_tag.fcg"

@@ -150,7 +150,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
 
     override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
         val stream = resolveStream(cookie, song)
-        return PlayableStream(stream.url, stream.ext, stream.bitrate, stream.level)
+        return PlayableStream(stream.url, stream.ext, stream.bitrate, stream.level, stream.extra)
     }
 
     private suspend fun resolveStream(cookie: String, song: Song): NeteaseStream {
@@ -189,6 +189,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
                     level = "",
                     ext = item.type.lowercase(Locale.ROOT).ifBlank { extensionFromUrl(url) },
                     bitrate = item.br / 1000,
+                    extra = item.volumeExtra(),
                 )
                 urlCache[cacheKey] = CachedUrl(stream, System.currentTimeMillis() + CACHE_TTL_MS)
                 return stream
@@ -866,6 +867,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             level = item.level.ifBlank { quality },
             ext = item.type.lowercase(Locale.ROOT).ifBlank { extensionFromUrl(url) },
             bitrate = item.br / 1000,
+            extra = item.volumeExtra(),
         )
     }
 
@@ -1008,7 +1010,15 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         val level: String,
         val ext: String,
         val bitrate: Int,
+        val extra: Map<String, String> = emptyMap(),
     )
+
+    private fun NeteaseDownloadData.volumeExtra(): Map<String, String> = buildMap {
+        gain?.let { put("netease_gain", it.toString()) }
+        peak?.let { put("netease_peak", it.toString()) }
+        closedGain?.let { put("netease_closed_gain", it.toString()) }
+        closedPeak?.let { put("netease_closed_peak", it.toString()) }
+    }
 
     private data class CachedUrl(val stream: NeteaseStream, val expiresAt: Long)
 
@@ -1398,6 +1408,10 @@ private data class NeteaseDownloadData(
     val br: Int = 0,
     val type: String = "",
     val level: String = "",
+    val gain: Double? = null,
+    val peak: Double? = null,
+    val closedGain: Double? = null,
+    val closedPeak: Double? = null,
 )
 
 // 网易逐字歌词（YRC）：行 `[行起毫秒,行时长毫秒]`，词 `(词起毫秒,词时长毫秒,0)词`，

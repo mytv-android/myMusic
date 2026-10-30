@@ -21,6 +21,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.math.BigInteger
 import java.net.URI
 import java.net.URLEncoder
@@ -30,6 +31,7 @@ import java.security.interfaces.RSAPublicKey
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.Inflater
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
@@ -60,6 +62,7 @@ private val KUGOU_INFO = ProviderInfo(
 
 class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
     private val json = NativeHttp.json
+    private val volumeCache = ConcurrentHashMap<String, Map<String, String>>()
 
     override val supportsSearchPagination: Boolean = true
 
@@ -235,6 +238,26 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         }
 
         return fetchSongInfo(cookie, hash).url
+    }
+
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+        val url = song.url.ifBlank { downloadUrl(cookie, song) }
+        val hash = song.extra["hash"].orEmpty().ifEmpty { song.id }
+        return PlayableStream(
+            url = url,
+            ext = extensionFromUrl(url).ifBlank { song.ext },
+            bitrate = song.bitrate,
+            extra = volumeCache[hash].orEmpty(),
+        )
+    }
+
+    private fun kugouVolumeExtra(resp: JsonObject): Map<String, String> = buildMap {
+        val volume = resp.findString("volume")
+        val gain = resp.findString("volume_gain")
+        val peak = resp.findString("volume_peak")
+        if (volume.isNotBlank()) put("kugou_volume", volume)
+        if (gain.isNotBlank()) put("kugou_volume_gain", gain)
+        if (peak.isNotBlank()) put("kugou_volume_peak", peak)
     }
 
     override suspend fun lyrics(cookie: String, song: Song): String {
@@ -994,6 +1017,11 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
 
         var ext = normalizeKugouExt(resp.findString("fileType", "extName", "extname"), downloadUrl)
         if (ext.isEmpty()) ext = "flac"
+        val volumeExtra = kugouVolumeExtra(resp)
+        if (volumeExtra.isNotEmpty()) {
+            if (volumeCache.size > 300) volumeCache.clear()
+            volumeCache[hash] = volumeExtra
+        }
         return Song(
             id = hash,
             name = firstNonEmpty(resp.findString("songName", "song_name", "audio_name"), song.name),
@@ -1006,11 +1034,12 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             url = downloadUrl,
             ext = ext,
             link = "https://www.kugou.com/song/#hash=$hash",
-            extra = mapOf(
-                "hash" to hash,
-                "album_audio_id" to albumAudioID,
-                "album_id" to albumID,
-            ),
+            extra = buildMap {
+                put("hash", hash)
+                put("album_audio_id", albumAudioID)
+                put("album_id", albumID)
+                putAll(volumeExtra)
+            },
         )
     }
 
@@ -1101,6 +1130,11 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             throw IllegalStateException("kugou priv_url v6 unavailable, status=${resp.findInt("status")} error_code=${resp.findInt("error_code", "errcode")}")
         }
 
+        val volumeExtra = kugouVolumeExtra(resp)
+        if (volumeExtra.isNotEmpty()) {
+            if (volumeCache.size > 300) volumeCache.clear()
+            volumeCache[hash] = volumeExtra
+        }
         return Song(
             id = hash,
             name = firstNonEmpty(resp.findString("songName", "song_name", "audio_name"), song.name),
@@ -1113,10 +1147,11 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             url = downloadUrl,
             ext = normalizeKugouExt(resp.findString("fileType", "extName", "extname"), downloadUrl),
             link = "https://www.kugou.com/song/#hash=$hash",
-            extra = mapOf(
-                "hash" to hash,
-                "album_audio_id" to albumAudioID,
-            ),
+            extra = buildMap {
+                put("hash", hash)
+                put("album_audio_id", albumAudioID)
+                putAll(volumeExtra)
+            },
         )
     }
 

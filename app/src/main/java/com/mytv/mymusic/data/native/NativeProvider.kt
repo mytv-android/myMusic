@@ -25,6 +25,8 @@ data class PlayableStream(
     val ext: String = "",
     val bitrate: Int = 0,
     val level: String = "",
+    /** 取流响应里带回来的附加信息（响度 gain/peak 等），会合并进播放队列里的 Song.extra。 */
+    val extra: Map<String, String> = emptyMap(),
 )
 
 /** 已登录账号的资料，用于账号卡片；拿不到就只显示“已登录”。 */
