@@ -76,7 +76,6 @@ data class UpdateUiState(
     val error: String = "",
     val file: File? = null,
     val permissionRequired: Boolean = false,
-    val skippedCode: Long = 0,
 )
 
 enum class InstallResult { Launched, NeedsPermission, Failed }
@@ -95,9 +94,6 @@ class UpdateRepository(
 
     @Volatile
     private var activeCall: okhttp3.Call? = null
-
-    @Volatile
-    private var cancelRequested = false
 
     private var installResultReceiver: BroadcastReceiver? = null
 
@@ -192,7 +188,6 @@ class UpdateRepository(
         val info = _state.value.info ?: return@withContext false
         val current = _state.value.phase
         if (current == UpdatePhase.Downloading || current == UpdatePhase.Verifying) return@withContext false
-        cancelRequested = false
         val directory = File(context.cacheDir, "updates").apply { mkdirs() }
         val target = File(directory, "myMusic-${info.versionName}.apk")
         if (info.size > 0 && directory.usableSpace < info.size + 8L * 1024 * 1024) {
@@ -253,12 +248,6 @@ class UpdateRepository(
                 }
             }
             activeCall = null
-            if (cancelRequested) {
-                target.delete()
-                cancelRequested = false
-                _state.update { it.copy(phase = UpdatePhase.Idle, phaseLabel = "", progress = 0f, message = "已取消下载", error = "", file = null) }
-                return@withContext false
-            }
             _state.update { it.copy(phase = UpdatePhase.Verifying, phaseLabel = "正在校验 SHA-256 与签名", progress = 1f) }
             verifyApk(target, info)
             _state.update {
@@ -268,44 +257,29 @@ class UpdateRepository(
                     progress = 1f,
                     file = target,
                     error = "",
-                    message = "更新包校验通过，等待确认安装",
+                    message = "更新包校验通过，正在打开系统安装器",
                 )
             }
             true
         } catch (error: Exception) {
             activeCall = null
             target.delete()
-            if (cancelRequested) {
-                _state.update { it.copy(phase = UpdatePhase.Idle, phaseLabel = "", progress = 0f, message = "已取消下载", error = "", file = null) }
-            } else {
-                _state.update {
-                    it.copy(
-                        phase = UpdatePhase.Error,
-                        phaseLabel = "",
-                        error = error.message ?: "更新包下载失败",
-                        file = null,
-                    )
-                }
+            _state.update {
+                it.copy(
+                    phase = UpdatePhase.Error,
+                    phaseLabel = "",
+                    error = error.message ?: "更新包下载失败",
+                    file = null,
+                )
             }
-            cancelRequested = false
             false
         }
     }
 
+    /** 应用退出时终止仍在进行的下载，避免后台线程继续写缓存。 */
     fun cancelDownload() {
-        cancelRequested = true
         activeCall?.cancel()
         activeCall = null
-        _state.update {
-            it.copy(
-                phase = UpdatePhase.Idle,
-                phaseLabel = "",
-                progress = 0f,
-                message = "已取消下载",
-                error = "",
-                file = null,
-            )
-        }
     }
 
     private fun verifyApk(file: File, info: UpdateInfo) {
@@ -524,17 +498,8 @@ class UpdateRepository(
         }
     }
 
-    fun skipCurrent() {
-        val info = _state.value.info ?: return
-        _state.update { it.copy(skippedCode = info.versionCode) }
-    }
-
     fun clearError() {
         _state.update { it.copy(error = "") }
-    }
-
-    suspend fun rememberSkipped(code: Long) {
-        settings.skippedUpdateCode(code)
     }
 
     companion object {

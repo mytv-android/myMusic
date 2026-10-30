@@ -262,11 +262,9 @@ class MusicActions(private val model: MusicViewModel) {
     fun checkUpdates() = model.checkForUpdates()
     suspend fun checkUpdatesNow(): com.mytv.mymusic.data.update.UpdateUiState = model.checkForUpdatesNow()
     fun downloadUpdate() = model.downloadUpdate()
-    fun cancelUpdateDownload() = model.cancelUpdateDownload()
     fun installUpdate() = model.installUpdate()
     fun openInstallPermission() = model.openInstallPermission()
     fun openReleasePage() = model.openReleasePage()
-    fun skipUpdate() = model.skipUpdate()
     fun clearUpdateError() = model.clearUpdateError()
 
     fun setEqEnabled(value: Boolean) = model.setEqualizerEnabled(value)

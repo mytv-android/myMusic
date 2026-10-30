@@ -88,7 +88,7 @@ internal fun settingsOverview(
     val logged = state.providers.filter { !state.cookies[it.id].isNullOrBlank() }
     val account = sync.account
     val info = update.info
-    val updateAvailable = info != null && info.versionCode != state.skippedUpdateCode
+    val updateAvailable = info != null
     val version = "版本 ${update.currentVersionName.ifBlank { "1.0" }}（构建 ${update.currentVersionCode}）"
     return SettingsOverview(
         values = mapOf(

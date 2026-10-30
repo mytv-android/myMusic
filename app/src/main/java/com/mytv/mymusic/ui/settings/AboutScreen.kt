@@ -41,7 +41,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,11 +93,8 @@ fun AboutScreen(
     val snackbar = LocalAppSnackbar.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
-    // 用户主动点“检查更新”时，连“此版本不再提示”跳过的版本也重新显示
-    var revealSkipped by rememberSaveable { mutableStateOf(false) }
     val info = update.info
-    val busy = update.phase == UpdatePhase.Downloading || update.phase == UpdatePhase.Verifying || update.phase == UpdatePhase.Ready
-    val showCard = info != null && (info.versionCode != state.skippedUpdateCode || revealSkipped || busy)
+    val showCard = info != null
     val isChecking = checking || update.phase == UpdatePhase.Checking
 
     fun check() {
@@ -107,9 +103,8 @@ fun AboutScreen(
             checking = true
             val result = actions.checkUpdatesNow()
             checking = false
-            when {
-                result.info != null -> revealSkipped = true
-                result.error.isBlank() -> snackbar.showSnackbar(result.message.ifBlank { "已是最新版本" })
+            if (result.info == null && result.error.isBlank()) {
+                snackbar.showSnackbar(result.message.ifBlank { "已是最新版本" })
             }
         }
     }
@@ -126,10 +121,7 @@ fun AboutScreen(
         item(key = "head", contentType = "appHeader") { AppHeader(update.currentVersionName, update.currentVersionCode) }
         if (showCard && info != null) {
             item(key = "update", contentType = "updateCard") {
-                UpdateCard(update, actions, progress, onLater = {
-                    actions.skipUpdate()
-                    revealSkipped = false
-                })
+                UpdateCard(update, actions, progress)
             }
         }
         if (info == null && update.error.isNotBlank() && !isChecking) {
@@ -148,9 +140,7 @@ fun AboutScreen(
                     title = "检查更新",
                     index = 0,
                     count = 6,
-                    onClick = {
-                        if (info != null) revealSkipped = true else check()
-                    },
+                    onClick = ::check,
                     icon = Icons.Filled.Refresh,
                     summary = checkSummary,
                     showChevron = false,
@@ -347,10 +337,10 @@ private fun AppHeader(versionName: String, versionCode: Long) {
     }
 }
 
-/** 新版本卡片：更新说明、下载进度、校验和安装都在这里；安装需要用户在系统对话框确认。 */
+/** 新版本卡片：更新说明、下载进度、校验和安装都在这里；下载和安装自动进行，系统对话框确认无法省略。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun UpdateCard(update: UpdateUiState, actions: MusicActions, progress: () -> Float, onLater: () -> Unit) {
+private fun UpdateCard(update: UpdateUiState, actions: MusicActions, progress: () -> Float) {
     val info = update.info ?: return
     val scheme = MaterialTheme.colorScheme
     val content = scheme.onTertiaryContainer
@@ -388,7 +378,7 @@ private fun UpdateCard(update: UpdateUiState, actions: MusicActions, progress: (
             Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Filled.Verified, null, Modifier.size(18.dp), tint = content)
                 Text(
-                    "下载后校验 SHA-256、包名、版本号和签名，再打开系统安装器。",
+                    "下载后自动校验 SHA-256、包名、版本号和签名，然后自动打开系统安装器。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = content,
                 )
@@ -400,35 +390,32 @@ private fun UpdateCard(update: UpdateUiState, actions: MusicActions, progress: (
         if (update.permissionRequired) {
             Box(Modifier.padding(top = 10.dp)) { InfoNote("需要允许本应用安装未知来源的应用。", "amber") }
         }
-        FlowRow(
-            Modifier.fillMaxWidth().padding(top = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            val textButton: @Composable (String, () -> Unit) -> Unit = { label, onClick ->
-                TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(CircleShape)) {
-                    Text(label, color = content)
+        if (!downloading) {
+            FlowRow(
+                Modifier.fillMaxWidth().padding(top = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                val textButton: @Composable (String, () -> Unit) -> Unit = { label, onClick ->
+                    TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(CircleShape)) {
+                        Text(label, color = content)
+                    }
                 }
-            }
-            val mainButton: @Composable (String, () -> Unit) -> Unit = { label, onClick ->
-                Button(onClick = onClick, colors = primaryColors, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(CircleShape)) {
-                    Text(label)
+                val mainButton: @Composable (String, () -> Unit) -> Unit = { label, onClick ->
+                    Button(onClick = onClick, colors = primaryColors, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(CircleShape)) {
+                        Text(label)
+                    }
                 }
-            }
-            when {
-                downloading -> mainButton("取消下载", actions::cancelUpdateDownload)
-                ready -> {
-                    if (update.permissionRequired) textButton("允许安装", actions::openInstallPermission)
-                    mainButton("打开系统安装器", actions::installUpdate)
-                }
-                update.phase == UpdatePhase.Error -> {
-                    textButton("浏览器打开", actions::openReleasePage)
-                    mainButton("重试下载", actions::downloadUpdate)
-                }
-                else -> {
-                    textButton("此版本不再提示", onLater)
-                    textButton("浏览器打开", actions::openReleasePage)
-                    mainButton("下载并安装", actions::downloadUpdate)
+                when {
+                    ready -> {
+                        if (update.permissionRequired) textButton("允许安装", actions::openInstallPermission)
+                        mainButton("重新打开安装器", actions::installUpdate)
+                    }
+                    update.phase == UpdatePhase.Error -> {
+                        textButton("浏览器打开", actions::openReleasePage)
+                        mainButton("重试下载", actions::downloadUpdate)
+                    }
+                    else -> mainButton("立即下载", actions::downloadUpdate)
                 }
             }
         }

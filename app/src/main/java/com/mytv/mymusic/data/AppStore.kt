@@ -97,7 +97,6 @@ class SettingsStore(private val context: Context) {
     private val equalizerBandsKey = stringPreferencesKey("equalizer_bands")
     private val searchHistoryKey = stringPreferencesKey("search_history")
     private val lastUpdateCheckKey = longPreferencesKey("last_update_check")
-    private val skippedUpdateKey = longPreferencesKey("skipped_update_code")
     private val colorSourceKey = stringPreferencesKey("color_source")
     private val customSeedKey = intPreferencesKey("custom_seed")
     private val browseStyleKey = stringPreferencesKey("browse_style")
@@ -165,7 +164,6 @@ class SettingsStore(private val context: Context) {
                 json.decodeFromString<List<String>>(values[searchHistoryKey] ?: "[]")
             }.getOrDefault(emptyList()),
             lastUpdateCheck = values[lastUpdateCheckKey] ?: 0L,
-            skippedUpdateCode = values[skippedUpdateKey] ?: 0L,
             // 旧版“系统取色”开关迁移为“系统壁纸”配色来源
             colorSource = values[colorSourceKey]
                 ?: if (values[dynamicColorKey] == true) "Wallpaper" else "Cover",
@@ -325,7 +323,6 @@ class SettingsStore(private val context: Context) {
     suspend fun clearSearchHistory() = context.dataStore.edit { it[searchHistoryKey] = "[]" }
 
     suspend fun lastUpdateCheck(value: Long) = context.dataStore.edit { it[lastUpdateCheckKey] = value }
-    suspend fun skippedUpdateCode(value: Long) = context.dataStore.edit { it[skippedUpdateKey] = value }
 }
 
 data class CookieSnapshot(
@@ -370,7 +367,6 @@ data class AppSettings(
     val equalizer: EqualizerSettings = EqualizerSettings(),
     val searchHistory: List<String> = emptyList(),
     val lastUpdateCheck: Long = 0L,
-    val skippedUpdateCode: Long = 0L,
     val colorSource: String = "Cover",
     val customSeed: Int = 0xFF006B5F.toInt(),
     val browseStyle: String = "TonalSpot",

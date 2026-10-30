@@ -403,7 +403,6 @@ fun MyMusicApp(model: MusicViewModel) {
         }
         UpdateDialog(
             update = update,
-            skippedCode = state.skippedUpdateCode,
             suppressed = route == "settings/about",
             actions = actions,
             progress = { updateProgress.value.progress },

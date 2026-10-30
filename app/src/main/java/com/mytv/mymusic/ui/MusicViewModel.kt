@@ -3,6 +3,7 @@ package com.mytv.mymusic.ui
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -57,6 +58,9 @@ import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.TrackOverrideEntity
 import com.mytv.mymusic.data.native.SodaProvider
 import com.mytv.mymusic.data.sync.SyncStrategy
+import com.mytv.mymusic.data.update.InstallResult
+import com.mytv.mymusic.data.update.UpdatePhase
+import com.mytv.mymusic.data.update.UpdateUiState
 import com.mytv.mymusic.playback.PlaybackService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -133,7 +137,6 @@ data class MusicUiState(
     val sodaSignerEnabled: Boolean = true,
     val aggregation: AggregationSettings = AggregationSettings(),
     val searchHistory: List<String> = emptyList(),
-    val skippedUpdateCode: Long = 0L,
     val loading: Boolean = false,
     val error: String = "",
     val current: Song? = null,
@@ -209,6 +212,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var failoverInProgress = false
     private var updateDownloadJob: Job? = null
     private var pendingUpdateInstall = false
+    private var installLaunching = false
+    private var lastInstallOutcome: InstallResult? = null
+    private var lastUpdateAttemptAt = 0L
     private var splitOverrideKeys: Set<String> = emptySet()
     private var mergeTargets: Map<String, String> = emptyMap()
     private var aggregateSongs: Map<String, List<Song>> = emptyMap()
@@ -311,7 +317,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             sodaSignerEnabled = settings.sodaSignerEnabled,
             aggregation = settings.aggregation,
             searchHistory = settings.searchHistory,
-            skippedUpdateCode = settings.skippedUpdateCode,
             accountProfiles = profiles,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MusicUiState())
@@ -379,8 +384,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             app.sync.syncIfStaleOnForeground()
         }
-        // 每次启动都检查一次更新，发现新版本由顶层弹窗提示；不依赖平台信息是否加载成功
-        viewModelScope.launch { app.update.check(manual = false) }
+        // 每次启动都检查更新；发现新版本立刻自动下载，用户没有“稍后”可选
+        checkUpdatesInBackground()
+        // 更新包一进入 Ready 就打开系统安装器，不等人点按钮
+        viewModelScope.launch {
+            updateState.map { it.phase }.distinctUntilChanged().collect { phase ->
+                if (phase == UpdatePhase.Ready) launchUpdateInstaller()
+            }
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val cutoff = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000
             runCatching { aggregateDao.pruneMatches(cutoff) }
@@ -3072,59 +3083,67 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- update ----------
 
-    fun checkForUpdates() {
-        viewModelScope.launch { app.update.check(manual = true) }
+    /** 启动和回前台时检查更新；发现新版本直接开始下载，用户没有“稍后”可选。 */
+    private fun checkUpdatesInBackground() {
+        lastUpdateAttemptAt = SystemClock.elapsedRealtime()
+        viewModelScope.launch {
+            app.update.check(manual = false)
+            if (updateState.value.phase == UpdatePhase.Available) downloadUpdate()
+        }
     }
 
-    suspend fun checkForUpdatesNow(): com.mytv.mymusic.data.update.UpdateUiState {
+    fun checkForUpdates() {
+        viewModelScope.launch {
+            app.update.check(manual = true)
+            if (updateState.value.phase == UpdatePhase.Available) downloadUpdate()
+        }
+    }
+
+    suspend fun checkForUpdatesNow(): UpdateUiState {
         app.update.check(manual = true)
+        if (updateState.value.phase == UpdatePhase.Available) downloadUpdate()
         return app.update.state.value
     }
 
     fun downloadUpdate() {
-        updateDownloadJob?.cancel()
-        updateDownloadJob = viewModelScope.launch {
-            if (!app.update.download()) return@launch
-            // 下载并校验完成后直接拉起安装器，用户不需要再点一次
-            launchUpdateInstaller()
+        when (updateState.value.phase) {
+            UpdatePhase.Downloading, UpdatePhase.Verifying -> return
+            // 已经下好就只负责打开安装器，不重复下载
+            UpdatePhase.Ready -> {
+                installUpdate()
+                return
+            }
+            else -> Unit
         }
-    }
-
-    fun cancelUpdateDownload() {
         updateDownloadJob?.cancel()
-        updateDownloadJob = null
-        app.update.cancelDownload()
+        updateDownloadJob = viewModelScope.launch { app.update.download() }
     }
 
     fun installUpdate() {
         viewModelScope.launch { launchUpdateInstaller() }
     }
 
-    /** 拉起系统安装器。缺少“安装未知来源”权限时打开系统设置，授权返回后自动继续安装。 */
+    /**
+     * 打开系统安装器。缺少“安装未知来源”权限时直接跳到授权页，授权返回后由
+     * [onAppForeground] 继续安装；安装器被退出时回到应用会再次拉起，不能跳过更新。
+     */
     private suspend fun launchUpdateInstaller() {
+        if (installLaunching) return
         val file = updateState.value.file ?: return
-        when (app.update.install(file)) {
-            com.mytv.mymusic.data.update.InstallResult.Launched -> pendingUpdateInstall = false
-            com.mytv.mymusic.data.update.InstallResult.NeedsPermission -> {
-                pendingUpdateInstall = true
-                app.update.openInstallPermissionSettings()
-            }
-            com.mytv.mymusic.data.update.InstallResult.Failed -> pendingUpdateInstall = false
+        installLaunching = true
+        try {
+            val result = app.update.install(file)
+            lastInstallOutcome = result
+            pendingUpdateInstall = result == InstallResult.NeedsPermission
+            if (result == InstallResult.NeedsPermission) app.update.openInstallPermissionSettings()
+        } finally {
+            installLaunching = false
         }
     }
 
     fun openInstallPermission() = app.update.openInstallPermissionSettings()
 
     fun openReleasePage() = app.update.openReleasePage()
-
-    fun skipUpdate() {
-        val info = updateState.value.info ?: return
-        viewModelScope.launch {
-            app.settings.skippedUpdateCode(info.versionCode)
-            app.update.skipCurrent()
-            app.update.clearError()
-        }
-    }
 
     fun clearUpdateError() = app.update.clearError()
 
@@ -3143,10 +3162,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onAppForeground() {
         app.sync.syncIfStaleOnForeground()
-        // 从“安装未知来源”设置页返回：已授权就直接继续安装，不用再点按钮
+        val update = updateState.value
         if (pendingUpdateInstall && canInstallPackages()) {
+            // 从“安装未知来源”设置页返回：已授权就直接继续安装，不用再点按钮
             pendingUpdateInstall = false
             viewModelScope.launch { launchUpdateInstaller() }
+        } else if (update.phase == UpdatePhase.Ready && update.file != null && lastInstallOutcome == InstallResult.Launched) {
+            // 之前把用户送到了系统安装器，但用户退出了：回到应用立即再次拉起，更新不能跳过
+            viewModelScope.launch { launchUpdateInstaller() }
+        }
+        // 没有待安装的更新时定期复查，发现新版本同样立刻下载
+        if (updateState.value.phase == UpdatePhase.Idle &&
+            SystemClock.elapsedRealtime() - lastUpdateAttemptAt > UPDATE_RECHECK_INTERVAL_MS
+        ) {
+            checkUpdatesInBackground()
         }
     }
 
@@ -3203,6 +3232,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         progressJob?.cancel()
         aggregateSearchJob?.cancel()
         collectionSearchJob?.cancel()
+        app.update.cancelDownload()
         controller?.release()
         super.onCleared()
     }
@@ -3235,6 +3265,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
 private const val AUTO_MATCH_TIMEOUT_MS = 8_000L
 private const val MAX_UNPLAYABLE_SKIPS = 10
+
+/** 回前台复查更新的最小间隔；启动时无论如何都会查一次。 */
+private const val UPDATE_RECHECK_INTERVAL_MS = 30L * 60 * 1000
 
 /** 扫码登录的轮询窗口：要盖住二维码自己的有效期（实测 3～5 分钟），否则后到的扫码没人接。 */
 private const val QR_POLL_WINDOW_MS = 310_000L
