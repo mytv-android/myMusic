@@ -1,0 +1,289 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <script src="react.js"></script>
+    <script src="react-dom.js"></script>
+    <script>
+      window.ucSecondVerifyReact = window.React;
+      window.ucSecondVerifyReactDom = window.ReactDOM;
+    </script>
+    <script src="sdk-glue.js"></script>
+    <script>
+      window._SdkGlueInit({
+        self: { aid: 386088, pageId: 24554 },
+        bdms: { aid: 386088, paths: ['/passport'] },
+      });
+    </script>
+    <script>
+      // 汽水二次验证宿主：页面以 api.qishui.com 为源，官方验证组件在页面内渲染；
+      // 组件内部对白名单域名的 XHR/fetch 全部改走带 a_bogus 的 __qishuiRequest
+      // （与 libresoda security_host.html 的桥接同一思路，去掉了需要本地 HTTP
+      // 服务的 verifyKey 分支——Android 侧由同源页面自己完成代发）。
+      (function () {
+        var whitelist = new Set(['api.qishui.com', 'auth.zijieapi.com', 'bff-pc.qishui.com']);
+
+        window.__qishuiRequest = function (request) {
+          return new Promise(function (resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            // 重入保护：这个 XHR 由下面的 send 拦截器判断，不能再被它转回 __qishuiRequest
+            xhr.__qDirect = true;
+            xhr.open(request.method || 'GET', request.url, true);
+            xhr.withCredentials = true;
+            var headers = request.headers || {};
+            Object.keys(headers).forEach(function (name) {
+              xhr.setRequestHeader(name, String(headers[name]));
+            });
+            xhr.timeout = request.timeout || 180000;
+            xhr.onload = function () {
+              resolve({
+                status: xhr.status,
+                body: xhr.responseText,
+                responseURL: xhr.responseURL,
+                headers: xhr.getAllResponseHeaders(),
+              });
+            };
+            xhr.onerror = function () { reject(new Error('XMLHttpRequest network error')); };
+            xhr.ontimeout = function () { reject(new Error('XMLHttpRequest timeout')); };
+            xhr.send(request.body == null ? null : request.body);
+          });
+        };
+
+        var nativeOpen = XMLHttpRequest.prototype.open;
+        var nativeSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+        var nativeSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url) {
+          this.__qUrl = String(url || '');
+          this.__qMethod = String(method || 'GET').toUpperCase();
+          this.__qHeaders = {};
+          return nativeOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+          if (!this.__qHeaders) this.__qHeaders = {};
+          this.__qHeaders[String(name)] = String(value);
+          return nativeSetRequestHeader.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function (body) {
+          if (this.__qDirect) return nativeSend.apply(this, arguments);
+          var host = '';
+          try { host = new URL(this.__qUrl || '', location.href).hostname; } catch (_) {}
+          if (!whitelist.has(host) || typeof window.__qishuiRequest !== 'function') {
+            return nativeSend.apply(this, arguments);
+          }
+          var xhr = this;
+          window.__qishuiRequest({
+            method: xhr.__qMethod || 'GET',
+            url: xhr.__qUrl,
+            headers: xhr.__qHeaders || {},
+            body: body == null ? null : String(body),
+            timeout: 180000,
+          }).then(function (result) {
+            var responseBody = String(result && result.body || '');
+            var parsedBody = responseBody;
+            try { parsedBody = JSON.parse(responseBody); } catch (_) {}
+            try { Object.defineProperty(xhr, 'status', { configurable: true, value: Number(result.status) || 0 }); } catch (_) {}
+            try { Object.defineProperty(xhr, 'statusText', { configurable: true, value: Number(result.status) === 200 ? 'OK' : '' }); } catch (_) {}
+            try { Object.defineProperty(xhr, 'responseText', { configurable: true, value: responseBody }); } catch (_) {}
+            try { Object.defineProperty(xhr, 'response', { configurable: true, value: parsedBody }); } catch (_) {}
+            try { Object.defineProperty(xhr, 'responseURL', { configurable: true, value: String(result.responseURL || xhr.__qUrl || '') }); } catch (_) {}
+            xhr.getAllResponseHeaders = function () { return String(result.headers || ''); };
+            xhr.getResponseHeader = function (name) {
+              var wanted = String(name || '').toLowerCase();
+              var line = String(result.headers || '').split(/\r?\n/).find(function (item) {
+                return item.toLowerCase().indexOf(wanted + ':') === 0;
+              });
+              return line ? line.slice(line.indexOf(':') + 1).trim() : null;
+            };
+            try { Object.defineProperty(xhr, 'readyState', { configurable: true, value: 4 }); } catch (_) {}
+            try {
+              xhr.dispatchEvent(new Event('readystatechange'));
+              xhr.dispatchEvent(new Event('load'));
+              xhr.dispatchEvent(new Event('loadend'));
+            } catch (_) {}
+          }).catch(function (error) {
+            if (typeof xhr.onerror === 'function') xhr.onerror(error);
+            try { xhr.dispatchEvent(new Event('error')); } catch (_) {}
+          });
+        };
+
+        var nativeFetch = window.fetch.bind(window);
+        window.fetch = function (input, init) {
+          var url = input && input.url ? input.url : String(input || '');
+          var host = '';
+          try { host = new URL(url, location.href).hostname; } catch (_) {}
+          if (!whitelist.has(host) || typeof window.__qishuiRequest !== 'function') {
+            return nativeFetch.apply(this, arguments);
+          }
+          var method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+          var body = init && init.body != null ? String(init.body) : null;
+          var headers = (init && init.headers) || {};
+          return window.__qishuiRequest({ method: method, url: url, headers: headers, body: body, timeout: 180000 }).then(function (result) {
+            return new Response(String(result.body || ''), {
+              status: Number(result.status) || 200,
+              headers: parseHeaderLines(result.headers),
+            });
+          });
+        };
+
+        function parseHeaderLines(raw) {
+          var list = [];
+          String(raw || '').split(/\r?\n/).forEach(function (line) {
+            var index = line.indexOf(':');
+            if (index > 0) list.push([line.slice(0, index).trim(), line.slice(index + 1).trim()]);
+          });
+          return list;
+        }
+
+        function setMfaStatus(message, isError) {
+          var element = document.getElementById('mfa-status');
+          if (!element) return;
+          element.textContent = message || '';
+          element.style.color = isError ? '#d93025' : '#202124';
+          element.style.display = message ? 'block' : 'none';
+        }
+
+        function normalizeObject(value) {
+          if (!value) return {};
+          if (typeof value === 'object') return value;
+          try { return JSON.parse(String(value)); } catch (_) { return {}; }
+        }
+
+        function resolveVerifyUrl(value) {
+          if (value && typeof value === 'object') {
+            var host = String(value.host || '').trim();
+            var path = String(value.path || '/').trim() || '/';
+            if (host) return 'https://' + host + (path.charAt(0) === '/' ? path : '/' + path);
+          }
+          return String(value || '');
+        }
+
+        function formEncode(values) {
+          var result = new URLSearchParams();
+          Object.keys(values || {}).forEach(function (key) {
+            var value = values[key];
+            if (value == null) return;
+            result.set(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+          });
+          return result.toString();
+        }
+
+        function loadVerifyScript(url) {
+          return new Promise(function (resolve, reject) {
+            var script = document.createElement('script');
+            script.type = 'text/javascript';
+            script.crossOrigin = 'anonymous';
+            script.src = url;
+            script.onload = resolve;
+            script.onerror = function () { reject(new Error('二次验证组件加载失败')); };
+            document.head.appendChild(script);
+          });
+        }
+
+        async function expandVerifyCenterDecision(originDecision, options) {
+          if (originDecision.verify_from !== 'verify_center') return originDecision;
+          var payload = Object.assign({ aid: 386088 }, originDecision, options.generalParams || {});
+          delete payload.is_login;
+          var response = await window.__qishuiRequest({
+            method: 'POST',
+            url: 'https://api.qishui.com/passport/safe/pack_verify_ways_data/?aid=386088',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'x-tt-passport-verify-portrait': originDecision.verify_portrait_id || '',
+            },
+            body: formEncode(payload),
+            timeout: 180000,
+          });
+          var envelope = JSON.parse(response.body || '{}');
+          var expanded = envelope.data || envelope;
+          if (response.status < 200 || response.status >= 400 || !expanded) {
+            throw new Error('获取二次验证决策失败：HTTP ' + response.status);
+          }
+          return Object.assign({}, originDecision, expanded);
+        }
+
+        function finish(status, message) {
+          try {
+            window.__qishuiAndroidVerify.complete(!!status, String(message || ''));
+          } catch (_) {}
+        }
+
+        window.__qishuiCancelSecondVerify = function () {
+          if (window.__qishuiMfaResolve) window.__qishuiMfaResolve({ status: false, message: '用户取消二次验证' });
+        };
+
+        window.__runSecondVerify = async function (originDecision, options) {
+          options = options || {};
+          setMfaStatus('正在加载汽水安全验证组件…');
+          try {
+            var decision = await expandVerifyCenterDecision(originDecision || {}, options);
+            var verifyUrl = resolveVerifyUrl(decision.url);
+            if (!verifyUrl) throw new Error('2046 决策中缺少二次验证组件 URL');
+            var eventParams = normalizeObject(decision.event_params);
+            var resource = new URL(verifyUrl, 'https://api.qishui.com/');
+            resource.searchParams.set('aid', '386088');
+            resource.searchParams.set('verify_reason', String(eventParams.verify_reason || ''));
+            resource.searchParams.set('verify_scene', String(eventParams.verify_scene || ''));
+            window.$$account_verify_portrait_id = decision.verify_portrait_id || '';
+            if (typeof window.ucWebSecondVerify !== 'function') {
+              await loadVerifyScript(resource.toString());
+            }
+            if (typeof window.ucWebSecondVerify !== 'function') {
+              throw new Error('官方二次验证组件未导出 ucWebSecondVerify');
+            }
+            setMfaStatus('请在下方完成二次验证');
+            var result = await new Promise(function (resolve) {
+              var finished = false;
+              var done = function (value) {
+                if (finished) return;
+                finished = true;
+                window.__qishuiMfaResolve = null;
+                resolve(value && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : { status: false, message: String(value || '') });
+              };
+              window.__qishuiMfaResolve = done;
+              var data = Object.assign({
+                verifyFinishCallback: done,
+                aid: 386088,
+                isNewVerifyUI: true,
+                generalParams: options.generalParams || {},
+                newSecondVerifyWebOptions: {
+                  host: 'https://api.qishui.com',
+                  verifyAppName: '汽水音乐移动端',
+                },
+                newSecondVerificationCall: { reportAppLog: function () {} },
+                event_params: eventParams,
+                monitorTime: {
+                  startTime: Date.now(),
+                  fetchEndTime: Date.now(),
+                  scriptLoadStartTime: 0,
+                  scriptLoadEndTime: Date.now(),
+                  renderStartTime: Date.now(),
+                },
+                fun: decision.verify_from === 'verify_center' ? 'verify_center' : 'verify',
+                uc_account_verify_version: '1.0.29',
+              }, decision);
+              window.ucWebSecondVerify(data);
+            });
+            if (!result || result.status !== true) {
+              finish(false, (result && result.message) || '二次验证未完成');
+              return;
+            }
+            setMfaStatus('验证已完成，正在提交登录结果…');
+            finish(true, 'ok');
+          } catch (error) {
+            setMfaStatus(String(error && error.message ? error.message : error), true);
+            finish(false, String(error && error.message ? error.message : error));
+          }
+        };
+      })();
+    </script>
+    <style>
+      html, body { width: 100%; height: 100%; margin: 0; background: #fff !important; font-family: sans-serif; }
+      body > div { background: #fff !important; }
+      #mfa-status { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 2147483647; padding: 9px 14px; border-radius: 8px; background: rgba(255,255,255,.96); box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+    </style>
+  </head>
+  <body>
+    <div id="mfa-status" style="display:none"></div>
+  </body>
+</html>

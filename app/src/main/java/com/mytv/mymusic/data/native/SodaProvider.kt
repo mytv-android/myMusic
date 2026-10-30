@@ -6,6 +6,9 @@ import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
+import com.mytv.mymusic.data.QRCheckResult
+import com.mytv.mymusic.data.QRCreateResult
+import com.mytv.mymusic.data.QRSession
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 import kotlinx.coroutines.CancellationException
@@ -56,7 +59,7 @@ private val SODA_INFO = ProviderInfo(
     albumSongs = true,
     parseAlbum = true,
     userPlaylists = true,
-    qrLogin = false,
+    qrLogin = true,
     playlistCategories = true,
     listeningModes = true,
     topLists = true,
@@ -139,6 +142,76 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             nickname = nickname,
             avatar = buildImageUrl(me.myInfo.avatar, ""),
         )
+    }
+
+    // ---------------------------------------------------------------------
+    // 扫码登录：隐藏 WebView 签名页（SodaQrSigner）+ qr_login.rs 状态机
+    // ---------------------------------------------------------------------
+
+    private val loginSessions = java.util.concurrent.ConcurrentHashMap<String, SodaLoginSession>()
+
+    private class SodaLoginSession(
+        val session: SodaQrSession,
+        val createdAt: Long = System.currentTimeMillis(),
+        @Volatile var consecutiveErrors: Int = 0,
+    )
+
+    override suspend fun createLogin(type: String): QRCreateResult {
+        val gateway: SodaQrGateway = SodaQrSigner
+        gateway.close() // 新二维码 = 新签名页会话：设备身份、cookie、localStorage 全部重来
+        pruneLoginSessions()
+        val session = SodaQrSession()
+        val created = try {
+            SodaQrLogin.create(gateway, session)
+        } catch (error: CancellationException) {
+            gateway.close()
+            throw error
+        } catch (error: Exception) {
+            gateway.close()
+            throw IllegalStateException("汽水二维码获取失败：${error.message ?: "网络错误"}", error)
+        }
+        val sessionId = NativeProviders.newSessionId(info.id)
+        loginSessions[sessionId] = SodaLoginSession(session)
+        return QRCreateResult(
+            sessionId = sessionId,
+            session = QRSession(
+                key = session.token,
+                // 二维码内容必须是 qrcode_index_url 原样；服务端自带的图片可能编码改写地址，不用
+                url = created.scanUrl,
+                imageUrl = "",
+            ),
+        )
+    }
+
+    override suspend fun checkLogin(sessionId: String, key: String): QRCheckResult {
+        val entry = loginSessions[sessionId]
+            ?: return QRCheckResult(status = "failed", message = "登录会话已过期，请重新生成二维码", cookie = "")
+        pruneLoginSessions()
+        val gateway: SodaQrGateway = SodaQrSigner
+        val result = try {
+            SodaQrLogin.check(gateway, entry.session)
+        } catch (error: CancellationException) {
+            gateway.close()
+            throw error
+        } catch (error: Exception) {
+            // 单次失败多半可重试；连着失败说明签名页出问题了，别空转到过期
+            entry.consecutiveErrors += 1
+            if (entry.consecutiveErrors >= 3) {
+                return QRCheckResult(status = "failed", message = "汽水登录轮询失败：${error.message ?: "未知错误"}", cookie = "")
+            }
+            return QRCheckResult(status = "waiting", message = "汽水正在确认登录，请稍候…", cookie = "")
+        }
+        entry.consecutiveErrors = 0
+        if (result.status == "success" || result.status == "expired" || result.status == "failed") {
+            loginSessions.remove(sessionId)
+            gateway.close()
+        }
+        return result
+    }
+
+    private fun pruneLoginSessions() {
+        val now = System.currentTimeMillis()
+        loginSessions.entries.removeIf { now - it.value.createdAt > LOGIN_SESSION_TTL_MS }
     }
 
     private fun findCachedFile(trackId: String, workDir: File): File? {
@@ -2471,6 +2544,9 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
          */
         const val DEFAULT_SIGNER_URL = "http://103.236.75.83:8899/sign"
         const val DEFAULT_SIGNER_TOKEN = "b356ad402bc31ee9e5a99cfdbf41eaa39961a562251c3359"
+
+        /** 扫码登录会话的登记寿命：远长于二维码自身 TTL，只用来清理遗留条目。 */
+        private const val LOGIN_SESSION_TTL_MS = 10 * 60_000L
 
         /** 签名器总开关；关掉后回到只走公开试听流的行为。 */
         @Volatile private var signerEnabled = true

@@ -41,6 +41,15 @@ class MyMusicApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: android.app.Activity) = ForegroundActivity.set(activity)
+            override fun onActivityPaused(activity: android.app.Activity) = ForegroundActivity.clear(activity)
+            override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
+            override fun onActivityStarted(activity: android.app.Activity) {}
+            override fun onActivityStopped(activity: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) {}
+            override fun onActivityDestroyed(activity: android.app.Activity) {}
+        })
         repository = MusicRepository()
         settings = SettingsStore(this)
         database = AppDatabase.create(this)

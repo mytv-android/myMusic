@@ -3127,7 +3127,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             base.value = base.value.copy(login = created, loginStatus = "等待扫码", loginProviderId = providerId)
             // 轮询到二维码自己的有效期为止：短于 TTL 会先停轮询、把用户后来的扫码关在门外。
-            val deadline = System.currentTimeMillis() + QR_POLL_WINDOW_MS
+            // 汽水的二次验证要等用户在可见窗口里完成，窗口额外放宽。
+            val windowMs = if (providerId == "soda") QR_POLL_WINDOW_MS * 3 else QR_POLL_WINDOW_MS
+            val deadline = System.currentTimeMillis() + windowMs
             while (System.currentTimeMillis() < deadline) {
                 delay(3000)
                 val result = try {
@@ -3157,7 +3159,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         base.value = base.value.copy(loginStatus = "登录失败：${result.message.ifBlank { "平台拒绝了这次登录" }}")
                         return@launch
                     }
-                    else -> base.value = base.value.copy(loginStatus = "等待扫码")
+                    // 汽水在扫码后也会回 waiting（error_code=7 限流冷却），此时沿用平台给的文案
+                    else -> base.value = base.value.copy(loginStatus = result.message.ifBlank { "等待扫码" })
                 }
             }
             base.value = base.value.copy(loginStatus = "二维码已过期")

@@ -72,7 +72,7 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 
 汽水的播放流分三层：分享页 / SEO、Web / H5、以及 App 端 `POST /luna/pc/track_v2`。前两层对会员曲目只返回 30～60 秒试听；App 端要求每个请求都带 `x-helios` / `x-medusa`，这两个头只能由官方客户端的原生组件生成。因此本项目把「签名」交给一个外部服务，取流和加密流解密留在客户端：
 
-- 汽水账号仍需登录：在 `设置 › 平台账号 › 汽水音乐` 粘贴官方客户端的 Cookie。电视端按既有约定不提供文本输入，汽水会员播放目前主要在手机或平板上使用。
+- 汽水账号登录：`设置 › 平台账号 › 汽水音乐` 用官方 App 扫码登录（见下节），也可以粘贴 Cookie；电视端同样支持扫码。
 - **默认**：`设置 › 平台账号 › 汽水播放签名器` 里选「SodaM 公共」，连的是 SodaM 桌面版默认的同一个公共实例，无需自己部署。签名请求会带着 Cookie 和完整请求头发到该服务，请只在自己信任的网络环境下使用；公共实例不可用时改回「自定义服务」即可。
 - 自建实例：选「自定义服务」后填 `POST /sign` 地址（例如 `http://192.168.1.10:8899/sign`）和可选的 Bearer Token。签名服务可运行 [libmssdk](https://github.com/sodahub-org/libmssdk)（官方客户端 `bdms.node` 的 HTTP 包装）或 SodaM/libresoda 的签名宿主，需要一台能加载官方原生组件的电脑（Windows / macOS / Linux + Wine），手机或电视通过局域网访问；签名器会看到即将发出的完整请求头（含 Cookie），只应指向自己信任的实例，跨公网使用 SSH 隧道或反向代理，并始终设置 Token。
 - 协议与 sodam 一致：请求 `{url, method, body, headers, ts_ms}`，响应 `{ok, headers: {x-helios, x-medusa}, ms_token, a_bogus}`；客户端通过签名器的 `GET /config` 对齐 `device_id` / `iid` / `fp`，并用 body 的 MD5（大写）生成 `X-SS-STUB`。
@@ -81,7 +81,19 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 
 签名器与相关参考实现不随本应用分发，也不包含任何官方二进制。请只用于播放自己账号有权播放的内容，不要做公共代理或分发凭据。
 
-**来源与许可**：签名服务协议、取流链路和加密流解密逻辑参考 [SodaM](https://github.com/sodahub-org/sodam)（AGPL-3.0）与 [libresoda](https://github.com/sodahub-org/libresoda)（AGPL-3.0），签名服务契约参考 [libmssdk](https://github.com/sodahub-org/libmssdk)（MIT，不包含官方 `bdms.node`）。默认连接的公共签名服务由 SodaM 作者提供并授权使用。本项目的 Kotlin 实现是对应的衍生作品，同样以 AGPL-3.0 分发；第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+### 汽水音乐扫码登录（WebView 签名页）
+
+汽水没有网页版，Cookie 抓取门槛很高，所以登录以**应用内扫码**为主：`设置 › 平台账号 › 汽水音乐 › 登录` 弹出二维码，用官方 App 扫码并在手机上确认即可，全程不离开应用，电视端同样可用（手机扫电视上的码）。
+
+汽水的护照接口有 Web 风控：裸请求会在扫码后被 `error_code=7` 一路拦住，抖音系的 `a_bogus` 也不被认，只有官方 Web 安全 SDK（bdms）在真实浏览器上下文里发出的请求才被接受，且确认后的登录态只落在该浏览器会话的 Cookie 里。桌面端 SodaM 为此拉起本机 Chromium 当「签名页」；本项目的做法是：
+
+- 把 libresoda 内置的官方安全组件（`security_host.html` + `sdk-glue.js` + `bdms.js`，原样打包在 `assets/soda/security/`）放进一个**隐藏的 0×0 WebView**；
+- 用 `loadDataWithBaseURL("https://api.qishui.com/")` 让页面拿到汽水同源身份——护照请求由页面 XHR 同源发出（Chromium 自己的网络栈与 Cookie jar），bdms 自动补 `a_bogus`（44～46 字符，随 WebView/bdms 版本不同），CORS 问题因此不存在；
+- 每次登录前清空该 WebView 的汽水 Cookie 与 localStorage，等价于桌面端「每个二维码一个独立浏览器上下文」，避免设备身份被复用触发限流；
+- `get_qrcode` / `check_qrconnect` 的会话参数与状态机（JS-SDK 公共参数、`x-tt-passport-*` 头、`X-SS-STUB`、`error_code=7` 冷却 5 秒、确认后跟一跳 `redirect_url` 引出 `sessionid` 等四件套）逐条移植自 libresoda 的 `qr_login.rs`；
+- 登录页 WebView 只在扫码期间存在，拿到登录态或过期即销毁；服务端要求二次验证（`error_code=2046`）时弹出一个**可见窗口**加载同一套官方验证组件（`assets/soda/security/soda_verify.html`，页面内 XHR/fetch 经 `__qishuiRequest` 补签名），用户完成后带决策里的 `biz_params` 重发 `check_qrconnect` 换取登录态。
+
+**来源与许可**：签名服务协议、取流链路和加密流解密逻辑参考 [SodaM](https://github.com/sodahub-org/sodam)（AGPL-3.0）与 [libresoda](https://github.com/sodahub-org/libresoda)（AGPL-3.0），签名服务契约参考 [libmssdk](https://github.com/sodahub-org/libmssdk)（MIT，不包含官方 `bdms.node`）。扫码登录原样内置 libresoda `tools/qishui-signer/security/` 的官方安全组件（bdms / sdk-glue 为汽水官方混淆代码，react 为 MIT），状态机为 `qr_login.rs` 的 Kotlin 移植。默认连接的公共签名服务由 SodaM 作者提供并授权使用。本项目的 Kotlin 实现是对应的衍生作品，同样以 AGPL-3.0 分发；第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 跨平台聚合与同步歌词
 
