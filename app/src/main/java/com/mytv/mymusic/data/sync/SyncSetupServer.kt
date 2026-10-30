@@ -209,7 +209,19 @@ internal class SyncSetupSession(
 
 internal data class SetupAddressCandidate(val interfaceName: String, val address: InetAddress)
 
-/** 优先 Wi-Fi，其次有线；只展示私网 IPv4，避免把公网或链路本地地址写进二维码。 */
+/**
+ * 挑选要写进二维码的局域网 IPv4。
+ *
+ * 一台设备常同时有多个 IPv4：开着 Wi-Fi Direct 时 p2p0 会拿到 192.168.49.1 这种和家庭局域网
+ * 不同网段的地址，USB / 蓝牙共享网络（usb0、rndis0、bt-pan）、蜂窝数据（rmnet*）、
+ * VPN / TUN（tun*、tap*）、Wi-Fi Aware（aware*）也各有地址。只有 Wi-Fi / 以太网那个是手机
+ * 所在局域网能访问的，所以按网卡名排优先级，前面的网卡没有可用地址时才退到后面的——只靠
+ * USB 共享手机网络上网时，usb0 / rndis0 就是唯一入口，不能把它排除掉。
+ *
+ * 只展示私网 IPv4：169.254.x.x 是链路本地，按它访问不到，公网地址写进二维码也没有意义。
+ * 同一块网卡报了多个地址时保留系统枚举顺序，第一个通常是 DHCP 分下来的那个，不按字符串
+ * 比大小——那样 192.168.49.1 会排在 192.168.50.64 前面。
+ */
 internal fun selectSyncSetupAddress(candidates: List<SetupAddressCandidate>): InetAddress? = candidates
     .filter { candidate ->
         val address = candidate.address
@@ -217,17 +229,27 @@ internal fun selectSyncSetupAddress(candidates: List<SetupAddressCandidate>): In
             !address.isLoopbackAddress && !address.isLinkLocalAddress && !address.isAnyLocalAddress
     }
     .sortedWith(
-        compareBy<SetupAddressCandidate> {
-            val name = it.interfaceName.lowercase()
-            when {
-                name.startsWith("wlan") -> 0
-                name.startsWith("eth") || name.startsWith("en") -> 1
-                else -> 2
-            }
-        }.thenBy { it.interfaceName }.thenBy { it.address.hostAddress },
+        compareBy<SetupAddressCandidate> { it.interfaceName.lowercase().lanPriority() }
+            .thenBy { it.interfaceName },
     )
     .firstOrNull()?.address
 
+/** Wi-Fi / 以太网网卡：手机所在局域网的入口。其余（p2p、usb/rndis、rmnet、tun…）都排在后面。 */
+private fun String.lanPriority(): Int {
+    val name = lowercase()
+    return when {
+        name.startsWith("wlan") -> 0
+        name.startsWith("eth") || name.startsWith("en") -> 1
+        // USB / 蓝牙共享网络：没有 Wi-Fi 和有线时，手机往往就在这个共享网络里
+        name.startsWith("usb") || name.startsWith("rndis") || name.startsWith("bt-pan") -> 2
+        else -> 3
+    }
+}
+
+/**
+ * 枚举网卡取要展示给手机的地址。服务本身监听通配地址（bindHost 为空时 NanoHTTPD 绑
+ * 0.0.0.0），所有网卡都进得来，所以这里只决定二维码和页面上写哪个地址。
+ */
 private fun findSyncSetupAddress(): InetAddress? = runCatching {
     val interfaces = NetworkInterface.getNetworkInterfaces() ?: return null
     Collections.list(interfaces)

@@ -282,6 +282,44 @@ class SyncSetupServerTest {
         assertNull(selectSyncSetupAddress(listOf(SetupAddressCandidate("wan0", InetAddress.getByName("8.8.8.8")))))
     }
 
+    @Test
+    fun prefersWifiOverWifiDirectGroupAddress() {
+        // Wi-Fi Direct 的 p2p0 常在枚举里排在 wlan0 前面，不能因为它先出现就写进二维码
+        val selected = selectSyncSetupAddress(
+            listOf(
+                SetupAddressCandidate("p2p0", InetAddress.getByName("192.168.49.1")),
+                SetupAddressCandidate("wlan0", InetAddress.getByName("192.168.50.64")),
+            ),
+        )
+        assertEquals("192.168.50.64", selected?.hostAddress)
+    }
+
+    @Test
+    fun keepsFirstAddressReportedForTheWifiInterface() {
+        // 同一块网卡报了两个地址时不按字符串比大小：否则 192.168.49.1 会赢过 192.168.50.64
+        val selected = selectSyncSetupAddress(
+            listOf(
+                SetupAddressCandidate("wlan0", InetAddress.getByName("192.168.50.64")),
+                SetupAddressCandidate("wlan0", InetAddress.getByName("192.168.49.1")),
+            ),
+        )
+        assertEquals("192.168.50.64", selected?.hostAddress)
+    }
+
+    @Test
+    fun fallsBackToTetheringWhenThereIsNoWifiOrEthernet() {
+        // 只靠 USB 共享手机网络上网时 usb0 / rndis0 是唯一入口，降级使用而不是放弃
+        val selected = selectSyncSetupAddress(
+            listOf(
+                SetupAddressCandidate("rmnet0", InetAddress.getByName("10.116.4.9")),
+                SetupAddressCandidate("p2p0", InetAddress.getByName("192.168.49.1")),
+                SetupAddressCandidate("tun0", InetAddress.getByName("10.8.0.2")),
+                SetupAddressCandidate("rndis0", InetAddress.getByName("192.168.42.129")),
+            ),
+        )
+        assertEquals("192.168.42.129", selected?.hostAddress)
+    }
+
     private fun start(
         snapshot: AtomicReference<SyncSetupSnapshot>,
         onSubmit: (SyncSetupSubmission) -> Unit = {},
