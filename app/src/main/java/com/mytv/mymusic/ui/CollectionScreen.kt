@@ -141,6 +141,9 @@ fun CollectionScreen(
     onOpenPlaybackSettings: () -> Unit,
 ) {
     var target by remember { mutableStateOf<SongAction?>(null) }
+    // 海报视图的设置面板由这里持有：电视上墙自己收方向键，顶栏那一排在有选中格时走不到，
+    // 长按格子的单曲操作面板也要能打开它（见下面 SongActionsSheet 的 onWallSettings）
+    var posterSettingsOpen by rememberSaveable(collection.kind, collection.id) { mutableStateOf(false) }
     // 没有“收藏歌单”的数据模型：收藏 = 存成本地歌单，同名本地歌单视为已收藏
     var savedNow by rememberSaveable(collection.kind, collection.id) { mutableStateOf(false) }
     val saved = remember(collection.title, playlists, savedNow) {
@@ -190,15 +193,37 @@ fun CollectionScreen(
             actions.setCollectionView(CollectionView.Poster)
         }
     }
+    val poster = state.collectionView == CollectionView.Poster
     when {
-        state.collectionView == CollectionView.Poster ->
-            CollectionPoster(state, collection, saved, ops, actions, onBack, onMore, holdAwake = target != null || pickerOpen)
+        poster ->
+            CollectionPoster(
+                state = state,
+                collection = collection,
+                saved = saved,
+                ops = ops,
+                actions = actions,
+                onBack = onBack,
+                onMore = onMore,
+                holdAwake = target != null || pickerOpen || posterSettingsOpen,
+                settingsOpen = posterSettingsOpen,
+                onSettingsOpenChange = { posterSettingsOpen = it },
+            )
         LocalAppWindow.current.twoPane ->
             TwoPaneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster)
         else ->
             PhoneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster)
     }
-    target?.let { SongActionsSheet(it, favorites, playlists, actions) { target = null } }
+    target?.let {
+        SongActionsSheet(
+            it,
+            favorites,
+            playlists,
+            actions,
+            onDismiss = { target = null },
+            // 电视上海报视图的墙自己收方向键，顶栏那一排在有选中格时走不到；单曲操作面板里也给一个入口
+            onWallSettings = if (poster && LocalAppWindow.current.isTv) ({ posterSettingsOpen = true }) else null,
+        )
+    }
     if (pickerOpen) {
         PlaylistPickerSheet(
             playlists = playlists,
@@ -230,6 +255,8 @@ private fun CollectionPoster(
     onBack: () -> Unit,
     onMore: (Song) -> Unit,
     holdAwake: Boolean,
+    settingsOpen: Boolean,
+    onSettingsOpenChange: (Boolean) -> Unit,
 ) {
     val songs = collection.songs
     val posterOps = remember(actions, songs, onBack, onMore) {
@@ -294,7 +321,9 @@ private fun CollectionPoster(
         sourceSettings = ops.openPlaybackSettings,
         message = message,
         resetKey = collection.kind to collection.id,
-        holdAwake = holdAwake,
+        holdAwake = holdAwake || settingsOpen,
+        settingsOpen = settingsOpen,
+        onSettingsOpenChange = onSettingsOpenChange,
     )
 }
 

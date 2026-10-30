@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -525,6 +526,8 @@ fun ConfirmDialog(
 /**
  * 歌曲操作：手机是底部面板，平板是侧边面板，电视是右侧面板。
  * 顶部三个快捷操作（收藏 / 下载 / 加歌单）用大按钮，其余是列表。
+ * [onWallSettings] 只在海报墙里传：电视上墙内焦点在墙自己手里，顶栏那一排方向键走不到，
+ * 从任意格长按 OK 打开的面板就是设置的另一条入口。
  */
 @Composable
 fun TrackActionsSheet(
@@ -538,6 +541,7 @@ fun TrackActionsSheet(
     onRemoveFromPlaylist: (() -> Unit)?,
     onDismiss: () -> Unit,
     onMerge: (() -> Unit)? = null,
+    onWallSettings: (() -> Unit)? = null,
 ) {
     var showPlaylists by remember { mutableStateOf(false) }
     com.mytv.mymusic.ui.components.AdaptiveSheet(
@@ -559,6 +563,7 @@ fun TrackActionsSheet(
                     onOpenSource?.let { SheetRow(Icons.Filled.SwapHoriz, "选择音源 / 查看其他版本", false, it) },
                     onMerge?.let { SheetRow(Icons.AutoMirrored.Filled.CallMerge, "合并到…", false, it) },
                     onRemoveFromPlaylist?.let { SheetRow(Icons.Filled.Delete, "从歌单移除", true, it) },
+                    onWallSettings?.let { SheetRow(Icons.Filled.Tune, "海报墙设置", false, it) },
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     rows.forEachIndexed { index, row ->

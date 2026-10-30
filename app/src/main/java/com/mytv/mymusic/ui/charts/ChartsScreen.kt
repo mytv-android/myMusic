@@ -153,7 +153,7 @@ fun ChartsScreen(
         SelectionPredictiveBack(selection)
         PhoneCharts(state, charts, sources, actions, onMore, selection, playlists)
     }
-    target?.let { SongActionsSheet(it, favorites, playlists, actions) { target = null } }
+    target?.let { SongActionsSheet(it, favorites, playlists, actions, onDismiss = { target = null }) }
 }
 
 @Composable
@@ -970,6 +970,7 @@ internal fun SongActionsSheet(
     playlists: List<LocalPlaylistSummary>,
     actions: MusicActions,
     onDismiss: () -> Unit,
+    onWallSettings: (() -> Unit)? = null,
 ) {
     TrackActionsSheet(
         song = target.song,
@@ -984,6 +985,7 @@ internal fun SongActionsSheet(
         },
         onRemoveFromPlaylist = null,
         onDismiss = onDismiss,
+        onWallSettings = onWallSettings,
     )
 }
 

@@ -51,7 +51,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -136,6 +135,8 @@ internal class PosterExtraAction(
  * 多选和自建歌单的编辑只在列表视图里；长按格子、大卡的“更多”只弹单曲操作（[CollectionPosterOps.songActions]）。
  * [resetKey] 换了一张歌单（首数一样也算）时变，整面墙重排、重新入场；[holdAwake] 是页面自己开着的面板（单曲操作等），
  * 开着时浮层不淡出、墙不起漂。
+ * 设置面板开着与否由调用方持有（[settingsOpen] / [onSettingsOpenChange]）：电视上墙自己收方向键，顶栏那一排
+ * 在有选中格时走不到，长按格子的单曲操作面板也要能打开它（见 SongActionsSheet 的 onWallSettings）。
  */
 @Composable
 internal fun CollectionPosterView(
@@ -155,13 +156,14 @@ internal fun CollectionPosterView(
     message: (@Composable () -> Unit)? = null,
     resetKey: Any? = null,
     holdAwake: Boolean = false,
+    settingsOpen: Boolean,
+    onSettingsOpenChange: (Boolean) -> Unit,
 ) {
     val window = LocalAppWindow.current
     val chrome = posterChromeFor(window.kind)
     val wall = rememberPosterWallState()
     val playFocus = remember { FocusRequester() }
     val cardFocus = remember { FocusRequester() }
-    var settingsOpen by rememberSaveable { mutableStateOf(false) }
     val currentKey = state.current?.key
     val track = state.currentTrack
     val currentIndex = remember(songs, currentKey, track) {
@@ -304,7 +306,7 @@ internal fun CollectionPosterView(
                     onShuffle = ops.shuffle,
                     onLocate = wall::locate,
                     onList = ops.showList,
-                    onSettings = { settingsOpen = true },
+                    onSettings = { onSettingsOpenChange(true) },
                     modifier = modifier,
                 )
             }
@@ -357,7 +359,7 @@ internal fun CollectionPosterView(
             }
         }
         if (settingsOpen) {
-            PosterSettingsSheet(state.poster, actions::setPosterPrefs) { settingsOpen = false }
+            PosterSettingsSheet(state.poster, actions::setPosterPrefs) { onSettingsOpenChange(false) }
         }
     }
 }

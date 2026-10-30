@@ -96,6 +96,7 @@ import kotlin.coroutines.cancellation.CancellationException
  * - 电视：胶囊、定位、设置和时钟（“电视时钟”开着时）排在顶部 80dp 一排，大卡放在它下面；空闲 6 秒浮层淡出，时钟留着。
  *   墙是无限的，方向键在墙里永远有邻格，普通焦点搜索走不出去：墙上没有选中格时按上键到顶部一排
  *   （有选中格时先按返回清掉），在顶部一排按下键回到墙并选中离中心最近的那格；
+ *   正在浏览（有选中格）时想开设置还有一条路：长按 OK 的单曲操作面板末尾有“海报墙设置”（电视才有）；
  * - 返回：设置 / 歌曲操作面板自己先关 → 墙这一层（漂移唤醒、焦点交回墙、收起别的歌的大卡、清焦点）→ 离开海报墙；
  * - [active] 为 false（播放页盖在上面）时墙停下帧循环和跟拍、大卡里的动画也停，不拿焦点、不给读屏；
  *   墙的状态留在这里，关掉播放页回来镜头还在原处（期间切了歌就已经停在新歌上）；
@@ -303,7 +304,15 @@ internal fun PosterWallScreen(
         PosterSettingsSheet(state.poster, actions::setPosterPrefs) { settingsOpen = false }
     }
     actionSong?.let { song ->
-        SongActionsSheet(SongAction(song, songs), favorites, playlists, actions) { actionSong = null }
+        SongActionsSheet(
+            SongAction(song, songs),
+            favorites,
+            playlists,
+            actions,
+            onDismiss = { actionSong = null },
+            // 电视上墙自己收方向键，顶栏那排（定位 / 设置）在有选中格时走不到；长按 OK 的面板里也给一个入口
+            onWallSettings = if (tv) ({ settingsOpen = true }) else null,
+        )
     }
 }
 

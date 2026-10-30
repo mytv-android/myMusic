@@ -166,6 +166,9 @@ fun LocalPlaylistScreen(
     var deleteOpen by remember { mutableStateOf(false) }
     var addOpen by remember { mutableStateOf(false) }
     var actionEntry by remember { mutableStateOf<Pair<Song, PlaylistEntryEntity>?>(null) }
+    // 海报视图的设置面板由这里持有：电视上墙自己收方向键，顶栏那一排在有选中格时走不到，
+    // 长按格子的单曲操作面板也要能打开它（见下面 TrackActionsSheet 的 onWallSettings）
+    var posterSettingsOpen by remember { mutableStateOf(false) }
     val selection = remember { SelectionState() }
     var pickerOpen by remember { mutableStateOf(false) }
     SelectionPredictiveBack(selection)
@@ -421,7 +424,9 @@ fun LocalPlaylistScreen(
                 onSongActions = { song, entry -> actionEntry = song to entry },
                 onBack = onBack,
                 resetKey = playlistId,
-                holdAwake = actionEntry != null || addOpen || renameOpen || deleteOpen,
+                holdAwake = actionEntry != null || addOpen || renameOpen || deleteOpen || posterSettingsOpen,
+                settingsOpen = posterSettingsOpen,
+                onSettingsOpenChange = { posterSettingsOpen = it },
             )
             load == null -> PlaylistLoading(embedded)
             playlist == null -> MissingPlaylist(onBack)
@@ -568,6 +573,8 @@ fun LocalPlaylistScreen(
                 actionEntry = null
             },
             onDismiss = { actionEntry = null },
+            // 电视上海报视图的墙自己收方向键，顶栏那一排在有选中格时走不到；单曲操作面板里也给一个入口
+            onWallSettings = if (posterView && LocalAppWindow.current.isTv) ({ posterSettingsOpen = true }) else null,
         )
     }
     if (pickerOpen) {
@@ -644,6 +651,8 @@ private fun LocalPlaylistPoster(
     onBack: () -> Unit,
     resetKey: Any?,
     holdAwake: Boolean,
+    settingsOpen: Boolean,
+    onSettingsOpenChange: (Boolean) -> Unit,
 ) {
     val songs = detail?.songs.orEmpty()
     // 解不出来的条目不在 songs 里：按同样的过滤把条目和 songs 一一对齐，下标才对得上
@@ -697,6 +706,8 @@ private fun LocalPlaylistPoster(
         message = message,
         resetKey = resetKey,
         holdAwake = holdAwake,
+        settingsOpen = settingsOpen,
+        onSettingsOpenChange = onSettingsOpenChange,
     )
 }
 
