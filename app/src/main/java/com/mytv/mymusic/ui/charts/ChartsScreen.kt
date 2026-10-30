@@ -1,6 +1,5 @@
 package com.mytv.mymusic.ui.charts
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.snap
@@ -114,7 +113,9 @@ import com.mytv.mymusic.ui.components.PageScaffold
 import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SelectionBar
+import com.mytv.mymusic.ui.components.SelectionPredictiveBack
 import com.mytv.mymusic.ui.components.SelectionState
+import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.Skeleton
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
@@ -149,7 +150,7 @@ fun ChartsScreen(
         TvCharts(charts, sources, actions, recommended, history)
     } else {
         val selection = remember { SelectionState() }
-        BackHandler(enabled = selection.active) { selection.exit() }
+        SelectionPredictiveBack(selection)
         PhoneCharts(state, charts, sources, actions, onMore, selection, playlists)
     }
     target?.let { SongActionsSheet(it, favorites, playlists, actions) { target = null } }
@@ -230,7 +231,7 @@ private fun PhoneCharts(
                                     },
                                     onAddTo = { pickerOpen = true },
                                     onExit = { selection.exit() },
-                                    modifier = Modifier.padding(horizontal = gutter).padding(bottom = 8.dp),
+                                    modifier = Modifier.padding(horizontal = gutter).padding(bottom = 8.dp).selectionBackPreview(selection),
                                 )
                             }
                         }

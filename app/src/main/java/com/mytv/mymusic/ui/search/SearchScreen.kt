@@ -164,7 +164,9 @@ import com.mytv.mymusic.ui.components.PlayPauseButton
 import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SelectionBar
+import com.mytv.mymusic.ui.components.SelectionPredictiveBack
 import com.mytv.mymusic.ui.components.SelectionState
+import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.Skeleton
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
@@ -349,7 +351,7 @@ fun SearchScreen(
     }
     // 换关键词或换结果类型后旧的选择没有意义；多选优先于收起键盘的返回行为
     LaunchedEffect(search.submittedQuery, search.kind) { ctx.selection.exit() }
-    BackHandler(enabled = ctx.selection.active) { ctx.selection.exit() }
+    SelectionPredictiveBack(ctx.selection)
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         if (window.isTv) {
@@ -862,7 +864,7 @@ private fun SearchSelectionHeader(ctx: SearchCtx, modifier: Modifier = Modifier)
         },
         onAddTo = { ctx.pickerOpen = true },
         onExit = { selection.exit() },
-        modifier = modifier,
+        modifier = modifier.selectionBackPreview(selection),
     )
 }
 

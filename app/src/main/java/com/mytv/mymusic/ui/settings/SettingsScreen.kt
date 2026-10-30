@@ -1,6 +1,7 @@
 package com.mytv.mymusic.ui.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +32,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,6 +45,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,6 +68,7 @@ import com.mytv.mymusic.ui.providerName
 import com.mytv.mymusic.ui.relativeTime
 import com.mytv.mymusic.ui.theme.FontScale
 import com.mytv.mymusic.ui.theme.LayoutMode
+import kotlin.coroutines.cancellation.CancellationException
 
 /** 设置列表每项下方显示的当前值，以及“关于”上的新版本标记。 */
 @Immutable
@@ -194,10 +198,19 @@ internal fun SettingsTwoPane(
             runCatching { backFocus.requestFocus() }
         }
     }
-    BackHandler(enabled = selected.parent != null) {
-        val parent = selected.parent ?: return@BackHandler
-        selected = parent
-        focusList(parent)
+    // 预测性返回：在“开源许可 / 隐私说明”这类子分区上，手势过程中右栏内容跟手右移淡出，松手才退回上一级
+    var backProgress by remember { mutableFloatStateOf(0f) }
+    PredictiveBackHandler(enabled = selected.parent != null) { events ->
+        try {
+            events.collect { event -> backProgress = event.progress }
+            selected.parent?.let { parent ->
+                selected = parent
+                focusList(parent)
+            }
+        } catch (_: CancellationException) {
+        } finally {
+            backProgress = 0f
+        }
     }
     BackHandler(enabled = tv && detailFocused && selected.parent == null) { focusList(listed) }
 
@@ -248,7 +261,12 @@ internal fun SettingsTwoPane(
                             .padding(start = 32.dp, end = 32.dp, top = 24.dp)
                     },
                 )
-                .onFocusChanged { detailFocused = it.hasFocus },
+                .onFocusChanged { detailFocused = it.hasFocus }
+                // 右侧内容跟着手势右移淡出，面板底色不动；进度只重绘图层，不触发重组
+                .graphicsLayer {
+                    alpha = 1f - backProgress
+                    translationX = size.width * 0.2f * backProgress
+                },
         ) {
             DetailHeader(
                 section = selected,

@@ -105,7 +105,9 @@ import com.mytv.mymusic.ui.components.PageScaffold
 import com.mytv.mymusic.ui.components.PlayAllSplitButton
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SelectionBar
+import com.mytv.mymusic.ui.components.SelectionPredictiveBack
 import com.mytv.mymusic.ui.components.SelectionState
+import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.components.distinctKeys
@@ -163,7 +165,7 @@ fun LocalPlaylistScreen(
     var actionEntry by remember { mutableStateOf<Pair<Song, PlaylistEntryEntity>?>(null) }
     val selection = remember { SelectionState() }
     var pickerOpen by remember { mutableStateOf(false) }
-    BackHandler(enabled = selection.active) { selection.exit() }
+    SelectionPredictiveBack(selection)
 
     // 确认删除会返回，软删除写库后 deletedAt 变化又会返回一次（退场动画期间页面仍在组合中），只能返回一次
     var left by remember { mutableStateOf(false) }
@@ -370,6 +372,7 @@ fun LocalPlaylistScreen(
                 onAddTo = { pickerOpen = true },
                 onExit = { selection.exit() },
                 onRemove = removeSelected,
+                modifier = Modifier.selectionBackPreview(selection),
             )
         } else {
             PlaylistActionRow(

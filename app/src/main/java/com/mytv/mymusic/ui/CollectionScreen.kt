@@ -81,7 +81,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.activity.compose.BackHandler
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.aggregate.Availability
@@ -99,7 +98,9 @@ import com.mytv.mymusic.ui.components.PlatformBadge
 import com.mytv.mymusic.ui.components.PlayAllSplitButton
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SelectionBar
+import com.mytv.mymusic.ui.components.SelectionPredictiveBack
 import com.mytv.mymusic.ui.components.SelectionState
+import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.components.distinctKeys
@@ -167,7 +168,7 @@ fun CollectionScreen(
     val onMore: (Song) -> Unit = remember(songs) { { song -> target = SongAction(song, songs) } }
     val selection = remember { SelectionState() }
     var pickerOpen by remember { mutableStateOf(false) }
-    BackHandler(enabled = selection.active) { selection.exit() }
+    SelectionPredictiveBack(selection)
     // 多选期间的批量操作：歌保持列表里的顺序
     val selectedSongs = { songs.filter { it.key in selection.selected } }
     val selectionOps = CollectionSelectionOps(
@@ -399,7 +400,7 @@ private fun PhoneCollection(
                 }
                 item(key = "actions", contentType = "actions") {
                     if (selection.active) {
-                        SelectionBarFor(selectionOps, Modifier.padding(horizontal = gutter).padding(bottom = 16.dp))
+                        SelectionBarFor(selectionOps, Modifier.padding(horizontal = gutter).padding(bottom = 16.dp).selectionBackPreview(selection))
                     } else {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = gutter).padding(bottom = 16.dp),
@@ -501,7 +502,7 @@ private fun TwoPaneCollection(
                 CollectionTitle(collection, large = true)
                 Spacer(Modifier.height(16.dp))
                 if (selection.active) {
-                    SelectionBarFor(selectionOps)
+                    SelectionBarFor(selectionOps, Modifier.selectionBackPreview(selection))
                 } else {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),

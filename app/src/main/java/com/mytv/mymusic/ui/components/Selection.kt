@@ -1,5 +1,6 @@
 package com.mytv.mymusic.ui.components
 
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,12 +20,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * 歌曲批量选择状态。长按一行或点“多选”进入；进入后行的点击语义换成切换选中，
@@ -36,6 +40,13 @@ class SelectionState {
         private set
     var selected: Set<String> by mutableStateOf(emptySet())
         private set
+
+    /**
+     * 预测性返回的手势进度（0..1）。[SelectionPredictiveBack] 写，多选操作条和行内标记据此做跟手预览；
+     * 只在手势期间非零，松手或取消后归零。
+     */
+    var backProgress: Float by mutableFloatStateOf(0f)
+        internal set
 
     /** 进入多选但不预选任何歌，全选按钮可用。 */
     fun start() {
@@ -62,6 +73,33 @@ class SelectionState {
         active = false
         selected = emptySet()
     }
+}
+
+/**
+ * 多选退出的预测性返回：手势过程中把进度写进 [SelectionState.backProgress]，
+ * 松手才退出多选，取消时进度归零。放在页面里多选界面之后（注册顺序晚于编辑、菜单等返回）。
+ */
+@Composable
+fun SelectionPredictiveBack(selection: SelectionState) {
+    PredictiveBackHandler(enabled = selection.active) { events ->
+        try {
+            events.collect { event -> selection.backProgress = event.progress }
+            selection.exit()
+        } catch (_: CancellationException) {
+        } finally {
+            selection.backProgress = 0f
+        }
+    }
+}
+
+/**
+ * 多选操作条的跟手退出：进度不为零时淡出并上移，预览退出多选后的页面。
+ * 只读 [SelectionState.backProgress]，状态变化只重绘图层，不触发重组。
+ */
+fun Modifier.selectionBackPreview(selection: SelectionState): Modifier = graphicsLayer {
+    val progress = selection.backProgress
+    alpha = 1f - progress
+    translationY = -8.dp.toPx() * progress
 }
 
 /** 批量操作条：替换列表头部的常规操作行。 */
