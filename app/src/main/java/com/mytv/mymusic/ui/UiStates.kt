@@ -130,7 +130,14 @@ data class LocalPlaylistSummary(
     val trackCount: Int,
     val updatedAt: Long,
     val dirty: Boolean,
-)
+    /** 绑定的平台歌单（provider + 平台 id）；非空表示跟随平台更新。 */
+    val linkProvider: String = "",
+    val linkId: String = "",
+    val linkCover: String = "",
+    val linkSyncedAt: Long = 0L,
+) {
+    val bound get() = linkProvider.isNotBlank() && linkId.isNotBlank()
+}
 
 data class LocalPlaylistDetail(
     val playlist: PlaylistEntity,

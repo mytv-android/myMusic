@@ -40,6 +40,8 @@ import com.mytv.mymusic.data.AppSettings
 import com.mytv.mymusic.data.CanonicalSourceEntity
 import com.mytv.mymusic.data.CanonicalTrackEntity
 import com.mytv.mymusic.data.DownloadRecord
+import com.mytv.mymusic.data.bindingTarget
+import com.mytv.mymusic.data.boundDiff
 import com.mytv.mymusic.data.CollectionView
 import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.data.LyricsBackgroundMode
@@ -358,19 +360,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     trackCount = countMap[playlist.id] ?: 0,
                     updatedAt = playlist.updatedAt,
                     dirty = playlist.dirty,
+                    linkProvider = playlist.linkProvider,
+                    linkId = playlist.linkId,
+                    linkCover = playlist.linkCover,
+                    linkSyncedAt = playlist.linkSyncedAt,
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /** 自建歌单的封面拼贴：每个歌单取前 4 首有封面的歌。 */
+    /** 自建歌单的封面拼贴：每个歌单取前 4 首有封面的歌；绑定的歌单把平台封面排在最前。 */
     val localPlaylistCovers: StateFlow<Map<String, List<String>>> = localPlaylists
         .map { list ->
             list.associate { summary ->
-                summary.id to libraryDao.entriesOnce(summary.id).asSequence()
+                val entryCovers = libraryDao.entriesOnce(summary.id).asSequence()
                     .mapNotNull { entry -> runCatching { json.decodeFromString<Song>(entry.payload).cover }.getOrNull() }
                     .filter { it.isNotBlank() }
-                    .take(4)
-                    .toList()
+                summary.id to (listOfNotNull(summary.linkCover.takeIf { it.isNotBlank() }) + entryCovers).take(4)
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
@@ -1048,7 +1053,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             message("当前歌单还没有加载完成")
             return
         }
-        addSongsToLibrary(collection.title, collection.songs)
+        if (collection.kind == CollectionKind.Playlist && collection.id.isNotBlank()) {
+            bindPlatformPlaylist(
+                name = collection.title,
+                provider = collection.source,
+                remoteId = collection.id,
+                cover = collection.cover,
+                songs = collection.songs,
+            )
+        } else {
+            addSongsToLibrary(collection.title, collection.songs)
+        }
     }
 
     fun closeCollection() {
@@ -1631,8 +1646,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             songs = result.songs,
                         )
                         _events.tryEmit(UiEvent.OpenCollection(result.item.name))
-                        // 复制歌单链接导入 = 直接存为本地歌单；同名歌单只补缺失的歌
-                        if (kind == CollectionKind.Playlist) importLinkPlaylist(result.item.name, result.songs)
+                        // 复制歌单链接导入 = 直接绑定为跟随平台更新的本地歌单
+                        if (kind == CollectionKind.Playlist) {
+                            bindPlatformPlaylist(
+                                name = result.item.name,
+                                provider = source,
+                                remoteId = result.item.id,
+                                cover = result.item.cover,
+                                songs = result.songs,
+                            )
+                        }
                         return@launch
                     }
                     val song = runCatching { app.repository.parseSong(providerId, cookie, value) }.getOrNull()
@@ -1718,6 +1741,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         launchPlaylistEdit {
             val playlist = libraryDao.playlistOnce(playlistId) ?: return@launchPlaylistEdit
             if (playlist.deletedAt != null) return@launchPlaylistEdit
+            unbindIfBound(playlistId)
             val entries = libraryDao.entriesOnce(playlistId)
             if (entries.any { it.songKey == song.key }) {
                 message("这首歌已经在「${playlist.name}」里")
@@ -1745,6 +1769,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         launchPlaylistEdit {
             val playlist = libraryDao.playlistOnce(playlistId) ?: return@launchPlaylistEdit
             if (playlist.deletedAt != null) return@launchPlaylistEdit
+            unbindIfBound(playlistId)
             val entries = libraryDao.entriesOnce(playlistId)
             val candidates = songs.distinctBy { it.key }.filter { song -> entries.none { it.songKey == song.key } }
             if (candidates.isEmpty()) {
@@ -1789,6 +1814,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun removePlaylistEntries(playlistId: String, positions: List<Int>) {
         if (positions.isEmpty()) return
         launchPlaylistEdit {
+            unbindIfBound(playlistId)
             val doomed = positions.toHashSet()
             val entries = libraryDao.entriesOnce(playlistId)
             libraryDao.replaceEntries(
@@ -1804,6 +1830,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removePlaylistEntry(playlistId: String, position: Int) {
         launchPlaylistEdit {
+            unbindIfBound(playlistId)
             val entries = libraryDao.entriesOnce(playlistId).filterNot { it.position == position }
             libraryDao.replaceEntries(playlistId, entries.withIndex().map { (index, entry) -> entry.copy(position = index) })
             libraryDao.markDirty(playlistId, System.currentTimeMillis())
@@ -1813,6 +1840,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun movePlaylistEntry(playlistId: String, position: Int, delta: Int) {
         launchPlaylistEdit {
+            unbindIfBound(playlistId)
             val entries = libraryDao.entriesOnce(playlistId).toMutableList()
             val index = entries.indexOfFirst { it.position == position }
             if (index < 0) return@launchPlaylistEdit
@@ -1855,6 +1883,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** 撤销“移出歌单”：把原条目插回原位置。 */
     fun insertPlaylistEntry(playlistId: String, position: Int, songKey: String, payload: String) {
         launchPlaylistEdit {
+            unbindIfBound(playlistId)
             val entries = libraryDao.entriesOnce(playlistId).toMutableList()
             if (entries.any { it.songKey == songKey }) return@launchPlaylistEdit
             val index = position.coerceIn(0, entries.size)
@@ -1898,17 +1927,35 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 链接导入的歌单存为同名本地歌单；已有同名歌单时把缺失的歌补进去，不重复建单。 */
-    private fun importLinkPlaylist(name: String, songs: List<Song>) {
-        if (songs.isEmpty()) return
+    // ---------- 平台歌单绑定 ----------
+
+    /** 自动刷新的节流间隔：打开详情页 / 进“我的”时最多每 15 分钟拉一次平台。 */
+    private val boundRefreshIntervalMs = 15L * 60_000
+
+    /**
+     * 把平台歌单绑定为本地歌单：已绑定同一平台歌单的刷新内容；同名普通歌单原地升级（不产生重复行）；
+     * 都没有就新建。绑定后本地内容跟随平台刷新。
+     */
+    fun bindPlatformPlaylist(name: String, provider: String, remoteId: String, cover: String, songs: List<Song>) {
+        if (songs.isEmpty() || remoteId.isBlank()) return
         launchPlaylistEdit {
-            val trimmed = name.trim().ifBlank { "未命名歌单" }
             val now = System.currentTimeMillis()
-            val existing = libraryDao.playlistsOnce().firstOrNull { it.name == trimmed && it.deletedAt == null }
-            if (existing == null) {
+            val trimmed = name.trim().ifBlank { "未命名歌单" }
+            val target = bindingTarget(libraryDao.allPlaylistsOnce(), provider, remoteId, trimmed)
+            if (target == null) {
                 val id = UUID.randomUUID().toString()
                 libraryDao.putPlaylist(
-                    PlaylistEntity(id = id, name = trimmed, createdAt = now, updatedAt = now, dirty = true)
+                    PlaylistEntity(
+                        id = id,
+                        name = trimmed,
+                        createdAt = now,
+                        updatedAt = now,
+                        dirty = true,
+                        linkProvider = provider,
+                        linkId = remoteId,
+                        linkCover = cover,
+                        linkSyncedAt = now,
+                    )
                 )
                 libraryDao.replaceEntries(
                     id,
@@ -1917,25 +1964,105 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     },
                 )
                 app.sync.onLocalChange()
-                message("已存为本地歌单「$trimmed」")
+                message("已绑定「$trimmed」，平台更新会自动同步")
             } else {
-                val entries = libraryDao.entriesOnce(existing.id)
-                val additions = songs.distinctBy { it.key }.filter { song -> entries.none { it.songKey == song.key } }
-                if (additions.isEmpty()) {
-                    message("本地歌单「$trimmed」已是最新")
-                } else {
-                    libraryDao.replaceEntries(
-                        existing.id,
-                        entries + additions.mapIndexed { index, song ->
-                            PlaylistEntryEntity(existing.id, entries.size + index, song.key, json.encodeToString(song))
-                        },
+                libraryDao.putPlaylist(
+                    target.copy(
+                        linkProvider = provider,
+                        linkId = remoteId,
+                        linkCover = cover,
+                        linkSyncedAt = now,
                     )
-                    libraryDao.markDirty(existing.id, now)
-                    app.sync.onLocalChange()
-                    message("「$trimmed」新增 ${additions.size} 首")
-                }
+                )
+                libraryDao.replaceEntries(
+                    target.id,
+                    songs.distinctBy { it.key }.mapIndexed { index, song ->
+                        PlaylistEntryEntity(target.id, index, song.key, json.encodeToString(song))
+                    },
+                )
+                libraryDao.markDirty(target.id, now)
+                app.sync.onLocalChange()
+                message("已绑定「${target.name}」，共 ${songs.size} 首")
             }
         }
+    }
+
+    /**
+     * 从平台刷新一个绑定歌单。[manual] 为 false 时按 [boundRefreshIntervalMs] 节流、失败静默
+     * （下次打开会再试）；手动同步总是执行并给出结果提示。
+     */
+    fun refreshBoundPlaylist(id: String, manual: Boolean = false) {
+        launchPlaylistEdit {
+            val playlist = libraryDao.playlistOnce(id) ?: return@launchPlaylistEdit
+            if (playlist.deletedAt != null || !playlist.bound) {
+                if (manual) message("这个歌单没有绑定平台歌单")
+                return@launchPlaylistEdit
+            }
+            val now = System.currentTimeMillis()
+            if (!manual && now - playlist.linkSyncedAt < boundRefreshIntervalMs) return@launchPlaylistEdit
+            val songs = runCatching {
+                app.repository.playlistSongs(playlist.linkProvider, cookieFor(playlist.linkProvider), playlist.linkId)
+            }.getOrElse {
+                if (it is CancellationException) throw it
+                if (manual) message("同步失败：${it.message ?: "平台没有响应"}", error = true)
+                return@launchPlaylistEdit
+            }
+            if (songs.isEmpty()) {
+                if (manual) message("平台歌单暂时没有歌曲，本机内容保持不变")
+                return@launchPlaylistEdit
+            }
+            val entries = libraryDao.entriesOnce(id)
+            val diff = boundDiff(entries.map { it.songKey }, songs.map { it.key })
+            libraryDao.replaceEntries(
+                id,
+                songs.distinctBy { it.key }.mapIndexed { index, song ->
+                    PlaylistEntryEntity(id, index, song.key, json.encodeToString(song))
+                },
+            )
+            if (diff.changed) {
+                libraryDao.putPlaylist(playlist.copy(linkSyncedAt = now, updatedAt = now, dirty = true))
+                app.sync.onLocalChange()
+            } else {
+                libraryDao.putPlaylist(playlist.copy(linkSyncedAt = now))
+            }
+            if (manual || diff.changed) {
+                val parts = buildList {
+                    if (diff.added > 0) add("新增 ${diff.added} 首")
+                    if (diff.removed > 0) add("移除 ${diff.removed} 首")
+                }
+                message(
+                    if (parts.isEmpty()) "「${playlist.name}」已同步，平台没有变化"
+                    else "「${playlist.name}」已同步：${parts.joinToString("，")}"
+                )
+            }
+        }
+    }
+
+    /** 进“我的”时刷新所有到期的绑定歌单（每个按间隔节流，串行避免瞬时大量请求）。 */
+    fun refreshStaleBoundPlaylists() {
+        viewModelScope.launch {
+            libraryDao.playlistsOnce()
+                .filter { it.bound && System.currentTimeMillis() - it.linkSyncedAt >= boundRefreshIntervalMs }
+                .forEach { refreshBoundPlaylist(it.id) }
+        }
+    }
+
+    /** 解除绑定：保留当前内容，不再跟随平台更新。 */
+    fun unbindPlaylist(id: String) {
+        launchPlaylistEdit {
+            val playlist = libraryDao.playlistOnce(id) ?: return@launchPlaylistEdit
+            if (!playlist.bound) return@launchPlaylistEdit
+            libraryDao.putPlaylist(playlist.copy(linkProvider = "", linkId = "", linkCover = "", linkSyncedAt = 0L))
+            message("已解除绑定，「${playlist.name}」保留当前歌曲，不再跟随平台更新")
+        }
+    }
+
+    /** 绑定歌单的手动编辑和平台刷新会互相覆盖：编辑前先解除绑定，内容变成手动维护的副本。 */
+    private suspend fun unbindIfBound(playlistId: String) {
+        val playlist = libraryDao.playlistOnce(playlistId) ?: return
+        if (!playlist.bound) return
+        libraryDao.putPlaylist(playlist.copy(linkProvider = "", linkId = "", linkCover = "", linkSyncedAt = 0L))
+        message("已解除绑定，「${playlist.name}」改为手动维护，不再跟随平台更新")
     }
 
     fun playSavedSongs(records: List<SavedSong>) = viewModelScope.launch {

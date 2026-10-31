@@ -1078,6 +1078,8 @@ class SyncCoordinator(
         val deletedAt = playlist.deletedAt?.let(SyncTime::toMillis)
         val createdAt = SyncTime.toMillis(playlist.createdAt).takeIf { it > 0 } ?: System.currentTimeMillis()
         val updatedAt = SyncTime.toMillis(playlist.updatedAt).takeIf { it > 0 } ?: System.currentTimeMillis()
+        // 同步快照不带平台绑定：保留本机已有的 link_*，否则一次拉取就把绑定抹掉了
+        val existing = libraryDao.playlistOnce(playlist.id)
         libraryDao.putPlaylist(
             PlaylistEntity(
                 id = playlist.id,
@@ -1086,6 +1088,10 @@ class SyncCoordinator(
                 updatedAt = updatedAt,
                 dirty = dirty,
                 deletedAt = deletedAt,
+                linkProvider = existing?.linkProvider.orEmpty(),
+                linkId = existing?.linkId.orEmpty(),
+                linkCover = existing?.linkCover.orEmpty(),
+                linkSyncedAt = existing?.linkSyncedAt ?: 0L,
             )
         )
         if (deletedAt != null) {

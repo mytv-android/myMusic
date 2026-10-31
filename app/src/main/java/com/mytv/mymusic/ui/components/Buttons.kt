@@ -169,6 +169,7 @@ fun PlayAllSplitButton(
     onQueue: (() -> Unit)? = null,
     onSave: (() -> Unit)? = null,
     label: String = "播放全部",
+    saveLabel: String = "存到本地歌单",
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val hasMenu = onShuffle != null || onQueue != null || onSave != null
@@ -218,7 +219,7 @@ fun PlayAllSplitButton(
                         }
                         onSave?.let {
                             DropdownMenuItem(
-                                text = { Text("存到本地歌单") },
+                                text = { Text(saveLabel) },
                                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
                                 onClick = { expanded = false; it() },
                             )

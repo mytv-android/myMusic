@@ -36,7 +36,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Search
@@ -81,7 +84,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.CollectionView
+import com.mytv.mymusic.data.PlaylistEntity
 import com.mytv.mymusic.data.PlaylistEntryEntity
+import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.sync.SyncUiState
@@ -156,6 +161,11 @@ fun LocalPlaylistScreen(
     val entries = detail?.entries.orEmpty()
     val songs = detail?.songs.orEmpty()
     val conflict = sync.conflicts.any { it.playlistId == playlistId }
+    val bound = playlist?.bound == true
+    // 打开绑定歌单时后台拉一次平台最新内容（内部按 15 分钟节流，失败静默）
+    LaunchedEffect(playlistId, playlist?.linkId) {
+        if (playlist?.bound == true) actions.refreshBoundPlaylist(playlistId)
+    }
     val undo = rememberUndo()
     val playFocus = remember { FocusRequester() }
     val editFocus = remember { FocusRequester() }
@@ -238,6 +248,8 @@ fun LocalPlaylistScreen(
         onEdit = { editing = true },
         onRename = { renameOpen = true },
         onDelete = { deleteOpen = true },
+        onSync = if (bound) ({ actions.syncBoundPlaylist(playlistId) }) else null,
+        onUnbind = if (bound) ({ actions.unbindPlaylist(playlistId) }) else null,
     )
 
     // ---- 列表片段：普通模式 / 编辑模式 ----
@@ -342,8 +354,9 @@ fun LocalPlaylistScreen(
         if (editing) {
             item(key = "editNote", contentType = "note") {
                 Text(
-                    if (window.isTv) "用行尾的上移、下移按钮调整顺序，左侧按钮移除。修改自动保存到本机。"
-                    else "用上下箭头调整顺序（键盘 Alt + ↑↓），点左侧按钮移除。修改自动保存到本机。",
+                    (if (window.isTv) "用行尾的上移、下移按钮调整顺序，左侧按钮移除。"
+                    else "用上下箭头调整顺序（键盘 Alt + ↑↓），点左侧按钮移除。修改自动保存到本机。") +
+                        (if (bound) "这个歌单绑定了平台，手动增删或移动后会自动解除绑定。" else ""),
                     Modifier.padding(start = 4.dp, top = 4.dp, bottom = 8.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -454,7 +467,11 @@ fun LocalPlaylistScreen(
                                 nameField()
                             }
                         } else {
-                            PlaylistHeader(playlist.name, meta, coverUrls, 180.dp, playlist.dirty, sync, conflict, showTitle = true)
+                            PlaylistHeader(
+                                playlist.name, meta, coverUrls, 180.dp, playlist.dirty, sync, conflict, showTitle = true,
+                                boundPlaylist = playlist.takeIf { it.bound },
+                                providers = state.providers,
+                            )
                             Spacer(Modifier.size(16.dp))
                             playActions(true)
                             Spacer(Modifier.size(12.dp))
@@ -497,7 +514,10 @@ fun LocalPlaylistScreen(
                                 } else {
                                     PlaylistMosaic(coverUrls, playlist.name, if (window.isTv) 220.dp else 240.dp, 28.dp)
                                     Spacer(Modifier.size(16.dp))
-                                    PlaylistSyncTag(playlist.dirty, sync, conflict, long = true)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (bound) BoundPlaylistTag(playlist.linkProvider, playlist.linkSyncedAt, state.providers)
+                                        PlaylistSyncTag(playlist.dirty, sync, conflict, long = true)
+                                    }
                                     Text(
                                         "${relativeTime(playlist.updatedAt).ifBlank { "刚刚" }}编辑",
                                         Modifier.padding(top = 8.dp, bottom = 16.dp),
@@ -542,7 +562,11 @@ fun LocalPlaylistScreen(
                         if (editing) {
                             Column(Modifier.padding(bottom = 4.dp)) { nameField() }
                         } else {
-                            PlaylistHeader(playlist.name, meta, coverUrls, 132.dp, playlist.dirty, sync, conflict, showTitle = false)
+                            PlaylistHeader(
+                                playlist.name, meta, coverUrls, 132.dp, playlist.dirty, sync, conflict, showTitle = false,
+                                boundPlaylist = playlist.takeIf { it.bound },
+                                providers = state.providers,
+                            )
                             Spacer(Modifier.size(16.dp))
                             playActions(false)
                             Spacer(Modifier.size(12.dp))
@@ -633,6 +657,9 @@ private data class PlaylistMenu(
     val onEdit: (() -> Unit)?,
     val onRename: () -> Unit,
     val onDelete: () -> Unit,
+    /** 绑定平台歌单的专属操作；未绑定为 null 不显示。 */
+    val onSync: (() -> Unit)? = null,
+    val onUnbind: (() -> Unit)? = null,
 )
 
 /**
@@ -721,6 +748,8 @@ private fun PlaylistHeader(
     sync: SyncUiState,
     conflict: Boolean,
     showTitle: Boolean,
+    boundPlaylist: PlaylistEntity? = null,
+    providers: List<ProviderInfo> = emptyList(),
 ) {
     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         PlaylistMosaic(covers, name, coverSize, 28.dp)
@@ -735,9 +764,22 @@ private fun PlaylistHeader(
                 )
                 Text(meta, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            PlaylistSyncTag(dirty, sync, conflict, long = true)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                boundPlaylist?.let {
+                    BoundPlaylistTag(it.linkProvider, it.linkSyncedAt, providers)
+                }
+                PlaylistSyncTag(dirty, sync, conflict, long = true)
+            }
         }
     }
+}
+
+/** 绑定平台歌单的标记：平台名 + 上次同步时间。 */
+@Composable
+private fun BoundPlaylistTag(providerId: String, syncedAt: Long, providers: List<ProviderInfo>) {
+    val scheme = MaterialTheme.colorScheme
+    val synced = relativeTime(syncedAt).ifBlank { "刚刚" }
+    Tag("已绑定${providerName(providers, providerId)} · ${synced}同步", scheme.primaryContainer, scheme.onPrimaryContainer, Icons.Filled.Link)
 }
 
 /**
@@ -805,6 +847,20 @@ private fun PlaylistMoreMenu(menu: PlaylistMenu) {
             Icon(Icons.Filled.MoreVert, "歌单更多操作")
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, shape = RoundedCornerShape(20.dp)) {
+            menu.onSync?.let { sync ->
+                DropdownMenuItem(
+                    text = { Text("同步平台歌单") },
+                    leadingIcon = { Icon(Icons.Filled.Sync, null) },
+                    onClick = { open = false; sync() },
+                )
+            }
+            menu.onUnbind?.let { unbind ->
+                DropdownMenuItem(
+                    text = { Text("解除绑定") },
+                    leadingIcon = { Icon(Icons.Filled.LinkOff, null) },
+                    onClick = { open = false; unbind() },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("重命名") },
                 leadingIcon = { Icon(Icons.Filled.Edit, null) },

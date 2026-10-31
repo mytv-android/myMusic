@@ -111,6 +111,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.DownloadRecord
+import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.sync.SyncStatus
@@ -122,6 +123,7 @@ import com.mytv.mymusic.ui.InputDialog
 import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.providerName
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.IconTone
 import com.mytv.mymusic.ui.components.ListRow
@@ -181,12 +183,15 @@ fun LibraryScreen(
     val importFile = rememberImportLauncher(actions)
     val menu = remember(importFile) { NewMenu({ createOpen = true }, { linkOpen = true }, importFile) }
     val stats = rememberLibraryStats(favorites, history, downloads)
-    LaunchedEffect(Unit) { actions.syncIfStaleOnScreen() }
+    LaunchedEffect(Unit) {
+        actions.syncIfStaleOnScreen()
+        actions.syncBoundPlaylistsOnScreen()
+    }
 
     when {
         window.isTv -> TvLibrary(state, history, playlists, covers, sync, stats, actions, nav, menu)
-        window.isTablet && window.twoPane -> TabletLibrary(playlists, covers, sync, stats, favorites, actions, nav, menu, detailPane)
-        else -> PhoneLibrary(playlists, covers, sync, stats, favorites, actions, nav, menu)
+        window.isTablet && window.twoPane -> TabletLibrary(playlists, covers, sync, stats, favorites, actions, nav, menu, detailPane, state.providers)
+        else -> PhoneLibrary(playlists, covers, sync, stats, favorites, actions, nav, menu, state.providers)
     }
 
     if (createOpen) {
@@ -219,6 +224,7 @@ private fun PhoneLibrary(
     actions: MusicActions,
     nav: LibraryNav,
     menu: NewMenu,
+    providers: List<ProviderInfo> = emptyList(),
 ) {
     val window = LocalAppWindow.current
     val phone = window.isPhone
@@ -262,7 +268,7 @@ private fun PhoneLibrary(
                 item(key = "plHead", contentType = "section") {
                     SectionLabel("自建歌单", trailing = { CountTag("${playlists.size} 个") })
                 }
-                playlistItems(playlists, covers, sync, conflictIds, settled, null, onOpen = nav.openPlaylist, onCreate = menu.onCreate)
+                playlistItems(playlists, covers, sync, conflictIds, settled, null, onOpen = nav.openPlaylist, onCreate = menu.onCreate, providers = providers)
             }
         }
         if (phone) {
@@ -289,6 +295,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playlistItems(
     selectedId: String?,
     onOpen: (String) -> Unit,
     onCreate: () -> Unit,
+    providers: List<ProviderInfo> = emptyList(),
 ) {
     if (playlists.isEmpty()) {
         item(key = "plEmpty", contentType = "empty") {
@@ -317,11 +324,17 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playlistItems(
             count = playlists.size,
             onClick = { onOpen(playlist.id) },
             selected = playlist.id == selectedId,
-            summary = "${playlist.trackCount} 首 · ${relativeTime(playlist.updatedAt).ifBlank { "刚创建" }}",
+            summary = playlistRowSummary(playlist, providers),
             leading = { PlaylistMosaic(covers[playlist.id].orEmpty(), playlist.name, 52.dp, 14.dp) },
             trailing = { PlaylistSyncTag(playlist, sync, playlist.id in conflictIds) },
         )
     }
+}
+
+internal fun playlistRowSummary(playlist: LocalPlaylistSummary, providers: List<ProviderInfo>): String {
+    val time = relativeTime(playlist.updatedAt).ifBlank { "刚创建" }
+    if (!playlist.bound) return "${playlist.trackCount} 首 · $time"
+    return "${playlist.trackCount} 首 · 已绑定${providerName(providers, playlist.linkProvider)} · $time"
 }
 
 // ---------------- 平板 ≥840dp：列表 + 详情 ----------------
@@ -337,6 +350,7 @@ private fun TabletLibrary(
     nav: LibraryNav,
     menu: NewMenu,
     detailPane: @Composable (playlistId: String, onClosed: () -> Unit) -> Unit,
+    providers: List<ProviderInfo> = emptyList(),
 ) {
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = selectedId?.takeIf { id -> playlists.any { it.id == id } } ?: playlists.firstOrNull()?.id
@@ -383,7 +397,7 @@ private fun TabletLibrary(
             item(key = "plHead", contentType = "section") {
                 SectionLabel("自建歌单", trailing = { NewPlaylistSplitButton(menu) })
             }
-            playlistItems(playlists, covers, sync, conflictIds, settled, selected, onOpen = { selectedId = it }, onCreate = menu.onCreate)
+            playlistItems(playlists, covers, sync, conflictIds, settled, selected, onOpen = { selectedId = it }, onCreate = menu.onCreate, providers = providers)
         }
         Surface(
             modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -492,7 +506,19 @@ private fun TvLibrary(
                             title = playlist.name,
                             onClick = { nav.openPlaylist(playlist.id) },
                             art = { PlaylistMosaic(covers[playlist.id].orEmpty(), playlist.name, 150.dp, 20.dp) },
-                            footer = { PlaylistSyncTag(playlist, sync, playlist.id in conflictIds) },
+                            footer = {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (playlist.bound) {
+                                        Tag(
+                                            "已绑定${providerName(state.providers, playlist.linkProvider)}",
+                                            MaterialTheme.colorScheme.primaryContainer,
+                                            MaterialTheme.colorScheme.onPrimaryContainer,
+                                            Icons.Filled.Link,
+                                        )
+                                    }
+                                    PlaylistSyncTag(playlist, sync, playlist.id in conflictIds)
+                                }
+                            },
                         )
                     }
                 }

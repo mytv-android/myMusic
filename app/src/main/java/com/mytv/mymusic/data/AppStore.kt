@@ -414,7 +414,16 @@ data class PlaylistEntity(
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
     val dirty: Boolean = true,
     @ColumnInfo(name = "deleted_at") val deletedAt: Long? = null,
-)
+    /** 绑定的平台歌单：provider + 平台歌单 id。非空表示这个歌单跟随平台更新。 */
+    @ColumnInfo(name = "link_provider", defaultValue = "") val linkProvider: String = "",
+    @ColumnInfo(name = "link_id", defaultValue = "") val linkId: String = "",
+    /** 平台歌单封面；绑定时封面拼贴优先用它。 */
+    @ColumnInfo(name = "link_cover", defaultValue = "") val linkCover: String = "",
+    /** 上次成功从平台刷新的时间，用于节流。 */
+    @ColumnInfo(name = "link_synced_at", defaultValue = "0") val linkSyncedAt: Long = 0L,
+) {
+    val bound get() = linkProvider.isNotBlank() && linkId.isNotBlank()
+}
 
 @Entity(
     tableName = "playlist_entries",
@@ -667,7 +676,7 @@ interface AggregateDao {
         MatchCacheEntity::class,
         TrackOverrideEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -876,8 +885,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** 平台歌单绑定：link_* 四列记录绑定的平台歌单和刷新时间。 */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `playlists` ADD COLUMN `link_provider` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `playlists` ADD COLUMN `link_id` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `playlists` ADD COLUMN `link_cover` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `playlists` ADD COLUMN `link_synced_at` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun create(context: Context) = Room.databaseBuilder(context, AppDatabase::class.java, "mymusic.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .build()
     }
 }

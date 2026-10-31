@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Shuffle
@@ -119,8 +120,21 @@ private class CollectionOps(
     val openPlaybackSettings: (() -> Unit)?,
 )
 
-/** 已收藏 = 这次会话里刚保存，或已有同名本地歌单。 */
-internal fun collectionSaved(title: String, playlists: List<LocalPlaylistSummary>, savedNow: Boolean): Boolean {
+/**
+ * 已收藏 / 已绑定：歌单按“绑定了这个平台歌单”判定（跟随平台更新）；榜单和专辑没有绑定，
+ * 沿用同名本地歌单视为已收藏。
+ */
+internal fun collectionSaved(
+    kind: CollectionKind,
+    id: String,
+    source: String,
+    title: String,
+    playlists: List<LocalPlaylistSummary>,
+    savedNow: Boolean,
+): Boolean {
+    if (kind == CollectionKind.Playlist) {
+        return savedNow || playlists.any { it.bound && it.linkProvider == source && it.linkId == id }
+    }
     val trimmed = title.trim()
     return savedNow || (trimmed.isNotEmpty() && playlists.any { it.name == trimmed })
 }
@@ -144,10 +158,10 @@ fun CollectionScreen(
     // 海报视图的设置面板由这里持有：电视上墙自己收方向键，顶栏那一排在有选中格时走不到，
     // 长按格子的单曲操作面板也要能打开它（见下面 SongActionsSheet 的 onWallSettings）
     var posterSettingsOpen by rememberSaveable(collection.kind, collection.id) { mutableStateOf(false) }
-    // 没有“收藏歌单”的数据模型：收藏 = 存成本地歌单，同名本地歌单视为已收藏
+    // 歌单的收藏 = 绑定平台歌单（跟随平台更新）；榜单 / 专辑 = 存成本地歌单，同名视为已收藏
     var savedNow by rememberSaveable(collection.kind, collection.id) { mutableStateOf(false) }
-    val saved = remember(collection.title, playlists, savedNow) {
-        collectionSaved(collection.title, playlists, savedNow)
+    val saved = remember(collection, playlists, savedNow) {
+        collectionSaved(collection.kind, collection.id, collection.source, collection.title, playlists, savedNow)
     }
     val songs = collection.songs
     val settingsTarget = rememberUpdatedState(onOpenPlaybackSettings)
@@ -273,13 +287,16 @@ private fun CollectionPoster(
             back = onBack,
         )
     }
-    val save = remember(ops, saved) {
+    val isPlaylist = collection.kind == CollectionKind.Playlist
+    val save = remember(ops, saved, isPlaylist) {
         PosterExtraAction(
-            icon = if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-            description = "收藏到本地歌单",
+            icon = if (isPlaylist) Icons.Filled.Link else if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+            description = if (isPlaylist) "绑定到我的歌单" else "收藏到本地歌单",
             onClick = { if (!saved) ops.save() },
             on = saved,
-            stateDescription = if (saved) "已存到本地歌单" else "未收藏",
+            stateDescription = if (isPlaylist) {
+                if (saved) "已绑定，平台更新自动同步" else "未绑定"
+            } else if (saved) "已存到本地歌单" else "未收藏",
         )
     }
     val providers = state.providers
@@ -442,8 +459,9 @@ private fun PhoneCollection(
                                 onQueue = ops.queue,
                                 onSave = ops.save,
                                 label = playLabel(collection),
+                                saveLabel = saveLabel(collection),
                             )
-                            SaveToggle(ops, saved)
+                            SaveToggle(ops, saved, collection.kind == CollectionKind.Playlist)
                             MultiSelectToggle(selection)
                         }
                     }
@@ -561,9 +579,10 @@ private fun TwoPaneCollection(
                                 onQueue = ops.queue,
                                 onSave = ops.save,
                                 label = playLabel(collection),
+                                saveLabel = saveLabel(collection),
                             )
                         }
-                        SaveToggle(ops, saved, if (tv) 48.dp else null)
+                        SaveToggle(ops, saved, collection.kind == CollectionKind.Playlist, if (tv) 48.dp else null)
                         MultiSelectToggle(selection, if (tv) 48.dp else null)
                         PosterViewToggle(onPosterView, if (tv) 48.dp else null)
                         ops.openPlaybackSettings?.let { open ->
@@ -590,20 +609,28 @@ private fun playLabel(collection: CollectionUiState) = when (collection.kind) {
     else -> "播放全部"
 }
 
-/** 收藏 = 存成本地歌单。已收藏时只显示状态，取消收藏要去“我的”里删歌单（删除需要二次确认）。 */
+private fun saveLabel(collection: CollectionUiState) =
+    if (collection.kind == CollectionKind.Playlist) "绑定到我的歌单" else "存到本地歌单"
+
+/**
+ * 歌单 = 绑定（跟随平台更新）；榜单 / 专辑 = 存成本地歌单。
+ * 已收藏 / 已绑定时只显示状态，取消要去“我的”里删歌单或解除绑定（删除需要二次确认）。
+ */
 @Composable
-private fun SaveToggle(ops: CollectionOps, saved: Boolean, size: androidx.compose.ui.unit.Dp? = null) {
+private fun SaveToggle(ops: CollectionOps, saved: Boolean, bind: Boolean, size: androidx.compose.ui.unit.Dp? = null) {
+    val onLabel = if (bind) "已绑定，平台更新自动同步" else "已存到本地歌单"
+    val offLabel = if (bind) "未绑定" else "未收藏"
     FilledTonalIconToggleButton(
         checked = saved,
         onCheckedChange = { if (!saved) ops.save() },
         modifier = Modifier
             .then(if (size != null) Modifier.size(size) else Modifier)
             .tvFocusRing(CircleShape)
-            .semantics { stateDescription = if (saved) "已存到本地歌单" else "未收藏" },
+            .semantics { stateDescription = if (saved) onLabel else offLabel },
     ) {
         Icon(
-            if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-            contentDescription = "收藏到本地歌单",
+            if (bind) Icons.Filled.Link else if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+            contentDescription = if (bind) "绑定到我的歌单" else "收藏到本地歌单",
         )
     }
 }

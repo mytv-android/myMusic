@@ -197,6 +197,11 @@ class MusicActions(private val model: MusicViewModel) {
     fun moveEntry(id: String, position: Int, delta: Int) = model.movePlaylistEntry(id, position, delta)
     fun searchLibrary(query: String) = model.searchLibrarySongs(query)
     fun clearLibrarySearch() = model.clearLibrarySearch()
+
+    /** 平台歌单绑定：同步该平台歌单 / 解除绑定。 */
+    fun syncBoundPlaylist(id: String) = model.refreshBoundPlaylist(id, manual = true)
+    fun refreshBoundPlaylist(id: String) = model.refreshBoundPlaylist(id)
+    fun unbindPlaylist(id: String) = model.unbindPlaylist(id)
     fun playDownload(record: DownloadRecord) = model.playDownloaded(record)
     fun deleteDownload(record: DownloadRecord) = model.deleteDownload(record)
     fun restoreEntry(entry: com.mytv.mymusic.data.PlaylistEntryEntity) =
@@ -255,6 +260,7 @@ class MusicActions(private val model: MusicViewModel) {
 
     fun syncNow() = model.syncNow()
     fun syncIfStaleOnScreen() = model.syncIfStaleOnScreen()
+    fun syncBoundPlaylistsOnScreen() = model.refreshStaleBoundPlaylists()
     fun connectSync(providerId: String, token: String, remote: String) = model.connectSync(providerId, token, remote)
     fun resolveInitial(strategy: SyncStrategy) = model.resolveInitialSync(strategy)
     fun cancelInitial() = model.cancelInitialSync()
