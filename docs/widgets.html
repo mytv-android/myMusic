@@ -68,17 +68,17 @@ a { color: var(--accent); }
 
 /* ---------- 预览栏：吸顶，所有原型共用一份状态 ---------- */
 .pbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; margin-block: 8px 0; padding-block: 10px; background: var(--bg); border-bottom: 1px solid var(--line); }
-.pbar .in { display: flex; gap: 10px 18px; align-items: center; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
-.pbar .lab { font: 500 11.5px/1 var(--mono); letter-spacing: .1em; color: var(--muted); white-space: nowrap; }
+.pbar .in { display: flex; gap: 8px 12px; align-items: center; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+.pbar .lab { font: 600 12px/1 var(--body); color: var(--muted); white-space: nowrap; margin-left: 4px; }
 .songsw { display: flex; align-items: center; gap: 8px; flex: none; }
 .songsw .thumb { width: 36px; height: 36px; border-radius: 10px; background-size: cover; flex: none; }
 .songsw .nm { display: grid; line-height: 1.25; min-width: 0; }
-.songsw .nm b { font-size: 14px; white-space: nowrap; }
+.songsw .nm b { font-size: 14px; white-space: nowrap; max-width: 7.5em; overflow: hidden; text-overflow: ellipsis; }
 .songsw .nm span { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .rb { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--fg); display: grid; place-items: center; cursor: pointer; flex: none; padding: 0; }
 .rb svg { width: 20px; height: 20px; fill: currentColor; }
 .seg { display: inline-flex; gap: 2px; flex: none; }
-.seg button { font: 600 13px/1 var(--body); border: 1px solid var(--line); background: var(--panel); color: var(--muted); padding: 9px 12px; cursor: pointer; white-space: nowrap; border-radius: 6px; }
+.seg button { font: 600 13px/1 var(--body); border: 1px solid var(--line); background: var(--panel); color: var(--muted); padding: 9px 10px; cursor: pointer; white-space: nowrap; border-radius: 6px; }
 .seg button:first-child { border-radius: 18px 6px 6px 18px; }
 .seg button:last-child { border-radius: 6px 18px 18px 6px; }
 .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); border-radius: 18px; }
@@ -292,7 +292,7 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: v
     <span class="chip">电视没有桌面小组件</span>
   </div>
   <div class="keys">
-    <div><h3>配色跟着封面</h3><p>切歌时所有小组件一起换色，和 App 里一样；也可以改成跟随壁纸或品牌色。桌面上没有过渡动画，颜色直接换。</p></div>
+    <div><h3>配色和深浅都跟 App</h3><p>配色来源、配色风格、主题都读 App 的外观设置。默认跟随封面，切歌时所有小组件一起换色；桌面上没有过渡动画，颜色直接换。</p></div>
     <div><h3>形状跟着播放页</h3><p>播放中的封面用播放页当前的形状，暂停时换成圆角方形看全图。形状在 App 里裁好，再把位图交给桌面。</p></div>
     <div><h3>按钮组照搬播放页</h3><p>上一首、播放、下一首连成一组，中间一段最宽、用主色。尺寸小时只留播放和下一首。</p></div>
     <div><h3>不靠常驻刷新</h3><p>切歌、暂停、收藏这些事件触发更新。时间文字交给系统计时控件自己走，进度条只在亮屏播放时 10 秒刷一次。</p></div>
@@ -312,10 +312,15 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: v
       <button type="button" data-v="1">播放中</button><button type="button" data-v="0">已暂停</button>
     </div>
     <div class="seg" id="colorSeg" role="group" aria-label="配色来源">
-      <button type="button" data-v="cover">跟随封面</button><button type="button" data-v="wall">跟随壁纸</button><button type="button" data-v="brand">品牌色</button>
+      <button type="button" data-v="cover">跟随封面</button><button type="button" data-v="wall">系统壁纸</button><button type="button" data-v="brand">品牌松绿</button>
     </div>
-    <div class="seg" id="darkSeg" role="group" aria-label="手机深浅模式">
-      <button type="button" data-v="0">浅色</button><button type="button" data-v="1">深色</button>
+    <span class="lab">App 主题</span>
+    <div class="seg" id="themeSeg" role="group" aria-label="App 主题设置">
+      <button type="button" data-v="system">跟随系统</button><button type="button" data-v="light">浅色</button><button type="button" data-v="dark">深色</button>
+    </div>
+    <span class="lab">手机</span>
+    <div class="seg" id="sysSeg" role="group" aria-label="手机深浅模式">
+      <button type="button" data-v="0">浅色模式</button><button type="button" data-v="1">深色模式</button>
     </div>
   </div>
 </div>
@@ -344,7 +349,8 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: v
         </div>
       </div>
     </div>
-    <p class="hint">跟随壁纸在 Android 12 起直接用系统取色；更早的系统由 App 读取壁纸主色自己生成。</p>
+    <p class="hint">组件的深浅跟 App 的主题设置走：App 是跟随系统时随手机切换，是浅色或深色时固定。可以在预览栏把 App 主题设成深色、手机保持浅色模式看看。</p>
+    <p class="hint">配色来源和 App 外观页是同一个设置（跟随封面、系统壁纸、品牌松绿、自选颜色），组件用和 App 相同的种子色和配色风格。</p>
   </div>
   <div class="main">
     <div class="dev" id="homeDev"><div class="phone" id="phone"></div></div>
@@ -464,7 +470,9 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: v
   <div class="side">
     <div class="eyebrow">规格</div>
     <h2>配色、形状、字体</h2>
-    <p>颜色角色和 App 相同：MaterialKolor 按当前种子色生成浅色、深色两套，一起交给桌面，由系统按深浅模式选。表里的色值随预览栏的歌曲和配色变化。</p>
+    <p>颜色角色和 App 相同，深浅跟 App 的主题设置走。主题是跟随系统时，MaterialKolor 按当前种子色生成浅色、深色两套一起交给桌面，由系统按深浅模式选；主题是浅色或深色时只交对应的一套。开了纯黑背景时，深色那套用纯黑方案。</p>
+    <p class="hint" id="tokenNote"></p>
+    <p>表里的色值随预览栏的歌曲和配色变化。</p>
     <p class="hint">原型用 OKLCH 近似 Material 色调，App 里是 MaterialKolor SPEC_2025，实际色值会略有不同。</p>
   </div>
   <div class="main">
@@ -515,7 +523,8 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: v
           <tr><td class="k">播放进度</td><td>正在播放 2×3、4×2、4×3</td><td>时间文字用 Chronometer，系统自己走字。进度条只在亮屏且播放中时每 10 秒推一次，灭屏立即停</td></tr>
           <tr><td class="k">歌词换行</td><td>歌词、正在播放 4×3</td><td>和“系统媒体条歌词”共用当前行的计算；只在亮屏时推，两次之间至少隔 1.5 秒</td></tr>
           <tr><td class="k">收藏变化</td><td>正在播放（心形）、歌单（我喜欢）</td><td>写入 <code>saved_songs</code> 的地方统一触发</td></tr>
-          <tr><td class="k">配色设置</td><td>全部</td><td>外观页改配色来源、风格、对比度时触发</td></tr>
+          <tr><td class="k">外观设置</td><td>全部</td><td>外观页改主题、纯黑背景、配色来源、配色风格、对比度时触发。配色来源是系统壁纸时，换壁纸也要推（App 进程在时监听壁纸颜色变化）</td></tr>
+          <tr><td class="k">系统切换深浅</td><td>全部（仅 App 主题为跟随系统时）</td><td>Android 12 起由系统按夜间模式选色，不用推；Android 12 以下颜色在生成时就定了，要在 uiMode 变化后重推一次</td></tr>
           <tr><td class="k">榜单内容</td><td>榜单</td><td>WorkManager 每 12 小时一次、需联网；打开 App 时顺带刷新。Glance 本身已依赖 WorkManager，不新增依赖</td></tr>
           <tr><td class="k">登录状态</td><td>听歌模式、榜单、歌单</td><td>账号页登录或退出后触发</td></tr>
           <tr><td class="k">定时关闭</td><td>正在播放</td><td>倒计时用 Chronometer 倒数（Android 7 起）；Android 6 只显示到分钟，每分钟推一次</td></tr>
@@ -550,32 +559,32 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: v
 
     <div class="notes">
       <div><h3>封面位图</h3><p>在 App 进程里用 Coil 按组件尺寸取图（<code>coverAt(px)</code>，最大 480px），用 <code>CoverShapes</code> 的同一个多边形裁好再传给桌面。系统限制一份 RemoteViews 的位图总量不超过屏幕像素 × 4 × 1.5 字节，480px 的封面约 0.9MB，余量很大。</p></div>
-      <div><h3>配色</h3><p><code>CoverSeedRepository</code> 已经在取封面种子色。用 MaterialKolor 分别生成浅色、深色两套，经 <code>ColorProviders(light, dark)</code> 交给 <code>GlanceTheme</code>。跟随壁纸时在 Android 12 起用系统的动态色。</p></div>
+      <div><h3>配色</h3><p>种子色和 App 取法相同（<code>CoverSeedRepository</code>、<code>wallpaperSeed()</code>、品牌色、自选颜色），用 MaterialKolor 按浏览页配色风格、对比度、纯黑背景生成。主题跟随系统时经 <code>ColorProviders(light, dark)</code> 传两套；主题固定时两个位置传同一套。不用系统动态色，免得组件和 App 的颜色对不上。</p></div>
       <div><h3>计时文字</h3><p>Glance 没有包装 Chronometer，用 <code>AndroidRemoteViews</code> 嵌一个 XML 布局，设置开始时间和是否在走。</p></div>
       <div><h3>预览图</h3><p>Android 11 及以下用 <code>previewImage</code> 的 PNG；Android 12 起用 <code>previewLayout</code>；Android 15 起再提供实时生成的预览。</p></div>
       <div><h3>配置页</h3><p>歌单、榜单、听歌模式、歌词有配置页，带默认值，添加时可以跳过；之后长按组件重新配置。配置页用 App 的主题。</p></div>
       <div><h3>无障碍</h3><p>每个按钮都写 contentDescription，播放键同时带状态（“暂停，正在播放”）。整块组件不加点击描述，免得读屏把按钮吞掉。</p></div>
       <div><h3>平板和电视</h3><p>平板桌面的格子更大，用同一组断点，最大可拉到 5×4。Android TV 没有桌面小组件，电视端不做。</p></div>
-      <div><h3>国产桌面</h3><p>MIUI / HyperOS、ColorOS、OriginOS 对标准小组件的圆角、尺寸和刷新频率各有处理，第四步要逐台真机看。</p></div>
+      <div><h3>国产桌面</h3><p>MIUI / HyperOS、ColorOS、OriginOS 对标准小组件的圆角、尺寸和刷新频率各有处理，收尾时要逐台真机看。</p></div>
     </div>
   </div>
 </section>
 
 <section class="sec" id="plan">
   <div class="side">
-    <div class="eyebrow">排期</div>
-    <h2>分四步做</h2>
-    <p>先把底层能力和主角做扎实，后面几款都是在同一套配色、取图和起播能力上加布局。</p>
+    <div class="eyebrow">工作量</div>
+    <h2>要做的四组事</h2>
+    <p>按依赖关系分组：后三组都建立在第一组的配色、取图和冷启动播放上。先做哪组不在这份方案里定。</p>
   </div>
   <div class="main">
     <div class="phases">
-      <div class="phase"><header><span class="tag">P1</span><h3>底层能力 + 正在播放</h3></header>
-        <ul><li>队列落盘和 <code>onPlaybackResumption</code>；当前形状挪到播放层；MainActivity 打开指定页面</li><li>组件配色管线（种子色 → 浅深两套）、封面取图裁形状、事件合并刷新</li><li>正在播放 7 档布局，加继续播放、无历史、封面加载中、定时关闭四个状态</li></ul></div>
-      <div class="phase"><header><span class="tag">P2</span><h3>歌词 + 快捷入口</h3></header>
+      <div class="phase"><header><span class="tag">基础</span><h3>底层能力 + 正在播放</h3></header>
+        <ul><li>队列落盘和 <code>onPlaybackResumption</code>；当前形状挪到播放层；MainActivity 打开指定页面</li><li>组件配色管线（读 App 外观设置，按主题给一套或两套）、封面取图裁形状、事件合并刷新</li><li>正在播放 7 档布局，加继续播放、无历史、封面加载中、定时关闭四个状态</li></ul></div>
+      <div class="phase"><header><span class="tag">依赖基础</span><h3>歌词 + 快捷入口</h3></header>
         <ul><li>歌词三档、三种背景、翻译开关；亮屏判断和行变化节流</li><li>快捷入口三档；识曲、搜索、定时的打开路径</li></ul></div>
-      <div class="phase"><header><span class="tag">P3</span><h3>歌单 + 听歌模式</h3></header>
+      <div class="phase"><header><span class="tag">依赖基础</span><h3>歌单 + 听歌模式</h3></header>
         <ul><li>按歌单起播挪到仓库层，加 Service 侧起播命令</li><li>两款的配置页，未登录状态</li></ul></div>
-      <div class="phase"><header><span class="tag">P4</span><h3>榜单 + 收尾</h3></header>
+      <div class="phase"><header><span class="tag">依赖后台起播</span><h3>榜单 + 收尾</h3></header>
         <ul><li>榜单组件和 WorkManager 定时刷新，离线状态</li><li>三代预览图；读屏走查；国产桌面真机测试</li></ul></div>
     </div>
   </div>
@@ -583,17 +592,16 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: v
 
 <section class="sec" id="ask">
   <div class="side">
-    <div class="eyebrow">待定</div>
-    <h2>要你定的五件事</h2>
-    <p>每条后面是我的建议，按建议做的话直接回“按建议”就行。</p>
+    <div class="eyebrow">已定</div>
+    <h2>四个决定</h2>
+    <p>2026-10-31 确认，上面各节已经按这些改过。</p>
   </div>
   <div class="main">
     <div class="qs">
-      <div class="q"><b>1. 小组件的深浅色跟谁走？</b><span>建议<em>跟随系统</em>。组件放在桌面上，跟壁纸和系统深色模式一致更自然。另一个选项是跟 App 里的主题设置，App 设成深色时组件也一直深色。</span></div>
-      <div class="q"><b>2. 要不要做歌词组件？</b><span>建议<em>做</em>，只在亮屏时逐行刷新，不做逐字。播放时大约每 4 秒推一次，灭屏不推。</span></div>
-      <div class="q"><b>3. 进度条怎么处理？</b><span>建议<em>2×3、4×2、4×3 显示进度条，亮屏时 10 秒一刷</em>，时间文字每秒走。另一种是只显示时间、不画进度条，几乎不用刷新。</span></div>
-      <div class="q"><b>4. 透明背景给谁？</b><span>建议<em>只给歌词</em>。其余组件有按钮，透明后按钮压在壁纸上不好认，提供实色和半透明两种。</span></div>
-      <div class="q"><b>5. 第一批做哪些？</b><span>建议<em>P1 + P2</em>：正在播放、歌词、快捷入口。听歌模式、歌单、榜单依赖后台起播，放第二批。</span></div>
+      <div class="q"><b>1. 深浅色跟 App 的主题设置</b><span>App 设成<em>跟随系统</em>时随手机切换；设成<em>浅色</em>或<em>深色</em>时组件固定，不管手机是什么模式。纯黑背景、配色来源、配色风格、对比度也都读 App 的外观设置。</span></div>
+      <div class="q"><b>2. 做歌词组件</b><span>只在<em>亮屏时按行刷新</em>，不做逐字高亮，灭屏不推。播放时大约每 4 秒推一次。</span></div>
+      <div class="q"><b>3. 进度条</b><span><em>2×3、4×2、4×3 显示</em>，亮屏且在播放时每 10 秒推一次；时间文字由 Chronometer 每秒自己走。</span></div>
+      <div class="q"><b>4. 透明背景只给歌词</b><span>其余组件提供<em>实色</em>和<em>半透明</em>两种：它们有按钮，透明后按钮压在壁纸上不好认。</span></div>
     </div>
   </div>
 </section>
@@ -1033,7 +1041,7 @@ function wscheme(seed, dark) {
 }
 const vars = sc => `--wb:${sc.b};--wbh:${sc.bh};--wo:${sc.o};--wov:${sc.ov};--wp:${sc.p};--wop:${sc.op};--wpc:${sc.pc};--wopc:${sc.opc};--wsc:${sc.sc};--wosc:${sc.osc};--wtc:${sc.tc};--wotc:${sc.otc};--wol:${sc.ol}`;
 
-/* ---------- 壁纸：三张渐变，跟随壁纸时用各自的主色做种子 ---------- */
+/* ---------- 壁纸：三张渐变，配色来源选系统壁纸时用各自的主色做种子 ---------- */
 const WALLS = [
   { name: '青岚', seed: '#2F7F72', css: 'radial-gradient(110% 70% at 18% 8%, #A9E3D2 0%, transparent 62%), radial-gradient(90% 70% at 92% 92%, #2C6283 0%, transparent 66%), linear-gradient(162deg, #CFEADF 0%, #5BA595 48%, #1E4C53 100%)' },
   { name: '暮橙', seed: '#C4643A', css: 'radial-gradient(100% 70% at 82% 12%, #FFD8B0 0%, transparent 60%), radial-gradient(90% 80% at 8% 96%, #7E3349 0%, transparent 66%), linear-gradient(170deg, #F7CBA2 0%, #D7794C 52%, #5A2A3A 100%)' },
@@ -1053,13 +1061,15 @@ const LIST = { name: '我喜欢的歌曲', count: 128, rows: [0, 10, 2, 8, 20, 1
 
 const S = {
   pi: 0, playing: true, color: 'cover', wall: 0,
-  dark: matchMedia('(prefers-color-scheme: dark)').matches,
+  theme: 'system', sysDark: matchMedia('(prefers-color-scheme: dark)').matches,
   bg: 'solid', timer: false, page: 0, pos: 46, bar: 40, timerLeft: 1800,
   hits: false, pg: { kind: 'now', w: 4, h: 2 },
 };
 const curP = () => PREVIEW[S.pi];
 const cur = () => SONGS[curP().i];
 const seedNow = () => S.color === 'cover' ? cur().seed : S.color === 'wall' ? WALLS[S.wall].seed : BRAND;
+/* 组件深浅跟 App 的主题设置：跟随系统时随手机切换，浅色 / 深色时固定 */
+const wDark = () => S.theme === 'system' ? S.sysDark : S.theme === 'dark';
 const shapeNow = () => S.playing ? curP().shape : 'Square';
 
 /* 歌词按 5 秒一行循环，前奏 8 秒 */
@@ -1147,7 +1157,7 @@ function ctx(over = {}) {
 
 /* ---------- 外壳：配色变量 + 背景模式 ---------- */
 function frame(kind, w, h, body, o = {}) {
-  const sc = wscheme(seedNow(), S.dark);
+  const sc = wscheme(seedNow(), wDark());
   let mode = o.bgMode || S.bg;
   if (mode === 'clear' && kind !== 'lyrics') mode = 'glass';
   const base = sc[o.bg || 'b'];
@@ -1413,7 +1423,7 @@ const ACT_TIP = {
   recognize: '打开 App，弹出识曲面板并开始听', openFav: '打开“我喜欢的歌曲”', timer: '打开定时关闭面板',
 };
 
-const wallBg = el => { el.style.setProperty('--wall', WALLS[S.wall].css); el.classList.toggle('dark', S.dark); };
+const wallBg = el => { el.style.setProperty('--wall', WALLS[S.wall].css); el.classList.toggle('dark', S.sysDark); };
 let lastK = -1;
 
 function renderControls() {
@@ -1422,7 +1432,7 @@ function renderControls() {
   $('#songName').textContent = s.t;
   $('#songMeta').textContent = `${s.a} · ${s.src}`;
   const on = (id, v) => $$(`#${id} button`).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === String(v))));
-  on('playSeg', S.playing ? 1 : 0); on('colorSeg', S.color); on('darkSeg', S.dark ? 1 : 0);
+  on('playSeg', S.playing ? 1 : 0); on('colorSeg', S.color); on('themeSeg', S.theme); on('sysSeg', S.sysDark ? 1 : 0);
   on('bgSeg', S.bg); on('timerSeg', S.timer ? 1 : 0); on('pageSeg', S.page); on('pgKind', S.pg.kind);
   $$('#wallSw button').forEach((b, j) => b.setAttribute('aria-pressed', String(j === S.wall)));
 }
@@ -1490,6 +1500,7 @@ function renderPg() {
 
 function renderLook() {
   const L = wscheme(seedNow(), false), D = wscheme(seedNow(), true);
+  $('#tokenNote').textContent = S.theme === 'system' ? 'App 主题是跟随系统：两套都交给桌面，由系统按深浅模式选。' : `App 主题是${S.theme === 'dark' ? '深色' : '浅色'}：只交${S.theme === 'dark' ? '深色' : '浅色'}那一套，手机切深浅不影响组件。`;
   const sw = c => `<span class="sw"><i style="background:${c}"></i>${c}</span>`;
   $('#tokenRows').innerHTML = TOKENS.map(([use, role, k]) => `<tr><td>${use}</td><td class="mono">${role}</td><td>${sw(L[k])}</td><td>${sw(D[k])}</td></tr>`).join('');
   $('#shapeStrip').innerHTML = SHAPE_USE.map(([n, use]) => `<div class="shape"><i style="clip-path:${poly(n, n === 'Cookie4' ? Math.PI / 4 : 0)}"></i><b>${SHAPE_LABEL[n]}</b><span>${use}</span></div>`).join('');
@@ -1525,7 +1536,8 @@ function wire() {
   const seg = (id, fn) => $$(`#${id} button`).forEach(b => b.addEventListener('click', () => { fn(b.dataset.v); renderAll(); }));
   seg('playSeg', v => { S.playing = v === '1'; S.bar = S.pos; });
   seg('colorSeg', v => { S.color = v; });
-  seg('darkSeg', v => { S.dark = v === '1'; });
+  seg('themeSeg', v => { S.theme = v; });
+  seg('sysSeg', v => { S.sysDark = v === '1'; });
   seg('bgSeg', v => { S.bg = v; });
   seg('timerSeg', v => { S.timer = v === '1'; S.timerLeft = 1800; });
   seg('pageSeg', v => { S.page = +v; });
