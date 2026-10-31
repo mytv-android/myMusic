@@ -166,7 +166,7 @@ private fun animated(scheme: ColorScheme, reduceMotion: Boolean): ColorScheme =
     if (reduceMotion) scheme else animateColorScheme(scheme, animationSpec = { tween(COLOR_TRANSITION_MS) })
 
 /** 壁纸取色：Android 12+ 读系统强调色，8.1+ 读壁纸主色。 */
-private fun Context.wallpaperSeed(): Color? = runCatching {
+internal fun Context.wallpaperSeed(): Color? = runCatching {
     when {
         Build.VERSION.SDK_INT >= 31 -> Color(getColor(android.R.color.system_accent1_500))
         Build.VERSION.SDK_INT >= 27 -> WallpaperManager.getInstance(this)

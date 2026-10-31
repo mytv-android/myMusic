@@ -1,9 +1,9 @@
 package com.mytv.mymusic
 
 import com.mytv.mymusic.data.CoverShapeChoice
-import com.mytv.mymusic.ui.player.RandomCoverShapes
+import com.mytv.mymusic.playback.RandomCoverShapes
 import com.mytv.mymusic.ui.player.label
-import com.mytv.mymusic.ui.player.nextRandomCoverShape
+import com.mytv.mymusic.playback.nextRandomCoverShape
 import com.mytv.mymusic.ui.player.polygon
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

@@ -13,17 +13,33 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.MediaButtonReceiver
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.R
+import kotlinx.coroutines.launch
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private var equalizer: EqualizerController? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private val foregroundGuard = Runnable { ensureForegroundOrStop() }
 
     override fun onCreate() {
         super.onCreate()
@@ -84,12 +100,61 @@ class PlaybackService : MediaSessionService() {
             })
         }
         app?.sleepTimer?.attach(player)
-        session = MediaSession.Builder(this, player).build()
+        session = MediaSession.Builder(this, player).setCallback(ResumptionCallback()).build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = session
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val result = super.onStartCommand(intent, flags, startId)
+        // 蓝牙耳机、系统媒体控件在 App 没运行时按播放：媒体按键接收器用 startForegroundService 拉起服务，
+        // 系统要求几秒内进前台。继续播放要先解析地址，断网时可能放不起来，到时还没进前台就自己收场，不让系统崩掉进程
+        if (intent?.action == Intent.ACTION_MEDIA_BUTTON && Build.VERSION.SDK_INT >= 26 && !isPlaybackOngoing()) {
+            handler.removeCallbacks(foregroundGuard)
+            handler.postDelayed(foregroundGuard, FOREGROUND_GUARD_MS)
+        }
+        return result
+    }
+
+    private fun ensureForegroundOrStop() {
+        if (isPlaybackOngoing()) return
+        val manager = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel(GUARD_CHANNEL) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(GUARD_CHANNEL, getString(R.string.playback_resume_channel), NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+        val notification = NotificationCompat.Builder(this, GUARD_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_mymusic)
+            .setContentTitle(getString(R.string.playback_resume_failed))
+            .setSilent(true)
+            .build()
+        runCatching {
+            ServiceCompat.startForeground(
+                this,
+                GUARD_NOTIFICATION_ID,
+                notification,
+                if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0,
+            )
+        }
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    /**
+     * 从最近任务划掉：在放就接着放；没在放就停掉服务。ViewModel 是进程级的、一直连着服务，
+     * 先让它放开控制器，不然服务被绑着停不下来，通知栏会一直挂着一个暂停的播放器。
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val playing = session?.player?.isPlaying == true
+        if (!isPlaybackOngoing() || !playing) {
+            (application as? MyMusicApp)?.takeIf { it.hasMusicViewModel }?.musicViewModel?.releasePlayer()
+            pauseAllPlayersAndStopSelf()
+        }
+    }
+
     override fun onDestroy() {
+        handler.removeCallbacks(foregroundGuard)
         (application as? MyMusicApp)?.sleepTimer?.detach()
         equalizer?.detach()
         equalizer = null
@@ -97,6 +162,42 @@ class PlaybackService : MediaSessionService() {
         session?.run { player.release(); release() }
         session = null
         super.onDestroy()
+    }
+
+    /** 播放器是空的时候（进程刚起来）收到播放：从 ViewModel 取回上次的队列，当前这首解析好地址再交给 Media3 开播。 */
+    private inner class ResumptionCallback : MediaSession.Callback {
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            isForPlayback: Boolean,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val app = application as? MyMusicApp
+                ?: return Futures.immediateFailedFuture(UnsupportedOperationException())
+            val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            app.appScope.launch {
+                val items = runCatching { app.musicViewModel.buildResumption(isForPlayback) }.getOrNull()
+                if (items != null) future.set(items) else future.setException(IllegalStateException("没有可以继续播放的队列"))
+            }
+            return future
+        }
+    }
+
+    private companion object {
+        const val FOREGROUND_GUARD_MS = 8_000L
+        const val GUARD_CHANNEL = "playback_resume"
+        const val GUARD_NOTIFICATION_ID = 0x6d6d
+    }
+}
+
+/**
+ * 系统媒体按键接收器（蓝牙耳机、Android 11+ 媒体控件的继续播放）。没有存下来的队列时没东西可放，
+ * 就不拉起前台服务，免得服务起来了却进不了前台被系统判崩。
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
+class ResumeButtonReceiver : MediaButtonReceiver() {
+    override fun shouldStartForegroundService(context: Context, intent: Intent): Boolean {
+        val app = context.applicationContext as? MyMusicApp ?: return false
+        return app.queueStore.hasSaved()
     }
 }
 

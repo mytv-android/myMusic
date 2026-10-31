@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 透明背景歌词的当前句：粗体。其余同 widget_shadow_text。 -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_shadow_text"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:ellipsize="end"
+    android:includeFontPadding="false"
+    android:shadowColor="#8C000000"
+    android:shadowDx="0"
+    android:shadowDy="1"
+    android:shadowRadius="3"
+    android:textColor="#FFFFFFFF"
+    android:textStyle="bold" />

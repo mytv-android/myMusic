@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 透明背景的歌词组件：白字加阴影，壁纸上也认得出。Glance 的 Text 不支持阴影，用 RemoteViews 嵌。
+     字号、行数、字重由 WidgetShadowText 设置。 -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_shadow_text"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:ellipsize="end"
+    android:includeFontPadding="false"
+    android:shadowColor="#8C000000"
+    android:shadowDx="0"
+    android:shadowDy="1"
+    android:shadowRadius="3"
+    android:textColor="#FFFFFFFF" />

@@ -4,15 +4,19 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionToken
-import com.google.common.util.concurrent.MoreExecutors
+import com.google.common.util.concurrent.ListenableFuture
+import com.mytv.mymusic.ForegroundActivity
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.aggregate.AggregateSearchEngine
 import com.mytv.mymusic.aggregate.AggregationSettings
@@ -64,8 +68,15 @@ import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.data.update.InstallResult
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
+import com.mytv.mymusic.playback.NowPlayingShape
 import com.mytv.mymusic.playback.PlaybackService
+import com.mytv.mymusic.playback.SavedCursor
+import com.mytv.mymusic.playback.SavedPlayback
 import com.mytv.mymusic.playback.VolumeNormalization
+import com.mytv.mymusic.widget.PlaybackSnapshot
+import com.mytv.mymusic.widget.SearchRequest
+import com.mytv.mymusic.widget.WidgetHub
+import com.mytv.mymusic.widget.WidgetTarget
 import com.mytv.mymusic.playback.VolumeNormalizationState
 import com.mytv.mymusic.recognize.AudioResampler
 import com.mytv.mymusic.recognize.MicRecorder
@@ -75,7 +86,9 @@ import com.mytv.mymusic.recognize.RecognitionPhase
 import com.mytv.mymusic.recognize.RecognitionUiState
 import com.mytv.mymusic.recognize.RecordedAudio
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -87,7 +100,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filterNotNull
 import coil3.SingletonImageLoader
 import com.mytv.mymusic.ui.theme.Appearance
 import com.mytv.mymusic.ui.theme.BlurMode
@@ -186,6 +202,11 @@ data class MusicUiState(
     val deepLink: String = "",
 )
 
+/**
+ * 整个进程只有一份（[MyMusicApp.musicViewModel]）：界面、桌面小组件、播放服务的继续播放都通过它控制播放器，
+ * 界面关掉以后组件照样能切歌、续接下一首的解析。
+ */
+@OptIn(FlowPreview::class)
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as MyMusicApp
@@ -198,7 +219,35 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         AppSettings(),
     )
     private var controller: MediaController? = null
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+    private val connected = MutableStateFlow<MediaController?>(null)
     private var progressJob: Job? = null
+
+    /**
+     * 从磁盘接上的队列：界面和组件能看到这首、听到哪儿，播放器里还是空的。按播放时才解析这一首的地址装进播放器，
+     * 免得一启动就去请求地址；系统媒体控件、蓝牙耳机的继续播放走 [buildResumption]。
+     */
+    private var dormant: SavedPlayback? = null
+    private var restoreJob: Deferred<Unit>? = null
+
+    /** 界面（MainActivity）打开过。组件、系统媒体控件拉起进程时不读榜单、不检查更新，等界面真正打开。 */
+    private val uiLaunched = MutableStateFlow(false)
+
+    /** 播放进度锚点：只在播放 / 暂停、跳转、切歌时更新，组件按它推算进度，不跟着 500ms 的进度流刷新。 */
+    private val anchor = MutableStateFlow(PositionAnchor())
+
+    private data class PositionAnchor(val key: String = "", val positionMs: Long = 0L, val at: Long = 0L)
+
+    private val _widgetTarget = MutableStateFlow<WidgetTarget?>(null)
+
+    /** 组件点开 App 时要去的页面；界面消费后清空（冷启动时界面还没订阅，所以不用一次性事件流）。 */
+    val widgetTarget: StateFlow<WidgetTarget?> = _widgetTarget.asStateFlow()
+    private val _lyricsView = MutableStateFlow(false)
+
+    /** 打开播放页时直接切到歌词视图（组件的歌词区域）。 */
+    val lyricsViewRequest: StateFlow<Boolean> = _lyricsView.asStateFlow()
+    private val _searchRequest = MutableStateFlow<SearchRequest?>(null)
+    val searchRequest: StateFlow<SearchRequest?> = _searchRequest.asStateFlow()
     private var loginJob: Job? = null
     private var aggregateSearchJob: Job? = null
     private var aggregateSearchGeneration = 0
@@ -296,8 +345,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val history: StateFlow<List<SavedSong>> = app.database.dao().songs("history")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    // 一直订阅：界面没打开时组件在后台起播，也要能找到已下载的本地文件
     val downloads: StateFlow<List<DownloadRecord>> = app.database.dao().downloads()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val localPlaylists: StateFlow<List<LocalPlaylistSummary>> =
         combine(libraryDao.playlists(), libraryDao.entryCounts()) { playlists, counts ->
             val countMap = counts.associate { it.playlistId to it.total }
@@ -405,28 +455,44 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 queue.drop(index + 1).take(3).forEach { coverSeeds.seedFor(it.cover) }
             }
         }
-        val token = SessionToken(application, android.content.ComponentName(application, PlaybackService::class.java))
-        val future = MediaController.Builder(application, token).buildAsync()
-        future.addListener({
-            controller = future.get().also { it.addListener(playerListener) }
-            startProgress()
-        }, MoreExecutors.directExecutor())
+        connectController()
         viewModelScope.launch {
-            runCatching { app.repository.providers() }.onSuccess { providers ->
+            val loaded = runCatching { app.repository.providers() }.onSuccess { providers ->
                 base.value = base.value.copy(providers = providers)
+            }.isSuccess
+            // 进程可能是桌面小组件或系统媒体控件拉起来的：界面真正打开了才读榜单、歌单，才做回前台同步
+            uiLaunched.first { it }
+            if (loaded) {
                 val settings = app.settings.state.first()
                 loadCharts(providerId = settings.chartsSource.ifBlank { null }, force = true)
                 loadPlaylists(providerId = settings.playlistsSource.ifBlank { null }, force = true)
             }
             app.sync.syncIfStaleOnForeground()
         }
-        // 每次启动都检查更新；发现新版本立刻自动下载，用户没有“稍后”可选
-        checkUpdatesInBackground()
-        // 更新包一进入 Ready 就打开系统安装器，不等人点按钮
+        viewModelScope.launch {
+            // 每次打开 App 都检查更新；发现新版本立刻自动下载，用户没有“稍后”可选
+            uiLaunched.first { it }
+            checkUpdatesInBackground()
+        }
+        // 更新包一进入 Ready 就打开系统安装器，不等人点按钮；界面不在前台（组件在后台起播）时等回到 App 由 onAppForeground 拉起
         viewModelScope.launch {
             updateState.map { it.phase }.distinctUntilChanged().collect { phase ->
-                if (phase == UpdatePhase.Ready) launchUpdateInstaller()
+                if (phase == UpdatePhase.Ready && ForegroundActivity.get() != null) launchUpdateInstaller()
             }
+        }
+        // 当前形状由播放层抽：切歌、改形状设置时抽好，播放页和桌面小组件读同一个值
+        viewModelScope.launch {
+            combine(
+                base.map { it.current?.key.orEmpty() }.distinctUntilChanged(),
+                settingsState.map { it.coverShape }.distinctUntilChanged(),
+            ) { key, choice -> key to choice }.collect { (key, choice) ->
+                if (key.isNotBlank()) NowPlayingShape.resolve(choice, key)
+            }
+        }
+        viewModelScope.launch {
+            combine(base, anchor, connected) { ui, at, player -> widgetSnapshot(ui, at, player) }
+                .distinctUntilChanged()
+                .collect { WidgetHub.playback.value = it }
         }
         viewModelScope.launch(Dispatchers.IO) {
             val cutoff = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000
@@ -651,8 +717,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         return scenes + modes.filterNot { it.group.contains("场景") }
     }
 
-    /** 起播一个听歌模式；失败返回可以直接展示的错误文案。 */
-    private suspend fun startListeningFeed(providerId: String, mode: ListeningMode, cookie: String): String? {
+    /**
+     * 起播一个听歌模式；失败返回可以直接展示的错误文案。[openPlayer] 为 false 时（桌面组件）不弹出播放页，
+     * 并且等到装进播放器才返回。
+     */
+    private suspend fun startListeningFeed(
+        providerId: String,
+        mode: ListeningMode,
+        cookie: String,
+        openPlayer: Boolean = true,
+    ): String? {
         val songs = runCatching { app.repository.listeningModeSongs(providerId, cookie, mode) }.getOrElse {
             if (it is CancellationException) throw it
             return it.message ?: "听歌模式读取失败"
@@ -660,8 +734,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (songs.isEmpty()) return "「${mode.name}」暂时没有歌曲"
         // 给队列里的歌打上模式标记：换队列后靠它判断还要不要继续续流
         val marked = songs.map { it.copy(extra = it.extra + (FEED_MARK to mode.id)) }
-        play(marked.first(), marked)
-        activeFeed = ActiveFeed(providerId, mode, cookie)
+        val feed = ActiveFeed(providerId, mode, cookie)
+        if (openPlayer) {
+            play(marked.first(), marked)
+            activeFeed = feed
+        } else if (!playNow(marked.first(), marked, openPlayer = false, feed = feed)) {
+            return base.value.playbackNotice.ifBlank { "「${mode.name}」暂时放不了" }
+        }
         _playlists.update { it.copy(listenActive = mode.id) }
         message("已开启「${mode.name}」")
         return null
@@ -1088,6 +1167,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             play(songs.first(), songs)
             return
         }
+        materializeDormant(player)
         val known = base.value.canonicalQueue.map { it.id }.toSet()
         val tracks = songs.map { canonicalForSong(it) }.distinctBy { it.id }.filter { it.id !in known }
         if (tracks.isEmpty()) {
@@ -1866,7 +1946,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleFavorite(song: Song) = viewModelScope.launch {
         val dao = app.database.dao()
-        if (favorites.value.any { it.key == song.key }) {
+        // 直接查库：组件在后台点收藏时界面没在订阅，favorites 可能还是旧的
+        if (dao.songsOnce("favorite").any { it.key == song.key }) {
             dao.remove("favorite", song.key)
             dao.saveTombstone(SavedSongTombstone(song.key, "favorite", System.currentTimeMillis()))
         } else {
@@ -1946,13 +2027,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** [openPlayer] 为 false 时只换队列开播，不弹出播放页（详情页海报视图）；平时按 [autoOpenPlayer]。 */
     fun play(song: Song, queue: List<Song> = listOf(song), openPlayer: Boolean = true) {
-        // 换队列时听歌模式就结束了，否则会在普通歌单尾部继续续推荐流
+        val (selected, ordered) = newQueue(song, queue)
+        playTrack(selected, ordered, openPlayer = openPlayer)
+    }
+
+    /** 和 [play] 一样，但等到装进播放器（或失败）才返回；组件后台起播用。[feed] 是这份队列所属的听歌模式。 */
+    private suspend fun playNow(song: Song, queue: List<Song>, openPlayer: Boolean, feed: ActiveFeed? = null): Boolean {
+        val (selected, ordered) = newQueue(song, queue)
+        activeFeed = feed
+        return startTrack(selected, ordered, null, openPlayer)
+    }
+
+    /** 换一份新队列：听歌模式到此结束（否则会在普通歌单尾部继续续推荐流），选中的这首排第一。 */
+    private fun newQueue(song: Song, queue: List<Song>): Pair<CanonicalTrack, List<CanonicalTrack>> {
         activeFeed = null
         _playlists.update { if (it.listenActive.isEmpty()) it else it.copy(listenActive = "") }
         val selected = canonicalForSong(song)
         val tracks = queue.map { canonicalForSong(it) }.ifEmpty { listOf(selected) }
-        val ordered = listOf(selected) + tracks.filter { it.id != selected.id }
-        playTrack(selected, ordered, openPlayer = openPlayer)
+        return selected to (listOf(selected) + tracks.filter { it.id != selected.id })
     }
 
     fun playTrack(
@@ -1961,68 +2053,78 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         pinnedProvider: String? = null,
         openPlayer: Boolean = true,
     ) {
-        viewModelScope.launch {
-            val player = controller
-            if (player == null) {
-                base.value = base.value.copy(error = "播放器尚未就绪")
-                return@launch
-            }
-            val ordered = (listOf(track) + queue.filter { it.id != track.id }).distinctBy { it.id }
-            val local = localFileFor(track)
-            var playableTrack = track
-            var ready: Resolution.Ready? = null
-            var autoMatched = false
-            if (local == null) {
-                val result = resolvePlayable(track, pinnedProvider)
-                playableTrack = result.track
-                ready = result.resolution as? Resolution.Ready
-                autoMatched = result.autoMatched
-                if (ready == null) {
-                    base.value = base.value.copy(
-                        playbackNotice = noSourceMessage(playableTrack, result.resolution),
-                        deepLink = (result.resolution as? Resolution.None)?.deepLink.orEmpty(),
-                    )
-                    return@launch
-                }
-            }
-            if (pinnedProvider != null) pinnedProviders[playableTrack.id] = pinnedProvider
-            val source = local?.first ?: ready!!.source
-            val resolvedSong = if (local != null) {
-                source.song.copy(url = Uri.fromFile(local.second).toString())
-            } else {
-                source.song.copy(url = ready!!.url)
-            }
-            val canonicalQueue = ordered.map { if (it.id == track.id) playableTrack else it }
-            val queueSongs = canonicalQueue.map { item ->
-                if (item.id == playableTrack.id) resolvedSong else preferredSong(item)
-            }
-            val fallbackNotice = when {
-                local != null -> ""
-                ready!!.isPreview -> "当前为试听片段"
-                autoMatched -> "原音源不可用，已自动匹配到${ready.source.providerName}"
-                pinnedProvider != null && ready.source.providerId != pinnedProvider ->
-                    "所选平台没有返回可播放地址，已切换到${ready.source.providerName}"
-                else -> ""
-            }
-            player.setMediaItems(queueSongs.map(::mediaItem), 0, 0)
-            player.prepare()
-            player.play()
-            base.value = base.value.copy(
-                queue = queueSongs,
-                canonicalQueue = canonicalQueue,
-                queueId = base.value.queueId + 1,
-                current = resolvedSong,
-                currentTrack = playableTrack,
-                currentSource = source,
-                playerOpen = (openPlayer && autoOpenPlayer) || base.value.playerOpen,
-                playbackNotice = fallbackNotice,
-                error = "",
-                deepLink = "",
-            )
-            rememberCanonical(playableTrack)
-            remember("history", historySong(resolvedSong))
-            loadLyrics(resolvedSong)
+        viewModelScope.launch { startTrack(track, queue, pinnedProvider, openPlayer) }
+    }
+
+    /** 解析 [track] 并把整份队列装进播放器开播；装上了返回 true。 */
+    private suspend fun startTrack(
+        track: CanonicalTrack,
+        queue: List<CanonicalTrack>,
+        pinnedProvider: String?,
+        openPlayer: Boolean,
+    ): Boolean {
+        val player = awaitController()
+        if (player == null) {
+            base.value = base.value.copy(error = "播放器尚未就绪")
+            return false
         }
+        val ordered = (listOf(track) + queue.filter { it.id != track.id }).distinctBy { it.id }
+        val local = localFileFor(track)
+        var playableTrack = track
+        var ready: Resolution.Ready? = null
+        var autoMatched = false
+        if (local == null) {
+            val result = resolvePlayable(track, pinnedProvider)
+            playableTrack = result.track
+            ready = result.resolution as? Resolution.Ready
+            autoMatched = result.autoMatched
+            if (ready == null) {
+                base.value = base.value.copy(
+                    playbackNotice = noSourceMessage(playableTrack, result.resolution),
+                    deepLink = (result.resolution as? Resolution.None)?.deepLink.orEmpty(),
+                )
+                return false
+            }
+        }
+        if (pinnedProvider != null) pinnedProviders[playableTrack.id] = pinnedProvider
+        val source = local?.first ?: ready!!.source
+        val resolvedSong = if (local != null) {
+            source.song.copy(url = Uri.fromFile(local.second).toString())
+        } else {
+            source.song.copy(url = ready!!.url)
+        }
+        val canonicalQueue = ordered.map { if (it.id == track.id) playableTrack else it }
+        val queueSongs = canonicalQueue.map { item ->
+            if (item.id == playableTrack.id) resolvedSong else preferredSong(item)
+        }
+        val fallbackNotice = when {
+            local != null -> ""
+            ready!!.isPreview -> "当前为试听片段"
+            autoMatched -> "原音源不可用，已自动匹配到${ready.source.providerName}"
+            pinnedProvider != null && ready.source.providerId != pinnedProvider ->
+                "所选平台没有返回可播放地址，已切换到${ready.source.providerName}"
+            else -> ""
+        }
+        dormant = null
+        player.setMediaItems(queueSongs.map(::mediaItem), 0, 0)
+        player.prepare()
+        player.play()
+        base.value = base.value.copy(
+            queue = queueSongs,
+            canonicalQueue = canonicalQueue,
+            queueId = base.value.queueId + 1,
+            current = resolvedSong,
+            currentTrack = playableTrack,
+            currentSource = source,
+            playerOpen = (openPlayer && autoOpenPlayer) || base.value.playerOpen,
+            playbackNotice = fallbackNotice,
+            error = "",
+            deepLink = "",
+        )
+        rememberCanonical(playableTrack)
+        remember("history", historySong(resolvedSong))
+        loadLyrics(resolvedSong)
+        return true
     }
 
     fun openSource(track: CanonicalTrack, queue: List<CanonicalTrack> = _search.value.aggregateGroups) {
@@ -2386,11 +2488,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
     fun transport(action: String) {
+        val sleeping = dormant
+        if (sleeping != null && (controller?.mediaItemCount ?: 0) == 0) {
+            // 从磁盘接上的队列还没装进播放器：播放、切歌都先解析这一首再装
+            when (action) {
+                "play" -> launchResume()
+                "next" -> if (sleeping.index < sleeping.songs.lastIndex) launchResume(sleeping.index + 1, 0L)
+                "previous" -> launchResume((sleeping.index - 1).coerceAtLeast(0), 0L)
+                else -> controller?.let { toggleMode(it, action) }
+            }
+            return
+        }
         val player = controller ?: return
         when (action) {
             "play" -> if (player.isPlaying) player.pause() else player.play()
             "next" -> player.seekToNextMediaItem()
             "previous" -> player.seekToPreviousMediaItem()
+            else -> toggleMode(player, action)
+        }
+    }
+
+    /** 随机、循环：播放器空着也能设，装进队列后照样生效。 */
+    private fun toggleMode(player: MediaController, action: String) {
+        when (action) {
             "shuffle" -> player.shuffleModeEnabled = !player.shuffleModeEnabled
             "repeat" -> player.repeatMode = when (player.repeatMode) {
                 Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
@@ -2401,14 +2521,28 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun seek(position: Long) {
+        val sleeping = dormant
+        if (sleeping != null && (controller?.mediaItemCount ?: 0) == 0) {
+            // 还没装进播放器：记下新位置，按播放时从这里开始
+            val at = position.coerceAtLeast(0)
+            dormant = sleeping.copy(cursor = sleeping.cursor.copy(positionMs = at))
+            _position.value = at
+            anchor.value = PositionAnchor(sleeping.current.key, at, SystemClock.elapsedRealtime())
+            persistCursor()
+            return
+        }
         controller?.seekTo(position)
         _position.value = position.coerceAtLeast(0)
     }
 
     /** 从队列里第 [index] 首开始放：只 seekTo，不换队列，所以不会清掉听歌模式的续流，也不会自动弹出播放页。 */
     fun playQueueIndex(index: Int) {
-        val player = controller ?: return
         if (index !in base.value.queue.indices) return
+        if (dormant != null && (controller?.mediaItemCount ?: 0) == 0) {
+            launchResume(index, 0L)
+            return
+        }
+        val player = controller ?: return
         player.seekTo(index, 0)
         player.play()
     }
@@ -2419,6 +2553,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun moveQueueItemNext(index: Int) {
         val player = controller ?: return
+        materializeDormant(player)
         val state = base.value
         val target = queueMoveNextTarget(index, player.currentMediaItemIndex, state.queue.size) ?: return
         player.moveMediaItem(index, target)
@@ -2443,6 +2578,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             play(song, listOf(song), openPlayer = false)
             return
         }
+        materializeDormant(player)
         val track = canonicalForSong(song)
         val index = state.canonicalQueue.indexOfFirst { it.id == track.id }
         if (index >= 0) {
@@ -2467,6 +2603,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearQueue() {
+        dormant = null
         controller?.clearMediaItems()
         controller?.stop()
         _position.value = 0
@@ -2952,11 +3089,31 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onEvents(player: Player, events: Player.Events) {
-            val song = base.value.queue.getOrNull(player.currentMediaItemIndex)
+            // 从磁盘接上的队列还没装进播放器：播放器是空的，进度和时长都以存下来的为准
+            val sleeping = dormant != null && player.mediaItemCount == 0
+            val song = if (sleeping) null else base.value.queue.getOrNull(player.currentMediaItemIndex)
+            val previous = base.value.current
+            val rawDuration = player.duration
+            val duration = when {
+                sleeping -> base.value.duration
+                // 还没准备好（空地址、刚切过来）时播放器给不出时长：同一首保留原值，换了歌先用歌曲信息里的
+                rawDuration == C.TIME_UNSET -> if (song == null || song.key == previous?.key) base.value.duration else song.duration * 1000L
+                else -> rawDuration.coerceAtLeast(0)
+            }
+            if (!sleeping && events.containsAny(
+                    Player.EVENT_IS_PLAYING_CHANGED,
+                    Player.EVENT_MEDIA_ITEM_TRANSITION,
+                    Player.EVENT_POSITION_DISCONTINUITY,
+                    Player.EVENT_PLAYBACK_STATE_CHANGED,
+                )
+            ) {
+                anchor.value = PositionAnchor(song?.key ?: previous?.key.orEmpty(), player.currentPosition.coerceAtLeast(0), SystemClock.elapsedRealtime())
+                persistCursor()
+            }
             base.value = base.value.copy(
                 current = song ?: base.value.current,
                 playing = player.isPlaying,
-                duration = player.duration.coerceAtLeast(0),
+                duration = duration,
                 shuffle = player.shuffleModeEnabled,
                 repeat = when (player.repeatMode) {
                     Player.REPEAT_MODE_ONE -> RepeatMode.One
@@ -2969,18 +3126,422 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startProgress() {
         progressJob = viewModelScope.launch {
+            var ticks = 0
             while (true) {
                 controller?.let {
+                    // 从磁盘接上、还没装进播放器的队列：进度停在存下来的位置
+                    if (dormant != null && it.mediaItemCount == 0) return@let
                     _position.value = it.currentPosition.coerceAtLeast(0)
                     syncNotificationLyrics(_position.value)
-                    val duration = it.duration.coerceAtLeast(0)
-                    if (base.value.duration != duration) {
-                        base.value = base.value.copy(duration = duration)
+                    val duration = it.duration
+                    if (duration != C.TIME_UNSET && base.value.duration != duration.coerceAtLeast(0)) {
+                        base.value = base.value.copy(duration = duration.coerceAtLeast(0))
                     }
+                    // 播放中每 10 秒存一次位置：进程被杀后组件和继续播放从这里接上
+                    if (it.isPlaying && ++ticks % CURSOR_SAVE_TICKS == 0) persistCursor()
                 }
                 delay(500)
             }
         }
+    }
+
+    // ---------- 播放器连接、队列落盘、继续播放 ----------
+
+    /** 连上播放服务。服务被系统回收、或从最近任务划掉停下后，下次要用播放器时（[awaitController]）再连。 */
+    private fun connectController() {
+        if (controller != null || controllerFuture != null) return
+        val context = getApplication<Application>()
+        val token = SessionToken(context, android.content.ComponentName(context, PlaybackService::class.java))
+        val future = MediaController.Builder(context, token)
+            .setListener(object : MediaController.Listener {
+                override fun onDisconnected(controller: MediaController) = onControllerLost(controller)
+            })
+            .buildAsync()
+        controllerFuture = future
+        future.addListener({
+            if (controllerFuture !== future) return@addListener
+            controllerFuture = null
+            val player = runCatching { future.get() }.getOrNull() ?: return@addListener
+            controller = player
+            player.addListener(playerListener)
+            connected.value = player
+            if (progressJob?.isActive != true) startProgress()
+            onControllerConnected(player)
+        }, ContextCompat.getMainExecutor(context))
+    }
+
+    /** 等控制器连上；服务起不来时返回 null。 */
+    suspend fun awaitController(timeoutMs: Long = CONTROLLER_TIMEOUT_MS): MediaController? {
+        controller?.let { return it }
+        connectController()
+        return withTimeoutOrNull(timeoutMs) { connected.filterNotNull().first() }
+    }
+
+    private fun onControllerConnected(player: MediaController) {
+        if (player.mediaItemCount > 0) {
+            // 服务那边已经装好了队列（系统媒体控件的继续播放先到）：界面状态由 buildResumption 写好了
+            dormant = null
+            WidgetHub.authoritative.value = true
+            startPersistence()
+            return
+        }
+        if (restoreJob?.isActive == true) return
+        restoreJob = viewModelScope.async { restoreDormant() }
+    }
+
+    /** 播放服务停了（被回收或出错）：队列转成 [dormant]，下次按播放时重新连上、从这里接着放。 */
+    private fun onControllerLost(lost: MediaController) {
+        if (controller !== lost) return
+        val index = runCatching { lost.currentMediaItemIndex }.getOrDefault(-1)
+        lost.removeListener(playerListener)
+        controller = null
+        connected.value = null
+        sleepQueue(index, _position.value)
+    }
+
+    /**
+     * 从最近任务划掉、又没在播放时播放服务要停下：先放开控制器，不然服务一直被绑着停不掉。
+     * 队列和位置留在 [dormant] 里，界面再打开、组件再按播放都从这里接上。
+     */
+    fun releasePlayer() {
+        persistCursor()
+        val player = controller ?: return
+        sleepQueue(player.currentMediaItemIndex, player.currentPosition)
+        player.removeListener(playerListener)
+        controller = null
+        connected.value = null
+        player.release()
+    }
+
+    private fun sleepQueue(index: Int, positionMs: Long) {
+        val state = base.value
+        val current = state.current ?: return
+        if (dormant != null || state.queue.isEmpty()) return
+        val at = if (state.queue.getOrNull(index)?.key == current.key) index else state.queue.indexOfFirst { it.key == current.key }
+        val shape = NowPlayingShape.current.value.takeIf { it.songKey == current.key }?.shape?.name.orEmpty()
+        dormant = SavedPlayback(
+            songs = state.queue,
+            cursor = SavedCursor(current.key, at.coerceAtLeast(0), positionMs.coerceAtLeast(0), state.duration, shape),
+        )
+        base.update { it.copy(playing = false) }
+        anchor.value = PositionAnchor(current.key, positionMs.coerceAtLeast(0), SystemClock.elapsedRealtime())
+    }
+
+    /** 进程刚起来：从磁盘接上上次的队列。只放进界面状态，不碰播放器。 */
+    private suspend fun restoreDormant() {
+        try {
+            if (base.value.queue.isNotEmpty()) return
+            // 先等设置读出来：音源的 Cookie 要用
+            app.settings.state.first()
+            val saved = app.queueStore.load() ?: return
+            if (base.value.queue.isNotEmpty() || (controller?.mediaItemCount ?: 0) > 0) return
+            applyDormant(saved)
+        } finally {
+            WidgetHub.authoritative.value = true
+            startPersistence()
+        }
+    }
+
+    private fun applyDormant(saved: SavedPlayback) {
+        dormant = saved
+        val current = saved.current
+        saved.cursor.shapeChoice?.let { NowPlayingShape.restore(current.key, it) }
+        val tracks = saved.songs.map(::canonicalForSong)
+        val track = tracks.getOrNull(saved.index)
+        base.update {
+            it.copy(
+                queue = saved.songs,
+                canonicalQueue = tracks,
+                queueId = it.queueId + 1,
+                current = current,
+                currentTrack = track,
+                currentSource = track?.sources?.find { source -> source.song.key == current.key },
+                duration = saved.cursor.durationMs.takeIf { duration -> duration > 0 } ?: current.duration * 1000L,
+                playing = false,
+            )
+        }
+        _position.value = saved.cursor.positionMs
+        anchor.value = PositionAnchor(current.key, saved.cursor.positionMs, SystemClock.elapsedRealtime())
+        loadLyrics(current)
+    }
+
+    private var persistenceStarted = false
+
+    /** 队列一变（停 1 秒再写）就落盘；位置由 [persistCursor] 在切歌、暂停和播放中每 10 秒写一次。 */
+    private fun startPersistence() {
+        if (persistenceStarted) return
+        persistenceStarted = true
+        viewModelScope.launch {
+            base.map { it.queue }
+                .distinctUntilChanged { old, new -> old === new }
+                .debounce(QUEUE_SAVE_DEBOUNCE_MS)
+                .collect { queue ->
+                    app.queueStore.saveQueue(queue)
+                    if (queue.isNotEmpty()) persistCursor()
+                }
+        }
+    }
+
+    private fun persistCursor() {
+        if (!persistenceStarted) return
+        val state = base.value
+        val song = state.current ?: return
+        if (state.queue.isEmpty()) return
+        val sleeping = dormant
+        val player = controller
+        val (index, position) = when {
+            sleeping != null -> sleeping.index to sleeping.cursor.positionMs
+            player != null && player.mediaItemCount > 0 -> player.currentMediaItemIndex to player.currentPosition
+            else -> return
+        }
+        val shape = NowPlayingShape.current.value.takeIf { it.songKey == song.key }?.shape?.name.orEmpty()
+        val cursor = SavedCursor(song.key, index, position.coerceAtLeast(0), state.duration, shape)
+        viewModelScope.launch { app.queueStore.saveCursor(cursor) }
+    }
+
+    private var resumeJob: Deferred<Boolean>? = null
+
+    /** 界面或组件上按播放 / 切歌，而播放器还是空的：把 [dormant] 解析好装进去开播。连点只跑一次。 */
+    private fun launchResume(index: Int? = null, positionMs: Long? = null): Deferred<Boolean> {
+        resumeJob?.takeIf { it.isActive }?.let { return it }
+        return viewModelScope.async { resumeDormant(index, positionMs) }.also { resumeJob = it }
+    }
+
+    private suspend fun resumeDormant(index: Int?, positionMs: Long?): Boolean {
+        val player = awaitController() ?: return false
+        restoreJob?.await()
+        val saved = dormant ?: return player.mediaItemCount > 0
+        if (player.mediaItemCount > 0) {
+            dormant = null
+            player.play()
+            return true
+        }
+        val start = index ?: saved.index
+        val items = resolveDormant(saved, start, positionMs ?: if (index == null) saved.cursor.positionMs else 0L)
+            ?: return false
+        if (player.mediaItemCount > 0) return true
+        player.setMediaItems(items.mediaItems, items.startIndex, items.startPositionMs)
+        player.prepare()
+        player.play()
+        return true
+    }
+
+    /**
+     * 系统媒体控件、蓝牙耳机的继续播放（[PlaybackService] 的 onPlaybackResumption）。播放器是空的，
+     * 从 [dormant] 或磁盘取回队列；[forPlayback] 时把当前这首的地址解析好（解析不出来往后试几首）再交给播放器。
+     */
+    suspend fun buildResumption(forPlayback: Boolean): MediaSession.MediaItemsWithStartPosition? {
+        restoreJob?.await()
+        if (dormant == null && base.value.queue.isEmpty()) app.queueStore.load()?.let(::applyDormant)
+        val saved = dormant ?: return null
+        if (!forPlayback) {
+            return MediaSession.MediaItemsWithStartPosition(saved.songs.map(::mediaItem), saved.index, saved.cursor.positionMs)
+        }
+        return resolveDormant(saved, saved.index, saved.cursor.positionMs)
+    }
+
+    /** 解析 [saved] 里第 [index] 首的地址；不行就往后试，最多 [RESUME_TRIES] 首、[RESUME_TIMEOUT_MS]。成功后队列转成在播。 */
+    private suspend fun resolveDormant(
+        saved: SavedPlayback,
+        index: Int,
+        positionMs: Long,
+    ): MediaSession.MediaItemsWithStartPosition? {
+        val songs = saved.songs
+        if (songs.isEmpty()) return null
+        val tracks = base.value.canonicalQueue.takeIf { it.size == songs.size && base.value.queue === songs }
+            ?: songs.map(::canonicalForSong)
+        val first = index.coerceIn(0, songs.lastIndex)
+        var notice = ""
+        val found = withTimeoutOrNull(RESUME_TIMEOUT_MS) {
+            for (at in first..minOf(songs.lastIndex, first + RESUME_TRIES - 1)) {
+                val track = tracks[at]
+                val local = localFileFor(track)
+                if (local != null) {
+                    return@withTimeoutOrNull Resumed(at, track, local.first, local.first.song.copy(url = Uri.fromFile(local.second).toString()))
+                }
+                val result = resolvePlayable(track, pinnedProviders[track.id])
+                val ready = result.resolution as? Resolution.Ready
+                if (ready != null) return@withTimeoutOrNull Resumed(at, result.track, ready.source, ready.source.song.copy(url = ready.url))
+                notice = noSourceMessage(result.track, result.resolution)
+            }
+            null
+        }
+        if (found == null) {
+            base.update { it.copy(playbackNotice = notice.ifBlank { "暂时连不上音源，稍后再试" }) }
+            return null
+        }
+        // 解析期间用户在 App 里放了别的：这份队列已经不是当前的了
+        if (dormant !== saved) return null
+        val queue = songs.mapIndexed { i, song -> if (i == found.index) found.song else song }
+        val canonical = tracks.mapIndexed { i, track -> if (i == found.index) found.track else track }
+        dormant = null
+        base.update {
+            it.copy(
+                queue = queue,
+                canonicalQueue = canonical,
+                current = found.song,
+                currentTrack = found.track,
+                currentSource = found.source,
+                playbackNotice = if (found.index != first) "已跳过《${songs[first].title}》：$notice" else "",
+                error = "",
+            )
+        }
+        rememberCanonical(found.track)
+        remember("history", historySong(found.song))
+        if (base.value.lyricsKey != found.song.key) loadLyrics(found.song)
+        return MediaSession.MediaItemsWithStartPosition(
+            queue.map(::mediaItem),
+            found.index,
+            if (found.index == first) positionMs else 0L,
+        )
+    }
+
+    private data class Resumed(val index: Int, val track: CanonicalTrack, val source: TrackSource, val song: Song)
+
+    /** 队列编辑要动播放器里的队列：先把 [dormant] 原样装进去（不解析、不开播），按播放时再走空地址的解析。 */
+    private fun materializeDormant(player: MediaController) {
+        val saved = dormant ?: return
+        dormant = null
+        if (player.mediaItemCount > 0) return
+        player.setMediaItems(base.value.queue.map(::mediaItem), saved.index, saved.cursor.positionMs)
+    }
+
+    /** 等播放真正开始（缓冲或在放）。组件的广播接收器等到这时候才结束，前台服务在点击给的豁免窗口里起来。 */
+    private suspend fun awaitPlaybackStart(timeoutMs: Long = WIDGET_START_TIMEOUT_MS): Boolean {
+        val player = controller ?: return false
+        if (!player.playWhenReady) return true
+        return withTimeoutOrNull(timeoutMs) {
+            while (!(player.playWhenReady &&
+                    (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING))
+            ) {
+                delay(100)
+            }
+            true
+        } ?: false
+    }
+
+    private fun widgetSnapshot(ui: MusicUiState, at: PositionAnchor, player: MediaController?): PlaybackSnapshot? {
+        val song = ui.current ?: return null
+        if (ui.queue.isEmpty()) return null
+        val live = player != null && dormant == null && player.mediaItemCount > 0
+        val index = ui.queue.indexOfFirst { it.key == song.key }.coerceAtLeast(0)
+        val looping = ui.repeat != RepeatMode.Off && ui.queue.size > 1
+        return PlaybackSnapshot(
+            song = song,
+            index = index,
+            queueSize = ui.queue.size,
+            playing = ui.playing,
+            live = live,
+            positionMs = if (at.key == song.key) at.positionMs else 0L,
+            anchorAt = at.at,
+            durationMs = ui.duration,
+            lyrics = if (ui.lyricsKey == song.key) ui.lyrics else "",
+            lyricsReady = ui.lyricsKey == song.key,
+            seed = ui.coverSeed,
+            sourceName = ui.currentSource?.providerName ?: providerName(song.source),
+            quality = ui.currentSource?.qualityLabel?.takeUnless { it == "音质未知" }.orEmpty(),
+            feedModeId = ui.listeningFeed?.modeId.orEmpty(),
+            hasPrevious = ui.queue.size > 1,
+            hasNext = index < ui.queue.lastIndex || looping || ui.listeningFeed != null,
+        )
+    }
+
+    // ---------- 桌面小组件 ----------
+
+    /** MainActivity 每次创建时调；[fresh] 是全新启动（不是旋转重建），收起上次留下的播放页和海报墙。 */
+    fun onUiLaunched(fresh: Boolean) {
+        if (fresh) base.update { it.copy(playerOpen = false, posterOpen = false) }
+        connectController()
+        uiLaunched.value = true
+    }
+
+    fun openFromWidget(target: WidgetTarget) {
+        _widgetTarget.value = target
+    }
+
+    fun consumeWidgetTarget() {
+        _widgetTarget.value = null
+    }
+
+    fun requestLyricsView() {
+        _lyricsView.value = true
+    }
+
+    fun consumeLyricsView() {
+        _lyricsView.value = false
+    }
+
+    fun requestSearch(request: SearchRequest) {
+        _searchRequest.value = request
+    }
+
+    fun consumeSearchRequest() {
+        _searchRequest.value = null
+    }
+
+    /**
+     * 组件上的播放、上一首、下一首（[action] 为 play / next / previous）。播放器里有歌就直接操作；
+     * 空的（进程刚被组件拉起）就从上次的位置接着放。开始放了才返回，返回值是成没成。
+     */
+    suspend fun widgetTransport(action: String): Boolean {
+        val player = awaitController() ?: return false
+        restoreJob?.await()
+        val sleeping = dormant
+        if (sleeping != null && player.mediaItemCount == 0) {
+            val job = when (action) {
+                "next" -> launchResume((sleeping.index + 1).coerceAtMost(sleeping.songs.lastIndex), 0L)
+                "previous" -> launchResume((sleeping.index - 1).coerceAtLeast(0), 0L)
+                else -> launchResume()
+            }
+            return job.await() && awaitPlaybackStart()
+        }
+        if (player.mediaItemCount == 0) return false
+        when (action) {
+            "play" -> if (player.isPlaying || (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING)) {
+                player.pause()
+                return true
+            } else {
+                player.play()
+            }
+            "next" -> player.seekToNextMediaItem()
+            "previous" -> player.seekToPreviousMediaItem()
+        }
+        // 暂停时切歌只换曲目，不等开播
+        return if (player.playWhenReady) awaitPlaybackStart() else true
+    }
+
+    /** 组件上的收藏：收藏或取消当前这首。ViewModel 刚被组件拉起时等磁盘上的队列接上再读当前这首。 */
+    suspend fun toggleFavoriteFromWidget(): Boolean {
+        awaitController()
+        restoreJob?.await()
+        val song = base.value.current ?: return false
+        toggleFavorite(song).join()
+        return true
+    }
+
+    /** 组件里点榜单 / 歌单的一行（[startKey]）或“播放全部”“随机播放”：放整份列表，不弹出播放页。 */
+    suspend fun playListFromWidget(songs: List<Song>, startKey: String?, shuffle: Boolean = false): Boolean {
+        if (songs.isEmpty()) return false
+        val player = awaitController() ?: return false
+        if (shuffle) player.shuffleModeEnabled = true
+        val start = when {
+            shuffle -> songs.indices.random()
+            startKey != null -> songs.indexOfFirst { it.key == startKey }.coerceAtLeast(0)
+            else -> 0
+        }
+        if (!playNow(songs[start], songs, openPlayer = false)) return false
+        return awaitPlaybackStart()
+    }
+
+    /** 组件上的听歌模式播放键：在后台开始漫游，不打开 App。失败时返回 false（错误写进 playbackNotice）。 */
+    suspend fun playModeFromWidget(providerId: String, mode: ListeningMode): Boolean {
+        awaitController() ?: return false
+        val error = startListeningFeed(providerId, mode, cookieFor(providerId), openPlayer = false)
+        if (error != null) {
+            base.update { it.copy(playbackNotice = error) }
+            return false
+        }
+        return awaitPlaybackStart()
     }
 
     // ---------- settings ----------
@@ -3349,8 +3910,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // 从“安装未知来源”设置页返回：已授权就直接继续安装，不用再点按钮
             pendingUpdateInstall = false
             viewModelScope.launch { launchUpdateInstaller() }
-        } else if (update.phase == UpdatePhase.Ready && update.file != null && lastInstallOutcome == InstallResult.Launched) {
-            // 之前把用户送到了系统安装器，但用户退出了：回到应用立即再次拉起，更新不能跳过
+        } else if (update.phase == UpdatePhase.Ready && update.file != null &&
+            (lastInstallOutcome == InstallResult.Launched || lastInstallOutcome == null)
+        ) {
+            // 之前把用户送到了系统安装器，但用户退出了：回到应用立即再次拉起，更新不能跳过。
+            // 没拉起过（下载完时界面不在前台，比如组件在后台起播）也在这里拉起
             viewModelScope.launch { launchUpdateInstaller() }
         }
         // 没有待安装的更新时定期复查，发现新版本同样立刻下载
@@ -3415,6 +3979,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         aggregateSearchJob?.cancel()
         collectionSearchJob?.cancel()
         app.update.cancelDownload()
+        controllerFuture?.cancel(true)
         controller?.release()
         super.onCleared()
     }
@@ -3441,6 +4006,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 听歌模式队列的标记，写在 Song.extra 里。 */
         const val FEED_MARK = LISTENING_FEED_MARK
+
+        const val CONTROLLER_TIMEOUT_MS = 5_000L
+
+        /** 队列变动后停这么久再落盘，连续改队列（听歌模式续一批、批量加入）只写一次。 */
+        const val QUEUE_SAVE_DEBOUNCE_MS = 1_000L
+
+        /** 进度循环 500ms 一圈，20 圈存一次位置。 */
+        const val CURSOR_SAVE_TICKS = 20
+
+        /** 继续播放最多往后试几首、总共等多久：系统要求前台服务 10 秒内起来。 */
+        const val RESUME_TRIES = 3
+        const val RESUME_TIMEOUT_MS = 6_000L
+
+        /** 组件的广播接收器最多等播放开始这么久。 */
+        const val WIDGET_START_TIMEOUT_MS = 8_000L
         val LINK_PATTERN = Regex("""https?://\S+""", RegexOption.IGNORE_CASE)
     }
 }
@@ -3476,7 +4056,7 @@ private val SavedSongJson = Json { ignoreUnknownKeys = true }
 fun SavedSong.song(json: Json = SavedSongJson) = json.decodeFromString<Song>(payload)
 fun DownloadRecord.song(json: Json = SavedSongJson) = json.decodeFromString<Song>(payload)
 
-private fun AppSettings.toAppearance() = Appearance(
+internal fun AppSettings.toAppearance() = Appearance(
     theme = theme,
     layout = LayoutMode.entries.find { it.name == layoutMode } ?: LayoutMode.Auto,
     colorSource = ColorSource.entries.find { it.name == colorSource } ?: ColorSource.Cover,

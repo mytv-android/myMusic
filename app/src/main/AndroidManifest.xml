@@ -61,6 +61,18 @@
                 android:name="beidouui_icon"
                 android:value="tcl_launcher_card.png" />
         </activity>
+        <!-- 桌面小组件的配置页（背景、榜单、歌单、听歌模式、歌词翻译）：添加时可跳过，长按组件重新进来 -->
+        <activity
+            android:name=".widget.WidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/widget_config_title"
+            android:taskAffinity=""
+            android:theme="@style/Theme.MyMusic">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
         <service
             android:name=".playback.PlaybackService"
             android:exported="true"
@@ -69,6 +81,82 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+        <!-- 进程不在时蓝牙耳机的播放键、Android 11+ 媒体控件的“继续播放”：拉起 PlaybackService 接上存下来的队列 -->
+        <receiver
+            android:name=".playback.ResumeButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 桌面小组件（Glance）。全部由 App 推送，见 widget/WidgetUpdater -->
+        <receiver
+            android:name=".widget.NowPlayingWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_now_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_now_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.LyricsWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_lyrics_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_lyrics_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.ModeWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_mode_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_mode_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.ChartWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_charts_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_charts_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.ListWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_list_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_list_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.ToolsWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_tools_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_tools_info" />
+        </receiver>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

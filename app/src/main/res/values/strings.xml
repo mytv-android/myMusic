@@ -1,4 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">myMusic</string>
+
+    <!-- 系统媒体按键拉起播放服务、续播失败时的兜底通知 -->
+    <string name="playback_resume_channel">继续播放</string>
+    <string name="playback_resume_failed">暂时无法继续播放</string>
+
+    <!-- 桌面小组件：名字和选择器里的一句说明（android:description） -->
+    <string name="widget_now_name">正在播放</string>
+    <string name="widget_now_description">封面、进度和切歌按钮，颜色跟着封面换</string>
+    <string name="widget_lyrics_name">歌词</string>
+    <string name="widget_lyrics_description">当前一句和下一句，可以设成透明背景</string>
+    <string name="widget_mode_name">听歌模式</string>
+    <string name="widget_mode_description">一键开始私人漫游或场景电台</string>
+    <string name="widget_charts_name">榜单</string>
+    <string name="widget_charts_description">选一张榜单，看前几名和排名变化</string>
+    <string name="widget_list_name">歌单</string>
+    <string name="widget_list_description">我喜欢、最近播放或任意歌单，点哪首播哪首</string>
+    <string name="widget_tools_name">快捷入口</string>
+    <string name="widget_tools_description">听歌识曲、搜索、我喜欢、定时关闭</string>
+    <string name="widget_config_title">小组件设置</string>
 </resources>

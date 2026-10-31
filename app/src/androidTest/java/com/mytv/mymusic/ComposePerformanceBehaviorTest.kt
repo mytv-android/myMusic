@@ -1,7 +1,6 @@
 package com.mytv.mymusic
 
 import androidx.activity.ComponentActivity
-import androidx.lifecycle.ViewModelProvider
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicViewModel
 import com.mytv.mymusic.ui.MusicUiState
@@ -45,6 +44,7 @@ import com.mytv.mymusic.ui.ChartsUiState
 import com.mytv.mymusic.ui.SearchUiState
 import com.mytv.mymusic.ui.charts.TvChartsTestHost
 import com.mytv.mymusic.ui.search.SearchScreen
+import com.mytv.mymusic.recognize.RecognitionUiState
 import com.mytv.mymusic.ui.search.SearchResultsTestHost
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.LibrarySearchUiState
@@ -247,7 +247,7 @@ class ComposePerformanceBehaviorTest {
         val visible = mutableStateOf(true)
         val position = mutableLongStateOf(0L)
         lateinit var actions: MusicActions
-        compose.runOnUiThread { actions = MusicActions(ViewModelProvider(compose.activity)[MusicViewModel::class.java]) }
+        compose.runOnUiThread { actions = MusicActions((compose.activity.application as MyMusicApp).musicViewModel) }
         val state = MusicUiState(current = Song(id = "one", name = "sample", source = "test"), duration = 120_000L)
         compose.setContent {
             TestTheme {
@@ -267,7 +267,7 @@ class ComposePerformanceBehaviorTest {
     @Test
     fun widePlayerDoubleTapStillFavoritesTheSong() {
         lateinit var model: MusicViewModel
-        compose.runOnUiThread { model = ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
+        compose.runOnUiThread { model = (compose.activity.application as MyMusicApp).musicViewModel }
         val actions = MusicActions(model)
         val song = Song(id = "wide-test-${System.nanoTime()}", name = "wide gesture", source = "test")
         val position = mutableLongStateOf(0L)
@@ -357,7 +357,7 @@ class ComposePerformanceBehaviorTest {
         val search = mutableStateOf(SearchUiState(query = "https://music.163.com/playlist?id=123"))
         val actions = testActions()
         compose.setContent {
-            TestTheme { SearchScreen(app.value, search.value, emptyList(), emptyList(), actions, {}) }
+            TestTheme { SearchScreen(app.value, search.value, emptyList(), emptyList(), actions, RecognitionUiState(), {}) }
         }
         compose.onNodeWithText("解析网易云音乐 链接").assertExists()
         compose.onNodeWithText("解析", substring = false).assertDoesNotExist()
@@ -420,7 +420,7 @@ class ComposePerformanceBehaviorTest {
 
     private fun testActions(): MusicActions {
         lateinit var actions: MusicActions
-        compose.runOnUiThread { actions = MusicActions(ViewModelProvider(compose.activity)[MusicViewModel::class.java]) }
+        compose.runOnUiThread { actions = MusicActions((compose.activity.application as MyMusicApp).musicViewModel) }
         return actions
     }
 

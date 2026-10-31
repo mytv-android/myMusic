@@ -1,5 +1,6 @@
 package com.mytv.mymusic
 
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.os.Bundle
@@ -15,23 +16,31 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mytv.mymusic.ui.MusicViewModel
 import com.mytv.mymusic.ui.MyMusicApp
+import com.mytv.mymusic.widget.ChartWidgetWorker
+import com.mytv.mymusic.widget.WidgetLinks
 import com.mytv.mymusic.ui.components.LocalDarkBarsRequests
 import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.MyMusicTheme
 import com.mytv.mymusic.ui.theme.isTelevision
 
 class MainActivity : ComponentActivity() {
+    private val model get() = (application as com.mytv.mymusic.MyMusicApp).musicViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // ViewModel 是进程级的，activity 退出后它还在：全新启动时收起上次留下的播放页
+        model.onUiLaunched(fresh = savedInstanceState == null)
+        if (savedInstanceState == null) {
+            openWidgetTarget(intent)
+            // 桌面上有榜单组件时顺带刷一次榜（上次刷新超过半小时才刷）
+            ChartWidgetWorker.refreshOnOpen(this)
+        }
         enableEdgeToEdge()
         // 三键导航下系统会在导航栏铺一层白色遮罩，盖住我们自己的磨砂底栏
         if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         setContent {
-            val model: MusicViewModel = viewModel()
+            val model = remember { model }
             val state by model.state.collectAsState()
             // 手动布局模式同时锁定屏幕方向；自动保持系统默认
             LaunchedEffect(state.appearance.layout) {
@@ -68,6 +77,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openWidgetTarget(intent)
+    }
+
+    /** 桌面小组件点开 App 时带着目标页（播放页、搜索、某个榜单……），交给界面去跳。 */
+    private fun openWidgetTarget(intent: Intent?) {
+        val target = WidgetLinks.parse(intent) ?: return
+        WidgetLinks.consume(intent)
+        model.openFromWidget(target)
+    }
+
     /**
      * 电视通常不当背景音乐播放器：用户主动离开（按 Home、切到别的应用、从最近任务切换）时才暂停，
      * 手机和平板保留后台播放。
@@ -90,6 +112,6 @@ class MainActivity : ComponentActivity() {
     private fun pauseOnLeave() {
         // 旋转等配置变更只是重建 activity，人还在应用里
         if (isChangingConfigurations) return
-        ViewModelProvider(this)[MusicViewModel::class.java].onAppBackgrounded()
+        model.onAppBackgrounded()
     }
 }

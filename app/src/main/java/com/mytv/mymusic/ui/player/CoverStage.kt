@@ -66,6 +66,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.size.Precision
 import com.mytv.mymusic.data.CoverShapeChoice
+import com.mytv.mymusic.playback.NowPlayingShape
 import com.mytv.mymusic.ui.CoverBox
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.rememberSettlingOffsetState
@@ -76,12 +77,11 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
-import kotlin.random.Random
 
 /**
  * 形状封面：封面裁成 MaterialShapes 形状，后面垫一层放大模糊的同图光晕。
  *
- * - 形状：[shapeChoice] 为“随机”时每首歌抽一种（[PlayerCoverShapes]，关掉再开不换）；固定时始终用那一种。
+ * - 形状：[shapeChoice] 为“随机”时每首歌抽一种（[NowPlayingShape]，切歌时由播放层抽好，关掉再开不换）；固定时始终用那一种。
  *   暂停变成圆角方形看全图（慢速空间弹簧），切歌形变到新形状；固定模式切歌形状不变，只交叉淡入封面图。
  * - 旋转：播放时外轮廓 40 秒一圈（没有封面图时转的是首字占位的轮廓），画面本身保持正向；暂停时停下并随形变转回正向。
  *   减少动画时不转、形变直接切换。电视上旋转和背景共用 30 帧节拍（[TvFrameGate]）。
@@ -115,7 +115,7 @@ fun CoverStage(
     // 和背景一样把系统“移除动画”当成减少动画：旋转是自己跑的帧循环，不受动画时长缩放影响
     val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
     val motion = MaterialTheme.motionScheme
-    val songShape = remember(shapeChoice, trackKey) { PlayerCoverShapes.resolve(shapeChoice, trackKey) }
+    val songShape = remember(shapeChoice, trackKey) { NowPlayingShape.resolve(shapeChoice, trackKey) }
     val target = when {
         collapsed -> CollapsedPolygon
         !playing -> PausedPolygon
@@ -657,33 +657,6 @@ internal fun advanceSpin(angle: Float, elapsedNanos: Long): Float =
 
 /** 停下时转回最近的直角：圆角方形四向对称，任何一个直角都是正向。 */
 internal fun restingAngle(angle: Float): Float = (angle / 90f).roundToInt() * 90f
-
-/**
- * “随机”封面形状的播放会话：记住当前这首歌（按 key）抽到的形状，进程内有效。
- * 关掉再打开播放页、几处封面同时显示时都读这一份；换歌才重新抽，且不和上一首重复。
- * 固定形状也记下来：再切回“随机”时这首保持当前形状，下一首才开始抽。
- */
-internal class CoverShapeSession(private val random: Random = Random.Default) {
-    private var key: String? = null
-    private var shape: CoverShapeChoice? = null
-
-    fun resolve(choice: CoverShapeChoice, songKey: String): CoverShapeChoice {
-        if (choice != CoverShapeChoice.Random) {
-            key = songKey
-            shape = choice
-            return choice
-        }
-        val current = shape
-        if (songKey == key && current != null) return current
-        return nextRandomCoverShape(current, random).also {
-            key = songKey
-            shape = it
-        }
-    }
-}
-
-/** 播放页共用的随机形状会话，进程内只有一份。 */
-internal val PlayerCoverShapes = CoverShapeSession()
 
 private val fittedShapes = HashMap<CoverShapeChoice, RoundedPolygon>()
 

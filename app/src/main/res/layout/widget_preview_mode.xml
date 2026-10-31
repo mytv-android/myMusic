@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 到 14 组件选择器里的预览（previewLayout）：按选择器给的大小缩放，深浅跟系统。15 起换成 Glance 实时生成的预览。 -->
+<ImageView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:importantForAccessibility="no"
+    android:scaleType="fitCenter"
+    android:src="@drawable/widget_preview_mode" />

@@ -1,6 +1,10 @@
 package com.mytv.mymusic
 
 import android.app.Application
+import android.os.Looper
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.cache.SimpleCache
 import com.mytv.mymusic.data.AppDatabase
@@ -12,8 +16,11 @@ import com.mytv.mymusic.data.sync.SyncCoordinator
 import com.mytv.mymusic.data.update.UpdateRepository
 import com.mytv.mymusic.playback.AdjustableLruEvictor
 import com.mytv.mymusic.playback.EqualizerController
+import com.mytv.mymusic.playback.QueueStore
 import com.mytv.mymusic.playback.RhythmAnalyzer
 import com.mytv.mymusic.playback.SleepTimer
+import com.mytv.mymusic.ui.MusicViewModel
+import com.mytv.mymusic.widget.WidgetUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,7 +31,7 @@ import com.mytv.mymusic.ui.theme.isTelevision
 import java.io.File
 
 @androidx.annotation.OptIn(UnstableApi::class)
-class MyMusicApp : Application() {
+class MyMusicApp : Application(), ViewModelStoreOwner {
     lateinit var repository: MusicRepository
     lateinit var settings: SettingsStore
     lateinit var database: AppDatabase
@@ -35,9 +42,25 @@ class MyMusicApp : Application() {
     lateinit var rhythmAnalyzer: RhythmAnalyzer
     lateinit var sync: SyncCoordinator
     lateinit var update: UpdateRepository
+    lateinit var queueStore: QueueStore
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val sleepTimer by lazy { SleepTimer(appScope) }
+
+    override val viewModelStore = ViewModelStore()
+
+    /**
+     * 整个进程共用的播放 ViewModel：界面、桌面小组件、播放服务（继续播放）都用它，界面关掉后组件仍能控制播放器、
+     * 解析下一首。MediaController 绑在创建它的线程的 Looper 上，所以只能在主线程第一次取。
+     */
+    private val musicViewModelLazy = lazy {
+        check(Looper.myLooper() == Looper.getMainLooper()) { "musicViewModel 只能在主线程创建" }
+        ViewModelProvider(this, ViewModelProvider.AndroidViewModelFactory.getInstance(this))[MusicViewModel::class.java]
+    }
+    val musicViewModel: MusicViewModel by musicViewModelLazy
+
+    /** ViewModel 已经建过了；播放服务收尾时只在它存在时通知，不为此新建一个。 */
+    val hasMusicViewModel: Boolean get() = musicViewModelLazy.isInitialized()
 
     override fun onCreate() {
         super.onCreate()
@@ -79,6 +102,9 @@ class MyMusicApp : Application() {
             scope = appScope,
         )
         update = UpdateRepository(this, settings)
+        queueStore = QueueStore(this)
+        // 桌面小组件：播放、设置、收藏、亮灭屏变化时合并刷新（手机和平板才有桌面组件）
+        if (!isTelevision()) WidgetUpdater.start(this)
     }
 
     private fun createMediaCache(): SimpleCache {

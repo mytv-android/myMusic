@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 起：配置页可跳过、长按重新配置（只有背景一项）。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_tools_description"
+    android:initialLayout="@layout/widget_loading"
+    android:previewImage="@drawable/widget_preview_tools"
+    android:previewLayout="@layout/widget_preview_tools"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:minResizeWidth="40dp"
+    android:minResizeHeight="40dp"
+    android:maxResizeHeight="220dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen"
+    android:configure="com.mytv.mymusic.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional" />

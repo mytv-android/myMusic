@@ -97,10 +97,18 @@ fun PlayerScreen(
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
     sheetOpen: Boolean = false,
+    lyricsRequest: Boolean = false,
+    onLyricsRequestHandled: () -> Unit = {},
 ) {
     val song = state.current ?: return
     val window = LocalAppWindow.current
     var lyricsMode by rememberSaveable { mutableStateOf(false) }
+    // 桌面歌词组件点进来：直接进歌词视图
+    LaunchedEffect(lyricsRequest) {
+        if (!lyricsRequest) return@LaunchedEffect
+        lyricsMode = true
+        onLyricsRequestHandled()
+    }
     var burst by remember { mutableIntStateOf(0) }
     // 预测性返回：手势过程中播放页缩小、下移、圆角变大，松手才真正收起
     var backProgress by remember { mutableFloatStateOf(0f) }

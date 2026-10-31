@@ -71,6 +71,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
+import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.ui.adaptive.BottomPlayerBar
 import com.mytv.mymusic.ui.adaptive.BottomPlayerBarHeight
 import com.mytv.mymusic.ui.adaptive.NowPlayingPane
@@ -97,6 +98,8 @@ import com.mytv.mymusic.ui.settings.settingsRoutes
 import com.mytv.mymusic.ui.theme.LocalHazeState
 import com.mytv.mymusic.ui.theme.PlayerTheme
 import com.mytv.mymusic.ui.tv.TvNavRail
+import com.mytv.mymusic.widget.SearchRequest
+import com.mytv.mymusic.widget.WidgetTarget
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 
@@ -164,6 +167,52 @@ fun MyMusicApp(model: MusicViewModel) {
 
     val app = remember(nav, model, actions) { AppNav(nav, model, actions, ::openTab, ::openSettings) }
     LaunchedEffect(window.showNowPlayingPane) { model.setAutoOpenPlayer(!window.showNowPlayingPane) }
+
+    // 桌面小组件点进来要去的页面：冷启动和已在前台都从这里走（MainActivity 把 Intent 里的目标交给 ViewModel）
+    val widgetTarget by model.widgetTarget.collectAsState()
+    val lyricsRequest by model.lyricsViewRequest.collectAsState()
+    LaunchedEffect(widgetTarget) {
+        val target = widgetTarget ?: return@LaunchedEffect
+        model.consumeWidgetTarget()
+        // 播放页、定时面板之外的目标都在主界面上：先收起盖在上面的播放页和海报墙
+        val overPlayer = target == WidgetTarget.Player || target == WidgetTarget.Lyrics || target == WidgetTarget.Timer
+        if (!overPlayer) {
+            actions.closePlayer()
+            actions.closePosterWall()
+        }
+        when (target) {
+            WidgetTarget.Player -> model.openPlayer(true)
+            WidgetTarget.Lyrics -> {
+                model.openPlayer(true)
+                model.requestLyricsView()
+            }
+            WidgetTarget.Timer -> {
+                model.openPlayer(true)
+                timerOpen = true
+            }
+            WidgetTarget.Search -> {
+                openTab(TopTab.Search.route)
+                model.requestSearch(SearchRequest.Focus)
+            }
+            WidgetTarget.Recognize -> {
+                openTab(TopTab.Search.route)
+                model.requestSearch(SearchRequest.Recognize)
+            }
+            WidgetTarget.Login -> openSettings("settings/accounts")
+            WidgetTarget.Favorites -> nav.navigate("favorites") { launchSingleTop = true }
+            WidgetTarget.History -> nav.navigate("history") { launchSingleTop = true }
+            WidgetTarget.Modes -> {
+                openTab(TopTab.Playlists.route)
+                actions.setPlaylistMode(PlaylistMode.Listening)
+            }
+            WidgetTarget.Charts -> openTab(TopTab.Charts.route)
+            is WidgetTarget.Chart -> {
+                openTab(TopTab.Charts.route)
+                actions.openChart(TopList(id = target.id, name = target.name, source = target.source))
+            }
+            is WidgetTarget.LocalPlaylist -> nav.navigate("localPlaylist/${target.id}") { launchSingleTop = true }
+        }
+    }
 
     // 选中的入口跟着返回栈走：详情页这类不是入口的页面归到栈里它下面最近的入口，
     // 从详情页进设置再返回时选中的回到原来的入口，不停在设置上
@@ -358,6 +407,8 @@ fun MyMusicApp(model: MusicViewModel) {
                         onOpenQueue = { queueOpen = true },
                         onOpenTimer = { timerOpen = true },
                         sheetOpen = queueOpen || timerOpen,
+                        lyricsRequest = lyricsRequest,
+                        onLyricsRequestHandled = model::consumeLyricsView,
                     )
                 }
                 }

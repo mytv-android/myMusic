@@ -101,6 +101,7 @@ import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -140,6 +141,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mytv.mymusic.widget.SearchRequest
 import com.mytv.mymusic.aggregate.AggregationSettings
 import com.mytv.mymusic.aggregate.Availability
 import com.mytv.mymusic.aggregate.CanonicalCollection
@@ -296,6 +298,8 @@ fun SearchScreen(
     actions: MusicActions,
     recognition: RecognitionUiState,
     onOpenSearchSettings: () -> Unit,
+    widgetRequest: SearchRequest? = null,
+    onWidgetRequestHandled: () -> Unit = {},
 ) {
     val window = LocalAppWindow.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -381,6 +385,17 @@ fun SearchScreen(
         null
     }
 
+    // 桌面小组件点进来：搜索条要聚焦输入框（可以直接粘贴分享链接），识曲按钮直接开始听
+    var focusSignal by remember { mutableIntStateOf(0) }
+    LaunchedEffect(widgetRequest) {
+        val request = widgetRequest ?: return@LaunchedEffect
+        onWidgetRequestHandled()
+        when (request) {
+            SearchRequest.Focus -> focusSignal++
+            SearchRequest.Recognize -> onRecognize?.invoke()
+        }
+    }
+
     // 编辑态返回：手势过程中首页内容跟手淡出上移，松手才收起编辑、回到结果
     var editingBack by remember { mutableFloatStateOf(0f) }
     PredictiveBackHandler(enabled = editing.value && !ctx.landing) { events ->
@@ -409,7 +424,7 @@ fun SearchScreen(
         if (window.isTv) {
             TvSearch(ctx, showHome, onEdit = onEdit)
         } else {
-            TouchSearch(ctx, showHome, editing.value, onEdit = onEdit, onRecognize = onRecognize)
+            TouchSearch(ctx, showHome, editing.value, onEdit = onEdit, onRecognize = onRecognize, focusSignal = focusSignal)
         }
     }
 
@@ -476,11 +491,17 @@ private fun TouchSearch(
     editing: Boolean,
     onEdit: (Boolean) -> Unit,
     onRecognize: (() -> Unit)?,
+    focusSignal: Int = 0,
 ) {
     val window = LocalAppWindow.current
     val landing = ctx.submittedQuery.value.isBlank()
     val focusManager = LocalFocusManager.current
     val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(focusSignal) {
+        if (focusSignal == 0) return@LaunchedEffect
+        withFrameNanos { }
+        runCatching { fieldFocus.requestFocus() }
+    }
     // 平板有结果时，输入中改成搜索框下方的 Docked search view，叠在结果上
     val docked = window.isTablet && editing && !landing
     val narrow = if (window.isPhone) Modifier.fillMaxWidth() else Modifier.widthIn(max = 640.dp).fillMaxWidth()

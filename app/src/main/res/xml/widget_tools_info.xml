@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 全部由 App 推送，updatePeriodMillis 为 0。配置页（背景）只在 Android 12 起给：可跳过、长按重新配置；更早的系统添加时会强制弹配置页，就不给了（见 xml-v31）。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_tools_description"
+    android:initialLayout="@layout/widget_loading"
+    android:previewImage="@drawable/widget_preview_tools"
+    android:previewLayout="@layout/widget_preview_tools"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:minResizeWidth="40dp"
+    android:minResizeHeight="40dp"
+    android:maxResizeHeight="220dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

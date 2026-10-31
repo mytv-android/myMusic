@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 小组件里的计时文字：已播时间和定时关闭的倒数。系统自己每秒走字，组件不用推。
+     等宽数字（tnum），走字时宽度不跳；颜色、字号、基准时间由 WidgetChronometer 设置。 -->
+<Chronometer xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_chronometer"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:fontFeatureSettings="tnum"
+    android:maxLines="1"
+    android:textSize="11sp" />

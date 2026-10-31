@@ -4,10 +4,10 @@ import androidx.compose.material3.MaterialShapes
 import androidx.graphics.shapes.Cubic
 import androidx.graphics.shapes.Morph
 import com.mytv.mymusic.data.CoverShapeChoice
-import com.mytv.mymusic.ui.player.CoverShapeSession
+import com.mytv.mymusic.playback.CoverShapeSession
 import com.mytv.mymusic.ui.player.MorphStep
 import com.mytv.mymusic.ui.player.PausedCoverPolygon
-import com.mytv.mymusic.ui.player.RandomCoverShapes
+import com.mytv.mymusic.playback.RandomCoverShapes
 import com.mytv.mymusic.ui.player.advanceSpin
 import com.mytv.mymusic.ui.player.coverPolygon
 import com.mytv.mymusic.ui.player.fitForRotation

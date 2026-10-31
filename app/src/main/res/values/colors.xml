@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 小组件第一次画出来之前的占位（initialLayout）：品牌松绿种子色的 surfaceContainer 和 primary -->
+    <color name="widget_loading_surface">#FFE9EFEC</color>
+    <color name="widget_loading_ink">#FF006B5F</color>
+</resources>

@@ -15,6 +15,7 @@ fun NavGraphBuilder.searchRoutes(app: AppNav) {
         val favorites by app.model.favorites.collectAsState()
         val playlists by app.model.localPlaylists.collectAsState()
         val recognition by app.model.recognitionState.collectAsState()
+        val widgetRequest by app.model.searchRequest.collectAsState()
         SearchScreen(
             state = state,
             search = search,
@@ -23,6 +24,8 @@ fun NavGraphBuilder.searchRoutes(app: AppNav) {
             actions = app.actions,
             recognition = recognition,
             onOpenSearchSettings = { app.openSettings("settings/search") },
+            widgetRequest = widgetRequest,
+            onWidgetRequestHandled = app.model::consumeSearchRequest,
         )
     }
 }

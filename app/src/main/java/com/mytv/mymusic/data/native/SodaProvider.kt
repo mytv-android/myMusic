@@ -120,7 +120,13 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val trackId = songTrackId(song)
         if (trackId.isEmpty()) throw IllegalStateException("track id is empty")
         findCachedFile(trackId, workDir)?.let {
-            return PlayableStream(Uri.fromFile(it).toString(), ext = it.extension.lowercase(), bitrate = song.bitrate)
+            // 文件名末段是播放信息里的原始码率（bps）；旧版本存下的 Song.bitrate 可能也是 bps，不能照搬
+            val cachedBitrate = it.nameWithoutExtension.substringAfterLast('-').toIntOrNull()?.takeIf { br -> br > 0 }
+            return PlayableStream(
+                Uri.fromFile(it).toString(),
+                ext = it.extension.lowercase(),
+                bitrate = cachedBitrate?.let(::normalizeSodaBitrate) ?: song.bitrate,
+            )
         }
         val info = resolveDownloadInfo(cookie, trackId, null)
         if (info.url.trim().isEmpty()) throw IllegalStateException("player info url not found")
@@ -128,7 +134,8 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return PlayableStream(
             url = url,
             ext = info.format.ifBlank { extensionFromUrl(url) }.ifBlank { song.ext },
-            bitrate = info.bitrate.takeIf { it > 0 } ?: song.bitrate,
+            // 播放信息里的码率是 bps，Song.bitrate 是 kbps
+            bitrate = info.bitrate.takeIf { it > 0 }?.let(::normalizeSodaBitrate) ?: song.bitrate,
             level = info.quality,
         )
     }

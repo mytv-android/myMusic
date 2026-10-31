@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 占位布局的底：和组件外框一样的 24dp 圆角，颜色跟系统深浅走。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/widget_loading_surface" />
+    <corners android:radius="24dp" />
+</shape>
