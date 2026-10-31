@@ -10,6 +10,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
@@ -124,6 +125,10 @@ import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.providerName
+import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
+import com.mytv.mymusic.ui.adaptive.FoldRow
+import com.mytv.mymusic.ui.adaptive.LocalFoldPane
+import com.mytv.mymusic.ui.adaptive.bottom
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.IconTone
 import com.mytv.mymusic.ui.components.ListRow
@@ -361,66 +366,93 @@ private fun TabletLibrary(
     val conflictIds = sync.conflicts.map { it.playlistId }.toSet()
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottom = LocalOverlayPadding.current.calculateBottomPadding()
-    Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        LazyColumn(
-            Modifier.width(380.dp).fillMaxHeight(),
-            contentPadding = PaddingValues(start = 24.dp, end = 16.dp, top = top + 28.dp, bottom = bottom + 24.dp),
-            verticalArrangement = Arrangement.spacedBy(SegmentGap),
-        ) {
-            item(key = "head", contentType = "header") {
-                Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("我的", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
-                        Text(
-                            syncHeadline(sync),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    // 书本姿态、双竖：列表收到折痕为止，详情在折痕另一侧；双横：列表在上屏、详情在下屏
+    FoldRow(
+        startWidth = 380.dp,
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface),
+        start = {
+            LazyColumn(
+                Modifier.fillMaxHeight(),
+                contentPadding = PaddingValues(start = 24.dp, end = 16.dp, top = top + 28.dp, bottom = LocalFoldPane.current.bottom(bottom + 24.dp)),
+                verticalArrangement = Arrangement.spacedBy(SegmentGap),
+            ) {
+                item(key = "head", contentType = "header") {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("我的", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
+                            Text(
+                                syncHeadline(sync),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        SyncCloudButton(sync, nav.openSync)
+                    }
+                }
+                item(key = "bento", contentType = "bento") {
+                    val onPlayFavorites: (() -> Unit)? = favorites.takeIf { it.isNotEmpty() }?.let { list ->
+                        { actions.playSavedSongs(list) }
+                    }
+                    // 按列表实际宽度选排法：平常 380dp 的列表放得下“左大右二”；
+                    // 书本姿态下列表收到折痕为止（Pixel Fold 不到 300dp），改成一行三张小卡
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        if (maxWidth < LibraryBentoRowWidth) {
+                            LibraryBentoRow(
+                                stats = stats,
+                                onFavorites = nav.openFavorites,
+                                onPlayFavorites = onPlayFavorites,
+                                onHistory = nav.openHistory,
+                                onDownloads = nav.openDownloads,
+                            )
+                        } else {
+                            LibraryBento(
+                                stats = stats,
+                                onFavorites = nav.openFavorites,
+                                onPlayFavorites = onPlayFavorites,
+                                onHistory = nav.openHistory,
+                                onDownloads = nav.openDownloads,
+                                tileHeight = 84.dp,
+                                compact = true,
+                            )
+                        }
+                    }
+                }
+                item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
+                item(key = "plHead", contentType = "section") {
+                    SectionLabel("自建歌单", trailing = { NewPlaylistSplitButton(menu) })
+                }
+                playlistItems(playlists, covers, sync, conflictIds, settled, selected, onOpen = { selectedId = it }, onCreate = menu.onCreate, providers = providers)
+            }
+        },
+        end = {
+            Surface(
+                modifier = Modifier.fillMaxHeight(),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                // 双横叠在下屏时圆角朝上，平常朝左贴着列表
+                shape = if (LocalFoldPane.current?.stacked == true) {
+                    RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+                } else {
+                    RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp)
+                },
+            ) {
+                if (selected != null) {
+                    androidx.compose.runtime.key(selected) {
+                        detailPane(selected) { selectedId = null }
+                    }
+                } else if (settled) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        EmptyState(
+                            icon = Icons.Filled.LibraryMusic,
+                            title = "选择或新建一个歌单",
+                            message = "歌单内容会显示在这里，不用跳页。",
+                            actionLabel = "新建歌单",
+                            onAction = menu.onCreate,
                         )
                     }
-                    SyncCloudButton(sync, nav.openSync)
                 }
             }
-            item(key = "bento", contentType = "bento") {
-                LibraryBento(
-                    stats = stats,
-                    onFavorites = nav.openFavorites,
-                    onPlayFavorites = favorites.takeIf { it.isNotEmpty() }?.let { list ->
-                        { actions.playSavedSongs(list) }
-                    },
-                    onHistory = nav.openHistory,
-                    onDownloads = nav.openDownloads,
-                    tileHeight = 84.dp,
-                    compact = true,
-                )
-            }
-            item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
-            item(key = "plHead", contentType = "section") {
-                SectionLabel("自建歌单", trailing = { NewPlaylistSplitButton(menu) })
-            }
-            playlistItems(playlists, covers, sync, conflictIds, settled, selected, onOpen = { selectedId = it }, onCreate = menu.onCreate, providers = providers)
-        }
-        Surface(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp),
-        ) {
-            if (selected != null) {
-                androidx.compose.runtime.key(selected) {
-                    detailPane(selected) { selectedId = null }
-                }
-            } else if (settled) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    EmptyState(
-                        icon = Icons.Filled.LibraryMusic,
-                        title = "选择或新建一个歌单",
-                        message = "歌单内容会显示在这里，不用跳页。",
-                        actionLabel = "新建歌单",
-                        onAction = menu.onCreate,
-                    )
-                }
-            }
-        }
-    }
+        },
+    )
 }
 
 // ---------------- 电视：磁贴行 + 自建歌单行 + 最近播放行 ----------------
@@ -822,6 +854,108 @@ private fun SmallTile(title: String, detail: String, container: Color, content: 
     }
 }
 
+/** 列表比这窄时，顶上的三张卡片改成一行三张小卡（[LibraryBentoRow]）。平板平常的列表内容宽 340dp，不会触发。 */
+internal val LibraryBentoRowWidth = 300.dp
+
+/**
+ * 窄列表（书本姿态下收到折痕为止的左页）的一行三张小卡：喜欢、最近、下载。
+ * 小卡放不下长文案，最近和下载只写首数，占用空间留给下载页。
+ */
+@Composable
+private fun LibraryBentoRow(
+    stats: LibraryStats,
+    onFavorites: () -> Unit,
+    onPlayFavorites: (() -> Unit)?,
+    onHistory: () -> Unit,
+    onDownloads: () -> Unit,
+) {
+    val shape = RoundedCornerShape(24.dp)
+    Row(
+        Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // 喜欢那张要放播放键，比另外两张宽一点
+        Surface(
+            onClick = onFavorites,
+            modifier = Modifier.weight(1.3f).fillMaxHeight().heightIn(min = 96.dp).tvFocusRing(shape),
+            shape = shape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ) {
+            Box {
+                Column(
+                    Modifier.fillMaxSize().padding(12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    HeartBadge(28.dp)
+                    // 大数字和“首喜欢的歌”分开读会变成“0，首喜欢的歌”
+                    Column(Modifier.clearAndSetSemantics { contentDescription = "喜欢的歌，${stats.favorites} 首" }) {
+                        Text(stats.favorites.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                        Text("首喜欢的歌", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                if (onPlayFavorites != null) {
+                    FilledIconButton(
+                        onClick = onPlayFavorites,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).tvFocusRing(CircleShape),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    ) { Icon(Icons.Filled.PlayArrow, "播放喜欢的歌") }
+                }
+            }
+        }
+        MiniTile(
+            title = "最近",
+            detail = when {
+                stats.historyToday > 0 -> "今天 ${stats.historyToday} 首"
+                stats.historyTotal > 0 -> "共 ${stats.historyTotal} 首"
+                else -> "暂无记录"
+            },
+            container = MaterialTheme.colorScheme.tertiaryContainer,
+            content = MaterialTheme.colorScheme.onTertiaryContainer,
+            onClick = onHistory,
+            shape = shape,
+        )
+        MiniTile(
+            title = "下载",
+            detail = when {
+                stats.downloadsActive > 0 -> "${stats.downloadsActive} 首下载中"
+                stats.downloadsDone > 0 -> "${stats.downloadsDone} 首"
+                else -> "暂无下载"
+            },
+            container = MaterialTheme.colorScheme.secondaryContainer,
+            content = MaterialTheme.colorScheme.onSecondaryContainer,
+            onClick = onDownloads,
+            shape = shape,
+        )
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.MiniTile(
+    title: String,
+    detail: String,
+    container: Color,
+    content: Color,
+    onClick: () -> Unit,
+    shape: androidx.compose.ui.graphics.Shape,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 96.dp).tvFocusRing(shape),
+        shape = shape,
+        color = container,
+        contentColor = content,
+    ) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(detail, style = MaterialTheme.typography.labelMedium, color = content)
+        }
+    }
+}
+
 /** 爱心放在 Cookie 形状里：形状只是装饰。 */
 @Composable
 internal fun HeartBadge(size: Dp) {
@@ -1059,7 +1193,10 @@ private fun LinkImportDialog(isLink: (String) -> Boolean, onImport: (String) -> 
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("导入歌单链接") },
+        title = {
+            DialogAvoidsFold()
+            Text("导入歌单链接")
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(

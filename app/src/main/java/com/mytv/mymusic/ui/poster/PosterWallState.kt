@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.focus.FocusRequester
+import com.mytv.mymusic.ui.adaptive.FoldAnchor
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.ceil
@@ -46,6 +47,8 @@ internal data class WallConfig(
     val currentKey: String? = null,
     /** 墙上开着面板（设置、歌曲操作、换源）：按键进了面板的窗口，墙收不到，空闲计时一直归零，浮层不淡出、不起漂。 */
     val holdAwake: Boolean = false,
+    /** 有分页的折痕时大卡那一段（墙本地 dp，见 [wallSpecFor]）；null 是普通窗口。 */
+    val segment: WallSegment? = null,
 )
 
 /**
@@ -155,6 +158,12 @@ internal class PosterWallState internal constructor(
     internal val camera = WallCamera(random = random)
     internal val palette = WallPalette()
     val focusRequester = FocusRequester()
+
+    /**
+     * 墙在窗口里的位置，折痕按它切（[rememberWallSpec]）。页面挂在根节点上、预测性返回的缩放之外：
+     * 和墙同一个矩形，返回手势缩小整页时折痕位置不跟着抖。
+     */
+    val foldAnchor = FoldAnchor()
 
     /** 镜头左上角（dp），摆放阶段读。 */
     internal var camX by mutableFloatStateOf(0f)
@@ -276,7 +285,7 @@ internal class PosterWallState internal constructor(
             lastTick = clock()
         }
         val vp = viewport
-        if (vp != null && (vp.insetTop != c.insetTop || vp.insetBottom != c.insetBottom)) changeInsets(vp, c)
+        if (vp != null && (vp.insetTop != c.insetTop || vp.insetBottom != c.insetBottom || vp.segment != c.segment)) changeInsets(vp, c)
         val s = scene
         if (!initialized || s == null || prev == null) {
             tryInit()
@@ -304,7 +313,13 @@ internal class PosterWallState internal constructor(
     internal fun setViewportSize(width: Float, height: Float) {
         val c = config
         val old = viewport
-        val vp = WallViewport(width, height, c?.insetTop ?: old?.insetTop ?: 0f, c?.insetBottom ?: old?.insetBottom ?: 0f)
+        val vp = WallViewport(
+            width,
+            height,
+            c?.insetTop ?: old?.insetTop ?: 0f,
+            c?.insetBottom ?: old?.insetBottom ?: 0f,
+            if (c != null) c.segment else old?.segment,
+        )
         if (vp == old) return
         viewport = vp
         val s = scene
@@ -321,11 +336,11 @@ internal class PosterWallState internal constructor(
     }
 
     /**
-     * 浮层量出来的高度晚于第一帧到、或者浮层换了高度：大卡要是还停在原来的正中，就跟着挪到新的正中；
-     * 用户已经把墙拖走了就不动。
+     * 浮层量出来的高度晚于第一帧到、或者浮层换了高度、或者折痕的分段变了（墙的位置第一次摆放后才知道、折起展开）：
+     * 大卡要是还停在原来的正中，就跟着挪到新的正中；用户已经把墙拖走了就不动。
      */
     private fun changeInsets(old: WallViewport, c: WallConfig) {
-        val vp = old.copy(insetTop = c.insetTop, insetBottom = c.insetBottom)
+        val vp = old.copy(insetTop = c.insetTop, insetBottom = c.insetBottom, segment = c.segment)
         viewport = vp
         val s = scene ?: return
         if (!initialized) return

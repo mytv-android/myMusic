@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.RhythmIntensity
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.TabletopTop
 import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.LyricsParser
 import com.mytv.mymusic.ui.MusicActions
@@ -72,6 +73,7 @@ import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.adaptive.modeLabel
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.components.Posture
 import com.mytv.mymusic.ui.components.tvFocusRing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -83,6 +85,8 @@ import kotlin.coroutines.cancellation.CancellationException
  * 沉浸式播放页，固定深色 Vibrant 配色（由外层 PlayerTheme 提供），背景是流光场（[LyricsBackdrop]）。
  * 手机：形状封面、标题、两行歌词、波浪进度、连接按钮组和浮动工具栏竖排，歌词页里封面缩成左上角的小圆；
  * 平板横屏：左栏播放、右栏整栏歌词，可进专注歌词；电视：封面 + 整栏歌词 + 浮动控制条，空闲进入环境模式。
+ * 折叠屏书本姿态、双竖：平板布局按折痕分成左右两页（竖着握的大折叠也走它）；桌面姿态、双横：上看下控的
+ * [TabletopPlayer]，控件不自动隐藏。只在播放页本来就开着时换排法，半开不会自己打开播放页。
  *
  * @param sheetOpen 播放页上开着队列或定时面板（换源面板从 [MusicUiState.sourcePickerTrack] 自己判断）：期间不进入空闲。
  */
@@ -112,17 +116,23 @@ fun PlayerScreen(
     var burst by remember { mutableIntStateOf(0) }
     // 预测性返回：手势过程中播放页缩小、下移、圆角变大，松手才真正收起
     var backProgress by remember { mutableFloatStateOf(0f) }
-    // 暂停时也照样计时：控制栏几秒后淡出，按确认键或点按唤醒
-    val idle = rememberIdleState(holdAwake = sheetOpen || state.sourcePickerTrack != null)
+    // 桌面姿态、双横（电视的姿态总是 Normal）；书本姿态、双竖只在平板宽度上分页，竖着握的大折叠也走平板布局
+    val tabletop = window.posture == Posture.Tabletop
+    val book = window.posture == Posture.Book && window.widthDp >= 600
+    val wideLayout = book || (window.widthDp >= 600 && window.widthDp > window.heightDp)
+    // 暂停时也照样计时：控制栏几秒后淡出，按确认键或点按唤醒。桌面姿态下半屏是平放着用手点的那一面，不进入空闲
+    val idle = rememberIdleState(holdAwake = sheetOpen || state.sourcePickerTrack != null || tabletop)
     PredictiveBackHandler { events ->
         // 电视上控制栏亮着时，返回键先收起控制栏；已经在环境模式下才退出播放页，和常见视频播放器一致
         val hideControls = window.isTv && !lyricsMode && idle.canAutoHide &&
             !idle.idle && state.sourcePickerTrack == null
+        // 桌面姿态上半屏本来就放歌词时，歌词视图和平常一个样子，返回键直接收起播放页
+        val lyricsView = lyricsMode && !(tabletop && state.tabletopTop == TabletopTop.Lyrics)
         try {
-            events.collect { if (!lyricsMode && !hideControls) backProgress = it.progress }
+            events.collect { if (!lyricsView && !hideControls) backProgress = it.progress }
             when {
                 hideControls -> idle.sleep()
-                lyricsMode -> lyricsMode = false
+                lyricsView -> lyricsMode = false
                 else -> onClose()
             }
         } catch (_: CancellationException) {
@@ -180,7 +190,9 @@ fun PlayerScreen(
             .then(if (window.isTv) Modifier.focusProperties { onExit = { cancelFocusChange() } }.focusGroup() else Modifier)
             .wakeOnInput(idle, consumeKeyWhenIdle = window.isTv),
     ) {
-        val wideBackdrop = window.isTv || (window.widthDp >= 600 && window.widthDp > window.heightDp)
+        val wideBackdrop = !tabletop && (window.isTv || wideLayout)
+        // 桌面姿态上半屏此刻放什么：设置里选的，或者工具栏、更多菜单临时换成的歌词
+        val tabletopShown = if (lyricsMode) TabletopTop.Lyrics else state.tabletopTop
         LyricsBackdrop(
             cover = song.cover,
             playing = state.playing,
@@ -189,9 +201,11 @@ fun PlayerScreen(
             wide = wideBackdrop,
             pulse = pulse,
             rhythmOffsetMs = state.rhythmOffsetMs,
-            // 手机歌词页、平板专注歌词整体压暗一些；电视底部额外加深，给控制条和细进度留对比度
+            // 手机歌词页、平板专注歌词整体压暗一些；电视底部额外加深，给控制条和细进度留对比度。
+            // 桌面姿态上下排：上半屏是歌词或时钟时按手机歌词页压暗，是封面时按手机播放页
             scrim = when {
                 window.isTv -> BackdropScrim.Tv
+                tabletop -> if (tabletopShown == TabletopTop.Cover) BackdropScrim.Phone else BackdropScrim.PhoneLyrics
                 wideBackdrop -> if (lyricsMode) BackdropScrim.WideFocus else BackdropScrim.Wide
                 lyricsMode -> BackdropScrim.PhoneLyrics
                 else -> BackdropScrim.Phone
@@ -221,7 +235,35 @@ fun PlayerScreen(
                 onOpenTimer = onOpenTimer,
                 onOpenSource = onOpenSource,
             )
-            window.widthDp >= 600 && window.widthDp > window.heightDp -> WidePlayer(
+            tabletop -> TabletopPlayer(
+                song = song,
+                playing = state.playing,
+                duration = state.duration,
+                position = position,
+                favorite = favorite,
+                sleep = sleep,
+                lyrics = lyrics,
+                lyricsLoading = lyricsLoading,
+                active = active,
+                sourceProvider = sourceProvider,
+                sourceDetail = sourceDetail,
+                playbackMode = playbackMode,
+                notice = state.playbackNotice,
+                deepLink = state.deepLink,
+                actions = actions,
+                top = state.tabletopTop,
+                lyricsMode = lyricsMode,
+                onLyricsMode = { lyricsMode = it },
+                onClose = onClose,
+                onOpenQueue = onOpenQueue,
+                onOpenTimer = onOpenTimer,
+                onFavoriteBurst = onFavoriteBurst,
+                onOpenSource = onOpenSource,
+                onSkip = onSkip,
+                pulse = pulse,
+                coverShape = state.coverShape,
+            )
+            wideLayout -> WidePlayer(
                 song = song,
                 playing = state.playing,
                 duration = state.duration,
@@ -278,7 +320,7 @@ fun PlayerScreen(
                 coverShape = state.coverShape,
             )
         }
-        HeartBurst(burst, Modifier.align(Alignment.Center))
+        HeartBurst(burst, heartBurstPlacement(window.fold, book, tabletop))
         if (state.rhythmDebug && rhythmDebugAvailable()) {
             RhythmDebugOverlay(pulse, state.rhythmOffsetMs, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp))
         }

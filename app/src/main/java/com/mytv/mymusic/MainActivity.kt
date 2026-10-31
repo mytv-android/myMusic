@@ -20,7 +20,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.window.layout.WindowInfoTracker
 import com.mytv.mymusic.playback.ScreensaverState
+import com.mytv.mymusic.ui.components.Fold
+import com.mytv.mymusic.ui.components.LocalWindowFold
+import com.mytv.mymusic.ui.components.toFold
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import com.mytv.mymusic.ui.MyMusicApp
 import com.mytv.mymusic.widget.ChartWidgetWorker
 import com.mytv.mymusic.widget.WidgetLinks
@@ -32,6 +40,7 @@ import com.mytv.mymusic.ui.theme.isTelevision
 class MainActivity : ComponentActivity() {
     private val model get() = (application as com.mytv.mymusic.MyMusicApp).musicViewModel
     private val handler = Handler(Looper.getMainLooper())
+    private val fold = MutableStateFlow<Fold?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,9 +54,18 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // 三键导航下系统会在导航栏铺一层白色遮罩，盖住我们自己的磨砂底栏
         if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+        // 折叠屏的折痕、双屏的铰链：窗口横跨它时才报，分屏和小窗里是空的
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                WindowInfoTracker.getOrCreate(this@MainActivity)
+                    .windowLayoutInfo(this@MainActivity)
+                    .collect { fold.value = it.toFold() }
+            }
+        }
         setContent {
             val model = remember { model }
             val state by model.state.collectAsState()
+            val fold by fold.collectAsState()
             // 电视固定深色；播放页、海报墙、详情页的海报视图固定深色，打开时系统栏图标跟着变浅
             val tvDevice = remember { isTelevision() }
             // 手动布局模式同时锁定屏幕方向；自动保持系统默认
@@ -86,7 +104,10 @@ class MainActivity : ComponentActivity() {
                 appearance = state.appearance,
                 coverSeed = state.coverSeed.takeIf { it != 0 }?.let { androidx.compose.ui.graphics.Color(it) },
             ) {
-                CompositionLocalProvider(LocalDarkBarsRequests provides darkBars) { MyMusicApp(model) }
+                CompositionLocalProvider(
+                    LocalDarkBarsRequests provides darkBars,
+                    LocalWindowFold provides fold,
+                ) { MyMusicApp(model) }
             }
         }
     }

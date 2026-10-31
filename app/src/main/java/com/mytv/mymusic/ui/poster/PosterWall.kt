@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -96,8 +97,10 @@ internal fun rememberPosterWallState(): PosterWallState = remember { PosterWallS
  * - [chromeAbove] 电视顶部一排浮层的焦点入口：墙上没有选中格时按上键交给它，下键回来由页面调 [PosterWallState.focusFromAbove]；
  * - [resetKey] 换了一份队列（首数一样也算）时变，整面墙重新入场；[currentKey] 正在播放那首的 key，用来分辨队列重排和切歌；
  * - [holdAwake] 墙上开着面板时为 true：空闲计时不走（电视浮层不淡出、不起漂）。
+ * - 折叠屏书本 / 桌面姿态（含双屏）：大卡居中到右页 / 上半屏，格距按那一段选（[rememberWallSpec]）；墙上的格子照常跨折痕铺满。
  *
- * 页面要接：BackHandler → [PosterWallState.handleBack]（返回 false 再离开），根节点挂 [posterWallWake]，
+ * 页面要接：BackHandler → [PosterWallState.handleBack]（返回 false 再离开），根节点挂 [posterWallWake]
+ * 和 `foldAnchor(state.foldAnchor)`（在预测性返回的 graphicsLayer 之前，和墙同一个矩形），
  * GrownPoster 的 `focused` / `coverPlaceholderKey` 取 [PosterWallState.grownFocused] / [PosterWallState.grownCoverKey]。
  */
 @Composable
@@ -121,7 +124,14 @@ internal fun PosterWall(
     holdAwake: Boolean = false,
 ) {
     val window = LocalAppWindow.current
-    val metrics = wallMetricsFor(window.isTv, window.widthDp, window.heightDp)
+    // 有分页的折痕时格距按大卡那一段选，大卡只在那一段里居中；没有时和以前一样按整个窗口
+    val spec = rememberWallSpec(state)
+    if (spec.pending) {
+        // 只有打开墙的第一帧：先铺背景，等页面摆放完知道折痕在哪再建墙（见 WallSpec.pending）
+        Box(modifier.fillMaxSize().wallBackground(state.palette))
+        return
+    }
+    val metrics = spec.metrics
     val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
     val count = songs.size
     val banded = feed != null
@@ -146,6 +156,7 @@ internal fun PosterWall(
         resetKey = resetKey,
         currentKey = currentKey,
         holdAwake = holdAwake,
+        segment = spec.segment,
     )
     SideEffect {
         state.onLongPress = onLongPress
@@ -204,7 +215,10 @@ internal fun PosterWall(
             .focusProperties { if (chromeAbove != null) up = chromeAbove }
             .focusable(),
     ) {
-        WallTiles(state, songs, currentIndex, env, grownContent)
+        // 大卡按墙的格距排版：桌面姿态的上半屏用手机档时，大卡也得是手机档的尺寸和字号
+        CompositionLocalProvider(LocalWallMetrics provides metrics) {
+            WallTiles(state, songs, currentIndex, env, grownContent)
+        }
         WallOverlay(state, ring)
     }
 }

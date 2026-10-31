@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -71,6 +72,7 @@ import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.TopTab
 import com.mytv.mymusic.ui.openLabel
+import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.PlayButtonSize
 import com.mytv.mymusic.ui.components.PlayPauseButton
 import com.mytv.mymusic.ui.components.SourceChip
@@ -117,6 +119,9 @@ fun TabletNavRail(selected: String, onSelect: (String) -> Unit, onSettings: () -
 /** 底部播放条高度（不含系统导航栏），Snackbar 要让开这么多。 */
 val BottomPlayerBarHeight = 88.dp
 
+/** 播放条按折痕分两段时每段至少这么宽：左段要放封面、歌名和上一首 / 播放 / 下一首。 */
+internal val BottomPlayerBarSplitMin = 260.dp
+
 /**
  * 840–1199dp：底部播放条，把右侧空间还给内容。
  * [visible] 为 false 时只保留同高占位，不读取进度、不保留波浪/时间观察。
@@ -142,28 +147,25 @@ fun BottomPlayerBar(
     val song = state.current ?: return
     val blur = LocalBlurPolicy.current.enabled
     val container = MaterialTheme.colorScheme.surfaceContainer
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .frosted(if (blur) container.copy(alpha = 0.85f) else container)
-            .windowInsetsPadding(WindowInsets.navigationBars)
-            .height(BottomPlayerBarHeight)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
+    // 播放条横跨侧栏右边的整块内容区，折痕要按它自己的位置量（扣掉左右留白后）
+    val anchor = rememberFoldAnchor()
+    // 只在竖折痕（书本、双竖）上分两段；左段放不下封面、歌名和三个按钮时当没有折痕。
+    // 没有折痕时不读 anchor：平板首次摆放后不必为它多重组一次
+    val folded = LocalAppWindow.current.fold != null
+    val split = if (folded) rememberFoldSplit(anchor, minSegment = BottomPlayerBarSplitMin)?.takeIf { it.vertical } else null
+    // 分两段时左页只有约 290dp（Pixel Fold）：封面、间距和播放键都收小一号，给歌名多留点地方
+    val compact = split != null
+    val info: @Composable (Modifier) -> Unit = { modifier ->
         Row(
-            Modifier
-                .widthIn(max = 280.dp)
-                .weight(0.8f)
+            modifier
                 .clip(RoundedCornerShape(16.dp))
                 // 整块（封面 + 歌名）按设置去播放页或海报墙；右边的“打开播放页”按钮总是打开播放页
                 .clickable(onClickLabel = state.miniPlayerTarget.openLabel, onClick = actions::openNowPlaying)
                 .padding(4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
         ) {
-            Cover(song.cover, song.title, 56.dp, corner = 14.dp)
+            Cover(song.cover, song.title, if (compact) 48.dp else 56.dp, corner = if (compact) 12.dp else 14.dp)
             Column(Modifier.weight(1f)) {
                 Text(song.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
@@ -175,18 +177,64 @@ fun BottomPlayerBar(
                 )
             }
         }
+    }
+    val transport: @Composable () -> Unit = {
         IconButton(onClick = { actions.transport("previous") }) { Icon(Icons.Filled.SkipPrevious, "上一首") }
-        PlayPauseButton(state.playing, { actions.transport("play") }, size = PlayButtonSize.Medium)
+        PlayPauseButton(state.playing, { actions.transport("play") }, size = if (compact) PlayButtonSize.Small else PlayButtonSize.Medium)
         IconButton(onClick = { actions.transport("next") }) { Icon(Icons.Filled.SkipNext, "下一首") }
+    }
+    val seek: @Composable (Modifier) -> Unit = { modifier ->
         WavySeekBar(
             position = position,
             duration = state.duration,
             playing = state.playing,
             onSeek = actions::seek,
-            modifier = Modifier.weight(1f),
+            modifier = modifier,
         )
+    }
+    val tail: @Composable () -> Unit = {
         IconButton(onClick = onOpenQueue) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
         IconButton(onClick = actions::openPlayer) { Icon(Icons.Filled.OpenInFull, "打开播放页") }
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .frosted(if (blur) container.copy(alpha = 0.85f) else container)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .height(BottomPlayerBarHeight)
+            .padding(horizontal = 16.dp)
+            .foldAnchor(anchor),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (split == null) Arrangement.spacedBy(12.dp) else Arrangement.Start,
+    ) {
+        if (split == null) {
+            info(Modifier.widthIn(max = 280.dp).weight(0.8f))
+            transport()
+            seek(Modifier.weight(1f))
+            tail()
+        } else {
+            // 书本、双竖：左页封面、歌名、上一首 / 播放 / 下一首，右页进度、队列、展开；折痕两侧留空，什么都不压
+            val density = LocalDensity.current
+            val start = with(density) { split.firstEnd.toDp() }
+            val gap = with(density) { (split.secondStart - split.firstEnd).toDp() }
+            Row(
+                Modifier.width(start),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                info(Modifier.weight(1f))
+                transport()
+            }
+            Spacer(Modifier.width(gap))
+            Row(
+                Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                seek(Modifier.weight(1f))
+                tail()
+            }
+        }
     }
 }
 

@@ -55,6 +55,7 @@ import com.mytv.mymusic.data.LyricsBackgroundMode
 import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.data.RHYTHM_OFFSET_MAX_MS
 import com.mytv.mymusic.data.RhythmIntensity
+import com.mytv.mymusic.data.TabletopTop
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
@@ -81,6 +82,13 @@ internal val RhythmIntensity.label: String
         RhythmIntensity.Strong -> "强烈"
     }
 
+internal val TabletopTop.label: String
+    get() = when (this) {
+        TabletopTop.Lyrics -> "歌词"
+        TabletopTop.Cover -> "封面"
+        TabletopTop.Clock -> "时钟"
+    }
+
 internal val MiniPlayerTarget.label: String
     get() = when (this) {
         MiniPlayerTarget.Player -> "播放页"
@@ -89,7 +97,7 @@ internal val MiniPlayerTarget.label: String
 
 /**
  * 设置 → 播放页（枚举仍叫 Lyrics）：封面形状、歌词背景、系统媒体条歌词、律动强度和跟拍校准、
- * 点按迷你播放器打开什么，电视上再加环境模式时钟。都只存在本机，改了立即生效。
+ * 点按迷你播放器打开什么；折叠屏展开时加桌面姿态上半屏放什么，电视上再加环境模式时钟。都只存在本机，改了立即生效。
  */
 @Composable
 fun LyricsSettingsScreen(
@@ -201,6 +209,22 @@ fun LyricsSettingsScreen(
                     else -> "点按底部播放条的封面和歌名、播放窗格的封面时打开哪一页。海报墙把播放队列铺成一面封面墙，正在放的歌放大显示歌词；“打开播放页”“全屏播放”按钮不受影响。"
                 },
             )
+        }
+        // 只在窗口横跨折痕（折叠屏内屏展开、双屏横跨）时才有意义，外屏、分屏里不显示
+        if (window.fold != null && !window.isTv) {
+            item(key = "tabletopHead", contentType = "sectionHeader") { SectionLabel("折叠屏桌面姿态") }
+            item(key = "tabletop", contentType = "toggleGroup") {
+                ConnectedToggleGroup(
+                    options = TabletopTop.entries,
+                    selected = state.tabletopTop,
+                    onSelect = actions::setTabletopTop,
+                    label = { it.label },
+                    modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+                )
+            }
+            item(key = "tabletopNote", contentType = "note") {
+                SettingsNote("屏幕半折、像小桌板一样立着时，播放页上半屏放什么；下半屏固定是进度和播放控制，不会自动隐藏。播放页开着时半折才会切过去，在别的页面半折不打断浏览。")
+            }
         }
         // 强制电视布局也算电视：环境模式只在电视播放页出现
         if (window.isTv) {

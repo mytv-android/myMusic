@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,6 +66,7 @@ import com.mytv.mymusic.ui.ListeningFeedUi
 import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.adaptive.foldAnchor
 import com.mytv.mymusic.ui.charts.SongAction
 import com.mytv.mymusic.ui.charts.SongActionsSheet
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
@@ -136,7 +138,9 @@ internal fun PosterWallScreen(
     val pulseScale = remember(pulse) { { pulse.coverScale } }
     // 切歌后新歌词取回来之前 state.lyrics 还是上一首的
     val lyricsReady = state.lyricsKey == currentKey
-    val metrics = wallMetricsFor(tv, window.widthDp, window.heightDp)
+    // 和墙同一份版式：折叠屏上格距按大卡那一段选，浮层的让位、大卡圆角也跟着它
+    val spec = rememberWallSpec(wall)
+    val metrics = spec.metrics
     val insets = WindowInsets.safeDrawing.asPaddingValues()
     val (insetTop, insetBottom) = wallInsets(metrics, insets.calculateTopPadding(), insets.calculateBottomPadding(), window.heightDp)
 
@@ -185,6 +189,8 @@ internal fun PosterWallScreen(
     Box(
         Modifier
             .fillMaxSize()
+            // 墙铺满这一层，折痕按这里切；挂在下面预测性返回的缩放之前，返回手势时折痕位置不抖
+            .foldAnchor(wall.foldAnchor)
             // 播放页盖在上面时，墙不让读屏读到、也不让遥控器焦点进入
             .then(if (active) Modifier else Modifier.clearAndSetSemantics {})
             .focusProperties { onEnter = { if (!active) cancelFocusChange() } }
@@ -278,6 +284,7 @@ internal fun PosterWallScreen(
             TouchChrome(
                 wall = wall,
                 metrics = metrics,
+                leftPage = spec.leftPage,
                 title = title,
                 subtitle = subtitle,
                 screenReader = screenReader,
@@ -351,11 +358,15 @@ private val ChromeShadow = 6.dp
 private const val ChromeFadeMs = 500
 private const val ChromeScrimAlpha = 0.86f
 
-/** 手机 / 平板：胶囊在左上，定位和设置在右下（平板留得更宽）。读屏开着时胶囊下面多一个“以列表浏览”。 */
+/**
+ * 手机 / 平板：胶囊在左上，定位和设置在右下（平板留得更宽）。读屏开着时胶囊下面多一个“以列表浏览”。
+ * 书本 / 双竖时胶囊收在左页里（[leftPage]，dp），长标题省略，不压折痕；右下的按钮本来就在右页。
+ */
 @Composable
 private fun TouchChrome(
     wall: PosterWallState,
     metrics: WallMetrics,
+    leftPage: Float?,
     title: String,
     subtitle: String,
     screenReader: Boolean,
@@ -368,6 +379,7 @@ private fun TouchChrome(
         Column(
             Modifier
                 .align(Alignment.TopStart)
+                .then(if (leftPage != null) Modifier.widthIn(max = leftPage.dp) else Modifier)
                 .padding(start = if (phone) 12.dp else 24.dp, top = if (phone) PhonePillTop else 20.dp, end = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {

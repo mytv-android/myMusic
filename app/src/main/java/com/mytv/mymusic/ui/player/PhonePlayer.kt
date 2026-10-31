@@ -67,6 +67,7 @@ import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.LyricLine
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.ParsedLyrics
+import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.WavySeekBar
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlin.math.roundToInt
@@ -76,6 +77,10 @@ import kotlin.math.roundToInt
  * 没有同步歌词时两行歌词那块不占位（收起有过渡）。
  * 歌词页里封面沿空间弹簧缩到左上角并形变成圆；空闲 4 秒后顶栏、按钮组、工具栏淡出，歌词扩成三行，进度变成细线，
  * 淡出的进度条拉平、两行预览的逐字填色停住，看不见的动画不再逐帧跑。
+ *
+ * 矮窗口（[com.mytv.mymusic.ui.components.AppWindow.short]，折叠屏上下分屏后约 400×400dp）换一种排法，见 [phoneShortSlots]：
+ * 歌词 / 队列 / 定时 / 更多并进顶栏、取代底部工具栏（音源在更多菜单里），封面缩到左边，右边是歌名、歌手和一行歌词，
+ * 下面是进度和小号按钮组；空闲时同样淡出，只是不换成三行歌词。歌词页和平常一样。
  *
  * 重组边界：空闲状态只在各个小组件里读（拦截点按、停动画），淡出透明度、歌词页过渡进度只在图层和摆放阶段读；
  * 播放页主体只随播放 / 暂停、切歌、进出歌词页、歌词有无这类低频变化重组。
@@ -134,17 +139,26 @@ internal fun PhonePlayer(
         label = "previewSpace",
     )
     val coverOnTop = rememberUpdatedState(lyricsMode)
-    val policy = remember(coverMove, previewSpace, coverOnTop) { PhoneStagePolicy(coverMove, previewSpace, coverOnTop) }
+    val short = LocalAppWindow.current.short
+    val policy = remember(coverMove, previewSpace, coverOnTop, short) { PhoneStagePolicy(coverMove, previewSpace, coverOnTop, short) }
 
     Layout(
         contents = listOf<@Composable () -> Unit>(
             {
                 if (showDefault) {
-                    PhoneTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, onClose, onOpenSource, onLyricsMode, idle, lyricsMode, chromeAlpha)
+                    if (short) {
+                        PhoneShortTopBar(song, sleep, deepLink, actions, onClose, onOpenSource, onLyricsMode, onOpenQueue, onOpenTimer, idle, lyricsMode, chromeAlpha)
+                    } else {
+                        PhoneTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, onClose, onOpenSource, onLyricsMode, idle, lyricsMode, chromeAlpha)
+                    }
                 }
             },
-            { if (showDefault) PhoneMeta(song, favorite, actions, idle, chrome, lyricsMode, defaultAlpha) },
-            { if (showDefault) PhoneLyricsPreview(lyrics, active, position, playing, idle, lyricsMode, chromeAlpha) { onLyricsMode(true) } },
+            { if (showDefault) PhoneMeta(song, favorite, actions, idle, chrome, lyricsMode, defaultAlpha, short) },
+            {
+                if (showDefault) {
+                    PhoneLyricsPreview(lyrics, active, position, playing, idle, lyricsMode, if (short) defaultAlpha else chromeAlpha, short) { onLyricsMode(true) }
+                }
+            },
             {
                 if (showDefault) {
                     PhoneControls(
@@ -164,11 +178,13 @@ internal fun PhonePlayer(
                         onOpenQueue = onOpenQueue,
                         onOpenTimer = onOpenTimer,
                         onOpenSource = onOpenSource,
+                        short = short,
                     )
                 }
             },
             { if (showDefault) PhoneNotice(notice, defaultAlpha) },
-            { if (showDefault) PhoneIdleLyrics(lyrics, active, position, playing, chrome, defaultAlpha) },
+            // 矮窗口放不下三行歌词：空闲时封面旁那一行歌词留着就够了
+            { if (showDefault && !short) PhoneIdleLyrics(lyrics, active, position, playing, chrome, defaultAlpha) },
             { if (showDefault) PhoneThinProgress(position, duration, chrome, defaultAlpha) },
             {
                 if (showLyrics) {
@@ -258,7 +274,41 @@ private fun PhoneTopBar(
     }
 }
 
-/** 歌名 30sp 粗体，两行内放不下才逐级缩小；歌手名 primary 色。切歌时整块淡出淡入。 */
+/** 矮窗口的顶栏：收起在左，歌词、队列、定时、更多靠右，取代底部的浮动工具栏；音源从更多菜单里换。 */
+@Composable
+private fun PhoneShortTopBar(
+    song: Song,
+    sleep: SleepTimerState,
+    deepLink: String,
+    actions: MusicActions,
+    onClose: () -> Unit,
+    onOpenSource: () -> Unit,
+    onLyricsMode: (Boolean) -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenTimer: () -> Unit,
+    idle: IdleState,
+    blocked: Boolean,
+    alpha: () -> Float,
+) {
+    IdleGuard(idle, blocked, Modifier.graphicsLayer { this.alpha = alpha() }) {
+        Row(
+            Modifier.fillMaxWidth().height(TopBarHeight).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onClose) { Icon(Icons.Filled.KeyboardArrowDown, "收起播放页", tint = MaterialTheme.colorScheme.onSurface) }
+            Spacer(Modifier.weight(1f))
+            ToolbarLyricsButton(on = false, onToggle = onLyricsMode)
+            ToolbarQueueButton(onOpenQueue)
+            ToolbarSleepButton(sleep, onOpenTimer)
+            MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+        }
+    }
+}
+
+/**
+ * 歌名 30sp 粗体，两行内放不下才逐级缩小；歌手名 primary 色。切歌时整块淡出淡入。
+ * 矮窗口（[short]）里放在封面右边，歌名改成 22sp 起、最小 16sp。
+ */
 @Composable
 private fun PhoneMeta(
     song: Song,
@@ -268,6 +318,7 @@ private fun PhoneMeta(
     chrome: State<Float>,
     blocked: Boolean,
     alpha: () -> Float,
+    short: Boolean = false,
 ) {
     Row(
         Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha() },
@@ -285,12 +336,20 @@ private fun PhoneMeta(
             Column {
                 Text(
                     shown.title,
-                    style = MaterialTheme.typography.displaySmall.copy(lineHeight = 1.18.em),
+                    style = if (short) {
+                        MaterialTheme.typography.titleLarge.copy(lineHeight = 1.2.em)
+                    } else {
+                        MaterialTheme.typography.displaySmall.copy(lineHeight = 1.18.em)
+                    },
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    autoSize = TextAutoSize.StepBased(minFontSize = 22.sp, maxFontSize = 30.sp, stepSize = 2.sp),
+                    autoSize = if (short) {
+                        TextAutoSize.StepBased(minFontSize = 16.sp, maxFontSize = 22.sp, stepSize = 2.sp)
+                    } else {
+                        TextAutoSize.StepBased(minFontSize = 22.sp, maxFontSize = 30.sp, stepSize = 2.sp)
+                    },
                 )
                 Text(
                     shown.artist,
@@ -309,7 +368,10 @@ private fun PhoneMeta(
     }
 }
 
-/** 两行歌词：当前行逐字填色，下一行 40% 透明；点按进入歌词页。没有同步歌词时不占位。 */
+/**
+ * 两行歌词：当前行逐字填色，下一行 40% 透明；点按进入歌词页。没有同步歌词时不占位。
+ * 矮窗口（[short]）里放在歌名下面，只放当前这一行（折行最多占两行高），空闲时也不淡出：那时它就是封面旁唯一的歌词。
+ */
 @Composable
 private fun PhoneLyricsPreview(
     lyrics: ParsedLyrics,
@@ -319,6 +381,7 @@ private fun PhoneLyricsPreview(
     idle: IdleState,
     blocked: Boolean,
     alpha: () -> Float,
+    short: Boolean = false,
     onOpen: () -> Unit,
 ) {
     if (!lyrics.synced) return
@@ -327,15 +390,19 @@ private fun PhoneLyricsPreview(
         blocked,
         Modifier
             .fillMaxWidth()
-            .height(PreviewHeight)
+            .height(if (short) ShortPreviewHeight else PreviewHeight)
             .clipToBounds()
             .graphicsLayer { this.alpha = alpha() },
     ) {
         // 空闲时预览淡出、换成三行歌词：这里的逐字填色停住，不再空跑帧循环。只有这个小块随空闲状态重组
-        val awake = !idle.idle
+        val awake = short || !idle.idle
         Box(Modifier.fillMaxSize().clickable(onClickLabel = "打开全屏歌词", onClick = onOpen)) {
             val index = active.value
             val line = lyrics.lines.getOrNull(index) ?: return@Box
+            if (short) {
+                CurrentLyric(line, position, playing, MaterialTheme.typography.bodyLarge.merge(ShortPreviewStyle))
+                return@Box
+            }
             val next = lyrics.lines.getOrNull(index + 1)?.text.orEmpty()
             Column {
                 CurrentLyric(line, position, playing && awake, MaterialTheme.typography.bodyLarge.merge(PreviewCurrentStyle))
@@ -428,6 +495,7 @@ private fun PhoneControls(
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
     onOpenSource: () -> Unit,
+    short: Boolean = false,
 ) {
     IdleGuard(idle, blocked, Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha() }) {
         // 空闲时整块淡出：进度条按暂停拉平，波浪不在看不见的地方继续动。只有这一块随空闲状态重组
@@ -442,19 +510,23 @@ private fun PhoneControls(
                 amplitudeScale = waveScale,
                 waveBpm = waveBpm,
             )
+            // 矮窗口：小号按钮组，工具栏已经并进顶栏
             TransportButtonGroup(
                 playing = playing,
                 onPrevious = { actions.transport("previous") },
                 onPlayPause = { actions.transport("play") },
                 onNext = { actions.transport("next") },
                 modifier = Modifier.padding(top = 8.dp),
+                size = if (short) TransportGroupSize.Compact else TransportGroupSize.Phone,
             )
-            PlayerToolbar(Modifier.padding(top = 18.dp)) {
-                ToolbarLyricsButton(on = false, onToggle = onLyricsMode)
-                ToolbarQueueButton(onOpenQueue)
-                ToolbarSleepButton(sleep, onOpenTimer)
-                ToolbarSourceButton(onOpenSource)
-                MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+            if (!short) {
+                PlayerToolbar(Modifier.padding(top = 18.dp)) {
+                    ToolbarLyricsButton(on = false, onToggle = onLyricsMode)
+                    ToolbarQueueButton(onOpenQueue)
+                    ToolbarSleepButton(sleep, onOpenTimer)
+                    ToolbarSourceButton(onOpenSource)
+                    MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+                }
             }
         }
     }
@@ -575,19 +647,23 @@ private fun PhoneLyricsPage(
  * 歌词页时封面图层以左上角为原点缩放平移到 [LyricsCoverSize] 的小圆处；进度只在图层里读，不重新测量。
  * 歌词页稳定后默认界面已移出组合，封面仍按最后一次的默认位置算起点，回到默认页时没有跳变。
  * 封面最先摆放，光晕垫在标题、收藏和顶栏下面；[coverOnTop]（要进歌词页）时提到最上层，小圆封面盖在歌词页上。
+ * [short]（矮窗口）时按 [phoneShortSlots] 摆放。
  */
 private class PhoneStagePolicy(
     private val coverMove: State<Float>,
     private val previewSpace: State<Float>,
     private val coverOnTop: State<Boolean>,
+    private val short: Boolean,
 ) : MultiContentMeasurePolicy {
     private var lastCover = 0
     private var lastCoverX = 0
     private var lastCoverY = 0
     private var lastMetaY = 0
     private var lastPreviewY = 0
+    private var lastShortControls = -1
 
     override fun MeasureScope.measure(measurables: List<List<Measurable>>, constraints: Constraints): MeasureResult {
+        if (short) return measureShort(measurables, constraints)
         val width = constraints.maxWidth
         val height = constraints.maxHeight
         val full = Constraints(maxWidth = width, maxHeight = height)
@@ -664,6 +740,93 @@ private class PhoneStagePolicy(
             lyricsPage?.place(0, 0)
         }
     }
+
+    /**
+     * 矮窗口：顶栏贴顶，进度 + 小号按钮组贴底，中间一行左边封面、右边歌名和一行歌词（[phoneShortSlots]）。
+     * 封面位置不依赖量到的文字，歌词页稳定后（控件已移出组合）按上一次量到的控件高度照样算出来，回封面时没有跳变。
+     */
+    private fun MeasureScope.measureShort(measurables: List<List<Measurable>>, constraints: Constraints): MeasureResult {
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        val full = Constraints(maxWidth = width, maxHeight = height)
+        val top = measurables[SlotTop].firstOrNull()?.measure(full)
+        val controls = measurables[SlotControls].firstOrNull()?.measure(Constraints(minWidth = width, maxWidth = width, maxHeight = height))
+        controls?.let { lastShortControls = it.height }
+        if (lastShortControls < 0) lastShortControls = ShortControlsEstimate.roundToPx()
+        val slots = phoneShortSlots(width, height, top?.height ?: TopBarHeight.roundToPx(), lastShortControls, density)
+
+        val meta = measurables[SlotMeta].firstOrNull()?.measure(Constraints.fixedWidth(slots.textWidth))
+        val metaHeight = meta?.height ?: 0
+        val textGap = 6.dp.roundToPx()
+        val previewBudget = (slots.areaBottom - slots.areaTop - metaHeight - textGap).coerceIn(0, ShortPreviewHeight.roundToPx())
+        val preview = measurables[SlotPreview].firstOrNull()?.measure(Constraints(maxWidth = slots.textWidth, maxHeight = previewBudget))
+        // 歌名和那一行歌词作为一块，对着封面竖向居中；比封面高时往下伸，但不过控件区
+        val block = metaHeight + (preview?.let { textGap + it.height } ?: 0)
+        val textY = (slots.coverTop + (slots.cover - block) / 2)
+            .coerceAtMost(slots.areaBottom - block)
+            .coerceAtLeast(slots.areaTop)
+
+        val notice = measurables[SlotNotice].firstOrNull()?.measure(Constraints(maxWidth = (width - 48.dp.roundToPx()).coerceAtLeast(0)))
+        val side = 24.dp.roundToPx()
+        val thin = measurables[SlotThin].firstOrNull()?.measure(Constraints.fixedWidth((width - side * 2).coerceAtLeast(0)))
+        val lyricsPage = measurables[SlotLyrics].firstOrNull()?.measure(Constraints.fixed(width, height))
+        val coverSize = slots.cover
+        val cover = measurables[SlotCover].first().measure(Constraints.fixed(coverSize, coverSize))
+
+        val miniSize = LyricsCoverSize.toPx()
+        val anchorX = LyricsCoverStart.toPx()
+        val anchorY = LyricsCoverTop.toPx()
+        return layout(width, height) {
+            // 同默认排法：封面最先摆放，进歌词页时提到最上层
+            cover.placeWithLayer(slots.coverX, slots.coverTop, zIndex = if (coverOnTop.value) 1f else 0f) {
+                val t = coverMove.value
+                transformOrigin = TransformOrigin(0f, 0f)
+                val scale = lerp(1f, miniSize / coverSize.coerceAtLeast(1), t)
+                scaleX = scale
+                scaleY = scale
+                translationX = (anchorX - slots.coverX) * t
+                translationY = (anchorY - slots.coverTop) * t
+            }
+            top?.place(0, 0)
+            meta?.place(slots.textX, textY)
+            preview?.place(slots.textX, textY + metaHeight + textGap)
+            controls?.place(0, slots.controlsY)
+            // 空闲时的细进度线落在波浪进度的中线上（进度区 32dp 高）
+            thin?.let { it.place(side, slots.controlsY + 16.dp.roundToPx() - it.height / 2) }
+            notice?.let { it.place((width - it.width) / 2, slots.controlsY - it.height - 6.dp.roundToPx()) }
+            lyricsPage?.place(0, 0)
+        }
+    }
+}
+
+/** [phoneShortSlots] 的结果（像素）：封面边长和位置、右边文字列的起点和宽，中间一行的上下界，以及控件区顶边。 */
+internal class PhoneShortSlots(
+    val cover: Int,
+    val coverX: Int,
+    val coverTop: Int,
+    val textX: Int,
+    val textWidth: Int,
+    val areaTop: Int,
+    val areaBottom: Int,
+    val controlsY: Int,
+)
+
+/**
+ * 矮窗口（约 400×400dp）的摆放（像素），[dp] 是每 dp 的像素数：[top] 是顶栏底边，[controls] 是进度加小号按钮组的高度，
+ * 贴底、离底边 8dp。中间一行（顶栏下 4dp 到控件区上 12dp）左边是封面，取这一行的高、窗口宽的 40%、168dp 三者最小，
+ * 离左边 20dp、竖向居中；封面右边 16dp 起是歌名和一行歌词，右边留 12dp。封面不超过这一行，所以和顶栏、控件都不重叠。
+ */
+internal fun phoneShortSlots(width: Int, height: Int, top: Int, controls: Int, dp: Float): PhoneShortSlots {
+    val controlsY = height - (8 * dp).roundToInt() - controls
+    val areaTop = top + (4 * dp).roundToInt()
+    val areaBottom = (controlsY - (12 * dp).roundToInt()).coerceAtLeast(areaTop)
+    val room = areaBottom - areaTop
+    val cover = minOf(room.toFloat(), width * 0.4f, 168 * dp).toInt().coerceAtLeast(0)
+    val coverX = (20 * dp).roundToInt()
+    val coverTop = areaTop + (room - cover) / 2
+    val textX = coverX + cover + (16 * dp).roundToInt()
+    val textWidth = (width - textX - (12 * dp).roundToInt()).coerceAtLeast(0)
+    return PhoneShortSlots(cover, coverX, coverTop, textX, textWidth, areaTop, areaBottom, controlsY)
 }
 
 /** [phoneStageSlots] 的结果（像素）。 */
@@ -733,7 +896,12 @@ private val LyricsCoverSize = 52.dp
 private val LyricsCoverStart = 20.dp
 private val LyricsCoverTop = 12.dp
 
+/** 矮窗口：封面旁那一行歌词最多折成两行的高度；控件区（进度 + 8dp + 56dp 小号按钮组）的估计高度。 */
+private val ShortPreviewHeight = 48.dp
+private val ShortControlsEstimate = 112.dp
+
 private val PreviewCurrentStyle = TextStyle(fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold)
+private val ShortPreviewStyle = TextStyle(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)
 private val PreviewNextStyle = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
 private val IdleCurrentStyle = TextStyle(fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold)
 private val IdleNextStyle = TextStyle(fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)

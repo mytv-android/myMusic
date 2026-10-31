@@ -46,6 +46,7 @@ import com.mytv.mymusic.data.CollectionView
 import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.data.LyricsBackgroundMode
 import com.mytv.mymusic.data.RhythmIntensity
+import com.mytv.mymusic.data.TabletopTop
 import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.data.Playlist
@@ -152,6 +153,7 @@ data class MusicUiState(
     val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,
     val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
     val tvAmbientClock: Boolean = true,
+    val tabletopTop: TabletopTop = TabletopTop.Lyrics,
     /** 电视播放时保持屏幕常亮，阻止系统屏保；默认关，见 AppSettings.keepScreenOn。 */
     val keepScreenOn: Boolean = false,
     val rhythmOffsetMs: Int = 0,
@@ -403,6 +405,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             rhythmIntensity = settings.rhythmIntensity,
             coverShape = settings.coverShape,
             tvAmbientClock = settings.tvAmbientClock,
+            tabletopTop = settings.tabletopTop,
             keepScreenOn = settings.keepScreenOn,
             rhythmOffsetMs = settings.rhythmOffsetMs,
             rhythmDebug = settings.rhythmDebug,
@@ -3740,6 +3743,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setRhythmIntensity(value: RhythmIntensity) = viewModelScope.launch { app.settings.rhythmIntensity(value) }
     fun setCoverShape(value: CoverShapeChoice) = viewModelScope.launch { app.settings.coverShape(value) }
     fun setTvAmbientClock(value: Boolean) = viewModelScope.launch { app.settings.tvAmbientClock(value) }
+    fun setTabletopTop(value: TabletopTop) = viewModelScope.launch { app.settings.tabletopTop(value) }
     fun setKeepScreenOn(value: Boolean) = viewModelScope.launch { app.settings.keepScreenOn(value) }
     fun setRhythmOffset(value: Int) = viewModelScope.launch { app.settings.rhythmOffsetMs(value) }
     fun setRhythmDebug(value: Boolean) = viewModelScope.launch { app.settings.rhythmDebug(value) }

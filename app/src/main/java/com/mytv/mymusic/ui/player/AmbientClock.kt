@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -43,33 +44,7 @@ import java.util.Calendar
 @Composable
 fun AmbientClock(modifier: Modifier = Modifier, overImages: Boolean = false) {
     val context = LocalContext.current
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    DisposableEffect(context) {
-        val refresh = { now = System.currentTimeMillis() }
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) = refresh()
-        }
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_TIME_TICK)
-            addAction(Intent.ACTION_TIME_CHANGED)
-            addAction(Intent.ACTION_TIMEZONE_CHANGED)
-        }
-        // 只收系统广播；设置里切 12/24 小时制会发 TIME_CHANGED，有的电视系统只改设置项不发广播，再监听设置项兜底
-        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) = refresh()
-        }
-        context.contentResolver.registerContentObserver(Settings.System.getUriFor(Settings.System.TIME_12_24), false, observer)
-        onDispose {
-            context.unregisterReceiver(receiver)
-            context.contentResolver.unregisterContentObserver(observer)
-        }
-    }
-    // 每次刷新后重新计时到下一个整分钟；广播提前刷新时这里也跟着重启
-    LaunchedEffect(now) {
-        delay(millisUntilNextMinute(now))
-        now = System.currentTimeMillis()
-    }
+    val now by rememberMinuteClock()
     val use24Hour = remember(context, now) { DateFormat.is24HourFormat(context) }
     val calendar = remember(now) { Calendar.getInstance().apply { timeInMillis = now } }
     val hour = calendar.get(Calendar.HOUR_OF_DAY)
@@ -96,6 +71,44 @@ fun AmbientClock(modifier: Modifier = Modifier, overImages: Boolean = false) {
     )
 }
 
+/**
+ * 当前时间（毫秒）：整分钟刷新一次，不按秒轮询；改时间、改时区、切换 12/24 小时制时立即刷新。
+ * 电视环境模式的时钟和桌面姿态上半屏的大时钟共用。返回值在调用方的组合里读，调用方随之每分钟重组一次。
+ */
+@Composable
+internal fun rememberMinuteClock(): State<Long> {
+    val context = LocalContext.current
+    val clock = remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var now by clock
+    DisposableEffect(context) {
+        val refresh = { now = System.currentTimeMillis() }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) = refresh()
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_TIME_TICK)
+            addAction(Intent.ACTION_TIME_CHANGED)
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+        }
+        // 只收系统广播；设置里切 12/24 小时制会发 TIME_CHANGED，有的电视系统只改设置项不发广播，再监听设置项兜底
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) = refresh()
+        }
+        context.contentResolver.registerContentObserver(Settings.System.getUriFor(Settings.System.TIME_12_24), false, observer)
+        onDispose {
+            context.unregisterReceiver(receiver)
+            context.contentResolver.unregisterContentObserver(observer)
+        }
+    }
+    // 每次刷新后重新计时到下一个整分钟；广播提前刷新时这里也跟着重启
+    LaunchedEffect(now) {
+        delay(millisUntilNextMinute(now))
+        now = System.currentTimeMillis()
+    }
+    return clock
+}
+
 /** 24 小时制补零（09:05、21:30）；12 小时制小时不补零（9:30），0 点和 12 点都显示 12。 */
 internal fun clockText(hour: Int, minute: Int, use24Hour: Boolean): String {
     val minutes = minute.toString().padStart(2, '0')
@@ -111,6 +124,12 @@ internal fun clockDescription(hour: Int, minute: Int, use24Hour: Boolean): Strin
     val period = if (use24Hour) "" else if (hour < 12) "上午" else "下午"
     return "当前时间 $period${clockText(hour, minute, use24Hour)}"
 }
+
+/** 时钟下面那行日期：“10月31日 周五”。[month] 从 1 起，[dayOfWeek] 按 Calendar（周日 = 1）。 */
+internal fun clockDateText(month: Int, day: Int, dayOfWeek: Int): String =
+    "${month}月${day}日 ${WeekdayNames[(dayOfWeek - 1).mod(7)]}"
+
+private val WeekdayNames = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
 
 /** 距下一个整分钟的毫秒数，范围 1..60000；时区偏移都是整分钟，按 UTC 毫秒取整即可。 */
 internal fun millisUntilNextMinute(nowMillis: Long): Long = 60_000L - nowMillis.mod(60_000L)

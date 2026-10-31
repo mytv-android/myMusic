@@ -136,9 +136,20 @@ internal fun WallScene.slotAt(p: WallPoint): SlotPos? {
     return null
 }
 
-/** 切歌跟随、“定位”、唤醒时去的那一份：离整块屏幕中心最近的（原型取 vw/2、vh/2，不扣浮层）。 */
-internal fun WallScene.followTarget(song: Int, cam: WallPoint, viewport: WallViewport): SlotPos? =
-    if (song < 0) null else nearestCopy(song, cam, WallPoint(viewport.width / 2, viewport.height / 2))
+/**
+ * 切歌跟随、“定位”、唤醒时去的那一份：离整块屏幕中心最近的（原型取 vw/2、vh/2，不扣浮层）。
+ * 有分页的折痕时取大卡那一段的中心，镜头少走一页。
+ */
+internal fun WallScene.followTarget(song: Int, cam: WallPoint, viewport: WallViewport): SlotPos? {
+    if (song < 0) return null
+    val s = viewport.segment
+    val screen = when {
+        s == null -> WallPoint(viewport.width / 2, viewport.height / 2)
+        s.vertical -> WallPoint(s.start + s.size / 2, viewport.height / 2)
+        else -> WallPoint(viewport.width / 2, s.start + s.size / 2)
+    }
+    return nearestCopy(song, cam, screen)
+}
 
 /** 这一格坐的是还没出的歌（听歌模式队尾的占位格）。 */
 internal fun WallField.isGhost(song: Int): Boolean = this is WallField.FeedBand && isGhost(song)

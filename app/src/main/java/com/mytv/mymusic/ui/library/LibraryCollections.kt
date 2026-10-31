@@ -74,6 +74,10 @@ import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.TrackActionsSheet
+import com.mytv.mymusic.ui.adaptive.FoldRow
+import com.mytv.mymusic.ui.adaptive.LocalFoldPane
+import com.mytv.mymusic.ui.adaptive.bottom
+import com.mytv.mymusic.ui.adaptive.top
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.PageScaffold
 import com.mytv.mymusic.ui.components.SegmentGap
@@ -645,7 +649,10 @@ private fun StorageCard(count: Int, downloadBytes: Long, cacheBytes: Long, freeB
 
 // ======================= 共用 =======================
 
-/** 列表 + 详情的两栏：左栏固定宽度，右栏占满；两栏各自滚动。 */
+/**
+ * 列表 + 详情的两栏：左栏固定宽度，右栏占满；两栏各自滚动。
+ * 书本姿态、双竖时左栏收到折痕为止，右栏从折痕另一侧开始；双横时左栏在上屏、右栏在下屏（见 [FoldRow]）。
+ */
 @Composable
 internal fun TwoColumns(
     padding: PaddingValues,
@@ -655,23 +662,30 @@ internal fun TwoColumns(
 ) {
     val window = LocalAppWindow.current
     val vertical = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())
-    Row(
-        Modifier.fillMaxSize().padding(horizontal = window.gutter),
-        horizontalArrangement = Arrangement.spacedBy(if (window.isTv) 32.dp else 24.dp),
-    ) {
-        LazyColumn(
-            Modifier.width(leftWidth).fillMaxHeight(),
-            contentPadding = vertical,
-            verticalArrangement = Arrangement.spacedBy(SegmentGap),
-            content = left,
-        )
-        LazyColumn(
-            Modifier.weight(1f).fillMaxHeight(),
-            contentPadding = vertical,
-            verticalArrangement = Arrangement.spacedBy(SegmentGap),
-            content = right,
-        )
-    }
+    // 留白放在 FoldRow 的 modifier 上：它按自己（扣掉留白后）的位置找折痕
+    FoldRow(
+        startWidth = leftWidth,
+        modifier = Modifier.fillMaxSize().padding(horizontal = window.gutter),
+        spacing = if (window.isTv) 32.dp else 24.dp,
+        start = {
+            val pane = LocalFoldPane.current
+            LazyColumn(
+                Modifier.fillMaxHeight(),
+                contentPadding = PaddingValues(top = pane.top(vertical.calculateTopPadding()), bottom = pane.bottom(vertical.calculateBottomPadding())),
+                verticalArrangement = Arrangement.spacedBy(SegmentGap),
+                content = left,
+            )
+        },
+        end = {
+            val pane = LocalFoldPane.current
+            LazyColumn(
+                Modifier.fillMaxHeight(),
+                contentPadding = PaddingValues(top = pane.top(vertical.calculateTopPadding()), bottom = pane.bottom(vertical.calculateBottomPadding())),
+                verticalArrangement = Arrangement.spacedBy(SegmentGap),
+                content = right,
+            )
+        },
+    )
 }
 
 @Composable

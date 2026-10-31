@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
 import com.mytv.mymusic.data.update.formatSize
+import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.tvFocusRing
 
@@ -58,6 +59,7 @@ fun UpdateDialog(
         // 强制更新：点外面、按返回都不响应，只有装上新版本才会消失
         onDismissRequest = {},
         title = {
+            DialogAvoidsFold()
             Text(
                 "发现新版本 ${info.versionName}",
                 style = MaterialTheme.typography.titleLarge,

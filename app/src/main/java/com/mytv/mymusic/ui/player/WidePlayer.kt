@@ -66,6 +66,7 @@ import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.layout.MultiContentMeasurePolicy
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -86,6 +87,8 @@ import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.ParsedLyrics
+import com.mytv.mymusic.ui.adaptive.FoldSplit
+import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.WavySeekBar
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.theme.LocalAppearance
@@ -99,6 +102,9 @@ import kotlin.math.roundToInt
  *
  * 尺寸按设计稿 1280×800 摆放，其他窗口见 [wideStackSlots]：先压间距、再缩封面；
  * 还放不下就收起音源胶囊（工具栏里仍能换源）、换小号按钮组；横屏手机这类更矮的窗口整栏等比缩小，任何高度都不重叠。
+ *
+ * 书本姿态、双竖（竖折痕把窗口分成左右两页）：左栏收到折痕左缘，歌词栏整页放在右页，专注歌词也只占右页，
+ * 竖向工具栏移到左页正中（见 [wideColumns]、[wideFocusFrame]）。
  *
  * 重组边界同手机：空闲状态只在小组件里读（拦截点按），淡出透明度和过渡进度只在图层和摆放阶段读。
  */
@@ -149,14 +155,22 @@ internal fun WidePlayer(
     val waveBpm = remember(pulse) { { pulseWaveBpm(pulse) } }
     val focusTarget = rememberUpdatedState(lyricsMode)
     val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    val fold = LocalAppWindow.current.fold
+    val insets = WindowInsets.safeDrawing
 
-    BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+    BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(insets)) {
+        // 书本姿态、双竖：竖折痕切出左右两页。只认竖折痕；没有折痕时为 null，下面的排版和原来一样
+        val split = playerFoldSplit(
+            fold, insets, density, direction, constraints.maxWidth, constraints.maxHeight,
+            minSegment = with(density) { WideFoldMinPage.toPx() },
+        )?.takeIf { it.vertical }
         // 收不收音源胶囊、按钮组用哪一档要在组合阶段定，只能按估计的高度判断；实际摆放在测量阶段按真实高度算
-        val estimate = remember(density, constraints.maxWidth, constraints.maxHeight) {
-            wideEstimate(density, constraints.maxWidth, constraints.maxHeight)
+        val estimate = remember(density, constraints.maxWidth, constraints.maxHeight, split) {
+            wideEstimate(density, constraints.maxWidth, constraints.maxHeight, split)
         }
         val full = estimate.full
-        val policy = remember(move, focusTarget, estimate) { WideStagePolicy(move, focusTarget, estimate) }
+        val policy = remember(move, focusTarget, estimate, split) { WideStagePolicy(move, focusTarget, estimate, split) }
         Layout(
             contents = listOf<@Composable () -> Unit>(
                 {
@@ -424,9 +438,9 @@ private fun DockPlayButton(playing: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** 换源结果：浮在歌词栏底部正中 8 秒，不挤动布局。 */
+/** 换源结果：浮在歌词栏底部正中 8 秒，不挤动布局。桌面姿态的播放页浮在上半屏底部正中。 */
 @Composable
-private fun WideNotice(notice: String) {
+internal fun WideNotice(notice: String) {
     if (notice.isBlank()) return
     Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f)) {
         Text(
@@ -454,13 +468,13 @@ private data class WideEstimate(
 )
 
 /** 标题按一行估：组合阶段量不到实际折行，两行标题在测量时由封面让出高度。 */
-private fun wideEstimate(density: Density, width: Int, height: Int): WideEstimate = with(density) {
+private fun wideEstimate(density: Density, width: Int, height: Int, split: FoldSplit?): WideEstimate = with(density) {
     val meta = (TitleLineHeight.toPx() + ArtistStyle.lineHeight.toPx() + 2.dp.toPx()).roundToInt()
     val pill = PillHeight.roundToPx()
     // WavySeekBar：32dp 的进度区 + 一行 labelMedium 时间
     val seek = (32.dp.toPx() + 16.sp.toPx()).roundToInt()
     val toolbar = ToolbarHeight.roundToPx()
-    val coverMax = wideColumns(width, density.density).coverMax
+    val coverMax = wideColumns(width, density.density, split).coverMax
     val full = wideFullTier(height, density.density, meta, seek, coverMax)
     val group = (if (full) TransportGroupSize.Tablet else TransportGroupSize.Compact).height.roundToPx()
     WideEstimate(full, meta, pill, seek, group, toolbar, DockHeightEstimate.roundToPx(), HeaderStyle.lineHeight.roundToPx())
@@ -470,11 +484,13 @@ private fun wideEstimate(density: Density, width: Int, height: Int): WideEstimat
  * 平板播放页的摆放。默认布局：左栏按 [wideStackSlots] 竖排，歌词栏在右；专注歌词按 [wideFocusFrame]。
  * 歌词列表按目标模式的尺寸测量，位置在图层里从一种模式平移到另一种；封面以左上角为原点缩放平移到竖向工具栏的小圆处。
  * 过渡进度只在图层里读，切换模式只重新测量一次。专注歌词稳定后默认布局已移出组合，封面按上一次量到的高度推算起点。
+ * [split] 是竖折痕切出的左右两页（本地像素），没有时为 null。
  */
 private class WideStagePolicy(
     private val move: State<Float>,
     private val focus: State<Boolean>,
     private val estimate: WideEstimate,
+    private val split: FoldSplit?,
 ) : MultiContentMeasurePolicy {
     private var lastMeta = estimate.meta
     private var lastSeek = estimate.seek
@@ -487,13 +503,16 @@ private class WideStagePolicy(
         val dp = density
         val focused = focus.value
         val loose = Constraints(maxWidth = width, maxHeight = height)
-        val cols = wideColumns(width, dp)
+        val cols = wideColumns(width, dp, split)
+        // 书本姿态里左栏的控件最宽只到折痕左缘，再宽就会伸进折痕
+        val book = split != null
+        val column = if (book) Constraints(maxWidth = cols.left, maxHeight = height) else loose
 
         val close = measurables[SlotClose].firstOrNull()?.measure(loose)
         val more = measurables[SlotMore].firstOrNull()?.measure(loose)
-        val pill = measurables[SlotPill].firstOrNull()?.measure(loose)
-        val group = measurables[SlotGroup].firstOrNull()?.measure(loose)
-        val toolbar = measurables[SlotToolbar].firstOrNull()?.measure(loose)
+        val pill = measurables[SlotPill].firstOrNull()?.measure(column)
+        val group = measurables[SlotGroup].firstOrNull()?.measure(column)
+        val toolbar = measurables[SlotToolbar].firstOrNull()?.measure(column)
         group?.let { lastGroup = it.height }
         toolbar?.let { lastToolbar = it.height }
 
@@ -522,7 +541,7 @@ private class WideStagePolicy(
         // 竖向工具栏按自然高度测量，太矮时由摆放阶段等比缩小
         val dock = measurables[SlotDock].firstOrNull()?.measure(Constraints(maxWidth = width))
         val dockWidth = dock?.width ?: DockWidth.roundToPx()
-        val frame = wideFocusFrame(width, height, dp, dockWidth, dock?.height ?: estimate.dock, estimate.header, lastSeek)
+        val frame = wideFocusFrame(width, height, dp, dockWidth, dock?.height ?: estimate.dock, estimate.header, lastSeek, split)
         val header = measurables[SlotHeader].firstOrNull()?.measure(Constraints(maxWidth = frame.lyricsWidth))
         val focusSeek = measurables[SlotFocusSeek].firstOrNull()?.measure(Constraints.fixedWidth(frame.seekWidth))
         val miniSize = DockCoverSize.toPx() * frame.dockScale
@@ -581,7 +600,8 @@ private class WideStagePolicy(
             meta?.placeInStack(blockX, stack.tops[row])
             row++
             if (full) {
-                pill?.placeInStack(blockX, stack.tops[row])
+                // 胶囊和标题左对齐；书本姿态里比标题宽的胶囊往左挪，右缘不过折痕
+                pill?.let { it.placeInStack(if (book) blockX.coerceAtMost(cols.left - it.width).coerceAtLeast(0) else blockX, stack.tops[row]) }
                 row++
             }
             seek?.placeInStack(blockX, stack.tops[row++])
@@ -609,12 +629,21 @@ internal class WideColumns(val left: Int, val block: Int, val coverMax: Int, val
  * 默认布局的横向分配，[dp] 是每 dp 的像素数。设计稿 1280dp 宽：左栏 560、歌词栏 x 600 宽 616、右边留 64 给右上角的更多按钮。
  * 左栏按宽度的 43.75% 取，限制在 340–560dp；封面不超过 320dp，并且离左栏两边各留 72dp：
  * 封面顶边和左上角的收起按钮在同一高度，窄窗口里不能压到按钮上。歌词栏最宽 760dp，再宽一行字太长。
+ *
+ * [split] 是竖折痕（书本姿态、双竖）切出的左右两页，像素、本地坐标；横折痕不管。有竖折痕时左栏就是左页：
+ * 右缘取折痕左缘（已让过 16dp 安全距离），歌词栏从右页起点再空 16dp，也就是离折痕 32dp；双屏的铰链本身有宽度，
+ * 歌词栏离铰链 16dp。右边照样给更多按钮留 64dp。
  */
-internal fun wideColumns(width: Int, dp: Float): WideColumns {
-    val left = (width * 0.4375f).coerceIn(340 * dp, 560 * dp).roundToInt().coerceAtMost(width)
+internal fun wideColumns(width: Int, dp: Float, split: FoldSplit? = null): WideColumns {
+    val book = split?.takeIf { it.vertical }
+    val left = if (book != null) {
+        book.firstEnd.roundToInt().coerceIn(0, width)
+    } else {
+        (width * 0.4375f).coerceIn(340 * dp, 560 * dp).roundToInt().coerceAtMost(width)
+    }
     val block = minOf(320 * dp, left - 48 * dp).roundToInt().coerceAtLeast(0)
     val coverMax = minOf(320 * dp, left - 144 * dp).roundToInt().coerceAtLeast(0)
-    val lyricsX = (left + 40 * dp).roundToInt()
+    val lyricsX = if (book != null) (book.secondStart + 16 * dp).roundToInt() else (left + 40 * dp).roundToInt()
     val lyricsWidth = (width - lyricsX - 64 * dp).coerceIn(0f, 760 * dp).roundToInt()
     return WideColumns(left, block, coverMax, lyricsX, lyricsWidth)
 }
@@ -700,6 +729,9 @@ internal class WideFocusFrame(
 /**
  * 设计稿 1280×800（状态栏下 772dp 高）：工具栏 x 32、宽 88；标题行 x 180、距顶 12；歌词宽 1000、高 610；
  * 进度条宽 980、底边留 40。工具栏的中心放在进度条以上区域 45% 的高度，窗口太矮放不下就等比缩小。
+ *
+ * 有竖折痕（[split]，书本姿态、双竖）时专注歌词只占右页：标题行、歌词和进度条从右页起点再空 16dp 开始，
+ * 右边留 32dp；竖向工具栏放在左页正中，左页只剩它，不再贴着窗口左边。
  */
 internal fun wideFocusFrame(
     width: Int,
@@ -709,10 +741,21 @@ internal fun wideFocusFrame(
     dockHeight: Int,
     headerHeight: Int,
     seekHeight: Int,
+    split: FoldSplit? = null,
 ): WideFocusFrame {
-    val dockX = (width * 0.025f).coerceIn(16 * dp, 32 * dp).roundToInt()
-    val contentX = (dockX + dockWidth + (width * 0.047f).coerceIn(32 * dp, 60 * dp)).roundToInt()
-    val right = (width * 0.078f).coerceIn(32 * dp, 100 * dp)
+    val book = split?.takeIf { it.vertical }
+    val dockX: Int
+    val contentX: Int
+    val right: Float
+    if (book != null) {
+        dockX = ((book.firstEnd - dockWidth) / 2f).roundToInt().coerceAtLeast(0)
+        contentX = (book.secondStart + 16 * dp).roundToInt()
+        right = 32 * dp
+    } else {
+        dockX = (width * 0.025f).coerceIn(16 * dp, 32 * dp).roundToInt()
+        contentX = (dockX + dockWidth + (width * 0.047f).coerceIn(32 * dp, 60 * dp)).roundToInt()
+        right = (width * 0.078f).coerceIn(32 * dp, 100 * dp)
+    }
     val lyricsWidth = (width - contentX - right).coerceIn(0f, 1100 * dp).roundToInt()
     val headerY = (12 * dp).roundToInt()
     val lyricsY = headerY + headerHeight + (22 * dp).roundToInt()
@@ -769,6 +812,9 @@ private val DockCoverSize = 64.dp
 
 /** 竖向工具栏的自然高度：64 封面 + 48 + 72 + 48 + 1 分隔 + 48 + 48，六个 10dp 间距，上下各 12。 */
 private val DockHeightEstimate = 413.dp
+
+/** 竖折痕切出的哪一页比这还窄，就当没有折痕：贴边的折痕分出来也放不下左栏。 */
+private val WideFoldMinPage = 240.dp
 
 private val TitleLineHeight = (34 * 1.18f).sp
 private val ArtistStyle = TextStyle(fontSize = 19.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium)

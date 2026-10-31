@@ -16,10 +16,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.window.layout.FoldingFeature
+import androidx.window.layout.WindowLayoutInfo
 import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.isTelevision
 
@@ -27,15 +30,42 @@ import com.mytv.mymusic.ui.theme.isTelevision
 enum class DeviceKind { Phone, Tablet, Tv }
 
 /**
+ * WindowManager 报来的折痕或铰链（FoldingFeature），见 MainActivity。
+ * [bounds] 是窗口坐标（像素），和 Compose 的 positionInWindow 同一套；宽或高为 0 的折痕已经按 1px 算。
+ * 只有窗口横跨整个显示区时才有：分屏、多窗口、折叠后的外屏都是 null。
+ */
+@Immutable
+data class Fold(
+    val bounds: Rect,
+    /** orientation == VERTICAL：折痕竖着，把窗口分成左右两块。 */
+    val vertical: Boolean,
+    /** state == HALF_OPENED。 */
+    val halfOpened: Boolean,
+    /** isSeparating：半开的折痕，或任何会挡像素的铰链。 */
+    val separating: Boolean,
+    /** occlusionType == FULL：双屏的铰链，下面没有像素。 */
+    val occluding: Boolean,
+)
+
+/**
+ * 从折痕推出来的姿态。[Book] 和 [Tabletop] 都要求折痕把窗口分开（[Fold.separating]）：
+ * 半开的折叠屏，或者横跨两块屏的双屏（铰链竖着算书本，横着算桌面）。
+ */
+enum class Posture { Normal, Flat, Book, Tabletop }
+
+/**
  * 断点：<600 手机；600–839 导航栏改为侧栏；840–1199 底部播放条；≥1200 常驻 380dp 播放窗格。
  */
 @Immutable
-data class AppWindow(val kind: DeviceKind, val widthDp: Int, val heightDp: Int) {
+data class AppWindow(val kind: DeviceKind, val widthDp: Int, val heightDp: Int, val fold: Fold? = null) {
     val isPhone get() = kind == DeviceKind.Phone
     val isTablet get() = kind == DeviceKind.Tablet
     val isTv get() = kind == DeviceKind.Tv
-    /** 列表 + 详情双栏（设置、同步、详情页左右分栏）。 */
-    val twoPane get() = isTv || widthDp >= 840
+    /**
+     * 列表 + 详情双栏（设置、同步、详情页左右分栏）。横跨双屏、铰链横着（双横）时也算：
+     * 铰链天然把窗口分成上下两块，列表放上屏、详情放下屏（见 FoldRow），不用等宽度够 840。
+     */
+    val twoPane get() = isTv || widthDp >= 840 || (isTablet && fold != null && fold.occluding && !fold.vertical)
     val showRail get() = !isPhone
     val showNowPlayingPane get() = isTablet && widthDp >= 1200
     val showBottomPlayerBar get() = isTablet && widthDp < 1200
@@ -45,9 +75,39 @@ data class AppWindow(val kind: DeviceKind, val widthDp: Int, val heightDp: Int) 
         DeviceKind.Tablet -> 24.dp
         DeviceKind.Tv -> 48.dp
     }
+    val posture: Posture get() = when {
+        fold == null || isTv -> Posture.Normal
+        !fold.separating -> Posture.Flat
+        fold.vertical -> Posture.Book
+        else -> Posture.Tabletop
+    }
+    /** 矮窗口（折叠屏上下分屏后的小窗等）：手机播放页换紧凑排法。 */
+    val short get() = isPhone && heightDp < 480
 }
 
 val LocalAppWindow = staticCompositionLocalOf { AppWindow(DeviceKind.Phone, 400, 800) }
+
+/** MainActivity 收集到的折痕，[rememberAppWindow] 读它；没有 Activity 收集（小组件配置页、预览、测试）时为 null。 */
+val LocalWindowFold = compositionLocalOf<Fold?> { null }
+
+/**
+ * 取第一条折痕。bounds 是窗口坐标（像素）；宽或高为 0 的折痕（不挡像素的折叠屏）按 1px 算，
+ * 免得后面拿它切分时左右两块挨在一起分不出来。
+ */
+fun WindowLayoutInfo.toFold(): Fold? {
+    val feature = displayFeatures.filterIsInstance<FoldingFeature>().firstOrNull() ?: return null
+    val b = feature.bounds
+    val vertical = feature.orientation == FoldingFeature.Orientation.VERTICAL
+    val right = if (vertical) maxOf(b.right, b.left + 1) else b.right
+    val bottom = if (vertical) b.bottom else maxOf(b.bottom, b.top + 1)
+    return Fold(
+        bounds = Rect(b.left.toFloat(), b.top.toFloat(), right.toFloat(), bottom.toFloat()),
+        vertical = vertical,
+        halfOpened = feature.state == FoldingFeature.State.HALF_OPENED,
+        separating = feature.isSeparating,
+        occluding = feature.occlusionType == FoldingFeature.OcclusionType.FULL,
+    )
+}
 
 /** 全局 Snackbar：页面里的撤销提示都走这一个，避免叠在一起，位置也会让开底部浮层。 */
 val LocalAppSnackbar = staticCompositionLocalOf<SnackbarHostState> { error("LocalAppSnackbar 未提供") }
@@ -109,7 +169,8 @@ fun rememberAppWindow(layout: LayoutMode = LayoutMode.Auto): AppWindow {
     val tv = remember(context) { context.isTelevision() }
     val width = configuration.screenWidthDp
     val height = configuration.screenHeightDp
-    return remember(layout, tv, width, height) {
+    val fold = LocalWindowFold.current
+    return remember(layout, tv, width, height, fold) {
         AppWindow(
             kind = when (layout) {
                 LayoutMode.Phone -> DeviceKind.Phone
@@ -123,6 +184,7 @@ fun rememberAppWindow(layout: LayoutMode = LayoutMode.Auto): AppWindow {
             },
             widthDp = width,
             heightDp = height,
+            fold = fold,
         )
     }
 }

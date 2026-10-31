@@ -86,6 +86,10 @@ import com.mytv.mymusic.ui.ConfirmDialog
 import com.mytv.mymusic.ui.ErrorBlock
 import com.mytv.mymusic.ui.InfoNote
 import com.mytv.mymusic.ui.MusicActions
+import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
+import com.mytv.mymusic.ui.adaptive.FoldRow
+import com.mytv.mymusic.ui.adaptive.LocalFoldPane
+import com.mytv.mymusic.ui.adaptive.bottom
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
 import com.mytv.mymusic.ui.components.IconTone
@@ -513,8 +517,9 @@ private fun ConflictResolver(
         }
         return
     }
-    // 大屏：居中对话框，宽 440dp
+    // 大屏：居中对话框，宽 440dp；折叠屏书本 / 桌面姿态挪到右页 / 上半屏
     Dialog(onDismissRequest = { if (dismissible) onCancel() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DialogAvoidsFold()
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -772,29 +777,33 @@ fun SyncConnectScreen(
                 infoContent = whatCard,
             )
         } else if (window.twoPane) {
-            // 左栏选位置和说明，右栏是表单（最宽 440dp，不拉满）
-            Row(
-                Modifier
+            // 左栏选位置和说明，右栏是表单（最宽 440dp，不拉满）；书本姿态、双竖时两栏以折痕为界
+            FoldRow(
+                startWidth = 360.dp,
+                modifier = Modifier
                     .fillMaxSize()
                     .padding(top = padding.calculateTopPadding())
                     .padding(horizontal = window.gutter),
-                horizontalArrangement = Arrangement.spacedBy(if (window.isTv) 32.dp else 24.dp),
-            ) {
-                Column(
-                    Modifier.width(360.dp).verticalScroll(rememberScrollState()).padding(bottom = padding.calculateBottomPadding()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    providerPicker()
-                    whatCard()
-                    help()
-                    offline()
-                }
-                Column(
-                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = padding.calculateBottomPadding()),
-                ) {
-                    Column(Modifier.widthIn(max = 440.dp), content = form)
-                }
-            }
+                spacing = if (window.isTv) 32.dp else 24.dp,
+                start = {
+                    Column(
+                        Modifier.verticalScroll(rememberScrollState()).padding(bottom = LocalFoldPane.current.bottom(padding.calculateBottomPadding())),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        providerPicker()
+                        whatCard()
+                        help()
+                        offline()
+                    }
+                },
+                end = {
+                    Column(
+                        Modifier.verticalScroll(rememberScrollState()).padding(bottom = LocalFoldPane.current.bottom(padding.calculateBottomPadding())),
+                    ) {
+                        Column(Modifier.widthIn(max = 440.dp), content = form)
+                    }
+                },
+            )
         } else {
             Column(
                 Modifier

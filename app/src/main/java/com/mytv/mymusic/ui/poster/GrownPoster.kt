@@ -263,7 +263,8 @@ internal fun GrownPoster(
     coverFlying: Boolean = false,
 ) {
     val window = LocalAppWindow.current
-    val style = GrownPosterStyle.of(wallMetricsFor(window.isTv, window.widthDp, window.heightDp))
+    // 跟墙用同一档格距（折叠屏上按大卡那一段选，可能和按整个窗口算的不一样）；墙外按窗口算
+    val style = GrownPosterStyle.of(LocalWallMetrics.current ?: wallMetricsFor(window.isTv, window.widthDp, window.heightDp))
     val cardPx = with(LocalDensity.current) { style.card.roundToPx() }
     // RenderEffect 要 Android 12+；电视即使在外观里强开模糊也只压暗
     val blurAllowed = LocalBlurPolicy.current.enabled && Build.VERSION.SDK_INT >= 31 && !window.isTv

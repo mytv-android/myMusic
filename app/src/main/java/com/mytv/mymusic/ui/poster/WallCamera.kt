@@ -29,43 +29,52 @@ internal fun clampCam(cam: WallPoint, from: WallPoint, bounds: WallBounds?): Cam
  * 把 [p] 居中到可用区时镜头该去的位置（点格子放大、切歌跟随、“定位”都用它）。
  * 先放大再居中：[WallScene.grown] 应已是 [p]，这样量的是 6×6 大卡。
  * 听歌模式的带子有边：尽量铺满整屏不露空边，但大卡必须整张落在可用区里。
+ * 有分页的折痕时居中到大卡那一段（[WallViewport.cardArea]：书本取右页、桌面取上半屏），最后保证不跨折痕。
  */
 internal fun WallScene.centerTarget(p: SlotPos, viewport: WallViewport): WallPoint {
     val r = rectAt(p)
-    val top = viewport.insetTop
-    val vh = viewport.usableHeight
-    var tx = r.centerX - viewport.width / 2
-    var ty = r.centerY - top - vh / 2
+    // 没有折痕时 a 就是原来的可用区（x 0、宽 width，y insetTop、高 usableHeight），算式和结果都不变
+    val a = viewport.cardArea
+    var tx = r.centerX - a.x - a.w / 2
+    var ty = r.centerY - a.y - a.h / 2
     val f = fillRange(viewport)
     if (f != null) {
-        tx = clampLoose(clampLoose(tx, f.x0, f.x1), r.right - viewport.width, r.x)
-        ty = clampLoose(clampLoose(ty, f.y0, f.y1), r.bottom - top - vh, r.y - top)
+        tx = clampLoose(clampLoose(tx, f.x0, f.x1), r.right - a.x - a.w, r.x - a.x)
+        ty = clampLoose(clampLoose(ty, f.y0, f.y1), r.bottom - a.y - a.h, r.y - a.y)
     }
-    return WallPoint(tx, ty)
+    return viewport.keepInSegment(r, WallPoint(tx, ty))
 }
 
 /**
  * 方向键焦点出了安全区（可用区四边内缩 [WallMetrics.safeMargin]）才移镜头，而且只移最小距离，
  * 正在播放的大卡因此尽量留在画面里；格子比安全区还大时改为居中。[base] 是镜头当前的落点
  * （弹簧还在走就用弹簧终点，见 [WallCamera.restingPoint]）。不用动返回 null。
+ * 有分页的折痕时，大卡（方向键 OK 原地放大、焦点移到大卡上）的安全区换成它那一段，而且不许跨折痕；
+ * 别的格子是背景，照旧按整屏算，可以跨折痕。
  */
 internal fun WallScene.revealTarget(p: SlotPos, base: WallPoint, viewport: WallViewport): WallPoint? {
     val r = rectAt(p)
     val m = metrics.safeMargin
-    val inset = viewport.insetTop
-    val vh = viewport.usableHeight
+    val card = p == grown && viewport.segment != null
+    // 没有折痕时 a 就是原来的可用区，下面的算式和以前逐项相同
+    val a = if (card) viewport.cardArea else viewport.usableArea
     var tx = base.x
     var ty = base.y
-    val left = tx + m
-    val right = tx + viewport.width - m
-    val top = ty + inset + m
-    val bottom = top + vh - 2 * m
-    if (r.w > right - left) tx = r.centerX - viewport.width / 2
+    val left = tx + a.x + m
+    val right = tx + a.x + a.w - m
+    val top = ty + a.y + m
+    val bottom = top + a.h - 2 * m
+    if (r.w > right - left) tx = r.centerX - a.x - a.w / 2
     else if (r.x < left) tx -= left - r.x
     else if (r.right > right) tx += r.right - right
-    if (r.h > bottom - top) ty = r.centerY - inset - vh / 2
+    if (r.h > bottom - top) ty = r.centerY - a.y - a.h / 2
     else if (r.y < top) ty -= top - r.y
     else if (r.bottom > bottom) ty += r.bottom - bottom
+    if (card) {
+        val k = viewport.keepInSegment(r, WallPoint(tx, ty))
+        tx = k.x
+        ty = k.y
+    }
     return if (tx == base.x && ty == base.y) null else WallPoint(tx, ty)
 }
 

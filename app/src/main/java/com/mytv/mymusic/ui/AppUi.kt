@@ -89,6 +89,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
 import com.mytv.mymusic.aggregate.Availability
 import com.mytv.mymusic.aggregate.CanonicalTrack
 import com.mytv.mymusic.aggregate.PlaybackMode
@@ -226,6 +227,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun setRhythmIntensity(value: com.mytv.mymusic.data.RhythmIntensity) = model.setRhythmIntensity(value)
     fun setCoverShape(value: com.mytv.mymusic.data.CoverShapeChoice) = model.setCoverShape(value)
     fun setTvAmbientClock(value: Boolean) = model.setTvAmbientClock(value)
+    fun setTabletopTop(value: com.mytv.mymusic.data.TabletopTop) = model.setTabletopTop(value)
     fun setKeepScreenOn(value: Boolean) = model.setKeepScreenOn(value)
     fun setRhythmOffset(value: Int) = model.setRhythmOffset(value)
     fun setRhythmDebug(value: Boolean) = model.setRhythmDebug(value)
@@ -490,7 +492,10 @@ fun InputDialog(
     var value by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title, style = MaterialTheme.typography.titleLarge) },
+        title = {
+            DialogAvoidsFold()
+            Text(title, style = MaterialTheme.typography.titleLarge)
+        },
         text = {
             OutlinedTextField(
                 value,
@@ -521,7 +526,10 @@ fun ConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title, style = MaterialTheme.typography.titleLarge) },
+        title = {
+            DialogAvoidsFold()
+            Text(title, style = MaterialTheme.typography.titleLarge)
+        },
         text = { Text(message, style = MaterialTheme.typography.bodyMedium) },
         confirmButton = {
             TextButton(onClick = { onConfirm(); onDismiss() }) {
@@ -720,7 +728,10 @@ fun MergeDialog(track: CanonicalTrack, candidates: List<CanonicalTrack>, onMerge
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.widthIn(max = 440.dp),
-        title = { Text("合并到…") },
+        title = {
+            DialogAvoidsFold()
+            Text("合并到…")
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(

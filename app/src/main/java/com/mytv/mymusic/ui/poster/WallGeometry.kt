@@ -55,17 +55,57 @@ internal data class WallTile(
 )
 
 /**
+ * 折痕切出的、放大卡要落进去的那一段（视口本地 dp）。[vertical] 为 true 时是 x 在 [start, end] 的一竖条
+ * （书本 / 双竖的右页），false 时是 y 在 [start, end] 的一横条（桌面 / 双横的上半屏）；另一个方向占满视口。
+ * 两端已经让过折痕两侧的安全距离（铰链按自己的宽度），见 FoldSplit。
+ */
+internal data class WallSegment(val vertical: Boolean, val start: Float, val end: Float) {
+    val size: Float get() = end - start
+}
+
+/**
  * 墙面视口。[width] × [height] 是整块屏幕；[insetTop] / [insetBottom] 是浮层（顶栏、底部按钮）让出的高度，
  * 中间才是放大卡要落进去的可用区。原型取值：手机 360×800、上 84 下 92；平板 1280×800 不让（歌单模式底部 88）；
  * 电视 960×540、上 80（顶部一排控件）。
+ * [segment] 是有分页的折痕时大卡那一段：大卡只在那一段里居中、不跨折痕，墙上别的格子照常铺满整屏。
  */
 internal data class WallViewport(
     val width: Float,
     val height: Float,
     val insetTop: Float = 0f,
     val insetBottom: Float = 0f,
+    val segment: WallSegment? = null,
 ) {
     val usableHeight: Float get() = height - insetTop - insetBottom
+
+    /** 浮层让出后的可用区。 */
+    val usableArea: WallRect get() = WallRect(0f, insetTop, width, usableHeight)
+
+    /**
+     * 大卡居中进去的区域：可用区和 [segment] 的交集。桌面姿态的上半屏扣掉顶栏后可能比大卡矮，
+     * 这时由 [keepInSegment] 兜底：大卡可以压到浮层的边，但不能跨折痕。浮层把那一段整个盖住时只按那一段。
+     */
+    val cardArea: WallRect
+        get() {
+            val s = segment ?: return usableArea
+            if (s.vertical) return WallRect(s.start, insetTop, s.size, usableHeight)
+            val top = max(insetTop, s.start)
+            val bottom = min(height - insetBottom, s.end)
+            return if (bottom > top) WallRect(0f, top, width, bottom - top) else WallRect(0f, s.start, width, s.size)
+        }
+
+    /**
+     * 大卡不许跨折痕：沿切分方向把镜头 [cam] 收到 [r] 整张落在 [segment] 里；那一段比大卡还窄时贴着它的起边。
+     * 没有 [segment] 时原样返回。
+     */
+    fun keepInSegment(r: WallRect, cam: WallPoint): WallPoint {
+        val s = segment ?: return cam
+        return if (s.vertical) {
+            WallPoint(clampLoose(cam.x, r.right - s.end, r.x - s.start), cam.y)
+        } else {
+            WallPoint(cam.x, clampLoose(cam.y, r.bottom - s.end, r.y - s.start))
+        }
+    }
 }
 
 /**
@@ -337,10 +377,11 @@ internal class WallScene(
         return best
     }
 
-    /** 方向键第一下：选离可用区中心最近的一格。 */
+    /** 方向键第一下：选离可用区中心最近的一格（有折痕时是大卡那一段的中心，一般就是大卡）。 */
     fun initialFocus(cam: WallPoint, viewport: WallViewport): SlotPos? {
-        val cx = cam.x + viewport.width / 2
-        val cy = cam.y + viewport.insetTop + viewport.usableHeight / 2
+        val a = viewport.cardArea
+        val cx = cam.x + a.x + a.w / 2
+        val cy = cam.y + a.y + a.h / 2
         val center = SlotPos(floor(cx / metrics.blockWidth).toInt(), floor(cy / metrics.blockHeight).toInt(), 0)
         var best: SlotPos? = null
         var bd = Float.POSITIVE_INFINITY

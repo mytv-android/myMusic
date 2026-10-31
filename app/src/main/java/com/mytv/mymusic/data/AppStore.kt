@@ -68,6 +68,12 @@ enum class CoverShapeChoice { Random, Cookie12, Cookie9, Cookie7, Sunny, SoftBur
 private fun String?.toCoverShapeChoice(): CoverShapeChoice =
     CoverShapeChoice.entries.firstOrNull { it.name == this } ?: CoverShapeChoice.Random
 
+/** 折叠屏桌面姿态（半开、竖着立起来的那一半）播放页上半屏放什么；下半屏固定是控制。 */
+enum class TabletopTop { Lyrics, Cover, Clock }
+
+private fun String?.toTabletopTop(): TabletopTop =
+    TabletopTop.entries.firstOrNull { it.name == this } ?: TabletopTop.Lyrics
+
 private fun String?.toPosterTint(): PosterTint =
     PosterTint.entries.firstOrNull { it.name == this } ?: PosterTint.Medium
 
@@ -114,6 +120,7 @@ class SettingsStore(private val context: Context) {
     private val rhythmIntensityKey = stringPreferencesKey("rhythm_intensity")
     private val coverShapeKey = stringPreferencesKey("cover_shape")
     private val tvAmbientClockKey = booleanPreferencesKey("tv_ambient_clock")
+    private val tabletopTopKey = stringPreferencesKey("tabletop_top")
     private val keepScreenOnKey = booleanPreferencesKey("tv_keep_screen_on")
     private val rhythmOffsetKey = intPreferencesKey("rhythm_offset_ms")
     private val rhythmDebugKey = booleanPreferencesKey("rhythm_debug")
@@ -153,6 +160,7 @@ class SettingsStore(private val context: Context) {
             rhythmIntensity = values[rhythmIntensityKey].toRhythmIntensity(),
             coverShape = values[coverShapeKey].toCoverShapeChoice(),
             tvAmbientClock = values[tvAmbientClockKey] ?: true,
+            tabletopTop = values[tabletopTopKey].toTabletopTop(),
             keepScreenOn = values[keepScreenOnKey] ?: false,
             rhythmOffsetMs = (values[rhythmOffsetKey] ?: 0).coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS),
             rhythmDebug = values[rhythmDebugKey] ?: false,
@@ -208,6 +216,7 @@ class SettingsStore(private val context: Context) {
     suspend fun rhythmIntensity(value: RhythmIntensity) = context.dataStore.edit { it[rhythmIntensityKey] = value.name }
     suspend fun coverShape(value: CoverShapeChoice) = context.dataStore.edit { it[coverShapeKey] = value.name }
     suspend fun tvAmbientClock(value: Boolean) = context.dataStore.edit { it[tvAmbientClockKey] = value }
+    suspend fun tabletopTop(value: TabletopTop) = context.dataStore.edit { it[tabletopTopKey] = value.name }
     suspend fun keepScreenOn(value: Boolean) = context.dataStore.edit { it[keepScreenOnKey] = value }
     suspend fun rhythmOffsetMs(value: Int) =
         context.dataStore.edit { it[rhythmOffsetKey] = value.coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS) }
@@ -366,6 +375,8 @@ data class AppSettings(
     val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
     /** 电视环境模式右上角是否显示时钟。 */
     val tvAmbientClock: Boolean = true,
+    /** 折叠屏桌面姿态播放页的上半屏：默认歌词。 */
+    val tabletopTop: TabletopTop = TabletopTop.Lyrics,
     /**
      * 电视播放时给窗口挂 FLAG_KEEP_SCREEN_ON：屏幕不超时，系统屏保就不会启动。
      * 默认关：屏幕会一直亮着，OLED 有烧屏风险；息屏听歌、离开应用都不受影响。

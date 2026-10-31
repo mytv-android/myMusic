@@ -129,6 +129,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -165,7 +166,14 @@ import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.PlaylistPickerSheet
 import com.mytv.mymusic.ui.SearchUiState
 import com.mytv.mymusic.ui.TrackActionsSheet
+import com.mytv.mymusic.ui.adaptive.FoldRow
+import com.mytv.mymusic.ui.adaptive.LocalFoldPane
+import com.mytv.mymusic.ui.adaptive.bottom
+import com.mytv.mymusic.ui.adaptive.foldAnchor
+import com.mytv.mymusic.ui.adaptive.rememberFoldAnchor
+import com.mytv.mymusic.ui.adaptive.rememberFoldSplit
 import com.mytv.mymusic.ui.components.AppLoading
+import com.mytv.mymusic.ui.components.Posture
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
@@ -553,8 +561,9 @@ private fun TouchSearch(
             }
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            // 按内容区实际宽度分栏：≥1200dp 时右侧有播放窗格，内容区会比窗口窄很多
-            val twoPane = !window.isPhone && maxWidth >= 760.dp
+            // 按内容区实际宽度分栏：≥1200dp 时右侧有播放窗格，内容区会比窗口窄很多。
+            // 折叠屏书本姿态内容区不到 760dp（Pixel Fold 745dp），但折痕本来就分出了两页：最佳匹配放左页，结果放右页
+            val twoPane = !window.isPhone && (maxWidth >= 760.dp || window.posture == Posture.Book)
             val listWidth = maxWidth - window.gutter * 2
             when {
                 showHome && !docked -> HomePage(ctx, narrow)
@@ -1003,28 +1012,52 @@ private fun SongResultsTwoPane(ctx: SearchCtx, rowWidth: Dp) {
     val results = remember(groups) { buildSongResultsCache(groups) }
     var altExpanded by rememberSaveable { mutableStateOf(false) }
     val showSkeleton = rememberDelayed(groups.isEmpty() && ctx.loading.value)
-    Row(Modifier.fillMaxSize().padding(horizontal = window.gutter), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-        if (groups.isNotEmpty() || showSkeleton) {
-            Column(
-                Modifier
-                    .width(TwoPaneLeft)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState())
-                    .padding(top = 8.dp, bottom = bottom),
-            ) {
-                if (groups.isNotEmpty()) BestMatchCard(ctx, groups.first(), vertical = true) else BestSkeleton(vertical = true)
-            }
-        }
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            SearchSelectionHeader(ctx, Modifier.padding(bottom = 8.dp))
-            LazyColumn(
-                Modifier.weight(1f).fillMaxHeight(),
-                contentPadding = PaddingValues(top = 4.dp, bottom = bottom),
-            ) {
-                songItems(ctx, results, rowWidth, bestInline = false, altExpanded = altExpanded, onToggleAlt = { altExpanded = !altExpanded })
-            }
-        }
+    val left = groups.isNotEmpty() || showSkeleton
+    // 和 FoldRow 量同一块区域，算出右栏被折痕切过后的实际宽度，结果行按它排。
+    // 没有折痕时不读 anchor，免得首次摆放后整块结果多重组一次
+    val anchor = rememberFoldAnchor()
+    val split = if (window.fold != null) {
+        rememberFoldSplit(anchor, minSegment = 160.dp)?.takeIf { it.vertical || it.occluding }
+    } else {
+        null
     }
+    val density = LocalDensity.current
+    val listWidth = when {
+        split == null -> rowWidth
+        split.vertical -> with(density) { split.secondSize.toDp() }
+        // 双横：结果在下屏，占满整行
+        else -> rowWidth + TwoPaneLeft + 24.dp
+    }
+    // 没有左栏时左栏宽度和间距都是 0，结果列表占满（和原来一样）；有折痕时列表仍从折痕另一侧开始。
+    // 一直用同一个 FoldRow，左栏出现、消失时右栏不重建
+    FoldRow(
+        startWidth = if (left) TwoPaneLeft else 0.dp,
+        modifier = Modifier.fillMaxSize().padding(horizontal = window.gutter).foldAnchor(anchor),
+        spacing = if (left) 24.dp else 0.dp,
+        start = {
+            if (left) {
+                Column(
+                    Modifier
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .padding(top = 8.dp, bottom = LocalFoldPane.current.bottom(bottom)),
+                ) {
+                    if (groups.isNotEmpty()) BestMatchCard(ctx, groups.first(), vertical = true) else BestSkeleton(vertical = true)
+                }
+            }
+        },
+        end = {
+            Column(Modifier.fillMaxHeight()) {
+                SearchSelectionHeader(ctx, Modifier.padding(bottom = 8.dp))
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxHeight(),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = bottom),
+                ) {
+                    songItems(ctx, results, listWidth, bestInline = false, altExpanded = altExpanded, onToggleAlt = { altExpanded = !altExpanded })
+                }
+            }
+        },
+    )
 }
 
 /**

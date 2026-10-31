@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -83,6 +85,7 @@ import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.CollectionKind
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.adaptive.foldAnchor
 import com.mytv.mymusic.ui.charts.TvDefaultFocus
 import com.mytv.mymusic.ui.components.DeviceKind
 import com.mytv.mymusic.ui.components.LocalAppWindow
@@ -130,7 +133,8 @@ internal class PosterExtraAction(
  *   电视上工具栏挪到顶部和胶囊同一排，底部留给大卡，焦点默认在“播放全部”，方向键下进墙；
  * - 配色：这张歌单没在放时取歌单封面的种子色，在放时跟着全局（正在播放的封面）走；
  * - 返回：先交给墙（弹回、焦点从卡里交回墙、收起别的大卡、清焦点），墙这层没事可做了才离开页面；
- * - 加载中墙上是同样版式的骨架格（占位格走微光），失败 / 空的时候 [message] 盖在墙中间。
+ * - 加载中墙上是同样版式的骨架格（占位格走微光），失败 / 空的时候 [message] 盖在墙中间；
+ * - 折叠屏书本 / 双竖：大卡、提示和底部工具栏在右页，胶囊收在左页；桌面 / 双横：大卡和提示在上半屏，工具栏留在下半屏。
  *
  * 多选和自建歌单的编辑只在列表视图里；长按格子、大卡的“更多”只弹单曲操作（[CollectionPosterOps.songActions]）。
  * [resetKey] 换了一张歌单（首数一样也算）时变，整面墙重排、重新入场；[holdAwake] 是页面自己开着的面板（单曲操作等），
@@ -178,6 +182,9 @@ internal fun CollectionPosterView(
     val overlay = LocalOverlayPadding.current.calculateBottomPadding()
     val insetTop = chrome.insetTop(statusTop.value).dp
     val insetBottom = chrome.insetBottom(overlay.value).dp
+    // 折叠屏书本 / 桌面姿态：大卡在右页 / 上半屏（墙自己处理），这里只把浮层挪开折痕
+    val spec = rememberWallSpec(wall)
+    val segment = spec.segment
     // 进度只交给大卡在绘制阶段读，这里不读值
     val position = remember(actions) { actions.position }.collectAsState()
     val pulse = rememberPosterPulse(
@@ -251,6 +258,8 @@ internal fun CollectionPosterView(
         Box(
             Modifier
                 .fillMaxSize()
+                // 墙铺满这一层，折痕按这里切；挂在下面预测性返回的缩放之前，返回手势时折痕位置不抖
+                .foldAnchor(wall.foldAnchor)
                 .posterWallWake(wall)
                 .graphicsLayer {
                     val progress = backProgress
@@ -283,8 +292,14 @@ internal fun CollectionPosterView(
                 holdAwake = holdAwake || settingsOpen || state.sourcePickerTrack != null,
             )
             if (message != null) {
+                // 有折痕时提示和大卡一样放进那一段：书本放右页；桌面放上半屏，底下的工具栏在下半屏，不用让
+                val upper = segment != null && !segment.vertical && segment.start <= 0f
+                val lower = segment != null && !segment.vertical && segment.start > 0f
                 Box(
-                    Modifier.fillMaxSize().padding(top = insetTop, bottom = insetBottom),
+                    Modifier
+                        .inWallSegment(segment)
+                        .fillMaxSize()
+                        .padding(top = if (lower) 0.dp else insetTop, bottom = if (upper) 0.dp else insetBottom),
                     contentAlignment = Alignment.Center,
                 ) { message() }
             }
@@ -340,6 +355,7 @@ internal fun CollectionPosterView(
                     }
                 }
             } else {
+                val leftPage = spec.leftPage
                 TitlePill(
                     title,
                     subtitle,
@@ -347,12 +363,17 @@ internal fun CollectionPosterView(
                     onSourceSettings = sourceSettings,
                     modifier = Modifier
                         .align(Alignment.TopStart)
+                        // 书本 / 双竖：胶囊收在左页里，长标题省略，不压折痕
+                        .then(if (leftPage != null) Modifier.widthIn(max = leftPage.dp) else Modifier)
                         .padding(start = chrome.side.dp, end = chrome.side.dp, top = statusTop + chrome.top.dp)
                         .then(fade),
                 )
+                // 书本 / 双竖：工具栏跟大卡一起在右页里居中（整墙居中正好压在折痕上）；桌面姿态本来就在下半屏，不动
+                val page = segment?.takeIf { it.vertical }
                 toolbar(
                     Modifier
-                        .align(Alignment.BottomCenter)
+                        .align(if (page != null) Alignment.BottomStart else Alignment.BottomCenter)
+                        .then(if (page != null) Modifier.inWallSegment(page).wrapContentWidth() else Modifier)
                         .padding(start = chrome.side.dp, end = chrome.side.dp, bottom = overlay + chrome.bottom.dp)
                         .then(fade),
                 )

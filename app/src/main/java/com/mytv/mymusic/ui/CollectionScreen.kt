@@ -88,6 +88,10 @@ import com.mytv.mymusic.aggregate.Availability
 import com.mytv.mymusic.data.CollectionView
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.ui.adaptive.FoldRow
+import com.mytv.mymusic.ui.adaptive.LocalFoldPane
+import com.mytv.mymusic.ui.adaptive.bottom
+import com.mytv.mymusic.ui.adaptive.top
 import com.mytv.mymusic.ui.charts.DiscoverErrorState
 import com.mytv.mymusic.ui.charts.SongAction
 import com.mytv.mymusic.ui.charts.SongActionsSheet
@@ -525,81 +529,85 @@ private fun TwoPaneCollection(
                 }
             },
     ) {
-        Row(
-            Modifier
+        // 书本姿态、双竖：封面和操作收到折痕为止，曲目在折痕另一侧；双横：上屏封面、下屏曲目
+        FoldRow(
+            startWidth = if (tv) 300.dp else 320.dp,
+            modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .padding(start = window.gutter, end = window.gutter, top = if (tv) 36.dp else 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(if (tv) 40.dp else 32.dp),
-        ) {
-            Column(
-                Modifier
-                    .width(if (tv) 300.dp else 320.dp)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState())
-                    .padding(bottom = overlay + 24.dp),
-            ) {
-                if (!tv) {
-                    IconButton(onClick = onBack, modifier = Modifier.padding(bottom = 8.dp)) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
-                    }
-                }
-                CollectionCover(collection, large = true)
-                Spacer(Modifier.height(16.dp))
-                CollectionTitle(collection, large = true)
-                Spacer(Modifier.height(16.dp))
-                if (selection.active) {
-                    SelectionBarFor(selectionOps, Modifier.selectionBackPreview(selection))
-                } else {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        itemVerticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (tv) {
-                            // 电视不用下拉菜单：播放全部 + 随机 + 加入队列平铺，焦点默认在“播放全部”
-                            Button(
-                                onClick = ops.playAll,
-                                modifier = Modifier.focusRequester(playFocus).heightIn(min = 48.dp).tvFocusRing(CircleShape),
-                            ) {
-                                Icon(Icons.Filled.PlayArrow, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text(playLabel(collection), Modifier.semantics { contentDescription = "${playLabel(collection)}：${collection.title}" })
-                            }
-                            FilledTonalIconButton(onClick = ops.shuffle, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
-                                Icon(Icons.Filled.Shuffle, "随机播放")
-                            }
-                            FilledTonalIconButton(onClick = ops.queue, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
-                                Icon(Icons.AutoMirrored.Filled.QueueMusic, "加入播放队列")
-                            }
-                        } else {
-                            PlayAllSplitButton(
-                                onPlayAll = ops.playAll,
-                                onShuffle = ops.shuffle,
-                                onQueue = ops.queue,
-                                onSave = ops.save,
-                                label = playLabel(collection),
-                                saveLabel = saveLabel(collection),
-                            )
-                        }
-                        SaveToggle(ops, saved, collection.kind == CollectionKind.Playlist, if (tv) 48.dp else null)
-                        MultiSelectToggle(selection, if (tv) 48.dp else null)
-                        PosterViewToggle(onPosterView, if (tv) 48.dp else null)
-                        ops.openPlaybackSettings?.let { open ->
-                            FilledTonalIconButton(onClick = open, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
-                                Icon(Icons.Filled.Tune, "换源设置")
-                            }
+            spacing = if (tv) 40.dp else 32.dp,
+            start = {
+                Column(
+                    Modifier
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = LocalFoldPane.current.bottom(overlay + 24.dp)),
+                ) {
+                    if (!tv) {
+                        IconButton(onClick = onBack, modifier = Modifier.padding(bottom = 8.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                         }
                     }
+                    CollectionCover(collection, large = true)
+                    Spacer(Modifier.height(16.dp))
+                    CollectionTitle(collection, large = true)
+                    Spacer(Modifier.height(16.dp))
+                    if (selection.active) {
+                        SelectionBarFor(selectionOps, Modifier.selectionBackPreview(selection))
+                    } else {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            itemVerticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (tv) {
+                                // 电视不用下拉菜单：播放全部 + 随机 + 加入队列平铺，焦点默认在“播放全部”
+                                Button(
+                                    onClick = ops.playAll,
+                                    modifier = Modifier.focusRequester(playFocus).heightIn(min = 48.dp).tvFocusRing(CircleShape),
+                                ) {
+                                    Icon(Icons.Filled.PlayArrow, null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(playLabel(collection), Modifier.semantics { contentDescription = "${playLabel(collection)}：${collection.title}" })
+                                }
+                                FilledTonalIconButton(onClick = ops.shuffle, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
+                                    Icon(Icons.Filled.Shuffle, "随机播放")
+                                }
+                                FilledTonalIconButton(onClick = ops.queue, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
+                                    Icon(Icons.AutoMirrored.Filled.QueueMusic, "加入播放队列")
+                                }
+                            } else {
+                                PlayAllSplitButton(
+                                    onPlayAll = ops.playAll,
+                                    onShuffle = ops.shuffle,
+                                    onQueue = ops.queue,
+                                    onSave = ops.save,
+                                    label = playLabel(collection),
+                                    saveLabel = saveLabel(collection),
+                                )
+                            }
+                            SaveToggle(ops, saved, collection.kind == CollectionKind.Playlist, if (tv) 48.dp else null)
+                            MultiSelectToggle(selection, if (tv) 48.dp else null)
+                            PosterViewToggle(onPosterView, if (tv) 48.dp else null)
+                            ops.openPlaybackSettings?.let { open ->
+                                FilledTonalIconButton(onClick = open, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
+                                    Icon(Icons.Filled.Tune, "换源设置")
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-            LazyColumn(
-                Modifier.weight(1f).fillMaxHeight(),
-                contentPadding = PaddingValues(top = if (tv) 0.dp else 56.dp, bottom = overlay + 48.dp),
-            ) {
-                collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = 0.dp, selection = selection)
-            }
-        }
+            },
+            end = {
+                LazyColumn(
+                    Modifier.fillMaxHeight(),
+                    contentPadding = PaddingValues(top = LocalFoldPane.current.top(if (tv) 0.dp else 56.dp), bottom = overlay + 48.dp),
+                ) {
+                    collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = 0.dp, selection = selection)
+                }
+            },
+        )
     }
 }
 

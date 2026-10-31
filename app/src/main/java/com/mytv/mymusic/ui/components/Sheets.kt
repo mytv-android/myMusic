@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -42,17 +43,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.mytv.mymusic.ui.adaptive.DialogFoldAnchor
+import com.mytv.mymusic.ui.adaptive.dialogFoldAnchor
+import com.mytv.mymusic.ui.adaptive.rememberDialogFoldSplit
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
- * 自适应面板：手机是底部面板；平板是右侧 400dp 的浮动侧边面板（后面的内容仍可见）；
- * 电视是贴右边、整高 360dp 的面板，返回键关闭。
+ * 自适应面板：手机是底部面板；平板是右侧 400dp 的浮动侧边面板（后面的内容仍可见），
+ * 折叠屏书本姿态只占右页、双屏横跨上下两块时只放上屏；电视是贴右边、整高 360dp 的面板，返回键关闭。
  */
 @Composable
 fun AdaptiveSheet(
@@ -93,7 +98,14 @@ fun AdaptiveSheet(
                 backProgress = 0f
             }
         }
-        Box(Modifier.fillMaxSize()) {
+        // 折痕：书本 / 双竖时面板只占右页（右页比 400dp 窄就收窄）；双横时铰链下面没有像素，面板只放上屏。
+        // 半开的桌面姿态折痕不挡像素，面板照常整高
+        val foldAnchor = remember { DialogFoldAnchor() }
+        val split = rememberDialogFoldSplit(foldAnchor)
+        val density = LocalDensity.current
+        val pageWidth = split?.takeIf { it.vertical }?.let { with(density) { it.secondSize.toDp() } }
+        val topScreen = split?.takeIf { !it.vertical && it.occluding }?.let { with(density) { it.firstEnd.toDp() } }
+        Box(Modifier.fillMaxSize().dialogFoldAnchor(foldAnchor)) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -104,16 +116,24 @@ fun AdaptiveSheet(
             )
             AnimatedVisibility(
                 visibleState = visible,
-                modifier = Modifier.align(Alignment.CenterEnd),
+                modifier = Modifier
+                    .align(if (topScreen != null) Alignment.TopEnd else Alignment.CenterEnd)
+                    .then(if (topScreen != null) Modifier.height(topScreen) else Modifier),
                 enter = slideInHorizontally(MaterialTheme.motionScheme.defaultSpatialSpec()) { it } + fadeIn(),
                 exit = slideOutHorizontally { it } + fadeOut(),
             ) {
                 val tv = window.isTv
+                val insets = when {
+                    tv -> Modifier
+                    // 上屏底下是铰链，不是导航栏
+                    topScreen != null -> Modifier.statusBarsPadding().padding(12.dp)
+                    else -> Modifier.statusBarsPadding().navigationBarsPadding().padding(12.dp)
+                }
                 Surface(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .width(if (tv) 360.dp else 400.dp)
-                        .then(if (tv) Modifier else Modifier.statusBarsPadding().navigationBarsPadding().padding(12.dp))
+                        .width(if (tv) 360.dp else pageWidth?.coerceAtMost(400.dp) ?: 400.dp)
+                        .then(insets)
                         .graphicsLayer {
                             alpha = 1f - backProgress
                             translationX = size.width * 0.6f * backProgress

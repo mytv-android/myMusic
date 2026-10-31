@@ -130,6 +130,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     // 桌面小组件；Glance 本身就依赖 WorkManager，不额外引入
     implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.window)
     // 安装 Baseline Profile；profileinstaller 也是 Compose 的传递依赖，这里显式声明以固定版本
     implementation(libs.androidx.profileinstaller)
     baselineProfile(project(":baselineprofile"))
@@ -142,5 +143,6 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.window.testing)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

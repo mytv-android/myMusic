@@ -114,6 +114,7 @@ import com.mytv.mymusic.aggregate.PlaybackMode
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.ui.AccountProfile
 import com.mytv.mymusic.ui.Cover
+import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
 import com.mytv.mymusic.ui.CoverBox
 import com.mytv.mymusic.ui.InfoNote
 import com.mytv.mymusic.ui.MusicActions
@@ -1028,6 +1029,7 @@ private fun QrLoginPanel(
         return
     }
     Dialog(onDismissRequest = onDismiss) {
+        DialogAvoidsFold()
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1168,7 +1170,10 @@ private fun CookieDialog(provider: ProviderInfo, initial: String, onSave: (Strin
     var value by remember(provider.id) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("${provider.name} Cookie") },
+        title = {
+            DialogAvoidsFold()
+            Text("${provider.name} Cookie")
+        },
         text = {
             Column {
                 Text(
@@ -1222,7 +1227,10 @@ private fun SodaSignerDialog(
     var token by remember { mutableStateOf(initialToken) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("汽水播放签名器") },
+        title = {
+            DialogAvoidsFold()
+            Text("汽水播放签名器")
+        },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 SodamCredit(note = "会员整曲的逐请求签名由 SodaM 提供，点按查看项目")

@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -55,6 +54,7 @@ import com.mytv.mymusic.data.update.UpdateUiState
 import com.mytv.mymusic.playback.EqPresets
 import com.mytv.mymusic.playback.EqualizerUiState
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.adaptive.FoldRow
 import com.mytv.mymusic.ui.components.ListRow
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
@@ -220,70 +220,75 @@ internal fun SettingsTwoPane(
         }
     }
 
-    Row(Modifier.fillMaxSize().then(if (tv) Modifier else Modifier.statusBarsPadding())) {
-        Column(
-            Modifier
-                .width(if (tv) 320.dp else 380.dp)
-                .fillMaxHeight()
-                // 从右栏按左键回来时回到刚才的选中项，而不是同一高度的别的项（电视上那会切走右栏）
-                .focusRestorer()
-                .verticalScroll(rememberScrollState())
-                .padding(
-                    start = if (tv) 28.dp else 24.dp,
-                    end = 16.dp,
-                    top = if (tv) 36.dp else 24.dp,
-                    bottom = bottom + 24.dp,
-                ),
-        ) {
-            Text(
-                "设置",
-                Modifier.padding(start = 4.dp, bottom = 16.dp),
-                style = if (tv) MaterialTheme.typography.headlineLarge else MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Black,
-            )
-            SettingsGroups(
-                overview = overview,
-                selected = listed,
-                twoPane = true,
-                onOpen = { selected = it },
-                itemModifier = { section ->
-                    Modifier
-                        .focusRequester(requesters.getValue(section))
-                        .onFocusChanged { if (tv && it.isFocused && listed != section) selected = section }
-                },
-            )
-        }
-        Column(
-            Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .then(
-                    if (tv) {
-                        Modifier.padding(start = 8.dp, end = 48.dp, top = 36.dp)
-                    } else {
+    // 书本姿态、双竖：设置列表收到折痕为止，分区内容在折痕另一侧；双横：列表在上屏、内容在下屏
+    FoldRow(
+        startWidth = if (tv) 320.dp else 380.dp,
+        modifier = Modifier.fillMaxSize().then(if (tv) Modifier else Modifier.statusBarsPadding()),
+        start = {
+            Column(
+                Modifier
+                    .fillMaxHeight()
+                    // 从右栏按左键回来时回到刚才的选中项，而不是同一高度的别的项（电视上那会切走右栏）
+                    .focusRestorer()
+                    .verticalScroll(rememberScrollState())
+                    .padding(
+                        start = if (tv) 28.dp else 24.dp,
+                        end = 16.dp,
+                        top = if (tv) 36.dp else 24.dp,
+                        bottom = bottom + 24.dp,
+                    ),
+            ) {
+                Text(
+                    "设置",
+                    Modifier.padding(start = 4.dp, bottom = 16.dp),
+                    style = if (tv) MaterialTheme.typography.headlineLarge else MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Black,
+                )
+                SettingsGroups(
+                    overview = overview,
+                    selected = listed,
+                    twoPane = true,
+                    onOpen = { selected = it },
+                    itemModifier = { section ->
                         Modifier
-                            .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-                            .padding(start = 32.dp, end = 32.dp, top = 24.dp)
+                            .focusRequester(requesters.getValue(section))
+                            .onFocusChanged { if (tv && it.isFocused && listed != section) selected = section }
                     },
                 )
-                .onFocusChanged { detailFocused = it.hasFocus }
-                // 右侧内容跟着手势右移淡出，面板底色不动；进度只重绘图层，不触发重组
-                .graphicsLayer {
-                    alpha = 1f - backProgress
-                    translationX = size.width * 0.2f * backProgress
-                },
-        ) {
-            DetailHeader(
-                section = selected,
-                onBack = selected.parent?.let { parent -> { selected = parent; focusList(parent) } },
-                backFocus = backFocus,
-            )
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                key(selected) { detail(selected) { selected = it } }
             }
-        }
-    }
+        },
+        end = {
+            Column(
+                Modifier
+                    .fillMaxHeight()
+                    .then(
+                        if (tv) {
+                            Modifier.padding(start = 8.dp, end = 48.dp, top = 36.dp)
+                        } else {
+                            Modifier
+                                .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                                .padding(start = 32.dp, end = 32.dp, top = 24.dp)
+                        },
+                    )
+                    .onFocusChanged { detailFocused = it.hasFocus }
+                    // 右侧内容跟着手势右移淡出，面板底色不动；进度只重绘图层，不触发重组
+                    .graphicsLayer {
+                        alpha = 1f - backProgress
+                        translationX = size.width * 0.2f * backProgress
+                    },
+            ) {
+                DetailHeader(
+                    section = selected,
+                    onBack = selected.parent?.let { parent -> { selected = parent; focusList(parent) } },
+                    backFocus = backFocus,
+                )
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    key(selected) { detail(selected) { selected = it } }
+                }
+            }
+        },
+    )
 }
 
 @Composable
