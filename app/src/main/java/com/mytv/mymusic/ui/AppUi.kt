@@ -217,6 +217,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun setAmoled(value: Boolean) = model.setAmoled(value)
     fun setBlurMode(value: com.mytv.mymusic.ui.theme.BlurMode) = model.setBlurMode(value)
     fun setLyricsBackground(value: com.mytv.mymusic.data.LyricsBackgroundMode) = model.setLyricsBackground(value)
+    fun setNotificationLyrics(value: Boolean) = model.setNotificationLyrics(value)
     fun setRhythmIntensity(value: com.mytv.mymusic.data.RhythmIntensity) = model.setRhythmIntensity(value)
     fun setCoverShape(value: com.mytv.mymusic.data.CoverShapeChoice) = model.setCoverShape(value)
     fun setTvAmbientClock(value: Boolean) = model.setTvAmbientClock(value)

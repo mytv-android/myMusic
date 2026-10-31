@@ -130,6 +130,7 @@ data class MusicUiState(
     val theme: String = "system",
     val appearance: Appearance = Appearance(),
     val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
+    val notificationLyrics: Boolean = false,
     val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,
     val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
     val tvAmbientClock: Boolean = true,
@@ -332,6 +333,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             theme = settings.theme,
             appearance = settings.toAppearance(),
             lyricsBackground = settings.lyricsBackground,
+            notificationLyrics = settings.notificationLyrics,
             rhythmIntensity = settings.rhythmIntensity,
             coverShape = settings.coverShape,
             tvAmbientClock = settings.tvAmbientClock,
@@ -2495,6 +2497,44 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var notifLyricsKey: String? = null
+    private var notifLyricLines: List<LyricLine> = emptyList()
+
+    /**
+     * 系统媒体条只有两行：歌名和歌手。开关打开时把第二行换成当前这句歌词。
+     * 每 500ms 比对一次当前曲目的 artist，只在需要时替换；关掉开关后把歌手名换回来。
+     */
+    private fun syncNotificationLyrics(positionMs: Long) {
+        val player = controller ?: return
+        val song = base.value.current ?: return
+        val item = player.currentMediaItem ?: return
+        if (item.mediaId != song.key) return
+        if (!settingsState.value.notificationLyrics) {
+            setMediaArtist(item, song.artist)
+            return
+        }
+        // 歌词还是上一首的（新歌还没取回来）：先留着歌手名，免得显示串了的歌词
+        val key = base.value.lyricsKey
+        if (key.isBlank() || key != song.key) return
+        if (notifLyricsKey != key) {
+            notifLyricsKey = key
+            notifLyricLines = LyricsParser.parse(base.value.lyrics).lines
+        }
+        val line = notifLyricLines.getOrNull(LyricsParser.activeLineIndex(notifLyricLines, positionMs))
+            ?.text?.trim().orEmpty()
+        setMediaArtist(item, line.ifBlank { song.artist })
+    }
+
+    /** 只改当前曲目的 artist：地址和 mediaId 不变，ExoPlayer 走仅元数据更新，不会重新加载歌曲。 */
+    private fun setMediaArtist(item: MediaItem, artist: String) {
+        if (item.mediaMetadata.artist?.toString() == artist) return
+        val player = controller ?: return
+        player.replaceMediaItem(
+            player.currentMediaItemIndex,
+            item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtist(artist).build()).build(),
+        )
+    }
+
     private fun canonicalForSong(song: Song): CanonicalTrack {
         val providerId = song.source.ifBlank { settingsState.value.provider }
         return TrackMatcher.singleSource(song, providerName(providerId), providerId, cookieFor(providerId))
@@ -2929,6 +2969,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             while (true) {
                 controller?.let {
                     _position.value = it.currentPosition.coerceAtLeast(0)
+                    syncNotificationLyrics(_position.value)
                     val duration = it.duration.coerceAtLeast(0)
                     if (base.value.duration != duration) {
                         base.value = base.value.copy(duration = duration)
@@ -2969,6 +3010,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setVolumeNormalization(value: Boolean) =
         viewModelScope.launch { app.settings.volumeNormalization(value) }
     fun setLyricsBackground(value: LyricsBackgroundMode) = viewModelScope.launch { app.settings.lyricsBackground(value) }
+    fun setNotificationLyrics(value: Boolean) = viewModelScope.launch { app.settings.notificationLyrics(value) }
     fun setRhythmIntensity(value: RhythmIntensity) = viewModelScope.launch { app.settings.rhythmIntensity(value) }
     fun setCoverShape(value: CoverShapeChoice) = viewModelScope.launch { app.settings.coverShape(value) }
     fun setTvAmbientClock(value: Boolean) = viewModelScope.launch { app.settings.tvAmbientClock(value) }

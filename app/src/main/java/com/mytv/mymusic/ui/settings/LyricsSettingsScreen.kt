@@ -88,8 +88,8 @@ internal val MiniPlayerTarget.label: String
     }
 
 /**
- * 设置 → 播放页（枚举仍叫 Lyrics）：封面形状、歌词背景、律动强度和跟拍校准、点按迷你播放器打开什么，电视上再加环境模式时钟。
- * 都只存在本机，改了立即生效。
+ * 设置 → 播放页（枚举仍叫 Lyrics）：封面形状、歌词背景、系统媒体条歌词、律动强度和跟拍校准、
+ * 点按迷你播放器打开什么，电视上再加环境模式时钟。都只存在本机，改了立即生效。
  */
 @Composable
 fun LyricsSettingsScreen(
@@ -132,6 +132,17 @@ fun LyricsSettingsScreen(
                     },
                 )
             }
+        }
+        item(key = "notificationHead", contentType = "sectionHeader") { SectionLabel("系统媒体播放条") }
+        item(key = "notification", contentType = "switch") {
+            SwitchRow(
+                title = "显示当前歌词",
+                checked = state.notificationLyrics,
+                onCheckedChange = actions::setNotificationLyrics,
+                index = 0,
+                count = 1,
+                summary = "把当前这句歌词放到系统通知、锁屏等媒体播放条的第二行，歌手名会被替换；歌词不同步时仍显示歌手。",
+            )
         }
         // 强度只对“律动”有意义；开启“减少动画”时背景回退成静止，但选项照常显示
         if (mode == LyricsBackgroundMode.Reactive) {

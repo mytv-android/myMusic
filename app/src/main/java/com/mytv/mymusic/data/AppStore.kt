@@ -110,6 +110,7 @@ class SettingsStore(private val context: Context) {
     private val sleepFadeKey = booleanPreferencesKey("sleep_fade")
     private val cacheLimitKey = intPreferencesKey("cache_limit_mb")
     private val lyricsBackgroundKey = stringPreferencesKey("lyrics_background")
+    private val notificationLyricsKey = booleanPreferencesKey("notification_lyrics")
     private val rhythmIntensityKey = stringPreferencesKey("rhythm_intensity")
     private val coverShapeKey = stringPreferencesKey("cover_shape")
     private val tvAmbientClockKey = booleanPreferencesKey("tv_ambient_clock")
@@ -147,6 +148,7 @@ class SettingsStore(private val context: Context) {
             volumeNormalization = values[volumeNormalizationKey] ?: false,
             showBottomNav = values[showBottomNavKey] ?: true,
             lyricsBackground = values[lyricsBackgroundKey].toLyricsBackgroundMode(),
+            notificationLyrics = values[notificationLyricsKey] ?: false,
             rhythmIntensity = values[rhythmIntensityKey].toRhythmIntensity(),
             coverShape = values[coverShapeKey].toCoverShapeChoice(),
             tvAmbientClock = values[tvAmbientClockKey] ?: true,
@@ -200,6 +202,7 @@ class SettingsStore(private val context: Context) {
     suspend fun amoled(value: Boolean) = context.dataStore.edit { it[amoledKey] = value }
     suspend fun blurMode(value: String) = context.dataStore.edit { it[blurModeKey] = value }
     suspend fun lyricsBackground(value: LyricsBackgroundMode) = context.dataStore.edit { it[lyricsBackgroundKey] = value.name }
+    suspend fun notificationLyrics(value: Boolean) = context.dataStore.edit { it[notificationLyricsKey] = value }
     suspend fun rhythmIntensity(value: RhythmIntensity) = context.dataStore.edit { it[rhythmIntensityKey] = value.name }
     suspend fun coverShape(value: CoverShapeChoice) = context.dataStore.edit { it[coverShapeKey] = value.name }
     suspend fun tvAmbientClock(value: Boolean) = context.dataStore.edit { it[tvAmbientClockKey] = value }
@@ -354,6 +357,8 @@ data class AppSettings(
     val volumeNormalization: Boolean = false,
     val showBottomNav: Boolean = true,
     val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
+    /** 系统媒体播放条第二行显示当前歌词（顶掉歌手名）；默认关。 */
+    val notificationLyrics: Boolean = false,
     val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,
     val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
     /** 电视环境模式右上角是否显示时钟。 */
