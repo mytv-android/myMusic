@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -47,6 +48,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             val model = remember { model }
             val state by model.state.collectAsState()
+            // 电视固定深色；播放页、海报墙、详情页的海报视图固定深色，打开时系统栏图标跟着变浅
+            val tvDevice = remember { isTelevision() }
             // 手动布局模式同时锁定屏幕方向；自动保持系统默认
             LaunchedEffect(state.appearance.layout) {
                 requestedOrientation = when (state.appearance.layout) {
@@ -56,8 +59,14 @@ class MainActivity : ComponentActivity() {
                     LayoutMode.Tv -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                 }
             }
-            // 电视固定深色；播放页、海报墙、详情页的海报视图固定深色，打开时系统栏图标跟着变浅
-            val tvDevice = remember { isTelevision() }
+            // 播放时保持屏幕常亮（设置 › 播放页 › 播放时阻止屏保）：系统屏保是屏幕超时才启动的，
+            // 屏幕不超时它就不启动。暂停、关掉开关都不挂；离开应用后窗口不可见，旗标不生效，照常息屏
+            LaunchedEffect(tvDevice, state.appearance.layout, state.keepScreenOn, state.playing) {
+                val keepAwake =
+                    (tvDevice || state.appearance.layout == LayoutMode.Tv) && state.keepScreenOn && state.playing
+                if (keepAwake) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
             val darkBars = remember { mutableIntStateOf(0) }
             val dark = tvDevice ||
                 state.appearance.layout == LayoutMode.Tv ||

@@ -152,6 +152,8 @@ data class MusicUiState(
     val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,
     val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
     val tvAmbientClock: Boolean = true,
+    /** 电视播放时保持屏幕常亮，阻止系统屏保；默认关，见 AppSettings.keepScreenOn。 */
+    val keepScreenOn: Boolean = false,
     val rhythmOffsetMs: Int = 0,
     val rhythmDebug: Boolean = false,
     val poster: PosterPrefs = PosterPrefs(),
@@ -401,6 +403,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             rhythmIntensity = settings.rhythmIntensity,
             coverShape = settings.coverShape,
             tvAmbientClock = settings.tvAmbientClock,
+            keepScreenOn = settings.keepScreenOn,
             rhythmOffsetMs = settings.rhythmOffsetMs,
             rhythmDebug = settings.rhythmDebug,
             poster = settings.poster,
@@ -3737,6 +3740,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setRhythmIntensity(value: RhythmIntensity) = viewModelScope.launch { app.settings.rhythmIntensity(value) }
     fun setCoverShape(value: CoverShapeChoice) = viewModelScope.launch { app.settings.coverShape(value) }
     fun setTvAmbientClock(value: Boolean) = viewModelScope.launch { app.settings.tvAmbientClock(value) }
+    fun setKeepScreenOn(value: Boolean) = viewModelScope.launch { app.settings.keepScreenOn(value) }
     fun setRhythmOffset(value: Int) = viewModelScope.launch { app.settings.rhythmOffsetMs(value) }
     fun setRhythmDebug(value: Boolean) = viewModelScope.launch { app.settings.rhythmDebug(value) }
     fun setPosterPrefs(transform: (PosterPrefs) -> PosterPrefs) = viewModelScope.launch { app.settings.poster(transform) }

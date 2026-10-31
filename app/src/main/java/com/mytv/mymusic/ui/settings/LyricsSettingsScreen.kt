@@ -211,9 +211,22 @@ fun LyricsSettingsScreen(
                     checked = state.tvAmbientClock,
                     onCheckedChange = actions::setTvAmbientClock,
                     index = 0,
-                    count = 1,
+                    count = 2,
                     summary = "空闲 4 秒进入环境模式后，右上角显示时间（跟随系统 12/24 小时制）",
                 )
+            }
+            item(key = "keepScreenOn", contentType = "switch") {
+                SwitchRow(
+                    title = "播放时阻止屏保",
+                    checked = state.keepScreenOn,
+                    onCheckedChange = actions::setKeepScreenOn,
+                    index = 1,
+                    count = 2,
+                    summary = "播放期间屏幕保持常亮，系统屏保不再启动；OLED 屏幕有烧屏风险，息屏听歌、离开应用都不受影响",
+                )
+            }
+            item(key = "keepScreenOnNote", contentType = "note") {
+                SettingsNote("系统屏保是屏幕超时才启动的，所以只有“屏幕常亮”能拦住它。电视自己拉的第三方屏保界面拦不住，那种情况下音乐会继续放。")
             }
         }
     }

@@ -114,6 +114,7 @@ class SettingsStore(private val context: Context) {
     private val rhythmIntensityKey = stringPreferencesKey("rhythm_intensity")
     private val coverShapeKey = stringPreferencesKey("cover_shape")
     private val tvAmbientClockKey = booleanPreferencesKey("tv_ambient_clock")
+    private val keepScreenOnKey = booleanPreferencesKey("tv_keep_screen_on")
     private val rhythmOffsetKey = intPreferencesKey("rhythm_offset_ms")
     private val rhythmDebugKey = booleanPreferencesKey("rhythm_debug")
     // 海报墙：墙内设置六项 + 详情页视图 + 迷你播放器去处，和播放页的设置一样只存在本机
@@ -152,6 +153,7 @@ class SettingsStore(private val context: Context) {
             rhythmIntensity = values[rhythmIntensityKey].toRhythmIntensity(),
             coverShape = values[coverShapeKey].toCoverShapeChoice(),
             tvAmbientClock = values[tvAmbientClockKey] ?: true,
+            keepScreenOn = values[keepScreenOnKey] ?: false,
             rhythmOffsetMs = (values[rhythmOffsetKey] ?: 0).coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS),
             rhythmDebug = values[rhythmDebugKey] ?: false,
             poster = posterPrefs(values),
@@ -206,6 +208,7 @@ class SettingsStore(private val context: Context) {
     suspend fun rhythmIntensity(value: RhythmIntensity) = context.dataStore.edit { it[rhythmIntensityKey] = value.name }
     suspend fun coverShape(value: CoverShapeChoice) = context.dataStore.edit { it[coverShapeKey] = value.name }
     suspend fun tvAmbientClock(value: Boolean) = context.dataStore.edit { it[tvAmbientClockKey] = value }
+    suspend fun keepScreenOn(value: Boolean) = context.dataStore.edit { it[keepScreenOnKey] = value }
     suspend fun rhythmOffsetMs(value: Int) =
         context.dataStore.edit { it[rhythmOffsetKey] = value.coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS) }
     suspend fun rhythmDebug(value: Boolean) = context.dataStore.edit { it[rhythmDebugKey] = value }
@@ -363,6 +366,11 @@ data class AppSettings(
     val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
     /** 电视环境模式右上角是否显示时钟。 */
     val tvAmbientClock: Boolean = true,
+    /**
+     * 电视播放时给窗口挂 FLAG_KEEP_SCREEN_ON：屏幕不超时，系统屏保就不会启动。
+     * 默认关：屏幕会一直亮着，OLED 有烧屏风险；息屏听歌、离开应用都不受影响。
+     */
+    val keepScreenOn: Boolean = false,
     /** 跟拍校准：律动画面相对“听到的位置”再晚多少毫秒（负数提前），−200..200。 */
     val rhythmOffsetMs: Int = 0,
     /** 播放页角落显示跟拍调试信息（只在可调试的安装包里能打开）。 */
