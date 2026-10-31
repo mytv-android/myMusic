@@ -114,7 +114,7 @@ fun AboutScreen(
         info != null -> "有新版本 ${info.versionName}（构建 ${info.versionCode}）"
         update.error.isNotBlank() -> "检查失败"
         update.message.isNotBlank() -> update.message
-        else -> "下载后校验 SHA-256 和签名"
+        else -> "下载后校验 SHA-256"
     }
 
     SettingsPage(SettingsSection.About, embedded, onBack, subtitle = "版本 ${update.currentVersionName.ifBlank { "1.0" }}（构建 ${update.currentVersionCode}）") {
@@ -378,7 +378,7 @@ private fun UpdateCard(update: UpdateUiState, actions: MusicActions, progress: (
             Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Filled.Verified, null, Modifier.size(18.dp), tint = content)
                 Text(
-                    "下载后自动校验 SHA-256、包名、版本号和签名，然后自动打开系统安装器。",
+                    "下载后自动校验 SHA-256、包名和版本号，然后自动打开系统安装器。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = content,
                 )
@@ -444,7 +444,7 @@ private fun UpdateProgressLabel(phase: UpdatePhase, label: String, progress: () 
         derivedStateOf { if (phase == UpdatePhase.Downloading) (progress().coerceIn(0f, 1f) * 100).toInt() else 100 }
     }
     Text(
-        "${label.ifBlank { if (phase == UpdatePhase.Ready) "已下载" else "正在下载" }} $percent% · 下载后校验 SHA-256 和签名",
+        "${label.ifBlank { if (phase == UpdatePhase.Ready) "已下载" else "正在下载" }} $percent% · 下载后校验 SHA-256",
         Modifier.padding(top = 6.dp),
         style = MaterialTheme.typography.bodyMedium,
         color = color.copy(alpha = 0.85f),

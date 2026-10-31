@@ -8,14 +8,12 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.IntentSender
 import android.content.pm.PackageInstaller
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.mytv.mymusic.data.SettingsStore
-import com.mytv.mymusic.data.sync.sha256
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -248,7 +246,7 @@ class UpdateRepository(
                 }
             }
             activeCall = null
-            _state.update { it.copy(phase = UpdatePhase.Verifying, phaseLabel = "正在校验 SHA-256 与签名", progress = 1f) }
+            _state.update { it.copy(phase = UpdatePhase.Verifying, phaseLabel = "正在校验 SHA-256", progress = 1f) }
             verifyApk(target, info)
             _state.update {
                 it.copy(
@@ -285,13 +283,7 @@ class UpdateRepository(
     private fun verifyApk(file: File, info: UpdateInfo) {
         val current = currentPackageInfo() ?: throw IOException("无法读取当前版本")
         if (info.versionCode <= current.code) throw IOException("更新清单版本不高于当前版本，已拒绝安装")
-        val flags = if (Build.VERSION.SDK_INT >= 28) {
-            PackageManager.GET_SIGNING_CERTIFICATES
-        } else {
-            @Suppress("DEPRECATION")
-            PackageManager.GET_SIGNATURES
-        }
-        val archive = context.packageManager.getPackageArchiveInfo(file.absolutePath, flags)
+        val archive = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
             ?: throw IOException("无法读取更新包信息")
         if (archive.packageName != context.packageName) {
             throw IOException("更新包包名与当前应用不一致，已拒绝安装")
@@ -300,34 +292,7 @@ class UpdateRepository(
         if (archiveCode != info.versionCode) {
             throw IOException("更新包版本号与清单不一致，已拒绝安装")
         }
-        val archiveInfo = archive.applicationInfo ?: throw IOException("无法读取更新包签名")
-        archiveInfo.sourceDir = file.absolutePath
-        val archiveSignatures = signaturesOf(archive)
-        val installed = installedSignatures()
-        if (archiveSignatures.isEmpty() || installed.isEmpty() || archiveSignatures.none { it in installed }) {
-            throw IOException("更新包签名与当前安装不一致，无法覆盖安装。请从当前渠道重新下载。")
-        }
     }
-
-    private fun signaturesOf(info: android.content.pm.PackageInfo): Set<String> = runCatching {
-        val signatures = if (Build.VERSION.SDK_INT >= 28) {
-            info.signingInfo?.apkContentsSigners.orEmpty()
-        } else {
-            @Suppress("DEPRECATION")
-            info.signatures.orEmpty()
-        }
-        signatures.map { sha256(it.toByteArray()) }.toSet()
-    }.getOrDefault(emptySet())
-
-    private fun installedSignatures(): Set<String> = runCatching {
-        val flags = if (Build.VERSION.SDK_INT >= 28) {
-            PackageManager.GET_SIGNING_CERTIFICATES
-        } else {
-            @Suppress("DEPRECATION")
-            PackageManager.GET_SIGNATURES
-        }
-        signaturesOf(context.packageManager.getPackageInfo(context.packageName, flags))
-    }.getOrDefault(emptySet())
 
     /**
      * 唤起系统安装器。小米电视等部分 ROM 没有为 content:// 的 ACTION_VIEW 注册安装器，
