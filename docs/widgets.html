@@ -1,0 +1,1576 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>myMusic 桌面小组件</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Roboto+Flex:opsz,wght@8..144,300..1000&family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  /* 版式：和前几份提案同一套规格文档。左栏写结论，右侧画板放能点的原型；窄屏合成一栏 */
+  --bg: #EEF2F0;
+  --panel: #FFFFFF;
+  --board: #E2E9E6;
+  --fg: #13201C;
+  --muted: #52615C;
+  --line: #CDD8D3;
+  --accent: #006B5F;
+  --on-accent: #FFFFFF;
+  --hot: #A3461F;
+  --bezel: #0A0E0D;
+
+  --display: "Roboto Flex", "Noto Sans SC", system-ui, sans-serif;
+  --body: "Roboto Flex", "Noto Sans SC", system-ui, sans-serif;
+  --mono: "Roboto Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  /* 小组件里只能用系统字体：Android 上是 Roboto + 思源黑体（Noto Sans CJK） */
+  --sys: "Roboto", "Noto Sans SC", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C1211; --panel: #141B19; --board: #101715; --fg: #E1EAE6; --muted: #95A6A0;
+    --line: #26322E; --accent: #5ED4BF; --on-accent: #00382F; --hot: #F2A07A; --bezel: #000000;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0C1211; --panel: #141B19; --board: #101715; --fg: #E1EAE6; --muted: #95A6A0;
+  --line: #26322E; --accent: #5ED4BF; --on-accent: #00382F; --hot: #F2A07A; --bezel: #000000;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 96px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+p { margin: 0; }
+code, .mono { font-family: var(--mono); font-size: .86em; }
+code { background: var(--board); border-radius: 6px; padding: 1px 6px; overflow-wrap: anywhere; }
+a { color: var(--accent); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+/* ---------- 页头 ---------- */
+.mast { display: grid; gap: 20px; padding-block: 24px 36px; }
+.eyebrow { font: 500 12px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.mast h1 { font-size: clamp(44px, 8vw, 92px); line-height: .98; font-weight: 900; letter-spacing: -.025em; }
+.mast h1 em { font-style: normal; color: var(--accent); }
+.lede { font-size: clamp(17px, 2vw, 20px); line-height: 1.65; max-width: 44em; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font: 500 12.5px/1 var(--mono); padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); }
+.chip b { color: var(--fg); font-weight: 500; }
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+.keys > div { background: var(--panel); padding: 18px 18px 20px; display: grid; gap: 6px; align-content: start; }
+.keys h3 { font-size: 16px; font-weight: 800; }
+.keys p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+/* ---------- 预览栏：吸顶，所有原型共用一份状态 ---------- */
+.pbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; margin-block: 8px 0; padding-block: 10px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.pbar .in { display: flex; gap: 10px 18px; align-items: center; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+.pbar .lab { font: 500 11.5px/1 var(--mono); letter-spacing: .1em; color: var(--muted); white-space: nowrap; }
+.songsw { display: flex; align-items: center; gap: 8px; flex: none; }
+.songsw .thumb { width: 36px; height: 36px; border-radius: 10px; background-size: cover; flex: none; }
+.songsw .nm { display: grid; line-height: 1.25; min-width: 0; }
+.songsw .nm b { font-size: 14px; white-space: nowrap; }
+.songsw .nm span { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.rb { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--fg); display: grid; place-items: center; cursor: pointer; flex: none; padding: 0; }
+.rb svg { width: 20px; height: 20px; fill: currentColor; }
+.seg { display: inline-flex; gap: 2px; flex: none; }
+.seg button { font: 600 13px/1 var(--body); border: 1px solid var(--line); background: var(--panel); color: var(--muted); padding: 9px 12px; cursor: pointer; white-space: nowrap; border-radius: 6px; }
+.seg button:first-child { border-radius: 18px 6px 6px 18px; }
+.seg button:last-child { border-radius: 6px 18px 18px 6px; }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); border-radius: 18px; }
+
+/* ---------- 章节 ---------- */
+section.sec { display: grid; grid-template-columns: minmax(0, 270px) minmax(0, 1fr); gap: 20px 44px; border-top: 1px solid var(--line); padding-block: 52px; scroll-margin-top: 70px; }
+section.sec:first-of-type { border-top: 0; }
+.side { display: grid; gap: 14px; align-content: start; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 84px); }
+.side .eyebrow { color: var(--accent); }
+.side h2 { font-size: 30px; line-height: 1.15; font-weight: 900; letter-spacing: -.01em; }
+.side p { color: var(--muted); font-size: 14.5px; }
+.main { display: grid; gap: 28px; min-width: 0; }
+@media (max-width: 900px) {
+  section.sec { grid-template-columns: minmax(0, 1fr); padding-block: 40px; }
+  .side { position: static; }
+}
+.prose { display: grid; gap: 12px; max-width: 46em; }
+.prose h3 { font-size: 19px; font-weight: 800; margin-top: 8px; }
+.prose p, .prose li { color: var(--muted); font-size: 14.5px; }
+.prose ul { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; }
+.prose b { color: var(--fg); }
+
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 28px; }
+.notes > div { display: grid; gap: 4px; align-content: start; }
+.notes h3 { font-size: 15px; font-weight: 800; }
+.notes p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+.legend { display: grid; gap: 0; padding: 0; margin: 0; }
+.legend li { list-style: none; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.legend li b { color: var(--fg); display: block; font-size: 15px; }
+.dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 600 11px/1 var(--mono); background: var(--hot); color: #fff; margin-top: 1px; }
+
+.ctl { display: grid; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; }
+.ctl .row { display: grid; gap: 8px; }
+.ctl .lab { font: 600 13px/1.3 var(--body); color: var(--muted); }
+.ctl .seg { flex-wrap: wrap; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatches button { width: 44px; height: 44px; border-radius: 14px; border: 2px solid transparent; cursor: pointer; background-size: cover; padding: 0; }
+.swatches button[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--panel) inset; }
+.hint { font-size: 13px; color: var(--muted); }
+.check { display: inline-flex; gap: 8px; align-items: center; font: 600 13.5px/1.3 var(--body); color: var(--fg); cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+
+/* 表格 */
+.tablebox { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; min-width: 660px; font-size: 14px; }
+th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 12px/1.4 var(--mono); letter-spacing: .06em; color: var(--muted); background: var(--board); }
+tr:last-child td { border-bottom: 0; }
+td.k { font-weight: 700; white-space: nowrap; }
+td .mono { color: var(--muted); }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: var(--mono); font-size: 13px; }
+.sw { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font: 500 12px/1 var(--mono); color: var(--muted); }
+.sw i { width: 22px; height: 22px; border-radius: 7px; border: 1px solid var(--line); display: inline-block; }
+
+.phases { display: grid; gap: 14px; }
+.phase { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 18px 20px; display: grid; gap: 8px; }
+.phase header { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.phase h3 { font-size: 18px; font-weight: 800; }
+.phase .tag { font: 500 11.5px/1 var(--mono); color: var(--accent); letter-spacing: .08em; }
+.phase ul { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: 14px; display: grid; gap: 4px; }
+.qs { display: grid; gap: 16px; }
+.q { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; display: grid; gap: 4px; }
+.q b { font-size: 15.5px; }
+.q span { color: var(--muted); font-size: 14px; }
+.q em { font-style: normal; color: var(--accent); font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }
+}
+</style>
+<style>
+/* ---------- 手机外框：内部按 dp 原尺寸排版，用 zoom 跟着容器缩放 ---------- */
+.dev { width: min(100%, 360px); }
+.phone { width: 360px; height: 740px; border-radius: 40px; overflow: hidden; position: relative; isolation: isolate; zoom: var(--k, 1); box-shadow: 0 0 0 7px var(--bezel), 0 22px 50px -24px rgba(0, 0, 0, .55); }
+.wallp { position: absolute; inset: 0; background: var(--wall); }
+.dark .wallp::after, .board.dark::before, .grid-bg.dark::before { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, .4); pointer-events: none; }
+.sbar { position: absolute; inset: 0 0 auto; height: 34px; display: flex; justify-content: space-between; align-items: center; padding: 4px 26px 0; font: 500 13.5px/1 var(--sys); color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .3); z-index: 2; }
+.sbar svg { width: 15px; height: 15px; fill: #fff; }
+.sbar .r { display: flex; gap: 5px; align-items: center; }
+.cells { position: absolute; left: 12px; top: 44px; width: 336px; height: 500px; }
+.slot { position: absolute; }
+.pdots { position: absolute; left: 0; right: 0; bottom: 116px; display: flex; justify-content: center; gap: 8px; }
+.pdots button { width: 8px; height: 8px; padding: 0; border: 0; border-radius: 4px; background: rgba(255, 255, 255, .55); cursor: pointer; }
+.pdots button[aria-pressed="true"] { width: 22px; background: #fff; }
+.dock { position: absolute; left: 22px; right: 22px; bottom: 34px; height: 72px; border-radius: 36px; background: rgba(255, 255, 255, .18); display: flex; justify-content: space-around; align-items: center; }
+.app { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; background: #F1F3F1; overflow: hidden; }
+.app svg { width: 26px; height: 26px; fill: #3C4A45; }
+.app.mm { background: linear-gradient(135deg, #1E9483, #006B5F 50%, #00524A); }
+.app.mm svg { width: 54px; height: 54px; }
+.navpill { position: absolute; bottom: 12px; left: 50%; width: 110px; height: 4px; margin-left: -55px; border-radius: 2px; background: rgba(255, 255, 255, .85); }
+
+/* ---------- 画板：用当前壁纸做底，组件按原尺寸摆 ---------- */
+.board { position: relative; isolation: isolate; min-width: min-content; border-radius: 22px; padding: 22px; background: var(--wall); display: flex; flex-wrap: wrap; gap: 22px 18px; align-items: flex-start; overflow: hidden; }
+.board > figure { position: relative; z-index: 1; margin: 0; display: grid; gap: 8px; justify-items: start; max-width: 100%; }
+.board figcaption { font: 500 11.5px/1.35 var(--mono); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .45); }
+.board figcaption b { font-weight: 500; opacity: .75; }
+.scroller { overflow-x: auto; max-width: 100%; border-radius: 22px; }
+
+/* ---------- 小组件本体 ---------- */
+.w { position: relative; overflow: hidden; flex: none; border-radius: 24px; background: var(--wbg); color: var(--wo); font: 400 14px/1.3 var(--sys); -webkit-font-smoothing: antialiased; user-select: none; }
+.w.bare { background: transparent; border-radius: 0; overflow: visible; }
+.w .i { display: block; fill: currentColor; flex: none; }
+.w [data-act] { cursor: pointer; }
+.w .col { display: flex; flex-direction: column; min-width: 0; }
+.w .rowf { display: flex; align-items: center; min-width: 0; }
+.w .fill { flex: 1; min-width: 0; min-height: 0; }
+.w .t { font-weight: 700; font-size: 15px; line-height: 1.3; color: var(--wo); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w .t.two { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.w .a { font-size: 12.5px; line-height: 1.35; color: var(--wov); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w .m { font-size: 11.5px; line-height: 1.35; color: var(--wov); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; align-items: center; }
+.w .num { font-size: 11px; color: var(--wov); }
+.cvw { position: relative; flex: none; }
+.cv { position: absolute; inset: 0; background-size: cover; background-position: center; }
+.cv.ph { background: var(--wsc); color: var(--wosc); display: grid; place-items: center; }
+.pb { flex: none; border-radius: 50%; background: var(--wp); color: var(--wop); display: grid; place-items: center; }
+.ib { flex: none; display: grid; place-items: center; color: var(--wov); border-radius: 50%; }
+.ib.tonal { background: var(--wsc); color: var(--wosc); }
+.ib.on { color: var(--wp); }
+.grp { display: flex; gap: 2px; flex: none; }
+.grp .g { display: grid; place-items: center; height: 100%; border-radius: 8px; background: var(--wsc); color: var(--wosc); width: 40px; }
+.grp .g.pp { background: var(--wp); color: var(--wop); flex: 1; min-width: 50px; }
+.grp .g.l { border-top-left-radius: 20px; border-bottom-left-radius: 20px; }
+.grp .g.r { border-top-right-radius: 20px; border-bottom-right-radius: 20px; }
+.grp.full { width: 100%; }
+.grp.full .g:not(.pp) { flex: 1; }
+.grp.full .g.pp { flex: 1.5; }
+.wv { display: block; overflow: visible; }
+.times { display: flex; justify-content: space-between; font-size: 11px; color: var(--wov); }
+.tchip { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px 2px 5px; border-radius: 10px; background: var(--wtc); color: var(--wotc); font-size: 11px; font-weight: 500; }
+.badge { position: absolute; display: grid; place-items: center; border-radius: 50%; background: var(--wp); color: var(--wop); box-shadow: 0 0 0 2.5px var(--wb); }
+
+/* 歌词 */
+.ly-cur { font-weight: 700; color: var(--wlc); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.28; }
+.ly-tr { color: var(--wld); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ly-dim { color: var(--wld); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w.clear { background: transparent; }
+.w.clear .ly-cur, .w.clear .ly-tr, .w.clear .ly-dim, .w.clear .m, .w.clear .t { text-shadow: 0 1px 3px rgba(0, 0, 0, .55), 0 0 1px rgba(0, 0, 0, .4); }
+
+/* 列表行 */
+.rows { display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: none; min-height: 0; }
+.rows::-webkit-scrollbar { display: none; }
+.lrow { display: flex; align-items: center; gap: 10px; flex: none; border-radius: 12px; }
+.lrow .tx { flex: 1; min-width: 0; display: grid; }
+.w .t2 { font-size: 13.5px; font-weight: 500; color: var(--wo); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+.w .a2 { font-size: 11.5px; color: var(--wov); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+.lrow.now .t2 { color: var(--wp); font-weight: 700; }
+.rk { width: 22px; flex: none; text-align: center; font-weight: 700; font-size: 15px; color: var(--wov); }
+.rk.top { color: var(--wp); font-size: 17px; }
+.dl { flex: none; font-size: 11px; font-weight: 500; display: inline-flex; align-items: center; color: var(--wov); min-width: 30px; justify-content: flex-end; }
+.dl.up { color: var(--wp); }
+.dl.new { background: var(--wtc); color: var(--wotc); border-radius: 8px; padding: 1px 6px; min-width: 0; }
+.pill { height: 40px; border-radius: 20px; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--wsc); color: var(--wosc); font-weight: 500; font-size: 13.5px; }
+.stack { display: flex; }
+.stack > .cvw + .cvw { margin-left: -14px; }
+.stack .cvw .cv { box-shadow: 0 0 0 2.5px var(--wb); }
+
+/* 点击区域标注 */
+.hits .w [data-hit] { position: relative; outline: 2px dashed var(--hitc, #FF5A36); outline-offset: -1px; }
+.hits .w [data-hit]::after { content: attr(data-hit); position: absolute; top: -7px; left: -7px; z-index: 3; width: 16px; height: 16px; border-radius: 50%; background: #FF5A36; color: #fff; font: 700 10px/16px var(--mono); text-align: center; }
+
+/* 小组件选择器 */
+.picker { background: var(--panel); border: 1px solid var(--line); border-radius: 28px; padding: 18px; display: grid; gap: 16px; }
+.picker header { display: flex; gap: 12px; align-items: center; }
+.picker header .app { width: 40px; height: 40px; }
+.picker header .app svg { width: 40px; height: 40px; }
+.picker header b { font-size: 17px; display: block; line-height: 1.2; }
+.picker header span { font-size: 13px; color: var(--muted); }
+.pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.pcard { border-radius: 20px; background: var(--board); padding: 12px; display: grid; gap: 10px; align-content: start; }
+.pcard .pv { position: relative; isolation: isolate; border-radius: 14px; height: 168px; display: grid; place-items: center; background: var(--wall); overflow: hidden; }
+.pcard .pv > div { position: relative; z-index: 1; }
+.pcard b { font-size: 15px; line-height: 1.3; }
+.pcard .sz { font: 500 11.5px/1 var(--mono); color: var(--muted); margin-left: 6px; }
+.pcard p { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+/* 断点试验台 */
+.lab2 { display: grid; gap: 14px; }
+.lab2 .ctl { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); align-items: end; }
+.lab2 input[type=range] { width: 100%; accent-color: var(--accent); }
+.readout { font: 500 14px/1.6 var(--body); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--fg); font-weight: 500; font-size: 15px; }
+.grid-bg { position: relative; isolation: isolate; border-radius: 22px; padding: 22px; background: var(--wall); overflow-x: auto; min-height: 140px; }
+.grid-bg .cellmap { position: relative; z-index: 1; }
+.grid-bg .cellmap i { position: absolute; border-radius: 10px; border: 1px dashed rgba(255, 255, 255, .45); }
+
+/* 形状条 */
+.shapes { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
+.shape { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px 10px 12px; display: grid; justify-items: center; gap: 8px; text-align: center; }
+.shape i { width: 64px; height: 64px; background: var(--accent); display: block; }
+.shape b { font-size: 13px; line-height: 1.3; }
+.shape span { font: 500 11px/1.35 var(--mono); color: var(--muted); }
+.specimen { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.specimen > div { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; display: grid; gap: 6px; }
+.specimen .big { font-size: 26px; font-weight: 700; line-height: 1.25; }
+.specimen .small { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow">myMusic · 设计提案 · 2026-10-31</div>
+  <h1>桌面<em>小组件</em></h1>
+  <p class="lede">六款桌面小组件，沿用 App 现在的三样东西：跟着封面变的配色、播放页的封面形状、连在一起的切歌按钮组。正在播放是唯一的主角，其余几款做得克制，只负责把人带到对应的功能。下面的原型都能点，顶部预览栏可以切歌、暂停、换配色。</p>
+  <div class="chips">
+    <span class="chip"><b>6</b> 款组件</span>
+    <span class="chip">Jetpack Glance <b>1.2</b></span>
+    <span class="chip">Android <b>6.0</b> 起</span>
+    <span class="chip">手机 · 平板</span>
+    <span class="chip">电视没有桌面小组件</span>
+  </div>
+  <div class="keys">
+    <div><h3>配色跟着封面</h3><p>切歌时所有小组件一起换色，和 App 里一样；也可以改成跟随壁纸或品牌色。桌面上没有过渡动画，颜色直接换。</p></div>
+    <div><h3>形状跟着播放页</h3><p>播放中的封面用播放页当前的形状，暂停时换成圆角方形看全图。形状在 App 里裁好，再把位图交给桌面。</p></div>
+    <div><h3>按钮组照搬播放页</h3><p>上一首、播放、下一首连成一组，中间一段最宽、用主色。尺寸小时只留播放和下一首。</p></div>
+    <div><h3>不靠常驻刷新</h3><p>切歌、暂停、收藏这些事件触发更新。时间文字交给系统计时控件自己走，进度条只在亮屏播放时 10 秒刷一次。</p></div>
+  </div>
+</header>
+
+<div class="pbar" id="pbar">
+  <div class="in">
+    <span class="lab">预览</span>
+    <div class="songsw">
+      <button class="rb" id="songPrev" type="button" aria-label="上一首示例歌曲"></button>
+      <span class="thumb" id="songThumb"></span>
+      <span class="nm"><b id="songName"></b><span id="songMeta"></span></span>
+      <button class="rb" id="songNext" type="button" aria-label="下一首示例歌曲"></button>
+    </div>
+    <div class="seg" id="playSeg" role="group" aria-label="播放状态">
+      <button type="button" data-v="1">播放中</button><button type="button" data-v="0">已暂停</button>
+    </div>
+    <div class="seg" id="colorSeg" role="group" aria-label="配色来源">
+      <button type="button" data-v="cover">跟随封面</button><button type="button" data-v="wall">跟随壁纸</button><button type="button" data-v="brand">品牌色</button>
+    </div>
+    <div class="seg" id="darkSeg" role="group" aria-label="手机深浅模式">
+      <button type="button" data-v="0">浅色</button><button type="button" data-v="1">深色</button>
+    </div>
+  </div>
+</div>
+
+<section class="sec" id="home">
+  <div class="side">
+    <div class="eyebrow">桌面</div>
+    <h2>放到桌面上的样子</h2>
+    <p>两屏桌面，按 4 列、每格 84×100dp 画。第一屏是常用组合，第二屏放榜单和歌单。组件上的播放、切歌、收藏按钮可以直接点。</p>
+    <div class="ctl">
+      <div class="row"><span class="lab">壁纸</span><div class="swatches" id="wallSw"></div></div>
+      <div class="row"><span class="lab">背景</span>
+        <div class="seg" id="bgSeg" role="group" aria-label="小组件背景">
+          <button type="button" data-v="solid">实色</button><button type="button" data-v="glass">半透明</button><button type="button" data-v="clear">透明</button>
+        </div>
+        <span class="hint">透明只对歌词组件生效，其余组件按半透明画。</span>
+      </div>
+      <div class="row"><span class="lab">定时关闭</span>
+        <div class="seg" id="timerSeg" role="group" aria-label="定时关闭">
+          <button type="button" data-v="0">未开启</button><button type="button" data-v="1">30 分钟</button>
+        </div>
+      </div>
+      <div class="row"><span class="lab">桌面</span>
+        <div class="seg" id="pageSeg" role="group" aria-label="桌面页">
+          <button type="button" data-v="0">第一屏</button><button type="button" data-v="1">第二屏</button>
+        </div>
+      </div>
+    </div>
+    <p class="hint">跟随壁纸在 Android 12 起直接用系统取色；更早的系统由 App 读取壁纸主色自己生成。</p>
+  </div>
+  <div class="main">
+    <div class="dev" id="homeDev"><div class="phone" id="phone"></div></div>
+  </div>
+</section>
+
+<section class="sec" id="set">
+  <div class="side">
+    <div class="eyebrow">清单</div>
+    <h2>选择器里的六款</h2>
+    <p>长按桌面打开小组件选择器后看到的列表。每张卡片写默认尺寸和一句说明，说明就是 <code>android:description</code> 的文案。</p>
+    <p>Android 15 起选择器可以显示 App 实时生成的预览，所以这里的预览就是组件本身，带着当前歌曲的配色。</p>
+  </div>
+  <div class="main">
+    <div class="picker">
+      <header><span class="app mm" id="pickerIcon"></span><div><b>myMusic</b><span>6 个小组件</span></div></header>
+      <div class="pgrid" id="picker"></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="now">
+  <div class="side">
+    <div class="eyebrow">主角</div>
+    <h2>正在播放</h2>
+    <p>七档布局，从 1×1 的封面按钮到 4×3 的歌词舞台。桌面给多大，就选能放下的最大一档，所以拖动尺寸时布局按档切换，不会等比缩放。</p>
+    <label class="check"><input type="checkbox" id="hitsToggle"> 显示点击区域</label>
+    <ol class="legend">
+      <li><span class="dot">1</span><div><b>封面和文字</b>打开播放页</div></li>
+      <li><span class="dot">2</span><div><b>播放 / 暂停</b>后台执行，不打开 App。1×1 整块都是这个按钮</div></li>
+      <li><span class="dot">3</span><div><b>上一首 / 下一首</b>后台执行</div></li>
+      <li><span class="dot">4</span><div><b>收藏</b>写入“我喜欢”，歌单组件同步刷新</div></li>
+      <li><span class="dot">5</span><div><b>歌词</b>打开播放页的歌词视图</div></li>
+    </ol>
+  </div>
+  <div class="main">
+    <div class="scroller"><div class="board" id="nowBoard"></div></div>
+    <div class="lab2">
+      <div class="ctl">
+        <div class="row"><span class="lab">组件</span>
+          <div class="seg" id="pgKind" role="group" aria-label="试验台组件">
+            <button type="button" data-v="now">正在播放</button><button type="button" data-v="lyrics">歌词</button><button type="button" data-v="charts">榜单</button><button type="button" data-v="list">歌单</button><button type="button" data-v="mode">听歌模式</button><button type="button" data-v="tools">快捷入口</button>
+          </div>
+        </div>
+        <div class="row"><label class="lab" for="pgW">宽度（格）</label><input type="range" id="pgW" min="1" max="5" step="1" value="4"></div>
+        <div class="row"><label class="lab" for="pgH">高度（格）</label><input type="range" id="pgH" min="1" max="4" step="1" value="2"></div>
+        <div class="readout" id="pgOut" aria-live="polite"></div>
+      </div>
+      <div class="grid-bg" id="pgStage"></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="lyrics">
+  <div class="side">
+    <div class="eyebrow">文字</div>
+    <h2>歌词</h2>
+    <p>当前一句放大，下一句变淡；有翻译时翻译跟在当前句下面。只按行换，不做逐字高亮：桌面组件不能播放动画，逐字刷新也太费电。</p>
+    <p>底色用主色容器，和正在播放区分开。透明背景时文字固定白色加阴影，浅色壁纸上会不好认，所以默认实色。</p>
+    <p>没有歌词时显示“纯音乐，请欣赏”或“暂时没有歌词”，点一下照样进播放页。</p>
+  </div>
+  <div class="main">
+    <div class="scroller"><div class="board" id="lyBoard"></div></div>
+    <div class="scroller"><div class="board" id="lyBgBoard"></div></div>
+  </div>
+</section>
+
+<section class="sec" id="mode">
+  <div class="side">
+    <div class="eyebrow">一键开播</div>
+    <h2>听歌模式</h2>
+    <p>绑定一个平台的一个模式，比如网易云私人漫游的默认模式。点播放在后台开始漫游，不打开 App；漫游中显示当前歌曲和下一首按钮。</p>
+    <p>需要登录的模式在未登录时换成“去登录”。添加时默认选第一个已登录平台的第一个模式，之后长按组件可以重新选。</p>
+  </div>
+  <div class="main">
+    <div class="scroller"><div class="board" id="modeBoard"></div></div>
+  </div>
+</section>
+
+<section class="sec" id="lists">
+  <div class="side">
+    <div class="eyebrow">列表</div>
+    <h2>榜单和歌单</h2>
+    <p>点某一行，从这一首开始播放整张榜单或歌单，不弹出播放页；点标题打开对应页面。列表可以在组件里上下滑。</p>
+    <p>榜单第一名用榜单页同款拱形封面，排名变化用箭头和“新”标。歌单默认是“我喜欢的歌曲”，正在播放的那一行标成主色。</p>
+  </div>
+  <div class="main">
+    <div class="scroller"><div class="board" id="chartBoard"></div></div>
+    <div class="scroller"><div class="board" id="listBoard"></div></div>
+  </div>
+</section>
+
+<section class="sec" id="tools">
+  <div class="side">
+    <div class="eyebrow">入口</div>
+    <h2>快捷入口</h2>
+    <p>2×2 是四瓣饼干形底板，中间是听歌识曲，四角是搜索、我喜欢、听歌模式、定时关闭。4×1 变成搜索条，点开可以直接粘贴分享链接。1×1 只留识曲。</p>
+    <p>识曲要用麦克风，只能在前台录音，所以点了会打开 App、弹出识曲面板并立刻开始听。定时关闭打开播放页的定时面板。</p>
+  </div>
+  <div class="main">
+    <div class="scroller"><div class="board" id="toolBoard"></div></div>
+  </div>
+</section>
+
+<section class="sec" id="states">
+  <div class="side">
+    <div class="eyebrow">边界</div>
+    <h2>空状态和异常</h2>
+    <p>没在播放、从没播放过、封面还没下载完、定时关闭中、未登录、离线。每种都给一个能点的下一步，不出现空白卡片。</p>
+  </div>
+  <div class="main">
+    <div class="scroller"><div class="board" id="stateBoard"></div></div>
+  </div>
+</section>
+
+<section class="sec" id="look">
+  <div class="side">
+    <div class="eyebrow">规格</div>
+    <h2>配色、形状、字体</h2>
+    <p>颜色角色和 App 相同：MaterialKolor 按当前种子色生成浅色、深色两套，一起交给桌面，由系统按深浅模式选。表里的色值随预览栏的歌曲和配色变化。</p>
+    <p class="hint">原型用 OKLCH 近似 Material 色调，App 里是 MaterialKolor SPEC_2025，实际色值会略有不同。</p>
+  </div>
+  <div class="main">
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>用在哪</th><th>颜色角色</th><th>浅色</th><th>深色</th></tr></thead>
+        <tbody id="tokenRows"></tbody>
+      </table>
+    </div>
+    <div class="shapes" id="shapeStrip"></div>
+    <div class="specimen">
+      <div><span class="eyebrow">小组件 · 系统字体</span><span class="big" style="font-family: var(--sys)">但愿人长久 2:08</span><span class="small">RemoteViews 只能用系统字体。数字用 Roboto 自带的等宽数字，计时不跳。</span></div>
+      <div><span class="eyebrow">App · Roboto Flex</span><span class="big" style="font-family: var(--body)">但愿人长久 2:08</span><span class="small">Roboto Flex 只打包了拉丁字母，中文在 App 里本来就回退到系统字体，所以两边只有英文和数字不同。</span></div>
+    </div>
+    <div class="notes">
+      <div><h3>圆角</h3><p>外圆角用系统的 <code>system_app_widget_background_radius</code>，内部元素用 <code>system_app_widget_inner_radius</code>（Android 12 起）。更早的系统用 24dp / 12dp 的背景图。</p></div>
+      <div><h3>留白</h3><p>4×2 及以上内边距 16dp，2×2 以下 12–14dp。所有按钮的点击区不小于 48dp，图标 20–24dp。</p></div>
+      <div><h3>半透明</h3><p>背景色叠 72% 不透明度。桌面组件不能做背景模糊，所以不提供毛玻璃。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="eng">
+  <div class="side">
+    <div class="eyebrow">工程</div>
+    <h2>怎么实现</h2>
+    <p>Jetpack Glance 1.2，每款一个 <code>GlanceAppWidget</code>。下面是断点、刷新、点击三张表，以及开工前要先补的四项底层能力。</p>
+  </div>
+  <div class="main">
+    <div class="prose">
+      <h3>正在播放的断点</h3>
+      <p>用 <code>SizeMode.Exact</code>，在 Composable 里按 <code>LocalSize</code> 选档。<code>SizeMode.Responsive</code> 每次更新要为每个尺寸各生成一份 RemoteViews，7 档就要带 7 份封面位图；播放组件刷新频繁，这笔开销不值得。</p>
+    </div>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>档位</th><th>最小尺寸</th><th>常见格数</th><th>内容</th></tr></thead>
+        <tbody id="bpRows"></tbody>
+      </table>
+    </div>
+
+    <div class="prose"><h3>什么时候刷新</h3><p>全部由事件推送，<code>updatePeriodMillis</code> 设为 0。PlaybackService 监听播放器事件，合并 300ms 内的连续变化后再调用 <code>updateAll</code>。</p></div>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>事件</th><th>更新哪些组件</th><th>做法</th></tr></thead>
+        <tbody>
+          <tr><td class="k">切歌</td><td>正在播放、歌词、歌单（高亮行）</td><td>新封面按组件尺寸取图、裁形状，新种子色生成配色后一起推送</td></tr>
+          <tr><td class="k">播放 / 暂停</td><td>正在播放、歌词、听歌模式</td><td>换播放图标，封面在形状和圆角方形之间切换，进度条在波浪和直线之间切换</td></tr>
+          <tr><td class="k">播放进度</td><td>正在播放 2×3、4×2、4×3</td><td>时间文字用 Chronometer，系统自己走字。进度条只在亮屏且播放中时每 10 秒推一次，灭屏立即停</td></tr>
+          <tr><td class="k">歌词换行</td><td>歌词、正在播放 4×3</td><td>和“系统媒体条歌词”共用当前行的计算；只在亮屏时推，两次之间至少隔 1.5 秒</td></tr>
+          <tr><td class="k">收藏变化</td><td>正在播放（心形）、歌单（我喜欢）</td><td>写入 <code>saved_songs</code> 的地方统一触发</td></tr>
+          <tr><td class="k">配色设置</td><td>全部</td><td>外观页改配色来源、风格、对比度时触发</td></tr>
+          <tr><td class="k">榜单内容</td><td>榜单</td><td>WorkManager 每 12 小时一次、需联网；打开 App 时顺带刷新。Glance 本身已依赖 WorkManager，不新增依赖</td></tr>
+          <tr><td class="k">登录状态</td><td>听歌模式、榜单、歌单</td><td>账号页登录或退出后触发</td></tr>
+          <tr><td class="k">定时关闭</td><td>正在播放</td><td>倒计时用 Chronometer 倒数（Android 7 起）；Android 6 只显示到分钟，每分钟推一次</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose"><h3>点了做什么</h3></div>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>位置</th><th>动作</th><th>实现</th></tr></thead>
+        <tbody>
+          <tr><td class="k">播放、上一首、下一首</td><td>后台执行</td><td>和媒体通知的按钮走同一条路：向 PlaybackService 发媒体按键 Intent。点击组件属于用户交互，允许从后台启动前台服务</td></tr>
+          <tr><td class="k">收藏</td><td>后台执行</td><td><code>actionRunCallback</code> 写库后刷新组件</td></tr>
+          <tr><td class="k">榜单行、歌单行、听歌模式播放</td><td>后台起播</td><td><code>actionRunCallback</code> 带上歌单 ID 和序号，交给 Service 侧的起播命令</td></tr>
+          <tr><td class="k">封面、标题、歌词</td><td>打开页面</td><td><code>actionStartActivity</code> 打开 MainActivity，extra 指定 <code>player</code> 或 <code>lyrics</code></td></tr>
+          <tr><td class="k">搜索条、识曲、定时、去登录</td><td>打开页面</td><td>同上，extra 为 <code>search</code>、<code>recognize</code>、<code>timer</code>、<code>login</code></td></tr>
+          <tr><td class="k">榜单标题、歌单标题</td><td>打开页面</td><td>同上，extra 为 <code>chart</code> 或 <code>collection</code> 加 ID</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose">
+      <h3>先补的底层能力</h3>
+      <ul>
+        <li><b>App 没运行时也能播。</b>现在播放队列不落盘，PlaybackService 也没有实现 <code>onPlaybackResumption</code>，进程被杀后点组件的播放键没有东西可放。要保存最后的队列、序号和进度，并实现这个回调；Android 13 起系统媒体控件的“继续播放”也靠它。Media3 1.11 在播放器为空时收到媒体按键是否会走这个回调，要真机确认。</li>
+        <li><b>当前形状放到播放层。</b>随机形状现在由 <code>CoverStage</code> 在界面里抽，App 没打开时组件拿不到。改成切歌时由播放层抽好，和歌曲一起保存，播放页和组件读同一个值。</li>
+        <li><b>按歌单起播挪出 ViewModel。</b><code>playCollection</code> 在 MusicViewModel 里，组件点歌单行时 ViewModel 不一定存在。要挪到 Service 也能调用的仓库层。</li>
+        <li><b>打开指定页面。</b>MainActivity 读取启动 Intent 里的目标页，冷启动和已在前台两种情况都要处理。</li>
+      </ul>
+    </div>
+
+    <div class="notes">
+      <div><h3>封面位图</h3><p>在 App 进程里用 Coil 按组件尺寸取图（<code>coverAt(px)</code>，最大 480px），用 <code>CoverShapes</code> 的同一个多边形裁好再传给桌面。系统限制一份 RemoteViews 的位图总量不超过屏幕像素 × 4 × 1.5 字节，480px 的封面约 0.9MB，余量很大。</p></div>
+      <div><h3>配色</h3><p><code>CoverSeedRepository</code> 已经在取封面种子色。用 MaterialKolor 分别生成浅色、深色两套，经 <code>ColorProviders(light, dark)</code> 交给 <code>GlanceTheme</code>。跟随壁纸时在 Android 12 起用系统的动态色。</p></div>
+      <div><h3>计时文字</h3><p>Glance 没有包装 Chronometer，用 <code>AndroidRemoteViews</code> 嵌一个 XML 布局，设置开始时间和是否在走。</p></div>
+      <div><h3>预览图</h3><p>Android 11 及以下用 <code>previewImage</code> 的 PNG；Android 12 起用 <code>previewLayout</code>；Android 15 起再提供实时生成的预览。</p></div>
+      <div><h3>配置页</h3><p>歌单、榜单、听歌模式、歌词有配置页，带默认值，添加时可以跳过；之后长按组件重新配置。配置页用 App 的主题。</p></div>
+      <div><h3>无障碍</h3><p>每个按钮都写 contentDescription，播放键同时带状态（“暂停，正在播放”）。整块组件不加点击描述，免得读屏把按钮吞掉。</p></div>
+      <div><h3>平板和电视</h3><p>平板桌面的格子更大，用同一组断点，最大可拉到 5×4。Android TV 没有桌面小组件，电视端不做。</p></div>
+      <div><h3>国产桌面</h3><p>MIUI / HyperOS、ColorOS、OriginOS 对标准小组件的圆角、尺寸和刷新频率各有处理，第四步要逐台真机看。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="plan">
+  <div class="side">
+    <div class="eyebrow">排期</div>
+    <h2>分四步做</h2>
+    <p>先把底层能力和主角做扎实，后面几款都是在同一套配色、取图和起播能力上加布局。</p>
+  </div>
+  <div class="main">
+    <div class="phases">
+      <div class="phase"><header><span class="tag">P1</span><h3>底层能力 + 正在播放</h3></header>
+        <ul><li>队列落盘和 <code>onPlaybackResumption</code>；当前形状挪到播放层；MainActivity 打开指定页面</li><li>组件配色管线（种子色 → 浅深两套）、封面取图裁形状、事件合并刷新</li><li>正在播放 7 档布局，加继续播放、无历史、封面加载中、定时关闭四个状态</li></ul></div>
+      <div class="phase"><header><span class="tag">P2</span><h3>歌词 + 快捷入口</h3></header>
+        <ul><li>歌词三档、三种背景、翻译开关；亮屏判断和行变化节流</li><li>快捷入口三档；识曲、搜索、定时的打开路径</li></ul></div>
+      <div class="phase"><header><span class="tag">P3</span><h3>歌单 + 听歌模式</h3></header>
+        <ul><li>按歌单起播挪到仓库层，加 Service 侧起播命令</li><li>两款的配置页，未登录状态</li></ul></div>
+      <div class="phase"><header><span class="tag">P4</span><h3>榜单 + 收尾</h3></header>
+        <ul><li>榜单组件和 WorkManager 定时刷新，离线状态</li><li>三代预览图；读屏走查；国产桌面真机测试</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="ask">
+  <div class="side">
+    <div class="eyebrow">待定</div>
+    <h2>要你定的五件事</h2>
+    <p>每条后面是我的建议，按建议做的话直接回“按建议”就行。</p>
+  </div>
+  <div class="main">
+    <div class="qs">
+      <div class="q"><b>1. 小组件的深浅色跟谁走？</b><span>建议<em>跟随系统</em>。组件放在桌面上，跟壁纸和系统深色模式一致更自然。另一个选项是跟 App 里的主题设置，App 设成深色时组件也一直深色。</span></div>
+      <div class="q"><b>2. 要不要做歌词组件？</b><span>建议<em>做</em>，只在亮屏时逐行刷新，不做逐字。播放时大约每 4 秒推一次，灭屏不推。</span></div>
+      <div class="q"><b>3. 进度条怎么处理？</b><span>建议<em>2×3、4×2、4×3 显示进度条，亮屏时 10 秒一刷</em>，时间文字每秒走。另一种是只显示时间、不画进度条，几乎不用刷新。</span></div>
+      <div class="q"><b>4. 透明背景给谁？</b><span>建议<em>只给歌词</em>。其余组件有按钮，透明后按钮压在壁纸上不好认，提供实色和半透明两种。</span></div>
+      <div class="q"><b>5. 第一批做哪些？</b><span>建议<em>P1 + P2</em>：正在播放、歌词、快捷入口。听歌模式、歌单、榜单依赖后台起播，放第二批。</span></div>
+    </div>
+  </div>
+</section>
+
+</div>
+<script>
+'use strict';
+const TAU = Math.PI * 2;
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* 稳定哈希 + 可复现随机数：同一首歌每次画出同一张封面、落在同一种格子 */
+function hash(str) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+/* ---------- 图标（Material Symbols 24dp 路径） ---------- */
+const IC = {
+  back: 'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z',
+  play: 'M8 5.14v13.72a1 1 0 0 0 1.5.86l10.6-6.86a1 1 0 0 0 0-1.72L9.5 4.28A1 1 0 0 0 8 5.14z',
+  pause: 'M7.5 5h3v14h-3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm6 0h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3z',
+  next: 'M6 18l8.4-6L6 6zm9.8-12H18v12h-2.2z',
+  prev: 'M6 6h2.2v12H6zm3.6 6 8.4 6V6z',
+  open: 'M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3z',
+  tune: 'M3 17v2h6v-2zM3 5v2h10V5zm10 16v-2h8v-2h-8v-2h-2v6zM7 9v2H3v2h4v2h2V9zm14 4v-2H11v2zm-6-4h2V7h4V5h-4V3h-2z',
+  locate: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A8.99 8.99 0 0 0 13 3.06V1h-2v2.06A8.99 8.99 0 0 0 3.06 11H1v2h2.06A8.99 8.99 0 0 0 11 20.94V23h2v-2.06A8.99 8.99 0 0 0 20.94 13H23v-2zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z',
+  list: 'M3 13h2v-2H3zm0 4h2v-2H3zm0-8h2V7H3zm4 4h14v-2H7zm0 4h14v-2H7zM7 7v2h14V7z',
+  grid: 'M3 3v8h8V3zm6 6H5V5h4zm-6 4v8h8v-8zm6 6H5v-4h4zm4-16v8h8V3zm6 6h-4V5h4zm-6 4v8h8v-8zm6 6h-4v-4h4z',
+  shuffle: 'M10.59 9.17 5.41 4 4 5.41l5.17 5.17zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04z',
+  fav: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
+  favo: 'M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z',
+  more: 'M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
+  check: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
+  close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
+  queue: 'M15 6H3v2h12zm0 4H3v2h12zM3 16h8v-2H3zM17 6v8.18A3 3 0 1 0 19 17V8h3V6z',
+};
+const ic = (n, size = 24) => `<svg class="i" viewBox="0 0 24 24" style="width:${size}px;height:${size}px" aria-hidden="true"><path d="${IC[n]}"/></svg>`;
+
+/* ---------- 曲目：一张 30 首的混合歌单。歌词只给正在播放演示用的三首，都是古诗词或自写的英译 ---------- */
+const SONGS = [
+  { t: '晴天', a: '周杰伦', src: 'QQ音乐', dur: 269, st: 'sun', pal: ['#F2D27A', '#E4572E', '#2B2D42', '#F6F1E7'] },
+  { t: '群青', a: 'YOASOBI', src: '网易云', dur: 248, st: 'mesh', pal: ['#0B2A6F', '#1F6FEB', '#7FD1FF', '#F4F7FF'] },
+  { t: '但愿人长久', a: '王菲', src: 'QQ音乐', dur: 245, st: 'moon', pal: ['#1B2150', '#5361C9', '#E9E4FF', '#B05C9A'], seed: '#5361C9',
+    ly: [['明月几时有', 'When did the bright moon first appear'], ['把酒问青天', 'Cup in hand, I ask the blue sky'], ['不知天上宫阙', 'I wonder, in the palaces of heaven'], ['今夕是何年', 'What year is it tonight'], ['我欲乘风归去', 'I long to ride the wind back home'], ['又恐琼楼玉宇', 'Yet fear those towers of jade'], ['高处不胜寒', 'Too cold, so high above'], ['起舞弄清影', 'I rise and dance with my clear shadow'], ['何似在人间', 'Better than this, among the living'], ['转朱阁 低绮户', 'Round the red pavilion, low past silk doors'], ['照无眠', 'It shines on the sleepless'], ['人有悲欢离合', 'People know sorrow, joy, parting, reunion'], ['月有阴晴圆缺', 'The moon waxes, wanes, is dim or bright'], ['此事古难全', 'Since old times this was never whole'], ['但愿人长久', 'I only wish us long life'], ['千里共婵娟', 'To share this moon a thousand miles apart']] },
+  { t: '独上西楼', a: '邓丽君', src: '网易云', dur: 232, st: 'hook', pal: ['#2A1A10', '#D07A22', '#F5E3C7', '#9A3E24'], seed: '#D07A22',
+    ly: [['无言独上西楼', 'Wordless, alone, I climb the west tower'], ['月如钩', 'The moon, a hook'], ['寂寞梧桐', 'A lonely parasol tree'], ['深院锁清秋', 'Locks clear autumn in the deep yard'], ['剪不断', 'Cut, it will not break'], ['理还乱', 'Combed, it tangles still'], ['是离愁', 'This is the grief of parting'], ['别是一般滋味', 'A flavour all its own'], ['在心头', 'Lodged in the heart']] },
+  { t: 'Lemon', a: '米津玄師', src: '网易云', dur: 255, st: 'halftone', pal: ['#F4EB49', '#1A1A1A', '#F7F5EE', '#3C8D2F'] },
+  { t: '平凡之路', a: '朴树', src: '酷狗', dur: 301, st: 'road', pal: ['#C9B79C', '#3E3A36', '#EFE7DA', '#8A5A3B'] },
+  { t: '夜に駆ける', a: 'YOASOBI', src: '网易云', dur: 261, st: 'stripes', pal: ['#140E2E', '#FF4D8D', '#FFD3E2', '#4C2BD6'] },
+  { t: '海阔天空', a: 'Beyond', src: '酷我', dur: 326, st: 'horizon', pal: ['#0E3B43', '#4FB0AE', '#F1F5F2', '#E8A33D'] },
+  { t: '富士山下', a: '陈奕迅', src: 'QQ音乐', dur: 259, st: 'mountain', pal: ['#E9E1D6', '#2F3E56', '#C8463D', '#9BB0C9'] },
+  { t: 'Clair de Lune', a: 'Debussy', src: '汽水', dur: 302, st: 'rings', pal: ['#0D1B2A', '#7C93B5', '#E0E6F1', '#C8B27A'] },
+  { t: '七里香', a: '周杰伦', src: 'QQ音乐', dur: 299, st: 'petals', pal: ['#F3E6EF', '#B7428A', '#3A2340', '#F2A6C8'] },
+  { t: '十年', a: '陈奕迅', src: 'QQ音乐', dur: 205, st: 'type', pal: ['#111111', '#F2F2F2', '#E63946', '#555555'] },
+  { t: '千本桜', a: '黒うさP', src: '网易云', dur: 245, st: 'bauhaus', pal: ['#1C1C2E', '#E63973', '#F5D0DD', '#19A7A0'] },
+  { t: '成都', a: '赵雷', src: '酷狗', dur: 328, st: 'photo', pal: ['#3A4A3F', '#C9A86A', '#EDE3CC', '#6D8A72'] },
+  { t: 'Yellow', a: 'Coldplay', src: '汽水', dur: 269, st: 'stars', pal: ['#0B0C1C', '#F6C445', '#FFF6D6', '#273469'] },
+  { t: '打上花火', a: 'DAOKO, 米津玄師', src: '网易云', dur: 289, st: 'burst', pal: ['#0A1230', '#FF8A3D', '#FFE2B8', '#5B6CFF'] },
+  { t: '红豆', a: '王菲', src: '酷我', dur: 252, st: 'dots', pal: ['#F1E4D8', '#A8202A', '#3B1E1E', '#E07A5F'] },
+  { t: '漠河舞厅', a: '柳爽', src: '汽水', dur: 302, st: 'snow', pal: ['#1D2B3A', '#B9D3E8', '#F4F8FB', '#7E5A9B'] },
+  { t: 'unravel', a: 'TK from 凛として時雨', src: '网易云', dur: 239, st: 'glitch', pal: ['#0E0E10', '#E8E8E8', '#C1121F', '#4A4E69'] },
+  { t: '后来', a: '刘若英', src: 'QQ音乐', dur: 341, st: 'mesh', pal: ['#3D2C4F', '#E8A0BF', '#FCE9F1', '#7A5CA8'] },
+  { t: '送别', a: '朴树', src: '酷狗', dur: 285, st: 'willow', pal: ['#E3E8D8', '#4F6B45', '#22301F', '#A8B98E'], seed: '#6E8F5E',
+    ly: [['长亭外', 'Beyond the long pavilion'], ['古道边', 'Beside the ancient road'], ['芳草碧连天', 'Fragrant grass runs green into the sky'], ['晚风拂柳笛声残', 'Evening wind in the willows, a flute fading'], ['夕阳山外山', 'Sunset, hills beyond hills'], ['天之涯', 'At the edge of the sky'], ['地之角', 'At the corner of the earth'], ['知交半零落', 'Old friends, half of them scattered'], ['一瓢浊酒尽余欢', 'One ladle of cloudy wine for the last of our joy'], ['今宵别梦寒', 'Tonight the dream of parting is cold']] },
+  { t: 'Bohemian Rhapsody', a: 'Queen', src: '汽水', dur: 355, st: 'quad', pal: ['#120D0D', '#D9A441', '#F3EBDD', '#7A1F1F'] },
+  { t: '夜曲', a: '周杰伦', src: 'QQ音乐', dur: 226, st: 'keys', pal: ['#0F0F14', '#E9E9EE', '#6B2737', '#2C2C36'] },
+  { t: '小幸运', a: '田馥甄', src: '酷狗', dur: 265, st: 'clover', pal: ['#E9F3E4', '#3F8F55', '#1E3A26', '#F2C14E'] },
+  { t: '光年之外', a: 'G.E.M. 邓紫棋', src: '酷我', dur: 235, st: 'orbit', pal: ['#05060F', '#8B5CF6', '#E9D5FF', '#22D3EE'] },
+  { t: '南山南', a: '马頔', src: '网易云', dur: 323, st: 'horizon', pal: ['#E8E0D0', '#5A6B7B', '#1F2A36', '#B88A5A'] },
+  { t: '稻香', a: '周杰伦', src: 'QQ音乐', dur: 223, st: 'field', pal: ['#F3D36B', '#6E8B3D', '#2E3A1F', '#E9963E'] },
+  { t: '夜空中最亮的星', a: '逃跑计划', src: '酷狗', dur: 252, st: 'stars', pal: ['#081226', '#9EC5FF', '#F2F6FF', '#3E5C9A'] },
+  { t: '告白气球', a: '周杰伦', src: 'QQ音乐', dur: 215, st: 'balloon', pal: ['#FCE7EC', '#E8506E', '#3A1F2B', '#7FB7E6'] },
+  { t: '起风了', a: '买辣椒也用券', src: '网易云', dur: 325, st: 'wind', pal: ['#DDE9F2', '#3C6E91', '#14283A', '#F0B86E'] },
+];
+SONGS.forEach((s, i) => { s.i = i; s.key = `${s.src}:${s.t}`; s.h = hash(s.key); });
+
+/* ---------- 程序化封面：每首一张 480px 图，替代真实专辑图 ---------- */
+let GRAIN = null;
+function grain() {
+  if (GRAIN) return GRAIN;
+  const c = document.createElement('canvas'); c.width = c.height = 160;
+  const g = c.getContext('2d'), d = g.createImageData(160, 160), r = rng(7);
+  for (let i = 0; i < d.data.length; i += 4) { const v = r() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+  g.putImageData(d, 0, 0);
+  return (GRAIN = c);
+}
+
+function drawCover(s, S = 480) {
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d', { willReadFrequently: s.st === 'glitch' }), R = rng(s.h), [bg, c1, c2, c3] = s.pal;
+  const lin = (x0, y0, x1, y1, stops) => { const gr = g.createLinearGradient(x0, y0, x1, y1); stops.forEach(([o, col]) => gr.addColorStop(o, col)); return gr; };
+  const circle = (x, y, r, fill) => { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = fill; g.fill(); };
+  g.fillStyle = bg; g.fillRect(0, 0, S, S);
+  switch (s.st) {
+    case 'moon': {
+      g.fillStyle = lin(0, 0, 0, S, [[0, bg], [1, c1]]); g.fillRect(0, 0, S, S);
+      g.save(); g.filter = 'blur(40px)'; circle(S * .62, S * .36, S * .3, c3 + '99'); g.restore();
+      circle(S * .62, S * .36, S * .2, c2);
+      g.globalAlpha = .18; for (let i = 0; i < 6; i++) circle(S * (.5 + R() * .25), S * (.28 + R() * .2), S * (.02 + R() * .04), bg); g.globalAlpha = 1;
+      g.fillStyle = bg + 'cc'; g.beginPath(); g.moveTo(0, S); g.lineTo(0, S * .78); for (let x = 0; x <= S; x += S / 12) g.lineTo(x, S * (.72 + R() * .1)); g.lineTo(S, S); g.fill();
+      break;
+    }
+    case 'sun': {
+      g.fillStyle = lin(0, 0, 0, S, [[0, c3], [.55, bg], [1, c1]]); g.fillRect(0, 0, S, S);
+      g.save(); g.beginPath(); g.arc(S / 2, S * .58, S * .3, 0, TAU); g.clip();
+      g.fillStyle = lin(0, S * .28, 0, S * .88, [[0, '#FFE08A'], [1, c1]]); g.fillRect(0, 0, S, S);
+      g.fillStyle = c3; for (let k = 0; k < 7; k++) { const y = S * (.6 + k * .045); g.fillRect(0, y, S, 3 + k * 2.2); }
+      g.restore();
+      g.fillStyle = c2; g.fillRect(0, S * .86, S, S * .14);
+      break;
+    }
+    case 'mesh': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      g.save(); g.filter = `blur(${S * .09}px)`;
+      [[c1, .3, .3, .42], [c2, .74, .4, .34], [c3, .5, .82, .3], [c1, .9, .9, .28]].forEach(([col, x, y, r]) => circle(S * (x + (R() - .5) * .15), S * (y + (R() - .5) * .15), S * r, col));
+      g.restore();
+      g.strokeStyle = c3 + '55'; g.lineWidth = 2; for (let i = 0; i < 5; i++) { g.beginPath(); g.arc(S * .5, S * 1.1, S * (.4 + i * .12), Math.PI * 1.1, Math.PI * 1.9); g.stroke(); }
+      break;
+    }
+    case 'hook': {
+      g.fillStyle = lin(0, 0, S, S, [[0, bg], [1, c3]]); g.fillRect(0, 0, S, S);
+      g.save(); g.filter = 'blur(26px)'; circle(S * .7, S * .3, S * .2, c1 + 'aa'); g.restore();
+      circle(S * .7, S * .3, S * .16, c2); circle(S * .64, S * .26, S * .15, bg);
+      g.strokeStyle = c2 + 'aa'; g.lineWidth = 3;
+      for (let i = 0; i < 3; i++) { g.beginPath(); g.moveTo(S * .08, S * (.62 + i * .1)); g.bezierCurveTo(S * .3, S * (.55 + i * .1), S * .6, S * (.72 + i * .1), S * .92, S * (.6 + i * .1)); g.stroke(); }
+      g.fillStyle = c1; g.fillRect(S * .14, S * .5, S * .06, S * .5); g.fillRect(S * .08, S * .5, S * .18, S * .03);
+      break;
+    }
+    case 'halftone': {
+      g.fillStyle = c2; g.fillRect(0, 0, S, S);
+      const step = S / 22;
+      for (let y = 0; y < 23; y++) for (let x = 0; x < 23; x++) { const d = Math.hypot(x - 16, y - 6) / 20; circle(x * step, y * step, step * .48 * clamp(1 - d, .05, 1), bg); }
+      g.fillStyle = c1; g.font = `900 ${S * .2}px "Roboto Flex", sans-serif`; g.fillText('L', S * .1, S * .9);
+      g.fillStyle = c3; g.fillRect(S * .1, S * .92, S * .3, S * .02);
+      break;
+    }
+    case 'road': {
+      g.fillStyle = lin(0, 0, 0, S, [[0, c2], [.5, bg], [1, c3]]); g.fillRect(0, 0, S, S);
+      g.fillStyle = c1; g.beginPath(); g.moveTo(S * .47, S * .5); g.lineTo(S * .53, S * .5); g.lineTo(S * .9, S); g.lineTo(S * .1, S); g.fill();
+      g.strokeStyle = c2; g.lineWidth = 4; g.setLineDash([S * .04, S * .04]); g.beginPath(); g.moveTo(S / 2, S * .52); g.lineTo(S / 2, S); g.stroke(); g.setLineDash([]);
+      g.fillStyle = c1 + '88'; g.fillRect(0, S * .49, S, 2);
+      break;
+    }
+    case 'stripes': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      g.save(); g.translate(S / 2, S / 2); g.rotate(-.5);
+      for (let i = -8; i < 9; i++) { g.fillStyle = [c1, c3, bg][(i + 9) % 3]; g.fillRect(i * S * .09, -S, S * .05, S * 2); }
+      g.restore();
+      g.save(); g.filter = 'blur(30px)'; circle(S * .3, S * .7, S * .25, c2 + '88'); g.restore();
+      circle(S * .3, S * .7, S * .12, c2);
+      break;
+    }
+    case 'horizon': {
+      g.fillStyle = lin(0, 0, 0, S, [[0, c2], [.55, c1], [.551, bg], [1, bg]]); g.fillRect(0, 0, S, S);
+      g.strokeStyle = c2 + '55'; g.lineWidth = 1.5;
+      for (let i = 0; i < 14; i++) { const y = S * (.58 + i * i * .0022); g.beginPath(); g.moveTo(0, y); g.lineTo(S, y); g.stroke(); }
+      circle(S * .3, S * .5, S * .07, c3);
+      break;
+    }
+    case 'mountain': {
+      g.fillStyle = lin(0, 0, 0, S, [[0, bg], [1, c3]]); g.fillRect(0, 0, S, S);
+      circle(S * .72, S * .28, S * .1, c2);
+      g.fillStyle = c1; g.beginPath(); g.moveTo(S * .05, S * .86); g.lineTo(S * .5, S * .34); g.lineTo(S * .95, S * .86); g.fill();
+      g.fillStyle = bg; g.beginPath(); g.moveTo(S * .41, S * .44); g.lineTo(S * .5, S * .34); g.lineTo(S * .59, S * .44); g.lineTo(S * .55, S * .47); g.lineTo(S * .5, S * .43); g.lineTo(S * .45, S * .47); g.fill();
+      g.fillStyle = c1 + 'cc'; g.fillRect(0, S * .86, S, S * .14);
+      break;
+    }
+    case 'rings': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      for (let i = 14; i > 0; i--) { g.strokeStyle = i % 3 ? c1 + '88' : c3; g.lineWidth = i % 3 ? 1.5 : 3; g.beginPath(); g.arc(S * .62, S * .42, i * S * .035, 0, TAU); g.stroke(); }
+      circle(S * .62, S * .42, S * .05, c2);
+      break;
+    }
+    case 'petals': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      for (let k = 0; k < 7; k++) {
+        const x = S * (.15 + R() * .7), y = S * (.15 + R() * .7), r = S * (.06 + R() * .1), rot = R() * TAU;
+        for (let p = 0; p < 5; p++) { g.save(); g.translate(x, y); g.rotate(rot + p * TAU / 5); g.fillStyle = p % 2 ? c1 + 'cc' : c3 + 'dd'; g.beginPath(); g.ellipse(r * .6, 0, r * .6, r * .32, 0, 0, TAU); g.fill(); g.restore(); }
+        circle(x, y, r * .16, c2);
+      }
+      break;
+    }
+    case 'type': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      g.fillStyle = c1; g.font = `900 ${S * .62}px "Noto Sans SC", sans-serif`; g.textBaseline = 'alphabetic';
+      g.fillText(s.t[0], -S * .04, S * .66);
+      g.fillStyle = c2; g.fillText(s.t[1] || '', S * .42, S * 1.06);
+      g.fillStyle = c3; g.fillRect(S * .06, S * .08, S * .2, S * .012);
+      break;
+    }
+    case 'bauhaus': {
+      const n = 4, u = S / n;
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+        const col = [c1, c3, c2, bg][Math.floor(R() * 4)], q = Math.floor(R() * 4);
+        g.fillStyle = [bg, c2, c1, c3][Math.floor(R() * 4)]; g.fillRect(x * u, y * u, u, u);
+        g.fillStyle = col; g.beginPath(); const cx = x * u + (q & 1) * u, cy = y * u + (q >> 1) * u; g.moveTo(cx, cy); g.arc(cx, cy, u, 0, TAU); g.save(); g.rect(x * u, y * u, u, u); g.clip(); g.fill(); g.restore();
+      }
+      break;
+    }
+    case 'photo': {
+      g.fillStyle = lin(0, 0, S, S, [[0, c2], [.5, c1], [1, bg]]); g.fillRect(0, 0, S, S);
+      g.save(); g.filter = 'blur(50px)'; circle(S * .2, S * .2, S * .3, '#FFD9A0aa'); circle(S * .8, S * .9, S * .4, c3); g.restore();
+      g.fillStyle = bg + 'dd'; for (let i = 0; i < 9; i++) { const w = S * (.04 + R() * .06), h = S * (.15 + R() * .3); g.fillRect(S * (i * .11 + .02), S - h, w, h); }
+      break;
+    }
+    case 'stars': {
+      g.fillStyle = lin(0, 0, 0, S, [[0, bg], [1, c3]]); g.fillRect(0, 0, S, S);
+      for (let i = 0; i < 90; i++) circle(R() * S, R() * S * .9, R() * 1.8 + .3, c2 + (R() > .5 ? 'ff' : '88'));
+      g.save(); g.filter = 'blur(18px)'; circle(S * .66, S * .3, S * .1, c1); g.restore();
+      circle(S * .66, S * .3, S * .035, '#FFFFFF');
+      break;
+    }
+    case 'burst': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      for (let k = 0; k < 3; k++) {
+        const x = S * (.25 + R() * .5), y = S * (.2 + R() * .4), r = S * (.12 + R() * .14), col = [c1, c2, c3][k];
+        g.strokeStyle = col; g.lineWidth = 2;
+        for (let i = 0; i < 36; i++) { const a = i / 36 * TAU; g.beginPath(); g.moveTo(x + Math.cos(a) * r * .2, y + Math.sin(a) * r * .2); g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); g.stroke(); circle(x + Math.cos(a) * r, y + Math.sin(a) * r, 2.2, col); }
+      }
+      g.fillStyle = '#000000aa'; g.fillRect(0, S * .82, S, S * .18);
+      break;
+    }
+    case 'dots': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      for (let i = 0; i < 26; i++) { const x = S * (.1 + R() * .8), y = S * (.1 + R() * .8); circle(x, y, S * .03, c1); circle(x - S * .008, y - S * .01, S * .008, '#ffffff77'); }
+      g.fillStyle = c2; g.fillRect(S * .08, S * .88, S * .5, S * .015);
+      break;
+    }
+    case 'snow': {
+      g.fillStyle = lin(0, 0, 0, S, [[0, bg], [.7, c3], [1, c1]]); g.fillRect(0, 0, S, S);
+      g.fillStyle = c2; g.beginPath(); g.moveTo(0, S * .82); g.quadraticCurveTo(S * .5, S * .7, S, S * .84); g.lineTo(S, S); g.lineTo(0, S); g.fill();
+      for (let i = 0; i < 120; i++) circle(R() * S, R() * S, R() * 2.2 + .4, '#ffffff' + (R() > .5 ? 'cc' : '66'));
+      g.fillStyle = bg; g.fillRect(S * .64, S * .5, S * .14, S * .26); g.fillStyle = c1; g.fillRect(S * .67, S * .54, S * .03, S * .05); g.fillRect(S * .72, S * .54, S * .03, S * .05);
+      break;
+    }
+    case 'glitch': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      circle(S * .5, S * .5, S * .3, c3);
+      for (let i = 0; i < 24; i++) { const y = R() * S, h = R() * S * .04 + 2, dx = (R() - .5) * S * .2; const img = g.getImageData(0, y, S, h); g.putImageData(img, dx, y); }
+      g.fillStyle = c1; for (let i = 0; i < 10; i++) g.fillRect(R() * S, R() * S, R() * S * .3, 2);
+      break;
+    }
+    case 'willow': {
+      g.fillStyle = lin(0, 0, 0, S, [[0, bg], [1, c3]]); g.fillRect(0, 0, S, S);
+      g.strokeStyle = c1; g.lineWidth = 2;
+      for (let i = 0; i < 26; i++) { const x = S * (.05 + i * .036); g.beginPath(); g.moveTo(x, 0); g.quadraticCurveTo(x + S * .05, S * .3, x - S * .02, S * (.4 + R() * .35)); g.stroke(); }
+      g.fillStyle = c2; g.fillRect(0, S * .9, S, S * .1);
+      circle(S * .78, S * .78, S * .05, '#E8A35A');
+      break;
+    }
+    case 'quad': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      [[.3, .32], [.7, .32], [.3, .72], [.7, .72]].forEach(([x, y], i) => {
+        g.save(); g.filter = 'blur(2px)'; circle(S * x, S * y, S * .14, [c1, c3, c3, c1][i]); g.restore();
+        circle(S * x, S * y - S * .02, S * .06, bg);
+      });
+      g.strokeStyle = c2; g.lineWidth = 2; g.strokeRect(S * .08, S * .08, S * .84, S * .84);
+      break;
+    }
+    case 'keys': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      g.save(); g.translate(S * .1, S * .55); g.rotate(-.2);
+      for (let i = 0; i < 14; i++) { g.fillStyle = c2; g.fillRect(i * S * .07, 0, S * .065, S * .5); }
+      for (let i = 0; i < 13; i++) { if ([2, 6, 9].includes(i)) continue; g.fillStyle = bg; g.fillRect(i * S * .07 + S * .045, 0, S * .045, S * .3); }
+      g.restore();
+      g.save(); g.filter = 'blur(30px)'; circle(S * .25, S * .25, S * .2, c3); g.restore();
+      break;
+    }
+    case 'clover': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      for (let p = 0; p < 4; p++) { const a = p * TAU / 4 + .4; circle(S * .5 + Math.cos(a) * S * .13, S * .45 + Math.sin(a) * S * .13, S * .14, c1); }
+      g.strokeStyle = c1; g.lineWidth = 8; g.beginPath(); g.moveTo(S * .5, S * .5); g.quadraticCurveTo(S * .55, S * .75, S * .66, S * .9); g.stroke();
+      circle(S * .82, S * .2, S * .05, c3);
+      break;
+    }
+    case 'orbit': {
+      g.fillStyle = bg; g.fillRect(0, 0, S, S);
+      g.save(); g.filter = 'blur(36px)'; circle(S * .5, S * .5, S * .24, c1 + 'cc'); g.restore();
+      g.strokeStyle = c2 + 'aa'; g.lineWidth = 1.5;
+      for (let i = 0; i < 5; i++) { g.beginPath(); g.ellipse(S * .5, S * .5, S * (.18 + i * .07), S * (.06 + i * .025), -.4, 0, TAU); g.stroke(); }
+      circle(S * .5, S * .5, S * .1, c2); circle(S * .83, S * .36, S * .02, c3);
+      break;
+    }
+    case 'field': {
+      g.fillStyle = lin(0, 0, 0, S, [[0, '#8EC5E8'], [.45, '#F5E6B8'], [.46, bg], [1, c3]]); g.fillRect(0, 0, S, S);
+      g.strokeStyle = c1; g.lineWidth = 2;
+      for (let i = 0; i < 70; i++) { const x = R() * S, y = S * (.48 + R() * .5); g.beginPath(); g.moveTo(x, S); g.quadraticCurveTo(x + 6, y + 20, x + 10, y); g.stroke(); }
+      circle(S * .78, S * .2, S * .07, '#FFF4C2');
+      break;
+    }
+    case 'balloon': {
+      g.fillStyle = lin(0, 0, 0, S, [[0, c3], [1, bg]]); g.fillRect(0, 0, S, S);
+      [[.35, .4, c1], [.62, .32, '#F5B83D'], [.55, .55, '#FFFFFF']].forEach(([x, y, col]) => {
+        g.fillStyle = col; g.beginPath(); g.ellipse(S * x, S * y, S * .1, S * .12, 0, 0, TAU); g.fill();
+        g.strokeStyle = c2 + '88'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(S * x, S * (y + .12)); g.quadraticCurveTo(S * (x + .04), S * (y + .3), S * .5, S * .95); g.stroke();
+      });
+      break;
+    }
+    case 'wind': {
+      g.fillStyle = lin(0, 0, S, S, [[0, bg], [1, c1]]); g.fillRect(0, 0, S, S);
+      g.strokeStyle = '#FFFFFFaa'; g.lineWidth = 2.5; g.lineCap = 'round';
+      for (let i = 0; i < 9; i++) { const y = S * (.15 + i * .09); g.beginPath(); g.moveTo(S * (.05 + R() * .2), y); g.bezierCurveTo(S * .4, y - 30, S * .6, y + 30, S * (.75 + R() * .2), y - 8); g.stroke(); }
+      g.save(); g.translate(S * .7, S * .72); g.rotate(-.5); g.fillStyle = c3; g.beginPath(); g.moveTo(0, -S * .08); g.lineTo(S * .06, 0); g.lineTo(0, S * .08); g.lineTo(-S * .06, 0); g.fill(); g.restore();
+      break;
+    }
+    default: break;
+  }
+  // 胶片颗粒 + 暗角：让程序化图更像印刷品
+  g.globalAlpha = .07; g.globalCompositeOperation = 'overlay'; g.fillStyle = g.createPattern(grain(), 'repeat'); g.fillRect(0, 0, S, S);
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+  const v = g.createRadialGradient(S / 2, S / 2, S * .35, S / 2, S / 2, S * .75); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.28)'); g.fillStyle = v; g.fillRect(0, 0, S, S);
+  return c.toDataURL('image/jpeg', .84);
+}
+
+const COVERS = new Map();
+const cover = s => { if (!COVERS.has(s.key)) COVERS.set(s.key, drawCover(s)); return COVERS.get(s.key); };
+const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+</script>
+<script>
+'use strict';
+/* ---------- 补充图标（Material Symbols 24dp） ---------- */
+Object.assign(IC, {
+  eq: 'M7 18h2V6H7v12zm4 4h2V2h-2v20zm-8-8h2v-4H3v4zm12 4h2V6h-2v12zm4-8v4h2v-4h-2z',
+  bedtime: 'M12.34 2.02C6.59 1.82 2 6.42 2 12c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-7.51-.25-12.09-8.43-8.32-14.96z',
+  headphones: 'M12 1c-4.97 0-9 4.03-9 9v7c0 1.66 1.34 3 3 3h3v-8H5v-2c0-3.87 3.13-7 7-7s7 3.13 7 7v2h-4v8h3c1.66 0 3-1.34 3-3v-7c0-4.97-4.03-9-9-9z',
+  search: 'M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
+  note: 'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z',
+  up: 'M7 14l5-5 5 5z',
+  down: 'M7 10l5 5 5-5z',
+  login: 'M11 7 9.6 8.4l2.6 2.6H2v2h10.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z',
+  cloudOff: 'M19.35 10.04A7.49 7.49 0 0 0 12 4c-1.48 0-2.85.43-4.01 1.17l1.46 1.46a5.497 5.497 0 0 1 8.05 4.87v.5H19c1.66 0 3 1.34 3 3 0 1.13-.64 2.11-1.56 2.62l1.45 1.45C23.16 18.16 24 16.68 24 15c0-2.64-2.05-4.78-4.65-4.96zM3 5.27l2.75 2.74C2.56 8.15 0 10.77 0 14c0 3.31 2.69 6 6 6h11.73l2 2L21 20.73 4.27 4 3 5.27zM7.73 10l8 8H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h1.73z',
+  bars: 'M10 20h4V4h-4v16zm-6 0h4v-8H4v8zM16 9v11h4V9h-4z',
+  wifi: 'M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3a4.237 4.237 0 0 0-6 0zm-4-4 2 2a7.074 7.074 0 0 1 10 0l2-2C15.14 9.14 8.87 9.14 5 13z',
+  battery: 'M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z',
+  call: 'M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z',
+  chat: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z',
+  camera: 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4zM9 2 7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z',
+  chevL: 'M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z',
+  chevR: 'M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z',
+});
+
+/* ---------- 品牌标记：屏幕框 + 音符，路径取自自适应图标前景 ---------- */
+const BRAND = '#006B5F';
+const brandMark = (size, frame = '#62E8CF', ink = '#FFFFFF', vb = '0 0 108 108') =>
+  `<svg viewBox="${vb}" width="${size}" height="${size}" aria-hidden="true">
+    <path d="M39,34.5H69A9.5,9.5 0 0 1 78.5,44V64A9.5,9.5 0 0 1 69,73.5H39A9.5,9.5 0 0 1 29.5,64V44A9.5,9.5 0 0 1 39,34.5Z" fill="none" style="stroke:${frame}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M45.14,63.89A7.4,5.6 -22 1 0 58.86,58.34A7.4,5.6 -22 1 0 45.14,63.89Z" style="fill:${ink}"/>
+    <path d="M56.67,59.98V43.5" fill="none" style="stroke:${ink}" stroke-width="5" stroke-linecap="round"/></svg>`;
+
+/* ---------- 形状：极坐标半径函数近似 MaterialShapes，转成百分比 polygon，随元素尺寸缩放 ---------- */
+const SQ_P = 5;
+const SHAPES = {
+  Cookie12: th => 1 - 0.07 * (1 - Math.cos(12 * th)) / 2,
+  Cookie9: th => 1 - 0.095 * (1 - Math.cos(9 * th)) / 2,
+  Cookie7: th => 1 - 0.115 * (1 - Math.cos(7 * th)) / 2,
+  Cookie4: th => 1 - 0.2 * (1 - Math.cos(4 * th)) / 2,
+  Sunny: th => { const w = (Math.cos(8 * th) + 1) / 2; return 1 - 0.12 * (1 - w * w); },
+  SoftBurst: th => { const w = (Math.cos(10 * th) + 1) / 2; return 1 - 0.17 * (1 - Math.pow(w, 1.6)); },
+  Clover8: th => { const v = (1 - Math.cos(8 * th)) / 2; return 1 - 0.22 * Math.pow(v, 4); },
+  Circle: () => 1,
+  Square: th => { const c = Math.abs(Math.cos(th)), s = Math.abs(Math.sin(th)); return Math.pow(Math.pow(c, SQ_P) + Math.pow(s, SQ_P), -1 / SQ_P); },
+};
+const SHAPE_LABEL = { Cookie12: '十二瓣', Cookie9: '九瓣', Cookie7: '七瓣', Sunny: '太阳', SoftBurst: '星芒', Clover8: '八叶', Square: '圆角方形', Cookie4: '四瓣', Arch: '拱形', Circle: '圆形' };
+const POLY = new Map();
+function poly(name, rot = 0) {
+  const key = name + rot;
+  if (POLY.has(key)) return POLY.get(key);
+  let pts = [];
+  if (name === 'Arch') {
+    // 拱形：上半圆，下边两个小圆角（榜单页 ChartsHero 用的 MaterialShapes.Arch）
+    for (let i = 0; i <= 40; i++) { const a = Math.PI + i / 40 * Math.PI; pts.push([50 + 50 * Math.cos(a), 50 + 50 * Math.sin(a)]); }
+    const r = 12;
+    for (let i = 0; i <= 10; i++) { const a = i / 10 * Math.PI / 2; pts.push([100 - r + r * Math.cos(a), 100 - r + r * Math.sin(a)]); }
+    for (let i = 0; i <= 10; i++) { const a = Math.PI / 2 + i / 10 * Math.PI / 2; pts.push([r + r * Math.cos(a), 100 - r + r * Math.sin(a)]); }
+  } else {
+    const fn = SHAPES[name], n = 120;
+    for (let i = 0; i < n; i++) { const th = i / n * TAU, r = fn(th - rot) * 50; pts.push([50 + r * Math.cos(th), 50 + r * Math.sin(th)]); }
+  }
+  const css = `polygon(${pts.map(([x, y]) => `${x.toFixed(2)}% ${y.toFixed(2)}%`).join(',')})`;
+  POLY.set(key, css);
+  return css;
+}
+
+/* ---------- 配色：OKLCH 近似 Material 色调（tone T 映射到 OKLab 明度 (T+16)/116） ---------- */
+function hexToOklch(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const lin = c => { c /= 255; return c <= .04045 ? c / 12.92 : Math.pow((c + .055) / 1.055, 2.4); };
+  const r = lin(n >> 16 & 255), g = lin(n >> 8 & 255), b = lin(n & 255);
+  const l = Math.cbrt(.4122214708 * r + .5363325363 * g + .0514459929 * b);
+  const m = Math.cbrt(.2119034982 * r + .6806995451 * g + .1073969566 * b);
+  const s = Math.cbrt(.0883024619 * r + .2817188376 * g + .6299787005 * b);
+  const A = 1.9779984951 * l - 2.4285922050 * m + .4505937099 * s;
+  const B = .0259040371 * l + .7827717662 * m - .8086757660 * s;
+  let h = Math.atan2(B, A) * 180 / Math.PI; if (h < 0) h += 360;
+  return { h, c: Math.hypot(A, B) };
+}
+function oklchHex(L, C, H) {
+  const rad = H * Math.PI / 180;
+  let rgb;
+  for (let n = 0; n < 16; n++, C *= .88) {
+    const a = C * Math.cos(rad), b = C * Math.sin(rad);
+    const l = (L + .3963377774 * a + .2158037573 * b) ** 3, m = (L - .1055613458 * a - .0638541728 * b) ** 3, s = (L - .0894841775 * a - 1.2914855480 * b) ** 3;
+    rgb = [4.0767416621 * l - 3.3077115913 * m + .2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - .3413193965 * s, -.0041960863 * l - .7034186147 * m + 1.7076147010 * s];
+    if (rgb.every(v => v > -.002 && v < 1.002)) break; // 超出 sRGB 时降色度，保住色相
+  }
+  const enc = x => { x = clamp(x, 0, 1); return Math.round((x <= .0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - .055) * 255); };
+  return '#' + rgb.map(v => enc(v).toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+const tone = (h, c, T) => oklchHex((T + 16) / 116, c * clamp(Math.min(T, 100 - T) / 22, .35, 1), h);
+const SCHEMES = new Map();
+function wscheme(seed, dark) {
+  const key = seed + dark;
+  if (SCHEMES.has(key)) return SCHEMES.get(key);
+  const { h } = hexToOklch(seed);
+  // TonalSpot：主色 36、次要 16、第三色 24（色相 +60）、中性 6、中性变体 8，按 CAM16 色度约 1/340 换成 OKLCH 色度
+  const P = .105, S2 = .047, T3 = .07, N = .012, NV = .022, h3 = (h + 60) % 360;
+  const sc = dark ? {
+    p: tone(h, P, 80), op: tone(h, P, 20), pc: tone(h, P, 30), opc: tone(h, P, 90),
+    sc: tone(h, S2, 30), osc: tone(h, S2, 90), tc: tone(h3, T3, 30), otc: tone(h3, T3, 90),
+    b: tone(h, N, 12), bh: tone(h, N, 17), o: tone(h, N, 90), ov: tone(h, NV, 80), ol: tone(h, NV, 30),
+  } : {
+    p: tone(h, P, 40), op: tone(h, P, 100), pc: tone(h, P, 90), opc: tone(h, P, 10),
+    sc: tone(h, S2, 90), osc: tone(h, S2, 10), tc: tone(h3, T3, 90), otc: tone(h3, T3, 10),
+    b: tone(h, N, 94), bh: tone(h, N, 92), o: tone(h, N, 10), ov: tone(h, NV, 30), ol: tone(h, NV, 80),
+  };
+  SCHEMES.set(key, sc);
+  return sc;
+}
+const vars = sc => `--wb:${sc.b};--wbh:${sc.bh};--wo:${sc.o};--wov:${sc.ov};--wp:${sc.p};--wop:${sc.op};--wpc:${sc.pc};--wopc:${sc.opc};--wsc:${sc.sc};--wosc:${sc.osc};--wtc:${sc.tc};--wotc:${sc.otc};--wol:${sc.ol}`;
+
+/* ---------- 壁纸：三张渐变，跟随壁纸时用各自的主色做种子 ---------- */
+const WALLS = [
+  { name: '青岚', seed: '#2F7F72', css: 'radial-gradient(110% 70% at 18% 8%, #A9E3D2 0%, transparent 62%), radial-gradient(90% 70% at 92% 92%, #2C6283 0%, transparent 66%), linear-gradient(162deg, #CFEADF 0%, #5BA595 48%, #1E4C53 100%)' },
+  { name: '暮橙', seed: '#C4643A', css: 'radial-gradient(100% 70% at 82% 12%, #FFD8B0 0%, transparent 60%), radial-gradient(90% 80% at 8% 96%, #7E3349 0%, transparent 66%), linear-gradient(170deg, #F7CBA2 0%, #D7794C 52%, #5A2A3A 100%)' },
+  { name: '雾蓝', seed: '#56679A', css: 'radial-gradient(110% 70% at 22% 10%, #DCE4FA 0%, transparent 60%), radial-gradient(90% 80% at 88% 94%, #34407A 0%, transparent 66%), linear-gradient(165deg, #D9E0F4 0%, #7E8FC2 50%, #283153 100%)' },
+];
+
+/* ---------- 示例数据 ---------- */
+const PREVIEW = [
+  { i: 2, shape: 'Cookie9', q: '无损', fav: true },
+  { i: 3, shape: 'Cookie12', q: '320k', fav: false },
+  { i: 20, shape: 'Clover8', q: '无损', fav: true },
+  { i: 9, shape: 'SoftBurst', q: 'Hi-Res', fav: false, pure: true },
+];
+const MODE = { src: '网易云', group: '私人漫游', name: '默认模式', sub: '按你的口味推荐', fan: [1, 27, 25], now: 1 };
+const CHART = { name: '飙升榜', src: '网易云', upd: '今天更新', rows: [[17, '+2'], [29, 'new'], [24, '-1'], [6, '+5'], [15, '0'], [1, '+1'], [4, '-2'], [18, 'new']] };
+const LIST = { name: '我喜欢的歌曲', count: 128, rows: [0, 10, 2, 8, 20, 11, 19, 3, 16, 22] };
+
+const S = {
+  pi: 0, playing: true, color: 'cover', wall: 0,
+  dark: matchMedia('(prefers-color-scheme: dark)').matches,
+  bg: 'solid', timer: false, page: 0, pos: 46, bar: 40, timerLeft: 1800,
+  hits: false, pg: { kind: 'now', w: 4, h: 2 },
+};
+const curP = () => PREVIEW[S.pi];
+const cur = () => SONGS[curP().i];
+const seedNow = () => S.color === 'cover' ? cur().seed : S.color === 'wall' ? WALLS[S.wall].seed : BRAND;
+const shapeNow = () => S.playing ? curP().shape : 'Square';
+
+/* 歌词按 5 秒一行循环，前奏 8 秒 */
+function lyr(song = cur(), pos = S.pos) {
+  const ly = song.ly;
+  if (!ly) return null;
+  const n = ly.length, k = Math.max(0, Math.floor((pos - 8) / 5)) % n;
+  const at = j => ly[(j + n) % n];
+  return { k, prev: at(k - 1)[0], cur: at(k)[0], tr: at(k)[1], next: at(k + 1)[0], next2: at(k + 2)[0] };
+}
+
+/* 封面：每首画一次，放进样式表，组件里只引用类名 */
+const COVER_SHEET = document.createElement('style');
+document.head.appendChild(COVER_SHEET);
+const COVER_CLS = new Map();
+function coverCls(s) {
+  if (!COVER_CLS.has(s.key)) {
+    const cls = 'cv' + s.i;
+    COVER_SHEET.sheet.insertRule(`.${cls}{background-image:url(${drawCover(s, 360)})}`, COVER_SHEET.sheet.cssRules.length);
+    COVER_CLS.set(s.key, cls);
+  }
+  return COVER_CLS.get(s.key);
+}
+</script>
+<script>
+'use strict';
+SONGS.forEach(s => { s.seed = s.seed || s.pal[1]; });
+
+/* ---------- 桌面格子：4 列桌面每格 84×100dp，组件占 n 格时四周各留 6dp ---------- */
+const CW = 84, CH = 100, GUT = 12;
+const dims = (c, r) => [c * CW - GUT, r * CH - GUT];
+
+/* 断点：桌面给的尺寸里能放下的最大一档（和 Glance 在 LocalSize 上自己挑档的逻辑一致） */
+const BP = {
+  now: [
+    { k: 'mini', w: 72, h: 88, cells: '1×1', name: '单格', what: '形状封面，整块是播放 / 暂停' },
+    { k: 'strip', w: 156, h: 88, cells: '2×1', name: '短条', what: '封面和播放键' },
+    { k: 'bar', w: 240, h: 88, cells: '3×1 · 4×1', name: '长条', what: '封面、歌名歌手、按钮组；宽度够 300dp 时加上一首' },
+    { k: 'square', w: 156, h: 188, cells: '2×2', name: '方块', what: '大封面，播放键压在封面右下角，下方歌名歌手' },
+    { k: 'tower', w: 156, h: 288, cells: '2×3', name: '竖条', what: '封面、歌名、进度，播放和下一首' },
+    { k: 'card', w: 324, h: 188, cells: '4×2 · 5×2', name: '卡片', what: '封面在左；右侧来源音质、收藏、歌名、进度、按钮组' },
+    { k: 'stage', w: 324, h: 288, cells: '4×3 及以上', name: '歌词舞台', what: '小封面和歌名在上，中间歌词，底部进度和按钮组' },
+  ],
+  lyrics: [
+    { k: 'line', w: 240, h: 88, cells: '3×1 · 4×1', name: '一行' },
+    { k: 'poster', w: 240, h: 188, cells: '3×2 · 4×2', name: '海报' },
+    { k: 'tall', w: 324, h: 288, cells: '4×3 及以上', name: '长卷' },
+  ],
+  mode: [
+    { k: 'strip', w: 156, h: 88, cells: '2×1', name: '短条' },
+    { k: 'square', w: 156, h: 188, cells: '2×2', name: '方块' },
+  ],
+  charts: [
+    { k: 'square', w: 156, h: 188, cells: '2×2', name: '方块' },
+    { k: 'card', w: 324, h: 188, cells: '4×2 及以上', name: '列表' },
+  ],
+  list: [
+    { k: 'square', w: 156, h: 188, cells: '2×2 · 2×3', name: '窄列表' },
+    { k: 'card', w: 324, h: 188, cells: '4×2 及以上', name: '宽列表' },
+  ],
+  tools: [
+    { k: 'mini', w: 72, h: 88, cells: '1×1', name: '识曲' },
+    { k: 'search', w: 240, h: 88, cells: '3×1 · 4×1', name: '搜索条' },
+    { k: 'cookie', w: 156, h: 156, cells: '2×2', name: '四瓣' },
+  ],
+};
+const MIN = { now: [1, 1], lyrics: [3, 1], mode: [2, 1], charts: [2, 2], list: [2, 2], tools: [1, 1] };
+const MAX = { now: [5, 4], lyrics: [5, 4], mode: [3, 2], charts: [5, 4], list: [5, 4], tools: [4, 2] };
+const KIND_NAME = { now: '正在播放', lyrics: '歌词', mode: '听歌模式', charts: '榜单', list: '歌单', tools: '快捷入口' };
+
+function pickBp(kind, w, h) {
+  const list = BP[kind], area = b => b.w * b.h;
+  const fit = list.filter(b => b.w <= w && b.h <= h);
+  if (!fit.length) return list.reduce((a, b) => (area(b) < area(a) ? b : a));
+  return fit.reduce((a, b) => (area(b) > area(a) ? b : a));
+}
+
+/* 一次渲染用到的状态；状态演示传覆盖项，live=false 的不参与每秒更新 */
+function ctx(over = {}) {
+  const p = curP();
+  const c = Object.assign({ s: cur(), p, playing: S.playing, fav: p.fav, timer: S.timer, timerLeft: S.timerLeft, pos: S.pos, bar: S.bar, ly: lyr(), live: true, state: null, mode: 'idle' }, over);
+  if (!('shape' in over)) c.shape = c.playing ? p.shape : 'Square';
+  return c;
+}
+
+/* ---------- 外壳：配色变量 + 背景模式 ---------- */
+function frame(kind, w, h, body, o = {}) {
+  const sc = wscheme(seedNow(), S.dark);
+  let mode = o.bgMode || S.bg;
+  if (mode === 'clear' && kind !== 'lyrics') mode = 'glass';
+  const base = sc[o.bg || 'b'];
+  const bg = mode === 'glass' ? `color-mix(in oklab, ${base} 72%, transparent)` : base;
+  let extra = '';
+  if (kind === 'lyrics') extra = mode === 'clear'
+    ? ';--wo:#FFFFFF;--wov:rgba(255,255,255,.82);--wlc:#FFFFFF;--wld:rgba(255,255,255,.8)'
+    : `;--wlc:${sc.opc};--wld:color-mix(in oklab, ${sc.opc} 66%, transparent)`;
+  const cls = ['w', o.bare ? 'bare' : '', mode === 'clear' ? 'clear' : ''].join(' ');
+  return `<div class="${cls}" role="img" aria-label="${o.label || ''}" style="width:${w}px;height:${h}px;${vars(sc)};--wbg:${bg}${extra}">${body}</div>`;
+}
+
+/* ---------- 零件 ---------- */
+function cvr(s, size, shape, o = {}) {
+  const clip = o.r != null ? `border-radius:${o.r}px` : `clip-path:${poly(shape, o.rot || 0)}`;
+  const attrs = (o.hit ? ` data-hit="${o.hit}"` : '') + (o.act ? ` data-act="${o.act}"` : '');
+  return `<div class="cvw"${attrs} style="width:${size}px;height:${size}px${o.style ? ';' + o.style : ''}"><div class="cv ${o.ph ? 'ph' : coverCls(s)}" style="${clip}">${o.ph ? ic('note', Math.round(size * .34)) : ''}</div></div>`;
+}
+function playB(size, o = {}) {
+  const pl = o.playing ?? S.playing, act = o.act || 'play', hit = o.hit === undefined ? 2 : o.hit;
+  return `<div class="pb" data-act="${act}"${hit ? ` data-hit="${hit}"` : ''} title="${act === 'play' ? (pl ? '暂停' : '播放') : '播放全部'}" style="width:${size}px;height:${size}px${o.style ? ';' + o.style : ''}">${ic(pl ? 'pause' : 'play', Math.round(size * .5))}</div>`;
+}
+function grp(c, { prev = true, h = 40, full = false } = {}) {
+  const items = [];
+  if (prev) items.push(['prev', 'prev', '上一首']);
+  items.push(['play', c.playing ? 'pause' : 'play', c.playing ? '暂停' : '播放']);
+  items.push(['next', 'next', '下一首']);
+  return `<div class="grp${full ? ' full' : ''}" style="height:${h}px">${items.map(([act, icon, tip], j) =>
+    `<div class="g${act === 'play' ? ' pp' : ''}${j === 0 ? ' l' : ''}${j === items.length - 1 ? ' r' : ''}" data-act="${act}" data-hit="${act === 'play' ? 2 : 3}" title="${tip}">${ic(icon, act === 'play' ? 24 : 20)}</div>`).join('')}</div>`;
+}
+const favB = c => `<div class="ib${c.fav ? ' on' : ''}" data-act="fav" data-hit="4" title="${c.fav ? '取消收藏' : '收藏'}" style="width:40px;height:40px;margin:-10px -10px -10px 0">${ic(c.fav ? 'fav' : 'favo', 20)}</div>`;
+const tchip = c => c.timer ? `<span class="tchip">${ic('bedtime', 12)}<span${c.live ? ' data-cd' : ''}>${fmt(c.timerLeft)}</span></span>` : '';
+const chrono = c => `<span${c.live ? ' data-chrono' : ''}>${fmt(c.pos)}</span>`;
+const metaOf = c => c.state === 'resume' ? '继续播放 · 最近播放' : `${c.s.src} · ${c.p.q}`;
+const metaRow = c => `<div class="rowf" style="gap:6px"><div class="m fill">${metaOf(c)}</div>${tchip(c)}</div>`;
+
+/* M3E 波浪进度：已播段播放时是波浪、暂停时拉直；未播段是 secondaryContainer 直线，末端一个主色点 */
+function wavy(W, c) {
+  const H = 12, mid = 6, frac = clamp(c.bar / c.s.dur, 0, 1);
+  const x1 = Math.max(.5, frac * (W - 10)), y = x => mid + 2.4 * Math.sin(x / 15 * TAU);
+  let d;
+  if (c.playing) { d = 'M0 ' + y(0).toFixed(2); for (let x = 1.5; x < x1; x += 1.5) d += 'L' + x.toFixed(1) + ' ' + y(x).toFixed(2); d += 'L' + x1.toFixed(1) + ' ' + y(x1).toFixed(2); }
+  else d = `M0 ${mid}L${x1.toFixed(1)} ${mid}`;
+  const gs = x1 + 6;
+  return `<svg class="wv" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><path d="${d}" fill="none" style="stroke:var(--wp)" stroke-width="3.5" stroke-linecap="round"/>${gs < W - 7 ? `<path d="M${gs.toFixed(1)} ${mid}H${W - 7}" fill="none" style="stroke:var(--wsc)" stroke-width="3.5" stroke-linecap="round"/>` : ''}<circle cx="${W - 2}" cy="${mid}" r="2" style="fill:var(--wp)"/></svg>`;
+}
+const prog = (W, c) => `<div${c.live ? ` data-prog="${W}"` : ''}>${wavy(W, c)}</div>`;
+const times = (c, style = '') => `<div class="times" style="${style}">${chrono(c)}<span>${fmt(c.s.dur)}</span></div>`;
+const markTile = size => `<div style="width:${size}px;height:${size}px;border-radius:${Math.round(size * .3)}px;background:var(--wpc);display:grid;place-items:center;flex:none">${brandMark(size, 'var(--wp)', 'var(--wopc)', '22 22 64 64')}</div>`;
+const noLyric = c => c.p.pure ? '纯音乐，请欣赏' : '暂时没有歌词';
+const lyAttr = (c, k) => c.live ? ` data-ly="${k}"` : '';
+
+/* ---------- 正在播放 ---------- */
+function nowEmpty(k, w, h) {
+  if (k === 'card' || k === 'stage') return `<div class="rowf" style="height:100%;padding:16px;gap:16px">${markTile(92)}<div class="col fill" style="gap:3px"><div class="t">还没有播放记录</div><div class="a" style="white-space:normal">从榜单或搜索里挑一首，这里就会显示正在播放</div><div class="pill" data-act="open" style="margin-top:10px;width:max-content;padding:0 16px">${ic('search', 18)}打开 myMusic</div></div></div>`;
+  if (k === 'square' || k === 'tower') return `<div class="col" data-act="open" style="height:100%;padding:14px">${markTile(64)}<div class="fill"></div><div class="t">还没有播放记录</div><div class="a">点这里挑一首歌</div></div>`;
+  return `<div class="rowf" data-act="open" style="height:100%;padding:12px;gap:12px;justify-content:center">${markTile(Math.min(56, h - 24))}${w > 120 ? '<div class="col fill"><div class="t">还没有播放记录</div><div class="a">点这里挑一首歌</div></div>' : ''}</div>`;
+}
+
+function nowBody(k, w, h, c) {
+  const s = c.s, ph = c.state === 'loading';
+  if (c.state === 'empty') return nowEmpty(k, w, h);
+  const open = { hit: 1, act: 'open', ph };
+  switch (k) {
+    case 'mini':
+      return `<div data-act="play" data-hit="2" title="${c.playing ? '暂停' : '播放'}" style="position:absolute;inset:0;display:grid;place-items:center"><div style="position:relative;width:60px;height:60px">${cvr(s, 60, c.shape, { ph })}<div class="badge" style="width:26px;height:26px;right:-5px;bottom:-5px">${ic(c.playing ? 'pause' : 'play', 16)}</div></div></div>`;
+    case 'strip':
+      return `<div class="rowf" style="height:100%;padding:12px 14px 12px 12px;justify-content:space-between">${cvr(s, 64, c.shape, open)}${playB(48, { playing: c.playing })}</div>`;
+    case 'bar': {
+      const wide = w >= 300, cs = wide ? 64 : 56;
+      return `<div class="rowf" style="height:100%;padding:12px;gap:12px">${cvr(s, cs, c.shape, open)}<div class="col fill" data-hit="1" data-act="open">${metaRow(c)}<div class="t">${s.t}</div><div class="a">${s.a}</div></div>${grp(c, { prev: wide, h: 44 })}</div>`;
+    }
+    case 'square':
+      return `<div style="position:absolute;left:14px;top:14px">${cvr(s, 112, c.shape, open)}</div>
+        <div style="position:absolute;right:10px;top:86px">${playB(48, { playing: c.playing, style: 'box-shadow:0 0 0 3px var(--wb)' })}</div>
+        <div class="col" data-hit="1" data-act="open" style="position:absolute;left:14px;right:14px;bottom:13px"><div class="t">${s.t}</div><div class="a">${c.state === 'resume' ? '继续播放 · ' + s.a : s.a}</div></div>`;
+    case 'tower': {
+      const cw = w - 28;
+      return `<div class="col" style="height:100%;padding:14px">
+        <div style="align-self:center">${cvr(s, 116, c.shape, open)}</div>
+        <div class="col" data-hit="1" data-act="open" style="margin-top:10px">${metaRow(c)}<div class="t">${s.t}</div><div class="a">${s.a}</div></div>
+        <div class="fill"></div>
+        ${prog(cw, c)}${times(c, 'margin:3px 0 8px')}
+        ${grp(c, { prev: false, full: true, h: 40 })}</div>`;
+    }
+    case 'card': {
+      const cs = 140, rw = w - 32 - cs - 14;
+      return `<div class="rowf" style="height:100%;padding:16px;gap:14px">
+        ${cvr(s, cs, c.shape, open)}
+        <div class="col fill" style="height:100%">
+          <div class="rowf" style="gap:6px"><div class="m fill" data-hit="1" data-act="open">${metaOf(c)}</div>${tchip(c)}${favB(c)}</div>
+          <div class="col" data-hit="1" data-act="open" style="margin-top:4px"><div class="t two">${s.t}</div><div class="a">${s.a}</div></div>
+          <div class="fill"></div>
+          ${c.state === 'resume' ? `<div class="a" style="margin-bottom:8px">上次听到 ${fmt(c.pos)}</div>` : prog(rw, c) + times(c, 'margin:3px 0 6px')}
+          ${grp(c, { full: true, h: 40 })}
+        </div></div>`;
+    }
+    case 'stage': {
+      const rw = w - 32;
+      const ly = c.ly
+        ? `<div class="ly-cur"${lyAttr(c, 'cur')} style="font-size:20px;color:var(--wp)">${c.ly.cur}</div><div class="ly-tr"${lyAttr(c, 'tr')} style="color:var(--wov)">${c.ly.tr}</div><div class="ly-dim"${lyAttr(c, 'next')} style="font-size:14.5px;color:var(--wov);margin-top:4px">${c.ly.next}</div>`
+        : `<div class="ly-dim" style="font-size:16px;color:var(--wov)">${noLyric(c)}</div>`;
+      return `<div class="col" style="height:100%;padding:16px">
+        <div class="rowf" style="gap:12px">${cvr(s, 64, c.shape, open)}<div class="col fill" data-hit="1" data-act="open">${metaRow(c)}<div class="t">${s.t}</div><div class="a">${s.a}</div></div>${favB(c)}</div>
+        <div class="col fill" data-hit="5" data-act="lyrics" style="justify-content:center;gap:2px;padding:8px 0">${ly}</div>
+        ${prog(rw, c)}${times(c, 'margin:3px 0 8px')}
+        ${grp(c, { full: true, h: 44 })}</div>`;
+    }
+  }
+  return '';
+}
+
+/* ---------- 歌词 ---------- */
+function lyricsBody(k, w, h, c) {
+  const s = c.s, none = c.ly ? null : noLyric(c);
+  const playIc = `<div class="ib" data-act="play" data-hit="2" title="${c.playing ? '暂停' : '播放'}" style="width:40px;height:40px;margin:-10px -10px -10px 0;color:var(--wlc)">${ic(c.playing ? 'pause' : 'play', 22)}</div>`;
+  const head = `<div class="rowf" style="gap:8px"><div class="m fill" style="color:var(--wld)">${ic('note', 14)}${s.t} · ${s.a}</div>${playIc}</div>`;
+  if (k === 'line') {
+    const body = none
+      ? `<div class="ly-cur" style="font-size:16px;-webkit-line-clamp:1">${none}</div><div class="ly-dim" style="font-size:12.5px">${s.t} · ${s.a}</div>`
+      : `<div class="ly-cur"${lyAttr(c, 'cur')} style="font-size:17px;-webkit-line-clamp:1">${c.ly.cur}</div><div class="ly-dim"${lyAttr(c, 'next')} style="font-size:13px">${c.ly.next}</div>`;
+    return `<div class="rowf" data-act="lyrics" data-hit="5" style="height:100%;padding:12px 16px 12px 12px;gap:12px">${cvr(s, 52, c.shape)}<div class="col fill" style="gap:2px">${body}</div></div>`;
+  }
+  if (k === 'poster') {
+    const big = w >= 300 ? 26 : 22;
+    const body = none
+      ? `<div class="ly-cur" style="font-size:${big - 2}px">${none}</div>`
+      : `<div class="ly-cur"${lyAttr(c, 'cur')} style="font-size:${big}px">${c.ly.cur}</div><div class="ly-tr"${lyAttr(c, 'tr')} style="margin-top:3px">${c.ly.tr}</div><div class="ly-dim"${lyAttr(c, 'next')} style="font-size:15px;margin-top:8px">${c.ly.next}</div>`;
+    return `<div class="col" data-act="lyrics" data-hit="5" style="height:100%;padding:14px 16px 16px">${head}<div class="fill"></div>${body}</div>`;
+  }
+  const body = none
+    ? `<div class="ly-cur" style="font-size:24px">${none}</div>`
+    : `<div class="ly-dim"${lyAttr(c, 'prev')} style="font-size:15px">${c.ly.prev}</div>
+       <div class="ly-cur"${lyAttr(c, 'cur')} style="font-size:28px;margin-top:10px">${c.ly.cur}</div>
+       <div class="ly-tr"${lyAttr(c, 'tr')} style="margin-top:4px;font-size:13px">${c.ly.tr}</div>
+       <div class="ly-dim"${lyAttr(c, 'next')} style="font-size:16px;margin-top:12px">${c.ly.next}</div>
+       <div class="ly-dim"${lyAttr(c, 'next2')} style="font-size:15px;margin-top:6px;opacity:.7">${c.ly.next2}</div>`;
+  return `<div class="col" data-act="lyrics" data-hit="5" style="height:100%;padding:14px 18px 18px">${head}<div class="col fill" style="justify-content:center">${body}</div></div>`;
+}
+
+/* ---------- 听歌模式 ---------- */
+function modeBody(k, w, h, c) {
+  const st = c.mode, now = SONGS[MODE.now];
+  const head = st === 'roam'
+    ? `<span style="color:var(--wp);display:inline-flex;gap:4px;align-items:center">${ic('bars', 14)}漫游中</span>`
+    : `${MODE.src} · ${MODE.group}`;
+  const loginB = size => `<div class="ib tonal" data-act="login" title="去登录" style="width:${size}px;height:${size}px">${ic('login', 22)}</div>`;
+  if (k === 'strip') {
+    return `<div class="rowf" style="height:100%;padding:12px 12px 12px 16px;gap:10px"><div class="col fill" data-act="openMode"><div class="t" style="font-size:16px">${MODE.name}</div><div class="m">${st === 'login' ? '需要登录' : st === 'roam' ? head : MODE.group}</div></div>${st === 'login' ? loginB(48) : playB(48, { playing: st === 'roam', hit: 0 })}</div>`;
+  }
+  const top = `<div class="rowf" style="gap:8px"><div style="width:32px;height:32px;border-radius:50%;background:var(--wtc);color:var(--wotc);display:grid;place-items:center;flex:none">${ic('headphones', 18)}</div><div class="m fill">${head}</div></div>`;
+  const sub = st === 'roam' ? `${now.t} · ${now.a}` : st === 'login' ? '登录网易云后才能漫游' : MODE.sub;
+  const mid = `<div class="col" data-act="openMode" style="margin-top:12px"><div class="t" style="font-size:21px;line-height:1.25">${MODE.name}</div><div class="a" style="white-space:normal;margin-top:2px">${sub}</div></div>`;
+  let bottom;
+  if (st === 'login') bottom = `<div class="pill" data-act="login">${ic('login', 18)}去登录</div>`;
+  else if (st === 'roam') bottom = `<div class="rowf" style="gap:8px;justify-content:flex-end"><div class="ib tonal" data-act="next" title="下一首" style="width:44px;height:44px">${ic('next', 22)}</div>${playB(48, { playing: true, hit: 0 })}</div>`;
+  else bottom = `<div class="rowf" style="gap:8px"><div class="stack">${MODE.fan.slice(0, 2).map(i => cvr(SONGS[i], 40, '', { r: 12 })).join('')}</div><div class="fill"></div>${playB(48, { playing: false, hit: 0 })}</div>`;
+  return `<div class="col" style="height:100%;padding:14px">${top}${mid}<div class="fill"></div>${bottom}</div>`;
+}
+
+/* ---------- 榜单 ---------- */
+function delta(d) {
+  if (d === 'new') return '<span class="dl new">新</span>';
+  if (d === '0') return '<span class="dl">—</span>';
+  const up = d[0] === '+';
+  return `<span class="dl${up ? ' up' : ''}">${ic(up ? 'up' : 'down', 16)}${d.slice(1)}</span>`;
+}
+function chartsBody(k, w, h, c) {
+  const sub = c.state === 'offline'
+    ? `${ic('cloudOff', 13)}离线 · 3 小时前更新`
+    : `${CHART.src} · ${CHART.upd}`;
+  if (k === 'square') {
+    const s0 = SONGS[CHART.rows[0][0]];
+    return `<div class="col" style="height:100%;padding:14px 14px 10px">
+      <div class="col" data-act="openChart"><div class="t">${CHART.name}</div><div class="m">${sub}</div></div>
+      <div class="rowf" data-act="playRow" style="gap:10px;margin-top:10px">${cvr(s0, 60, 'Arch')}<div class="col fill"><span class="rk top" style="text-align:left;width:auto;font-size:20px;line-height:1.1">1</span><span class="t2" style="font-weight:700">${s0.t}</span><span class="a2">${s0.a}</span></div></div>
+      <div class="col" style="margin-top:8px">${CHART.rows.slice(1, 3).map(([i, d], j) =>
+        `<div class="lrow" data-act="playRow" style="height:22px;gap:6px;flex:none"><span class="rk${j < 2 ? ' top' : ''}" style="font-size:13px;width:16px">${j + 2}</span><span class="t2 fill" style="font-size:12.5px">${SONGS[i].t}</span>${delta(d)}</div>`).join('')}</div></div>`;
+  }
+  const rows = CHART.rows.map(([i, d], j) => {
+    const s = SONGS[i], n = j + 1;
+    return `<div class="lrow" data-act="playRow" style="height:44px"><span class="rk${n <= 3 ? ' top' : ''}">${n}</span>${n === 1 ? cvr(s, 36, 'Arch') : cvr(s, 36, '', { r: 10 })}<div class="tx"><span class="t2">${s.t}</span><span class="a2">${s.a}</span></div>${delta(d)}</div>`;
+  }).join('');
+  return `<div class="col" style="height:100%;padding:14px 14px 4px">
+    <div class="rowf" style="gap:8px;margin-bottom:6px"><div class="col fill" data-act="openChart"><div class="t" style="font-size:16px">${CHART.name}</div><div class="m">${sub}</div></div>${playB(40, { playing: false, act: 'playAll', hit: 0 })}</div>
+    <div class="rows fill">${rows}</div></div>`;
+}
+
+/* ---------- 歌单 ---------- */
+function listBody(k, w, h, c) {
+  const wide = k === 'card', cs = wide ? 36 : 32;
+  const head = `<div class="rowf" style="gap:6px;margin-bottom:6px"><div class="col fill" data-act="openList"><div class="t" style="font-size:${wide ? 16 : 14}px">${LIST.name}</div><div class="m">${ic('fav', 12)}${LIST.count} 首</div></div>${wide ? `<div class="ib tonal" data-act="shuffle" title="随机播放" style="width:40px;height:40px">${ic('shuffle', 20)}</div>` : ''}${playB(wide ? 40 : 36, { playing: false, act: 'playAll', hit: 0 })}</div>`;
+  const rows = LIST.rows.map(i => {
+    const s = SONGS[i], on = s.key === c.s.key;
+    return `<div class="lrow${on ? ' now' : ''}" data-act="playRow" style="height:${cs + 10}px">${cvr(s, cs, '', { r: wide ? 10 : 8 })}<div class="tx"><span class="t2">${s.t}</span><span class="a2">${s.a}</span></div>${on ? `<span style="color:var(--wp)">${ic('bars', 16)}</span>` : ''}</div>`;
+  }).join('');
+  return `<div class="col" style="height:100%;padding:14px 14px 4px">${head}<div class="rows fill">${rows}</div></div>`;
+}
+
+/* ---------- 快捷入口 ---------- */
+function toolsBody(k, w, h) {
+  if (k === 'mini') {
+    return `<div style="position:absolute;inset:0;display:grid;place-items:center"><div data-act="recognize" title="听歌识曲" style="width:64px;height:64px;clip-path:${poly('Cookie9')};background:var(--wpc);color:var(--wopc);display:grid;place-items:center">${ic('eq', 28)}</div></div>`;
+  }
+  if (k === 'search') {
+    return `<div style="position:absolute;inset:0;display:flex;align-items:center"><div class="rowf" style="width:100%;height:56px;border-radius:28px;background:var(--wbg);padding:0 8px 0 12px;gap:8px">
+      <div class="rowf fill" data-act="search" style="gap:8px;height:100%">${brandMark(32, 'var(--wp)', 'var(--wo)', '22 22 64 64')}<span class="a fill" style="font-size:14px">搜索歌曲、歌手或粘贴链接</span></div>
+      <div class="ib tonal" data-act="recognize" title="听歌识曲" style="width:40px;height:40px">${ic('eq', 20)}</div></div></div>`;
+  }
+  const side = Math.min(w, h), a = Math.round(side * .27 - 22), b = Math.round(side * .73 - 22);
+  const btn = (x, y, icon, act, tip) => `<div class="ib tonal" data-act="${act}" title="${tip}" style="position:absolute;width:44px;height:44px;left:${x}px;top:${y}px">${ic(icon, 22)}</div>`;
+  return `<div style="position:absolute;left:${(w - side) / 2}px;top:${(h - side) / 2}px;width:${side}px;height:${side}px">
+    <div style="position:absolute;inset:0;clip-path:${poly('Cookie4', Math.PI / 4)};background:var(--wbg)"></div>
+    ${btn(a, a, 'search', 'search', '搜索')}${btn(b, a, 'fav', 'openFav', '我喜欢')}${btn(a, b, 'headphones', 'openMode', '听歌模式')}${btn(b, b, 'bedtime', 'timer', '定时关闭')}
+    <div class="pb" data-act="recognize" title="听歌识曲" style="position:absolute;width:64px;height:64px;left:${side / 2 - 32}px;top:${side / 2 - 32}px">${ic('eq', 30)}</div></div>`;
+}
+
+const BODY = { now: nowBody, lyrics: lyricsBody, mode: modeBody, charts: chartsBody, list: listBody, tools: toolsBody };
+function widget(kind, w, h, over = {}, o = {}) {
+  const bp = pickBp(kind, w, h);
+  const body = BODY[kind](bp.k, w, h, ctx(over));
+  return frame(kind, w, h, body, { bare: kind === 'tools', bg: kind === 'lyrics' ? 'pc' : 'b', bgMode: o.bgMode, label: `${KIND_NAME[kind]}小组件，${bp.name}` });
+}
+const widgetCells = (kind, cw, rh, over, o) => { const [w, h] = dims(cw, rh); return widget(kind, w, h, over, o); };
+const fig = (html, cap) => `<figure>${html}<figcaption>${cap}</figcaption></figure>`;
+</script>
+<script>
+'use strict';
+/* ---------- 桌面布局：两屏，格子坐标 (列, 行, 宽, 高) ---------- */
+const HOME = [
+  [{ kind: 'now', c: 0, r: 0, cw: 4, rh: 2 }, { kind: 'tools', c: 0, r: 2, cw: 2, rh: 2 }, { kind: 'mode', c: 2, r: 2, cw: 2, rh: 2 }, { kind: 'lyrics', c: 0, r: 4, cw: 4, rh: 1 }],
+  [{ kind: 'charts', c: 0, r: 0, cw: 4, rh: 3 }, { kind: 'now', c: 0, r: 3, cw: 2, rh: 2 }, { kind: 'list', c: 2, r: 3, cw: 2, rh: 2 }],
+];
+const PICK = [
+  { kind: 'now', cw: 4, rh: 2, name: '正在播放', range: '1×1 到 5×4', desc: '封面、进度和切歌按钮，颜色跟着封面换' },
+  { kind: 'lyrics', cw: 4, rh: 2, name: '歌词', range: '3×1 到 5×4', desc: '当前一句和下一句，可以设成透明背景' },
+  { kind: 'mode', cw: 2, rh: 2, name: '听歌模式', range: '2×1 到 3×2', desc: '一键开始私人漫游或场景电台' },
+  { kind: 'charts', cw: 4, rh: 2, name: '榜单', range: '2×2 到 5×4', desc: '选一张榜单，看前几名和排名变化' },
+  { kind: 'list', cw: 2, rh: 2, name: '歌单', range: '2×2 到 5×4', desc: '我喜欢、最近播放或任意歌单，点哪首播哪首' },
+  { kind: 'tools', cw: 2, rh: 2, name: '快捷入口', range: '1×1 到 4×2', desc: '听歌识曲、搜索、我喜欢、定时关闭' },
+];
+const TOKENS = [
+  ['组件背景', 'surfaceContainer', 'b'],
+  ['歌名、正文', 'onSurface', 'o'],
+  ['歌手、时间、次要文字', 'onSurfaceVariant', 'ov'],
+  ['播放键、按钮组中段、已播进度、排名前三', 'primary', 'p'],
+  ['播放键上的图标', 'onPrimary', 'op'],
+  ['歌词组件底色、识曲 1×1、空状态标记', 'primaryContainer', 'pc'],
+  ['歌词文字', 'onPrimaryContainer', 'opc'],
+  ['上一首 / 下一首、圆形次要按钮、未播进度', 'secondaryContainer', 'sc'],
+  ['它们的图标', 'onSecondaryContainer', 'osc'],
+  ['定时标签、“新”标、听歌模式图标', 'tertiaryContainer', 'tc'],
+  ['它们的文字', 'onTertiaryContainer', 'otc'],
+];
+const SHAPE_USE = [
+  ['Cookie12', '播放中的封面'], ['Cookie9', '播放中的封面'], ['Cookie7', '播放中的封面'], ['Sunny', '播放中的封面'], ['SoftBurst', '播放中的封面'], ['Clover8', '播放中的封面'],
+  ['Square', '暂停时的封面'], ['Cookie4', '快捷入口 2×2 底板'], ['Arch', '榜单第一名'], ['Circle', '播放键、圆形按钮'],
+];
+const ACT_TIP = {
+  open: '打开播放页', lyrics: '打开播放页的歌词视图', openMode: '打开听歌模式页', login: '打开账号页登录网易云',
+  playRow: '后台从这一首开始播放，不弹出播放页', playAll: '后台从第一首开始播放', shuffle: '后台随机播放整张歌单',
+  openChart: '打开飙升榜页面', openList: '打开“我喜欢的歌曲”', search: '打开搜索页并弹出键盘',
+  recognize: '打开 App，弹出识曲面板并开始听', openFav: '打开“我喜欢的歌曲”', timer: '打开定时关闭面板',
+};
+
+const wallBg = el => { el.style.setProperty('--wall', WALLS[S.wall].css); el.classList.toggle('dark', S.dark); };
+let lastK = -1;
+
+function renderControls() {
+  const s = cur();
+  $('#songThumb').className = 'thumb ' + coverCls(s);
+  $('#songName').textContent = s.t;
+  $('#songMeta').textContent = `${s.a} · ${s.src}`;
+  const on = (id, v) => $$(`#${id} button`).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === String(v))));
+  on('playSeg', S.playing ? 1 : 0); on('colorSeg', S.color); on('darkSeg', S.dark ? 1 : 0);
+  on('bgSeg', S.bg); on('timerSeg', S.timer ? 1 : 0); on('pageSeg', S.page); on('pgKind', S.pg.kind);
+  $$('#wallSw button').forEach((b, j) => b.setAttribute('aria-pressed', String(j === S.wall)));
+}
+
+function renderPhone() {
+  const ph = $('#phone');
+  wallBg(ph);
+  ph.innerHTML = `<div class="wallp"></div>
+    <div class="sbar"><span>10:31</span><span class="r">${ic('wifi', 15)}${ic('battery', 15)}</span></div>
+    <div class="cells">${HOME[S.page].map(it => `<div class="slot" style="left:${it.c * CW + 6}px;top:${it.r * CH + 6}px">${widgetCells(it.kind, it.cw, it.rh)}</div>`).join('')}</div>
+    <div class="pdots">${HOME.map((_, j) => `<button type="button" aria-label="第 ${j + 1} 屏" aria-pressed="${j === S.page}" data-page="${j}"></button>`).join('')}</div>
+    <div class="dock"><span class="app">${ic('call')}</span><span class="app">${ic('chat')}</span><span class="app mm">${brandMark(54)}</span><span class="app">${ic('camera')}</span></div>
+    <div class="navpill"></div>`;
+}
+
+function renderPicker() {
+  $('#picker').innerHTML = PICK.map(p => {
+    const [w, h] = dims(p.cw, p.rh), z = Math.min(1, 212 / w, 148 / h);
+    return `<div class="pcard"><div class="pv" style="--wall:${WALLS[S.wall].css}"><div style="zoom:${z.toFixed(3)}">${widget(p.kind, w, h)}</div></div><div><b>${p.name}</b><span class="sz">${p.cw} × ${p.rh}</span></div><p>${p.desc}。可调范围 ${p.range}。</p></div>`;
+  }).join('');
+}
+
+function board(id, items) {
+  const el = $('#' + id);
+  wallBg(el);
+  el.innerHTML = items.join('');
+}
+const sized = (kind, cw, rh, cap, over, o) => { const [w, h] = dims(cw, rh); return fig(widget(kind, w, h, over, o), `${cap} · ${cw}×${rh} <b>${w}×${h}dp</b>`); };
+
+function renderBoards() {
+  const NOW = [['mini', 1, 1], ['strip', 2, 1], ['bar', 4, 1], ['square', 2, 2], ['tower', 2, 3], ['card', 4, 2], ['stage', 4, 3]];
+  board('nowBoard', NOW.map(([k, cw, rh]) => sized('now', cw, rh, BP.now.find(b => b.k === k).name)));
+  board('lyBoard', [['line', 4, 1], ['poster', 4, 2], ['tall', 4, 3]].map(([k, cw, rh]) => sized('lyrics', cw, rh, BP.lyrics.find(b => b.k === k).name)));
+  board('lyBgBoard', [['solid', '实色'], ['glass', '半透明'], ['clear', '透明']].map(([m, n]) => sized('lyrics', 4, 2, '背景' + n, {}, { bgMode: m })));
+  board('modeBoard', [
+    ...[['idle', '未开始'], ['roam', '漫游中'], ['login', '未登录']].map(([m, n]) => sized('mode', 2, 2, n, { mode: m })),
+    ...[['idle', '未开始'], ['login', '未登录']].map(([m, n]) => sized('mode', 2, 1, n, { mode: m })),
+  ]);
+  board('chartBoard', [sized('charts', 2, 2, '榜单 · 方块'), sized('charts', 4, 2, '榜单 · 列表'), sized('charts', 4, 3, '榜单 · 列表')]);
+  board('listBoard', [sized('list', 2, 2, '歌单 · 窄列表'), sized('list', 2, 3, '歌单 · 窄列表'), sized('list', 4, 3, '歌单 · 宽列表')]);
+  board('toolBoard', [sized('tools', 2, 2, '四瓣'), sized('tools', 4, 1, '搜索条'), sized('tools', 1, 1, '识曲')]);
+  board('stateBoard', [
+    sized('now', 4, 2, '进程已结束，显示最近一首', { state: 'resume', playing: false, live: false, pos: 132 }),
+    sized('now', 2, 2, '从没播放过', { state: 'empty', live: false }),
+    sized('now', 4, 2, '封面下载中', { state: 'loading', live: false }),
+    sized('now', 4, 2, '定时关闭中', { timer: true, live: false, timerLeft: 1752 }),
+    sized('mode', 2, 2, '听歌模式 · 未登录', { mode: 'login' }),
+    sized('charts', 4, 2, '榜单 · 离线，显示缓存', { state: 'offline' }),
+  ]);
+}
+
+function renderPg() {
+  const { kind } = S.pg, [mnW, mnH] = MIN[kind], [mxW, mxH] = MAX[kind];
+  S.pg.w = clamp(S.pg.w, mnW, mxW); S.pg.h = clamp(S.pg.h, mnH, mxH);
+  const wIn = $('#pgW'), hIn = $('#pgH');
+  wIn.min = mnW; wIn.max = mxW; hIn.min = mnH; hIn.max = mxH; wIn.value = S.pg.w; hIn.value = S.pg.h;
+  const [w, h] = dims(S.pg.w, S.pg.h), bp = pickBp(kind, w, h);
+  $('#pgOut').innerHTML = `<b>${S.pg.w} × ${S.pg.h} 格</b>，${w} × ${h}dp<br>落到「${bp.name}」，这一档最小 ${bp.w} × ${bp.h}dp`;
+  let cells = '';
+  for (let y = 0; y < S.pg.h; y++) for (let x = 0; x < S.pg.w; x++) cells += `<i style="left:${x * CW - 6}px;top:${y * CH - 6}px;width:${CW}px;height:${CH}px"></i>`;
+  const st = $('#pgStage');
+  wallBg(st);
+  st.innerHTML = `<div class="cellmap" style="width:${w}px;height:${h}px">${widget(kind, w, h)}<div style="position:absolute;inset:0;pointer-events:none;z-index:2">${cells}</div></div>`;
+}
+
+function renderLook() {
+  const L = wscheme(seedNow(), false), D = wscheme(seedNow(), true);
+  const sw = c => `<span class="sw"><i style="background:${c}"></i>${c}</span>`;
+  $('#tokenRows').innerHTML = TOKENS.map(([use, role, k]) => `<tr><td>${use}</td><td class="mono">${role}</td><td>${sw(L[k])}</td><td>${sw(D[k])}</td></tr>`).join('');
+  $('#shapeStrip').innerHTML = SHAPE_USE.map(([n, use]) => `<div class="shape"><i style="clip-path:${poly(n, n === 'Cookie4' ? Math.PI / 4 : 0)}"></i><b>${SHAPE_LABEL[n]}</b><span>${use}</span></div>`).join('');
+  $('#bpRows').innerHTML = BP.now.map(b => `<tr><td class="k">${b.name}</td><td class="num">${b.w} × ${b.h}dp</td><td class="num">${b.cells}</td><td>${b.what}</td></tr>`).join('');
+}
+
+function renderAll() {
+  renderControls(); renderPhone(); renderPicker(); renderBoards(); renderPg(); renderLook();
+  const l = lyr(); lastK = l ? l.k : -1;
+}
+
+/* ---------- 交互 ---------- */
+function step(dir) {
+  S.pi = (S.pi + dir + PREVIEW.length) % PREVIEW.length;
+  S.pos = 10; S.bar = 10;
+  renderAll();
+}
+let toastT = 0;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = '点击后：' + msg;
+  t.hidden = false;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => { t.hidden = true; }, 2200);
+}
+
+function wire() {
+  $('#songPrev').innerHTML = ic('chevL', 20);
+  $('#songNext').innerHTML = ic('chevR', 20);
+  $('#pickerIcon').innerHTML = brandMark(40);
+  $('#songPrev').addEventListener('click', () => step(-1));
+  $('#songNext').addEventListener('click', () => step(1));
+  const seg = (id, fn) => $$(`#${id} button`).forEach(b => b.addEventListener('click', () => { fn(b.dataset.v); renderAll(); }));
+  seg('playSeg', v => { S.playing = v === '1'; S.bar = S.pos; });
+  seg('colorSeg', v => { S.color = v; });
+  seg('darkSeg', v => { S.dark = v === '1'; });
+  seg('bgSeg', v => { S.bg = v; });
+  seg('timerSeg', v => { S.timer = v === '1'; S.timerLeft = 1800; });
+  seg('pageSeg', v => { S.page = +v; });
+  seg('pgKind', v => { S.pg.kind = v; });
+  $('#wallSw').innerHTML = WALLS.map((wl, j) => `<button type="button" aria-label="壁纸：${wl.name}" title="${wl.name}" style="background:${wl.css}" data-j="${j}"></button>`).join('');
+  $$('#wallSw button').forEach(b => b.addEventListener('click', () => { S.wall = +b.dataset.j; renderAll(); }));
+  $('#pgW').addEventListener('input', e => { S.pg.w = +e.target.value; renderPg(); });
+  $('#pgH').addEventListener('input', e => { S.pg.h = +e.target.value; renderPg(); });
+  $('#hitsToggle').addEventListener('change', e => $('#now').classList.toggle('hits', e.target.checked));
+  document.addEventListener('click', e => {
+    const pg = e.target.closest('[data-page]');
+    if (pg) { S.page = +pg.dataset.page; renderAll(); return; }
+    const a = e.target.closest('.w [data-act]');
+    if (!a) return;
+    const act = a.dataset.act;
+    if (act === 'play') { S.playing = !S.playing; S.bar = S.pos; }
+    else if (act === 'next') return step(1);
+    else if (act === 'prev') return step(-1);
+    else if (act === 'fav') curP().fav = !curP().fav;
+    else { toast(ACT_TIP[act] || act); return; }
+    renderAll();
+  });
+  const t = document.createElement('div');
+  t.id = 'toast'; t.hidden = true; t.setAttribute('role', 'status');
+  t.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom, 0px));z-index:20;max-width:calc(100% - 32px);background:var(--fg);color:var(--bg);font:600 14px/1.4 var(--body);padding:12px 18px;border-radius:14px;box-shadow:0 10px 30px -10px rgba(0,0,0,.4)';
+  document.body.appendChild(t);
+  const ro = new ResizeObserver(es => es.forEach(e => $('#phone').style.setProperty('--k', (e.contentRect.width / 360).toFixed(4))));
+  ro.observe($('#homeDev'));
+}
+
+/* 每秒：时间文字走字（组件里是 Chronometer）；歌词按行换；进度条 10 秒推一次 */
+setInterval(() => {
+  if (!S.playing || !$('#phone').firstChild) return;
+  S.pos++;
+  if (S.timer) S.timerLeft = Math.max(0, S.timerLeft - 1);
+  if (S.pos >= cur().dur) { step(1); return; }
+  $$('[data-chrono]').forEach(e => { e.textContent = fmt(S.pos); });
+  $$('[data-cd]').forEach(e => { e.textContent = fmt(S.timerLeft); });
+  const l = lyr();
+  if (l && l.k !== lastK) { lastK = l.k; $$('[data-ly]').forEach(e => { e.textContent = l[e.dataset.ly]; }); }
+  if (S.pos % 10 === 0) { S.bar = S.pos; const c = ctx(); $$('[data-prog]').forEach(e => { e.innerHTML = wavy(+e.dataset.prog, c); }); }
+}, 1000);
+
+function init() { wire(); renderAll(); }
+Promise.race([document.fonts ? document.fonts.ready : Promise.resolve(), new Promise(r => setTimeout(r, 1500))]).then(init);
+</script>
+</body>
+</html>
