@@ -15,11 +15,15 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.mytv.mymusic.data.SettingsStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -95,6 +99,15 @@ class UpdateRepository(
 
     private var installResultReceiver: BroadcastReceiver? = null
 
+    /** 检查更新与下载各自缓存一份线路测速结果，避免每次请求都重新探测。 */
+    private var manifestProbeExpiry = 0L
+    private var manifestProbeOrder: List<String>? = null
+    private var downloadProbeExpiry = 0L
+    private var downloadProbeOrder: List<String>? = null
+
+    @Volatile
+    private var downloadCancelled = false
+
     init {
         val info = currentPackageInfo()
         _state.value = UpdateUiState(
@@ -114,17 +127,8 @@ class UpdateRepository(
     suspend fun check(manual: Boolean): Boolean = withContext(Dispatchers.IO) {
         _state.update { it.copy(phase = UpdatePhase.Checking, phaseLabel = "正在检查更新", error = "", permissionRequired = false) }
         try {
-            val request = Request.Builder()
-                .url(MANIFEST_URL)
-                .header("Cache-Control", "no-cache")
-                .header("User-Agent", "myMusic-Android")
-                .build()
-            val raw = http.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("检查更新失败（HTTP ${response.code}）")
-                response.body.string()
-            }
-            val manifest = json.decodeFromString<UpdateManifest>(raw)
-            if (manifest.schema != "mymusic.update") throw IOException("更新清单格式不受支持")
+            val manifest = fetchManifest(manifestMirrorOrder())
+                ?: throw IOException("检查更新失败：所有线路均不可用")
             settings.lastUpdateCheck(System.currentTimeMillis())
             val current = currentPackageInfo() ?: throw IOException("无法读取当前版本")
             if (manifest.minSdk > 0 && Build.VERSION.SDK_INT < manifest.minSdk) {
@@ -208,44 +212,24 @@ class UpdateRepository(
                 permissionRequired = false,
             )
         }
+        downloadCancelled = false
         try {
-            val request = Request.Builder()
-                .url(info.url)
-                .header("User-Agent", "myMusic-Android")
-                .build()
-            val call = http.newCall(request)
-            activeCall = call
-            call.execute().use { response ->
-                if (!response.isSuccessful) throw IOException("下载失败（HTTP ${response.code}）")
-                val body = response.body
-                val total = info.size.takeIf { it > 0 } ?: body.contentLength()
-                val digest = MessageDigest.getInstance("SHA-256")
-                var copied = 0L
-                val progressGate = DownloadProgressGate()
-                val buffer = ByteArray(64 * 1024)
-                target.outputStream().use { output ->
-                    body.byteStream().use { input ->
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read <= 0) break
-                            output.write(buffer, 0, read)
-                            digest.update(buffer, 0, read)
-                            copied += read
-                            if (total > 0 && progressGate.shouldEmit(System.nanoTime(), complete = copied >= total)) {
-                                _state.update { it.copy(progress = (copied.toFloat() / total).coerceIn(0f, 1f)) }
-                            }
-                        }
-                    }
-                }
-                if (info.size > 0 && copied != info.size) {
-                    throw IOException("下载大小与更新清单不一致")
-                }
-                val actual = digest.digest().joinToString("") { "%02x".format(it) }
-                if (!actual.equals(info.sha256, ignoreCase = true)) {
-                    throw IOException("更新包 SHA-256 校验失败")
+            var lastError: Exception? = null
+            var downloaded = false
+            for (mirror in downloadMirrorOrder(info.url)) {
+                if (downloadCancelled) break
+                _state.update { it.copy(progress = 0f) }
+                try {
+                    downloadFrom(mirrorUrl(mirror, info.url), target, info)
+                    downloaded = true
+                    break
+                } catch (error: Exception) {
+                    activeCall = null
+                    target.delete()
+                    lastError = error
                 }
             }
-            activeCall = null
+            if (!downloaded) throw lastError ?: IOException("下载已取消")
             _state.update { it.copy(phase = UpdatePhase.Verifying, phaseLabel = "正在校验 SHA-256", progress = 1f) }
             verifyApk(target, info)
             _state.update {
@@ -276,9 +260,121 @@ class UpdateRepository(
 
     /** 应用退出时终止仍在进行的下载，避免后台线程继续写缓存。 */
     fun cancelDownload() {
+        downloadCancelled = true
         activeCall?.cancel()
         activeCall = null
     }
+
+    /** 从单个线路下载更新包；大小或摘要对不上会抛异常，由调用方换下一条线路。 */
+    private fun downloadFrom(url: String, target: File, info: UpdateInfo) {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .build()
+        val call = http.newCall(request)
+        activeCall = call
+        call.execute().use { response ->
+            if (!response.isSuccessful) throw IOException("下载失败（HTTP ${response.code}）")
+            val body = response.body
+            val total = info.size.takeIf { it > 0 } ?: body.contentLength()
+            val digest = MessageDigest.getInstance("SHA-256")
+            var copied = 0L
+            val progressGate = DownloadProgressGate()
+            val buffer = ByteArray(64 * 1024)
+            target.outputStream().use { output ->
+                body.byteStream().use { input ->
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        digest.update(buffer, 0, read)
+                        copied += read
+                        if (total > 0 && progressGate.shouldEmit(System.nanoTime(), complete = copied >= total)) {
+                            _state.update { it.copy(progress = (copied.toFloat() / total).coerceIn(0f, 1f)) }
+                        }
+                    }
+                }
+            }
+            if (info.size > 0 && copied != info.size) {
+                throw IOException("下载大小与更新清单不一致")
+            }
+            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            if (!actual.equals(info.sha256, ignoreCase = true)) {
+                throw IOException("更新包 SHA-256 校验失败")
+            }
+        }
+        activeCall = null
+    }
+
+    /**
+     * GitHub 直连在国内经常超时，内置多个加速镜像 + 源站直连兜底。
+     * 并发测速后按耗时升序使用，测速结果缓存 5 分钟；不可达的线路留在末尾作为兜底。
+     */
+    private suspend fun probeMirrors(target: String): List<String> = coroutineScope {
+        val results = MIRRORS.map { mirror ->
+            async {
+                val startedAt = System.nanoTime()
+                val reachable = withTimeoutOrNull(PROBE_TIMEOUT_MS) {
+                    try {
+                        val request = Request.Builder()
+                            .url(mirrorUrl(mirror, target))
+                            .head()
+                            .header("User-Agent", USER_AGENT)
+                            .build()
+                        http.newCall(request).execute().use { it.isSuccessful || it.code == 405 }
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+                mirror to if (reachable == true) System.nanoTime() - startedAt else Long.MAX_VALUE
+            }
+        }.awaitAll()
+        results.sortedWith(compareBy({ it.second }, { it.first })).map { it.first }
+    }
+
+    private suspend fun manifestMirrorOrder(): List<String> {
+        val now = System.currentTimeMillis()
+        manifestProbeOrder?.takeIf { now < manifestProbeExpiry }?.let { return it }
+        return probeMirrors(MANIFEST_URL).also {
+            manifestProbeOrder = it
+            manifestProbeExpiry = now + PROBE_TTL_MS
+        }
+    }
+
+    private suspend fun downloadMirrorOrder(target: String): List<String> {
+        val now = System.currentTimeMillis()
+        downloadProbeOrder?.takeIf { now < downloadProbeExpiry }?.let { return it }
+        return probeMirrors(target).also {
+            downloadProbeOrder = it
+            downloadProbeExpiry = now + PROBE_TTL_MS
+        }
+    }
+
+    /** 依次尝试各线路，返回第一个能解析且 schema 正确的更新清单。 */
+    private fun fetchManifest(order: List<String>): UpdateManifest? {
+        for (mirror in order) {
+            val body = fetchText(mirrorUrl(mirror, MANIFEST_URL)) ?: continue
+            val manifest = runCatching { json.decodeFromString<UpdateManifest>(body) }.getOrNull() ?: continue
+            if (manifest.schema == "mymusic.update") return manifest
+        }
+        return null
+    }
+
+    private fun fetchText(url: String): String? = try {
+        val request = Request.Builder()
+            .url(url)
+            .header("Cache-Control", "no-cache")
+            .header("User-Agent", USER_AGENT)
+            .build()
+        http.newCall(request).execute().use { response ->
+            if (response.isSuccessful) response.body.string() else null
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun mirrorUrl(mirror: String, target: String): String =
+        if (mirror.isEmpty()) target else mirror + target
 
     private fun verifyApk(file: File, info: UpdateInfo) {
         val current = currentPackageInfo() ?: throw IOException("无法读取当前版本")
@@ -472,6 +568,23 @@ class UpdateRepository(
         private const val INSTALL_RESULT_ACTION = "com.mytv.mymusic.action.INSTALL_RESULT"
         const val MANIFEST_URL = "https://github.com/mytv-android/myMusic/releases/latest/download/update.json"
         const val RELEASES_URL = "https://github.com/mytv-android/myMusic/releases"
+        private const val USER_AGENT = "myMusic-Android"
+        private const val PROBE_TTL_MS = 5 * 60 * 1000L
+        private const val PROBE_TIMEOUT_MS = 3_000L
+
+        /** GitHub 加速镜像；空字符串表示源站直连。与 myDV 的列表保持一致。 */
+        private val MIRRORS = listOf(
+            "https://gh-proxy.org/",
+            "https://gh-proxy.com/",
+            "https://ghproxy.net/",
+            "https://gh.cc/",
+            "https://mirror.ghproxy.com/",
+            "https://github.moeyy.xyz/",
+            "https://ghproxy.cn/",
+            "https://gh.api.99988866.xyz/",
+            "https://gh-proxy.ygxz.in/",
+            "",
+        )
     }
 }
 
