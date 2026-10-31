@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.WavyProgressIndicatorDefaults
@@ -203,19 +202,6 @@ internal fun spokenPositionBucket(positionMs: Long): Long = positionMs / 10_000L
 private fun spokenTime(ms: Long): String {
     val seconds = (ms / 1000).coerceAtLeast(0)
     return if (seconds >= 60) "${seconds / 60} 分 ${seconds % 60} 秒" else "$seconds 秒"
-}
-
-/** 迷你播放器播放键外的一圈波浪进度环。进度 provider 在指示器的绘制阶段读取。 */
-@Composable
-fun ProgressRing(fraction: () -> Float, playing: Boolean, modifier: Modifier = Modifier, size: Dp = 48.dp) {
-    val reduceMotion = LocalAppearance.current.reduceMotion
-    CircularWavyProgressIndicator(
-        progress = fraction,
-        modifier = modifier.size(size),
-        color = MaterialTheme.colorScheme.primary,
-        trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.18f),
-        amplitude = { if (playing && !reduceMotion) 1f else 0f },
-    )
 }
 
 /** 200ms–5s 的等待用形变 LoadingIndicator；更短不显示，更长换成骨架屏 + 文案。 */

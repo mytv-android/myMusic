@@ -11,7 +11,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -38,7 +37,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -59,7 +61,6 @@ import com.mytv.mymusic.ui.TopTab
 import com.mytv.mymusic.ui.openLabel
 import com.mytv.mymusic.ui.components.PlayButtonSize
 import com.mytv.mymusic.ui.components.PlayPauseButton
-import com.mytv.mymusic.ui.components.ProgressRing
 import com.mytv.mymusic.ui.components.rememberSettlingOffsetState
 import com.mytv.mymusic.ui.components.sharedNowPlayingCover
 import com.mytv.mymusic.ui.theme.LocalBlurPolicy
@@ -138,6 +139,7 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
             .shadow(8.dp, shape, ambientColor = Color.Black.copy(alpha = 0.3f), spotColor = Color.Black.copy(alpha = 0.3f))
             .clip(shape)
             .frosted(if (blur) container.copy(alpha = 0.82f) else container, shape)
+            .miniPlayerProgress(position, state.duration)
             .combinedClickable(
                 onClickLabel = state.miniPlayerTarget.openLabel,
                 onLongClickLabel = "打开播放队列",
@@ -205,23 +207,23 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Box(contentAlignment = Alignment.Center) {
-            MiniProgress(position, state.duration, state.playing)
-            PlayPauseButton(state.playing, { actions.transport("play") }, size = PlayButtonSize.Mini)
-        }
+        PlayPauseButton(state.playing, { actions.transport("play") }, size = PlayButtonSize.Mini)
         IconButton(onClick = { actions.transport("next") }, modifier = Modifier.size(48.dp)) {
             Icon(Icons.Filled.SkipNext, "下一首", tint = MaterialTheme.colorScheme.onSecondaryContainer)
         }
     }
 }
 
-/** 只有这圈进度环读播放进度，迷你播放器其余部分不跟着每 500ms 重组。 */
+/** 整条迷你播放器底边的 2dp 进度；只在绘制阶段读进度，不触发其他内容重组。 */
 @Composable
-private fun MiniProgress(position: State<Long>, duration: Long, playing: Boolean) {
-    // 不在这里读 position.value：进度 provider 由进度环在绘制阶段调用
-    ProgressRing(
-        fraction = { if (duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f },
-        playing = playing,
-        size = 52.dp,
-    )
+private fun Modifier.miniPlayerProgress(position: State<Long>, duration: Long): Modifier {
+    val progressColor = MaterialTheme.colorScheme.primary
+    val trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.12f)
+    return drawBehind {
+        val fraction = if (duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f
+        val lineHeight = 2.dp.toPx()
+        val topLeft = Offset(0f, size.height - lineHeight)
+        drawRect(trackColor, topLeft = topLeft, size = Size(size.width, lineHeight))
+        drawRect(progressColor, topLeft = topLeft, size = Size(size.width * fraction, lineHeight))
+    }
 }

@@ -1,7 +1,8 @@
 package com.mytv.mymusic.ui.components
 
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
@@ -30,7 +32,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,10 +40,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -52,30 +51,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/** 宽度动画放在布局阶段读值：按下形变只重新测量，不触发重组。 */
-private fun Modifier.animatedWidth(width: State<Dp>): Modifier = layout { measurable, constraints ->
-    val w = width.value.roundToPx().coerceIn(constraints.minWidth, constraints.maxWidth)
-    val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
-    layout(w, placeable.height) { placeable.place(0, 0) }
+/** 固定圆形播放键的可见尺寸；不足 48dp 时由外层透明 Surface 补足点击区。 */
+enum class PlayButtonSize(val diameter: Dp, val icon: Dp) {
+    Mini(40.dp, 22.dp),
+    Small(44.dp, 24.dp),
+    Medium(56.dp, 28.dp),
+    ;
+
+    val touchTarget: Dp get() = maxOf(48.dp, diameter)
 }
 
-/** 播放键尺寸。播放时圆角变小（方），暂停时是满圆。 */
-enum class PlayButtonSize(
-    val width: Dp,
-    val height: Dp,
-    val icon: Dp,
-    val playingCorner: Dp,
-    val pressedWidth: Dp,
-) {
-    Mini(34.dp, 34.dp, 20.dp, 10.dp, 30.dp),
-    Small(40.dp, 40.dp, 22.dp, 12.dp, 36.dp),
-    Medium(56.dp, 56.dp, 28.dp, 16.dp, 50.dp),
-}
-
-/**
- * 形变播放键：暂停时满圆，播放时圆角方形，按下时变窄、圆角收到 16dp。
- * 形状只表达状态变化，不承载语义；读屏读“播放 / 暂停”。
- */
+/** 播放 / 暂停只切换图标，轮廓始终为圆；按下时轻微缩放，不改变布局尺寸。 */
 @Composable
 fun PlayPauseButton(
     playing: Boolean,
@@ -87,44 +73,46 @@ fun PlayPauseButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Dp>()
-    val corner = animateDpAsState(
-        when {
-            pressed -> 16.dp.coerceAtMost(size.height / 2)
-            playing -> size.playingCorner
-            else -> size.height / 2
-        },
-        spatial,
-        label = "playCorner",
+    val scale by animateFloatAsState(
+        if (pressed) 0.92f else 1f,
+        MaterialTheme.motionScheme.fastSpatialSpec(),
+        label = "playScale",
     )
-    val width = animateDpAsState(if (pressed) size.pressedWidth else size.width, spatial, label = "playWidth")
     Surface(
         onClick = onClick,
         modifier = modifier
-            .height(size.height)
-            .animatedWidth(width)
-            .graphicsLayer {
-                shape = RoundedCornerShape(corner.value)
-                clip = true
-            }
-            .tvFocusRing(RoundedCornerShape(size.playingCorner))
+            .size(size.touchTarget)
+            .tvFocusRing(CircleShape)
             .semantics {
                 role = Role.Button
                 contentDescription = if (playing) "暂停" else "播放"
                 stateDescription = if (playing) "正在播放" else "已暂停"
             },
-        shape = RectangleShape,
-        color = containerColor,
+        shape = CircleShape,
+        color = Color.Transparent,
         contentColor = contentColor,
         interactionSource = interaction,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Crossfade(playing, label = "playIcon") { isPlaying ->
-                Icon(
-                    if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(size.icon),
-                )
+            Box(
+                Modifier
+                    .size(size.diameter)
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        shape = CircleShape
+                        clip = true
+                    }
+                    .background(containerColor, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Crossfade(playing, label = "playIcon") { isPlaying ->
+                    Icon(
+                        if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(size.icon),
+                    )
+                }
             }
         }
     }

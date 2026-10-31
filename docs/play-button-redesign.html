@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>myMusic 播放按钮重设计</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700;800;900&family=Roboto+Flex:opsz,wght@8..144,400..900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #f2f3f7;
+  --paper: #ffffff;
+  --ink: #1b1c28;
+  --muted: #68697a;
+  --line: #d9dae4;
+  --accent: #4c549c;
+  --soft-accent: #e5e7f7;
+  --dark: #12131a;
+  --p: #b9c3ff;
+  --op: #1e2a60;
+  --pc: #3a4580;
+  --opc: #dee0ff;
+  --sc: #3f4466;
+  --osc: #dfe1f9;
+  --os: #e4e1ec;
+  --osv: #b9b8c9;
+  --progress: 38%;
+  --progress-value: 38;
+  --body: "Roboto Flex", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --spring: cubic-bezier(.3, 1.35, .45, 1);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+h1, h2, h3, p { margin: 0; }
+svg { display: block; }
+[hidden] { display: none !important; }
+.page-head, .controls, .comparison, .options, .spec-wrap, .footer { width: min(1180px, calc(100% - 40px)); margin-inline: auto; }
+.page-head { padding: 66px 0 34px; }
+.doc-label { color: var(--accent); font-size: 14px; font-weight: 700; }
+h1 { max-width: 880px; margin-top: 12px; font-size: clamp(42px, 6.4vw, 78px); line-height: 1.12; letter-spacing: -.045em; font-weight: 900; text-wrap: balance; }
+.lede { max-width: 760px; margin-top: 24px; color: var(--muted); font-size: 17px; line-height: 1.8; }
+.lede strong { color: var(--ink); font-weight: 700; }
+
+/* 所有原型共用这一组状态，便于横向比较。 */
+.controls { display: flex; align-items: center; flex-wrap: wrap; gap: 16px 24px; padding: 14px 16px; margin-bottom: 24px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.control-group { display: flex; align-items: center; gap: 10px; }
+.control-label { color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.segmented { display: flex; padding: 3px; background: var(--page); border-radius: 12px; }
+.segmented button, .focus-toggle { min-height: 36px; padding: 6px 13px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 650; }
+.segmented button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+.focus-toggle { border: 1px solid var(--line); background: var(--paper); }
+.focus-toggle[aria-pressed="true"] { border-color: var(--accent); background: var(--soft-accent); color: var(--accent); }
+.progress-control { flex: 1 1 240px; }
+.progress-control input { width: 100%; min-width: 110px; accent-color: var(--accent); cursor: pointer; }
+.progress-control output { min-width: 40px; color: var(--ink); font-variant-numeric: tabular-nums; font-size: 13px; text-align: right; }
+.controls button:focus-visible, .transport-play:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+/* 首屏直接对照问题与推荐解。 */
+.comparison { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; background: var(--dark); color: var(--os); border-radius: 26px; }
+.compare { min-width: 0; padding: 28px clamp(16px, 3vw, 36px) 30px; }
+.compare + .compare { border-left: 1px solid #30313e; }
+.compare-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.compare-head h2 { font-size: 20px; line-height: 1.3; }
+.compare-head span { color: var(--osv); font-size: 12px; }
+.compare.recommended { background: #191b2a; }
+.compare.recommended h2 { color: var(--p); }
+.demo-slot { min-height: 126px; display: grid; place-items: center; padding-block: 20px 14px; }
+.compare-note { min-height: 3.2em; color: var(--osv); font-size: 13px; line-height: 1.65; }
+
+/* 每个方案都放在同一条迷你播放条里，右侧再放 56dp 近景。 */
+.options { padding-top: 34px; }
+.option { display: grid; grid-template-columns: 260px minmax(360px, 1fr) 126px; gap: 28px; align-items: center; padding: 34px 0; border-top: 1px solid var(--line); }
+.option-copy { align-self: center; }
+.option-title { display: flex; align-items: center; gap: 11px; }
+.variant-letter { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border: 1px solid #b8bacb; border-radius: 50%; color: var(--accent); font-size: 14px; font-weight: 800; }
+.option h2 { font-size: 25px; line-height: 1.25; letter-spacing: -.02em; }
+.option-copy > p { margin-top: 12px; color: var(--muted); font-size: 14px; line-height: 1.75; }
+.option-copy .tradeoff { margin-top: 10px; color: #858696; font-size: 12.5px; }
+.option-stage { min-width: 0; min-height: 132px; display: grid; place-items: center; padding: 24px 16px; background: var(--dark); border-radius: 20px; }
+.closeup { display: grid; justify-items: center; gap: 9px; }
+.closeup-stage { width: 112px; height: 104px; display: grid; place-items: center; background: var(--dark); border-radius: 20px; }
+.closeup-label { color: var(--muted); font-size: 12px; }
+
+/* 迷你播放条：尺寸沿用当前 360×64dp 画板。 */
+.mini-bar { position: relative; isolation: isolate; display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; max-width: 360px; height: 64px; padding: 7px 5px 7px 8px; overflow: hidden; background: var(--sc); color: var(--osc); border-radius: 20px; box-shadow: 0 9px 22px -13px #000; }
+.song-cover { width: 48px; height: 48px; flex: none; overflow: hidden; border-radius: 12px; }
+.song-cover svg { width: 100%; height: 100%; }
+.song-copy { min-width: 0; flex: 1; line-height: 1.35; }
+.song-title { overflow: hidden; color: var(--osc); font-size: 15px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.song-artist { overflow: hidden; margin-top: 4px; color: #c2c2dc; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.next-icon { display: grid; place-items: center; width: 42px; height: 48px; flex: none; color: var(--osc); }
+.next-icon svg { width: 27px; height: 27px; fill: currentColor; }
+.mini-progress { position: absolute; z-index: 3; right: 0; bottom: 0; left: 0; height: 2px; background: #ffffff14; pointer-events: none; }
+.mini-progress i { display: block; width: var(--progress); height: 100%; background: var(--p); }
+
+/* 真正的按钮都是 48dp 以上点击区；可见图形可以更小。 */
+.transport-play { --visual-size: 40px; --hit-size: 48px; --icon-size: 23px; position: relative; display: grid; place-items: center; width: var(--hit-size); height: 48px; flex: none; padding: 0; border: 0; border-radius: 24px; background: transparent; color: var(--op); cursor: pointer; }
+.transport-play.is-closeup { --visual-size: 56px; --hit-size: 64px; --icon-size: 30px; height: 64px; }
+.button-visual { position: relative; display: grid; place-items: center; width: var(--visual-size); height: var(--visual-size); overflow: hidden; border-radius: 50%; background: var(--p); color: var(--op); transition: transform .3s var(--spring), border-radius .35s var(--spring), background-color .25s; }
+.transport-play:active .button-visual { transform: scale(.9); }
+.icon-set { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.icon-set .icon { grid-area: 1 / 1; width: var(--icon-size); height: var(--icon-size); fill: currentColor; transition: opacity .18s, transform .3s var(--spring); }
+.icon-play { transform: translateX(1px); }
+.icon-pause { opacity: 0; transform: scale(.75); }
+body[data-playing="true"] .icon-play { opacity: 0; transform: translateX(1px) scale(.75); }
+body[data-playing="true"] .icon-pause { opacity: 1; transform: scale(1); }
+
+/* 当前：34dp 播放态方形 + 52dp 波浪环。 */
+.v-current { --visual-size: 34px; --hit-size: 52px; --icon-size: 20px; }
+.v-current .button-visual { z-index: 1; }
+body[data-playing="true"] .v-current .button-visual { border-radius: 10px; }
+.progress-ring { position: absolute; width: 52px; height: 52px; overflow: visible; transform: rotate(-90deg); }
+.progress-ring path { fill: none; stroke-linecap: round; stroke-width: 2.5; }
+.ring-track { stroke: #dfe1f92e; }
+.ring-progress { stroke: var(--p); }
+
+/* B：封面圆钮。封面旋转，图标永远在独立图层保持正向。 */
+.v-cover .button-visual { background: #282b48; }
+.cover-spin { position: absolute; inset: 0; animation: record-spin 18s linear infinite; animation-play-state: paused; }
+.cover-spin svg { width: 100%; height: 100%; }
+body[data-playing="true"] .cover-spin { animation-play-state: running; }
+.v-cover .icon-set { color: #fff; filter: drop-shadow(0 1px 3px #000) drop-shadow(0 0 2px #000); }
+@keyframes record-spin { to { transform: rotate(360deg); } }
+
+/* C：无底色，只保留主操作图标。 */
+.v-bare { --visual-size: 46px; --icon-size: 30px; }
+.v-bare.is-closeup { --visual-size: 60px; --icon-size: 38px; }
+.v-bare .button-visual { background: transparent; color: var(--p); }
+
+/* D：动作文案直接进入固定胶囊。 */
+.v-pill { --visual-width: 74px; --hit-size: 78px; }
+.v-pill.is-closeup { --visual-width: 96px; --hit-size: 100px; }
+.v-pill .button-visual { display: flex; width: var(--visual-width); gap: 5px; border-radius: 999px; }
+.pill-icon { position: relative; display: grid; place-items: center; width: var(--icon-size); height: var(--icon-size); }
+.pill-icon .icon { grid-area: 1 / 1; width: 100%; height: 100%; fill: currentColor; transition: opacity .18s, transform .3s var(--spring); }
+.action-label { font-size: 13px; font-weight: 750; }
+.is-closeup .action-label { font-size: 16px; }
+.label-pause { display: none; }
+body[data-playing="true"] .label-play { display: none; }
+body[data-playing="true"] .label-pause { display: inline; }
+
+/* E：进度在圆内水平填充。两层图标分别裁切，跨越边界也保持对比。 */
+.v-fill { --visual-size: 42px; }
+.v-fill .button-visual { background: var(--pc); color: var(--opc); }
+.fill-progress { position: absolute; top: 0; bottom: 0; left: 0; width: var(--progress); overflow: hidden; background: var(--p); color: var(--op); }
+.fill-progress .icon-set { right: auto; width: var(--visual-size); height: var(--visual-size); }
+
+/* F：固定七瓣轮廓，不再用方圆变化表达状态。 */
+.v-petal { --visual-size: 44px; }
+.v-petal .button-visual { border-radius: 0; clip-path: url(#cookie-seven); }
+
+/* 焦点只在用户打开“电视焦点”或键盘导航时出现，不和进度环混为一谈。 */
+body[data-tv-focus="true"] .transport-play .button-visual { transform: scale(1.06); box-shadow: 0 0 0 3px var(--sc), 0 0 0 6px var(--os); }
+body[data-tv-focus="true"] .v-petal .button-visual { box-shadow: none; filter: drop-shadow(0 0 3px var(--os)); }
+.transport-play:focus-visible { outline: none; }
+.transport-play:focus-visible .button-visual { box-shadow: 0 0 0 3px var(--sc), 0 0 0 6px var(--os); }
+
+/* 落地规格。 */
+.spec-wrap { padding: 36px 0 20px; }
+.spec-intro { display: grid; grid-template-columns: 1fr 1.4fr; gap: 36px; padding: 30px; background: var(--soft-accent); border-radius: 22px; }
+.spec-intro h2 { font-size: 28px; line-height: 1.35; letter-spacing: -.025em; }
+.spec-intro p { color: #555b85; }
+.spec-intro strong { color: var(--ink); }
+.table-scroll { margin-top: 24px; overflow-x: auto; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; }
+th, td { padding: 15px 18px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: #e9eaf0; color: var(--muted); font-size: 12px; font-weight: 700; }
+td { font-size: 13px; }
+td:first-child { color: var(--ink); font-weight: 750; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+.footer { display: flex; justify-content: space-between; gap: 20px; padding: 22px 0 54px; color: var(--muted); font-size: 12px; }
+
+@media (max-width: 1020px) {
+  .option { grid-template-columns: 230px minmax(340px, 1fr); gap: 24px; }
+  .closeup { grid-column: 2; grid-row: 2; grid-template-columns: auto auto; align-items: center; justify-content: center; margin-top: -12px; }
+  .closeup-stage { width: 92px; height: 82px; }
+}
+@media (max-width: 720px) {
+  .page-head, .controls, .comparison, .options, .spec-wrap, .footer { width: min(100% - 28px, 560px); }
+  .page-head { padding-top: 42px; }
+  .comparison { grid-template-columns: 1fr; }
+  .compare + .compare { border-top: 1px solid #30313e; border-left: 0; }
+  .compare-note { min-height: 0; }
+  .controls { align-items: stretch; }
+  .control-group { flex-wrap: wrap; }
+  .progress-control { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; flex-basis: 100%; flex-wrap: nowrap; }
+  .progress-control input { min-width: 0; }
+  .option { grid-template-columns: 1fr; gap: 20px; padding-block: 30px; }
+  .option-stage { min-height: 120px; }
+  .closeup { grid-column: 1; grid-row: auto; margin-top: 0; }
+  .spec-intro { grid-template-columns: 1fr; gap: 14px; padding: 24px; }
+  .footer { flex-direction: column; gap: 5px; }
+}
+@media (max-width: 390px) {
+  .mini-bar { gap: 6px; }
+  .next-icon { width: 34px; }
+  .song-title { font-size: 14px; }
+  .v-pill { --visual-width: 68px; --hit-size: 70px; }
+  .action-label { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body data-playing="true" data-tv-focus="false">
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <defs>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6h2v12h-2z"/></symbol>
+    <symbol id="cover-art" viewBox="0 0 100 100">
+      <rect width="100" height="100" fill="#e7a176"/>
+      <circle cx="75" cy="25" r="14" fill="#f6d9a7"/>
+      <path d="M0 72L28 34L50 65L72 40L100 74V100H0Z" fill="#515981"/>
+      <path d="M0 82L22 59L43 81L65 57L100 88V100H0Z" fill="#282e52"/>
+      <path d="M0 93L35 76L63 91L83 77L100 86V100H0Z" fill="#171c38"/>
+    </symbol>
+    <clipPath id="cookie-seven" clipPathUnits="objectBoundingBox">
+      <path d="M.5.02C.58.02.62.08.66.12C.72.09.8.1.85.16C.92.23.88.31.9.37C.97.41 1 .49.97.57C.94.66.86.67.83.73C.84.82.79.9.71.93C.63.96.58.9.5.91C.43.96.34.96.28.9C.22.84.26.76.2.72C.11.7.05.63.07.54C.09.46.16.43.15.36C.11.28.15.19.23.15C.31.11.37.16.42.11C.44.05.46.02.5.02Z"/>
+    </clipPath>
+  </defs>
+</svg>
+
+<header class="page-head">
+  <div class="doc-label">myMusic · 播放按钮重设计</div>
+  <h1>播放按钮，<br>只留一个轮廓。</h1>
+  <p class="lede">现在的问题不是“方”或“圆”本身，而是<strong>播放态的圆角方形外面又套了一层波浪圆环</strong>。下面六版都取消方圆切换；播放状态交给图标，进度要么退到整条播放栏底部，要么融入按钮本身。点击任意播放键即可同步预览。</p>
+</header>
+
+<div class="controls" aria-label="原型控制">
+  <div class="control-group">
+    <span class="control-label">状态</span>
+    <div class="segmented" role="group" aria-label="播放状态">
+      <button type="button" data-set-playing="true" aria-pressed="true">播放中</button>
+      <button type="button" data-set-playing="false" aria-pressed="false">已暂停</button>
+    </div>
+  </div>
+  <div class="control-group progress-control">
+    <label class="control-label" for="progress">进度</label>
+    <input id="progress" type="range" min="0" max="100" value="38">
+    <output id="progress-output" for="progress">38%</output>
+  </div>
+  <button class="focus-toggle" type="button" id="focus-toggle" aria-pressed="false">预览电视焦点</button>
+</div>
+
+<section class="comparison" aria-label="当前样式与推荐方案对比">
+  <div class="compare">
+    <div class="compare-head"><h2>现在</h2><span>两层轮廓互相争抢</span></div>
+    <div class="demo-slot" data-demo="current"></div>
+    <p class="compare-note">34dp 播放态圆角方形，外套 52dp 波浪进度环。方形随状态变化，圆环又持续起伏，视觉重心很碎。</p>
+  </div>
+  <div class="compare recommended">
+    <div class="compare-head"><h2>A · 圆钮，进度落地</h2><span>推荐</span></div>
+    <div class="demo-slot" data-demo="circle"></div>
+    <p class="compare-note">按钮固定为 40dp 圆形；2dp 进度移到整条迷你播放栏底部。圆钮更完整，进度仍然看得见，但不围着主操作打转。</p>
+  </div>
+</section>
+
+<main class="options">
+  <article class="option">
+    <div class="option-copy">
+      <div class="option-title"><span class="variant-letter">B</span><h2>封面就是播放键</h2></div>
+      <p>把圆形封面作为按钮，图标直接叠在封面上。播放时封面慢转，暂停图标保持正向，让歌曲本身成为主操作。</p>
+      <p class="tradeoff">适合：迷你条、音乐氛围优先的场景。深色封面需要保留图标阴影。</p>
+    </div>
+    <div class="option-stage" data-demo="cover"></div>
+    <div class="closeup"><div class="closeup-stage" data-closeup="cover"></div><span class="closeup-label">56dp 近景</span></div>
+  </article>
+
+  <article class="option">
+    <div class="option-copy">
+      <div class="option-title"><span class="variant-letter">C</span><h2>只留图标</h2></div>
+      <p>去掉容器和圆环，48dp 点击区里只显示一枚主色图标。进度放到底线，整个控制区最干净。</p>
+      <p class="tradeoff">适合：底部栏、次级播放窗格。主操作层级较弱，不建议直接用于大播放页。</p>
+    </div>
+    <div class="option-stage" data-demo="bare"></div>
+    <div class="closeup"><div class="closeup-stage" data-closeup="bare"></div><span class="closeup-label">56dp 近景</span></div>
+  </article>
+
+  <article class="option">
+    <div class="option-copy">
+      <div class="option-title"><span class="variant-letter">D</span><h2>动作写进胶囊</h2></div>
+      <p>固定胶囊不再变形，图标旁直接写“播放 / 暂停”。用户不需要理解形状暗语，遥控器远距离看也最明确。</p>
+      <p class="tradeoff">适合：电视、无障碍优先。手机迷你条上会挤压歌名宽度。</p>
+    </div>
+    <div class="option-stage" data-demo="pill"></div>
+    <div class="closeup"><div class="closeup-stage" data-closeup="pill"></div><span class="closeup-label">56dp 近景</span></div>
+  </article>
+
+  <article class="option">
+    <div class="option-copy">
+      <div class="option-title"><span class="variant-letter">E</span><h2>把进度装进圆钮</h2></div>
+      <p>外轮廓始终是圆，主色从左向右填充表示进度。图标用明暗两层同步裁切，跨过填充分界时也能保持对比。</p>
+      <p class="tradeoff">适合：仍想让进度贴着播放键的人。实现比 A 复杂，小尺寸下填充分界更醒目。</p>
+    </div>
+    <div class="option-stage" data-demo="fill"></div>
+    <div class="closeup"><div class="closeup-stage" data-closeup="fill"></div><span class="closeup-label">56dp 近景</span></div>
+  </article>
+
+  <article class="option">
+    <div class="option-copy">
+      <div class="option-title"><span class="variant-letter">F</span><h2>七瓣单轮廓</h2></div>
+      <p>沿用播放页 MaterialShapes 的形状语言，但按钮始终固定为七瓣，不再随状态变方。进度放到底线。</p>
+      <p class="tradeoff">适合：想保留 Expressive 个性的方案。建议至少 40dp，更小尺寸会显得细节偏多。</p>
+    </div>
+    <div class="option-stage" data-demo="petal"></div>
+    <div class="closeup"><div class="closeup-stage" data-closeup="petal"></div><span class="closeup-label">56dp 近景</span></div>
+  </article>
+</main>
+
+<section class="spec-wrap" aria-labelledby="spec-title">
+  <div class="spec-intro">
+    <h2 id="spec-title">建议先上 A，<br>E 留作备选。</h2>
+    <p><strong>A 的改动最小，也最耐看：</strong>播放键固定圆形，状态只切换三角形与双竖线；迷你条底部的 2dp 线性进度替代按钮外的波浪环，Mini / Small / Medium 三档继续共用。若一定要保留“进度贴着播放键”的关系，再选 E。</p>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>方向</th><th>按钮轮廓</th><th>进度位置</th><th>优点</th><th>主要代价</th></tr></thead>
+      <tbody>
+        <tr><td>A · 圆钮</td><td>固定圆形</td><td>整条播放栏底部</td><td>清晰、稳定、三端通用</td><td>进度不再围绕播放键</td></tr>
+        <tr><td>B · 封面</td><td>固定圆形封面</td><td>整条播放栏底部</td><td>歌曲识别度最高</td><td>图标需要额外保证对比度</td></tr>
+        <tr><td>C · 图标</td><td>无可见容器</td><td>整条播放栏底部</td><td>最轻、最安静</td><td>主操作不够突出</td></tr>
+        <tr><td>D · 胶囊</td><td>固定文字胶囊</td><td>整条播放栏底部</td><td>动作最明确</td><td>占用横向空间最多</td></tr>
+        <tr><td>E · 内嵌进度</td><td>固定圆形</td><td>按钮内部水平填充</td><td>只有一个轮廓，仍保留局部进度</td><td>双色图标裁切实现较复杂</td></tr>
+        <tr><td>F · 七瓣</td><td>固定 MaterialShapes</td><td>整条播放栏底部</td><td>与大播放页形状语言统一</td><td>小尺寸辨识度一般</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer class="footer"><span>交互：点击播放键切换状态；拖动进度查看 E；可单独预览电视焦点。</span><span>HTML 视觉原型 · A 已应用到 App · 2026-10-31</span></footer>
+
+<script>
+const body = document.body;
+let playing = true;
+
+function iconPair() {
+  return `<span class="icon-set" aria-hidden="true">
+    <svg class="icon icon-play" viewBox="0 0 24 24"><use href="#i-play"/></svg>
+    <svg class="icon icon-pause" viewBox="0 0 24 24"><use href="#i-pause"/></svg>
+  </span>`;
+}
+
+function ringMarkup() {
+  return `<svg class="progress-ring" viewBox="0 0 52 52" aria-hidden="true">
+    <path class="ring-track" d="${wavePath(false)}"/>
+    <path class="ring-progress" pathLength="100" stroke-dasharray="38 100" d="${wavePath(true)}"/>
+  </svg>`;
+}
+
+function playMarkup(variant, closeup = false) {
+  const cls = `transport-play v-${variant}${closeup ? " is-closeup" : ""}`;
+  let content = iconPair();
+  if (variant === "cover") {
+    content = `<span class="cover-spin" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#cover-art"/></svg></span>${iconPair()}`;
+  } else if (variant === "pill") {
+    content = `<span class="pill-icon" aria-hidden="true">
+      <svg class="icon icon-play" viewBox="0 0 24 24"><use href="#i-play"/></svg>
+      <svg class="icon icon-pause" viewBox="0 0 24 24"><use href="#i-pause"/></svg>
+    </span><span class="action-label"><span class="label-play">播放</span><span class="label-pause">暂停</span></span>`;
+  } else if (variant === "fill") {
+    content = `${iconPair()}<span class="fill-progress" aria-hidden="true">${iconPair()}</span>`;
+  }
+  return `<button type="button" class="${cls}" aria-label="暂停" aria-pressed="true">${variant === "current" ? ringMarkup() : ""}<span class="button-visual">${content}</span></button>`;
+}
+
+function demoMarkup(variant) {
+  const noBaseline = variant === "current" || variant === "fill";
+  return `<div class="mini-bar">
+    <div class="song-cover" aria-hidden="true"><svg viewBox="0 0 100 100"><use href="#cover-art"/></svg></div>
+    <div class="song-copy"><div class="song-title">山海</div><div class="song-artist">草东没有派对 · 网易云</div></div>
+    ${playMarkup(variant)}
+    <span class="next-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-next"/></svg></span>
+    ${noBaseline ? "" : `<span class="mini-progress" aria-hidden="true"><i></i></span>`}
+  </div>`;
+}
+
+function wavePath(wavy) {
+  const points = [];
+  const count = 96;
+  for (let i = 0; i <= count; i++) {
+    const angle = -Math.PI / 2 + (i / count) * Math.PI * 2;
+    const radius = 23 + (wavy ? Math.sin(angle * 8) * .65 : 0);
+    const x = 26 + Math.cos(angle) * radius;
+    const y = 26 + Math.sin(angle) * radius;
+    points.push(`${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
+  }
+  return `${points.join(" ")}Z`;
+}
+
+document.querySelectorAll("[data-demo]").forEach(el => { el.innerHTML = demoMarkup(el.dataset.demo); });
+document.querySelectorAll("[data-closeup]").forEach(el => { el.innerHTML = playMarkup(el.dataset.closeup, true); });
+
+function syncPlaying() {
+  body.dataset.playing = String(playing);
+  document.querySelectorAll(".transport-play").forEach(button => {
+    button.setAttribute("aria-label", playing ? "暂停" : "播放");
+    button.setAttribute("aria-pressed", String(playing));
+  });
+  document.querySelectorAll("[data-set-playing]").forEach(button => {
+    button.setAttribute("aria-pressed", String(Number(button.dataset.setPlaying === "true") === Number(playing)));
+  });
+  document.querySelectorAll(".ring-progress").forEach(path => path.setAttribute("d", wavePath(playing)));
+}
+
+document.addEventListener("click", event => {
+  const playButton = event.target.closest(".transport-play");
+  if (playButton) {
+    playing = !playing;
+    syncPlaying();
+    return;
+  }
+  const stateButton = event.target.closest("[data-set-playing]");
+  if (stateButton) {
+    playing = stateButton.dataset.setPlaying === "true";
+    syncPlaying();
+  }
+});
+
+const progress = document.getElementById("progress");
+progress.addEventListener("input", () => {
+  const value = Number(progress.value);
+  document.documentElement.style.setProperty("--progress", `${value}%`);
+  document.documentElement.style.setProperty("--progress-value", value);
+  document.getElementById("progress-output").value = `${value}%`;
+  document.querySelectorAll(".ring-progress").forEach(path => path.setAttribute("stroke-dasharray", `${value} 100`));
+});
+
+const focusToggle = document.getElementById("focus-toggle");
+focusToggle.addEventListener("click", () => {
+  const enabled = body.dataset.tvFocus !== "true";
+  body.dataset.tvFocus = String(enabled);
+  focusToggle.setAttribute("aria-pressed", String(enabled));
+});
+
+syncPlaying();
+</script>
+</body>
+</html>
