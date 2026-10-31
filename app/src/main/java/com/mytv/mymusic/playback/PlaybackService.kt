@@ -14,9 +14,11 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import android.content.Context
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.mytv.mymusic.MyMusicApp
+import com.mytv.mymusic.R
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
@@ -25,6 +27,10 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        // 不设置的话媒体通知会用 Media3 自带的小图标（一个圈里的播放键），和品牌图标对不上
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider(this).apply { setSmallIcon(R.drawable.ic_stat_mymusic) }
+        )
         val app = application as? MyMusicApp
         val cache = app?.mediaCache
         val builder = ExoPlayer.Builder(this).setAudioAttributes(
