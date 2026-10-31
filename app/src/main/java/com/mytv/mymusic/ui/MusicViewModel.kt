@@ -2528,6 +2528,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** 只改当前曲目的 artist：地址和 mediaId 不变，ExoPlayer 走仅元数据更新，不会重新加载歌曲。 */
     private fun setMediaArtist(item: MediaItem, artist: String) {
         if (item.mediaMetadata.artist?.toString() == artist) return
+        // HLS / DASH / SmoothStreaming 源不支持仅更新元数据，替换会把整首歌重新加载，这类音源保持歌手名
+        val path = item.localConfiguration?.uri?.path.orEmpty().lowercase()
+        if (path.endsWith(".m3u8") || path.endsWith(".mpd") || path.endsWith(".ism") || path.endsWith(".sdp")) return
         val player = controller ?: return
         player.replaceMediaItem(
             player.currentMediaItemIndex,
