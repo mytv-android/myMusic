@@ -232,6 +232,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var dormant: SavedPlayback? = null
     private var restoreJob: Deferred<Unit>? = null
 
+    /**
+     * 播放是被系统打断的（离开应用时自动暂停、屏保期间别的声音抢了焦点），回到前台要接着放；
+     * 用户自己按的暂停、睡眠定时、队列播完都不算，见 [onPlayWhenReadyChanged]。
+     */
+    private var interruptedBySystem = false
+
+    /** 自己刚调的 pause（离开应用自动暂停）：别被 onPlayWhenReadyChanged 当成用户按的暂停清掉账。 */
+    private var autoPauseInFlight = false
+
     /** 界面（MainActivity）打开过。组件、系统媒体控件拉起进程时不读榜单、不检查更新，等界面真正打开。 */
     private val uiLaunched = MutableStateFlow(false)
 
@@ -2987,6 +2996,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // 换上地址后又收到空地址留下的“文件不存在”时只重新准备一次，避免真坏的地址来回重试
         private var staleErrorRetried = -1
 
+        /**
+         * 记录这次暂停是不是用户自己要的：只有被系统打断（抢焦点、输出切换）的才在回到前台时接着放。
+         * 用户按的暂停（界面、通知栏、遥控器、组件）、睡眠定时、队列播完都不接。
+         */
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (playWhenReady) {
+                interruptedBySystem = false
+                return
+            }
+            // 离开应用时的自动暂停：账在 onAppBackgrounded 里已经记了，别当成用户按的暂停清掉
+            if (autoPauseInFlight) {
+                autoPauseInFlight = false
+                return
+            }
+            interruptedBySystem = reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ||
+                reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY
+        }
+
         override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
             val index = controller?.currentMediaItemIndex ?: return
             val song = base.value.queue.getOrNull(index) ?: return
@@ -3323,6 +3350,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         lost.removeListener(playerListener)
         controller = null
         connected.value = null
+        // 播放器没了：没有可以接着放的东西，回前台也不自动开播
+        interruptedBySystem = false
+        autoPauseInFlight = false
         sleepQueue(index, _position.value)
     }
 
@@ -3334,6 +3364,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         persistCursor()
         val player = controller ?: return
         sleepQueue(player.currentMediaItemIndex, player.currentPosition)
+        interruptedBySystem = false
+        autoPauseInFlight = false
         player.removeListener(playerListener)
         controller = null
         connected.value = null
@@ -4050,6 +4082,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         ) {
             checkUpdatesInBackground()
         }
+        resumeIfInterrupted()
     }
 
     private fun canInstallPackages(): Boolean {
@@ -4062,11 +4095,35 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         app.sync.syncIfStaleOnScreen()
     }
 
-    /** 电视上离开应用即暂停播放，避免回到桌面后还在响；手机和平板保留后台播放。 */
-    fun onAppBackgrounded() {
-        val tv = getApplication<Application>().isTelevision() || settingsState.value.layoutMode == LayoutMode.Tv.name
-        if (tv) controller?.takeIf { it.playWhenReady }?.pause()
+    /**
+     * 电视上离开应用即暂停播放，避免回到桌面后还在响；手机和平板保留后台播放。
+     *
+     * [resumeOnReturn] 为真时记下「这不是用户自己要停的」，回到前台由 [resumeIfInterrupted] 接着放：
+     * 电视上按 Home、被别的应用盖住都会走到这儿，音乐跟着人回来，不会因为屏保（有些电视的屏保就是
+     * 别的应用拉起来的前台界面）弹一下就一直停着。退出应用（finish）不算，回前台不自动放。
+     */
+    fun onAppBackgrounded(resumeOnReturn: Boolean = true) {
+        if (!isTvLayout()) return
+        val player = controller?.takeIf { it.playWhenReady } ?: return
+        interruptedBySystem = resumeOnReturn
+        autoPauseInFlight = resumeOnReturn
+        player.pause()
     }
+
+    /**
+     * 被系统打断的播放回到前台时接着放：离开应用的自动暂停、屏保期间别的声音抢了焦点。
+     * 用户自己按的暂停不接（[onPlayWhenReadyChanged] 已经清过账），睡眠定时、队列播完也不接。
+     */
+    private fun resumeIfInterrupted() {
+        if (!interruptedBySystem) return
+        interruptedBySystem = false
+        if (!isTvLayout()) return
+        val player = controller?.takeIf { it.mediaItemCount > 0 && !it.isPlaying } ?: return
+        player.play()
+    }
+
+    private fun isTvLayout(): Boolean =
+        getApplication<Application>().isTelevision() || settingsState.value.layoutMode == LayoutMode.Tv.name
 
     fun diagnostics(): String {
         val context = getApplication<Application>()

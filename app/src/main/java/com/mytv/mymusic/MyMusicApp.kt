@@ -18,6 +18,7 @@ import com.mytv.mymusic.playback.AdjustableLruEvictor
 import com.mytv.mymusic.playback.EqualizerController
 import com.mytv.mymusic.playback.QueueStore
 import com.mytv.mymusic.playback.RhythmAnalyzer
+import com.mytv.mymusic.playback.ScreensaverState
 import com.mytv.mymusic.playback.SleepTimer
 import com.mytv.mymusic.ui.MusicViewModel
 import com.mytv.mymusic.widget.WidgetUpdater
@@ -103,6 +104,8 @@ class MyMusicApp : Application(), ViewModelStoreOwner {
         )
         update = UpdateRepository(this, settings)
         queueStore = QueueStore(this)
+        // 屏保、息屏的状态：电视上这时候「离开应用」不是用户真的走了，音乐不能停
+        ScreensaverState.start(this)
         // 桌面小组件：播放、设置、收藏、亮灭屏变化时合并刷新（手机和平板才有桌面组件）
         if (!isTelevision()) WidgetUpdater.start(this)
     }
