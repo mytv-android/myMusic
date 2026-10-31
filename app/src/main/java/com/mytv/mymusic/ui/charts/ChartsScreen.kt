@@ -970,6 +970,7 @@ internal fun SongActionsSheet(
     playlists: List<LocalPlaylistSummary>,
     actions: MusicActions,
     onDismiss: () -> Unit,
+    onWallLocate: (() -> Unit)? = null,
     onWallSettings: (() -> Unit)? = null,
 ) {
     TrackActionsSheet(
@@ -985,6 +986,7 @@ internal fun SongActionsSheet(
         },
         onRemoveFromPlaylist = null,
         onDismiss = onDismiss,
+        onWallLocate = onWallLocate,
         onWallSettings = onWallSettings,
     )
 }

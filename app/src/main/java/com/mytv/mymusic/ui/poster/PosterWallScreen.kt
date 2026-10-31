@@ -50,13 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -93,10 +87,9 @@ import kotlin.coroutines.cancellation.CancellationException
  * 挂在 MyMusicApp 里主界面之上、播放页之下，外面套 PlayerTheme（深色，随当前封面取色、450ms 过渡）。
  *
  * - 手机 / 平板：胶囊在左上，“定位”48dp 圆钮和设置 56dp FAB 在右下，都让开系统栏；
- * - 电视：胶囊、定位、设置和时钟（“电视时钟”开着时）排在顶部 80dp 一排，大卡放在它下面；空闲 6 秒浮层淡出，时钟留着。
- *   墙是无限的，方向键在墙里永远有邻格，普通焦点搜索走不出去：墙上没有选中格时按上键到顶部一排
- *   （有选中格时先按返回清掉），在顶部一排按下键回到墙并选中离中心最近的那格；
- *   正在浏览（有选中格）时想开设置还有一条路：长按 OK 的单曲操作面板末尾有“海报墙设置”（电视才有）；
+ * - 电视：顶部 80dp 一排只有胶囊和时钟（“电视时钟”开着时），大卡放在它下面；空闲 6 秒浮层淡出，时钟留着。
+ *   墙是无限的、方向键永远留在墙里，一排上没有任何能拿方向的按钮：返回靠遥控器的返回键，
+ *   “回到正在播放”和“海报墙设置”都在长按 OK 的单曲操作面板末尾（焦点够得到的入口只放在那一处）；
  * - 返回：设置 / 歌曲操作面板自己先关 → 墙这一层（漂移唤醒、焦点交回墙、收起别的歌的大卡、清焦点）→ 离开海报墙；
  * - [active] 为 false（播放页盖在上面）时墙停下帧循环和跟拍、大卡里的动画也停，不拿焦点、不给读屏；
  *   墙的状态留在这里，关掉播放页回来镜头还在原处（期间切了歌就已经停在新歌上）；
@@ -124,7 +117,6 @@ internal fun PosterWallScreen(
     val currentIndex = remember(songs, currentKey) { songs.indexOfFirst { it.key == currentKey } }
     val feed = state.listeningFeed?.takeIf { it.owns(current) }
     val wall = rememberPosterWallState()
-    val chromeFocus = remember { FocusRequester() }
     val primaryFocus = remember { FocusRequester() }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var actionSong by remember { mutableStateOf<Song?>(null) }
@@ -223,7 +215,6 @@ internal fun PosterWallScreen(
             },
             autoFocus = false,
             active = active,
-            chromeAbove = if (tv) chromeFocus else null,
             resetKey = state.queueId,
             currentKey = currentKey,
             holdAwake = settingsOpen || actionSong != null || state.sourcePickerTrack != null,
@@ -279,11 +270,8 @@ internal fun PosterWallScreen(
                 wall = wall,
                 title = title,
                 subtitle = subtitle,
-                chromeFocus = chromeFocus,
                 showClock = state.tvAmbientClock,
                 screenReader = screenReader,
-                onBack = actions::closePosterWall,
-                onSettings = { settingsOpen = true },
                 onOpenQueue = onOpenQueue,
             )
         } else {
@@ -310,7 +298,8 @@ internal fun PosterWallScreen(
             playlists,
             actions,
             onDismiss = { actionSong = null },
-            // 电视上墙自己收方向键，顶栏那排（定位 / 设置）在有选中格时走不到；长按 OK 的面板里也给一个入口
+            // 电视上墙里的方向键永远留在墙里，顶栏没有能拿焦点的按钮：这两个入口只放在长按 OK 的面板里
+            onWallLocate = if (tv) ({ wall.locate() }) else null,
             onWallSettings = if (tv) ({ settingsOpen = true }) else null,
         )
     }
@@ -405,19 +394,17 @@ private fun TouchChrome(
 }
 
 /**
- * 电视顶部一排：左边胶囊，右边定位、设置（都是 48dp 圆钮），最右是时钟。空闲时除了时钟都淡出（时钟本来就是给空闲时看的）。
- * 这一排里按下键回到墙（[PosterWallState.focusFromAbove]）；从墙按上键进来落在“定位”上（[chromeFocus]）。
+ * 电视顶部一排：左边胶囊，最右是时钟，中间没有按钮——墙里的方向键永远留在墙里，这一排上的钮根本拿不到焦点，
+ * 所以不画：返回用遥控器的返回键，“回到正在播放”和“海报墙设置”在长按 OK 的单曲操作面板里。
+ * 空闲时胶囊淡出，时钟留着（时钟本来就是给空闲时看的）。读屏开着时胶囊旁边多一个“以列表浏览”。
  */
 @Composable
 private fun TvTopRow(
     wall: PosterWallState,
     title: String,
     subtitle: String,
-    chromeFocus: FocusRequester,
     showClock: Boolean,
     screenReader: Boolean,
-    onBack: () -> Unit,
-    onSettings: () -> Unit,
     onOpenQueue: () -> Unit,
 ) {
     val alpha = rememberChromeAlpha(wall)
@@ -425,12 +412,7 @@ private fun TvTopRow(
         Modifier
             .fillMaxWidth()
             .padding(start = 32.dp, end = 36.dp, top = 24.dp)
-            .heightIn(min = PillHeight)
-            .onPreviewKeyEvent { e ->
-                if (e.key != Key.DirectionDown || e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                wall.focusFromAbove()
-                true
-            },
+            .heightIn(min = PillHeight),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
@@ -438,15 +420,9 @@ private fun TvTopRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            WallTitlePill(title, subtitle, onBack, Modifier.weight(1f, fill = false))
+            // 电视没有返回钮（遥控器有返回键）；这一排也不放定位 / 设置
+            WallTitlePill(title, subtitle, onBack = null, Modifier.weight(1f, fill = false))
             if (screenReader) ListEntry(onOpenQueue)
-        }
-        Row(
-            Modifier.padding(start = 16.dp).graphicsLayer { this.alpha = alpha.value },
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            LocateButton(wall, Modifier.focusRequester(chromeFocus))
-            RoundChromeButton(Icons.Filled.Tune, "海报墙设置", onSettings)
         }
         if (showClock) {
             Spacer(Modifier.width(20.dp))
@@ -465,9 +441,12 @@ private fun rememberChromeAlpha(wall: PosterWallState): State<Float> {
     return alpha.asState()
 }
 
-/** 顶栏胶囊：48dp 高（大字号时跟着字长高，不裁字）、surfaceContainerHigh 86%，左边返回（离开海报墙），右边标题和一行说明。 */
+/**
+ * 顶栏胶囊：48dp 高（大字号时跟着字长高，不裁字）、surfaceContainerHigh 86%，左边返回（离开海报墙），右边标题和一行说明。
+ * [onBack] 为 null 时（电视）只画标题——返回钮够不到，不放。
+ */
 @Composable
-private fun WallTitlePill(title: String, subtitle: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
+private fun WallTitlePill(title: String, subtitle: String, onBack: (() -> Unit)?, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier.heightIn(min = PillHeight),
         shape = PillShape,
@@ -476,12 +455,14 @@ private fun WallTitlePill(title: String, subtitle: String, onBack: () -> Unit, m
         shadowElevation = ChromeShadow,
     ) {
         Row(
-            Modifier.padding(start = 4.dp, end = 18.dp, top = 4.dp, bottom = 4.dp),
+            Modifier.padding(start = if (onBack != null) 4.dp else 18.dp, end = 18.dp, top = 4.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(40.dp).tvFocusRing(CircleShape)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "关闭海报墙")
+            if (onBack != null) {
+                IconButton(onClick = onBack, modifier = Modifier.size(40.dp).tvFocusRing(CircleShape)) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "关闭海报墙")
+                }
             }
             Column {
                 Text(
@@ -503,9 +484,9 @@ private fun WallTitlePill(title: String, subtitle: String, onBack: () -> Unit, m
     }
 }
 
-/** “定位正在播放”：正在播放的那首没放大时高亮成主色。高亮只在这个小组件里读墙的状态。 */
+/** 手机 / 平板的“定位正在播放”：正在播放的那首没放大时高亮成主色。高亮只在这个小组件里读墙的状态。 */
 @Composable
-private fun LocateButton(wall: PosterWallState, modifier: Modifier = Modifier) {
+private fun LocateButton(wall: PosterWallState) {
     val hot = wall.hasCurrent && !wall.currentGrown
     val scheme = MaterialTheme.colorScheme
     val effects = MaterialTheme.motionScheme.defaultEffectsSpec<androidx.compose.ui.graphics.Color>()
@@ -517,28 +498,13 @@ private fun LocateButton(wall: PosterWallState, modifier: Modifier = Modifier) {
     val content by animateColorAsState(if (hot) scheme.onPrimary else scheme.onSurface, effects, label = "posterLocateIcon")
     Surface(
         onClick = wall::locate,
-        modifier = modifier.size(48.dp).tvFocusRing(CircleShape),
+        modifier = Modifier.size(48.dp).tvFocusRing(CircleShape),
         shape = CircleShape,
         color = container,
         contentColor = content,
         shadowElevation = ChromeShadow,
     ) {
         Box(contentAlignment = Alignment.Center) { Icon(Icons.Filled.MyLocation, "定位正在播放") }
-    }
-}
-
-/** 电视顶部一排的 48dp 圆钮（设置）。 */
-@Composable
-private fun RoundChromeButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.size(48.dp).tvFocusRing(CircleShape),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = ChromeScrimAlpha),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shadowElevation = ChromeShadow,
-    ) {
-        Box(contentAlignment = Alignment.Center) { Icon(icon, label) }
     }
 }
 
