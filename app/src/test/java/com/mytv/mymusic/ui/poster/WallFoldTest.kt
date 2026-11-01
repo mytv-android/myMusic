@@ -1,6 +1,7 @@
 package com.mytv.mymusic.ui.poster
 
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.ui.adaptive.FoldSplit
 import com.mytv.mymusic.ui.adaptive.foldSplit
 import com.mytv.mymusic.ui.components.Fold
@@ -71,6 +72,8 @@ class WallFoldTest {
         assertEquals(WallMetrics.Phone, spec.metrics)
         // 胶囊收在左页：折痕左缘再让 16dp
         assertEquals((1104f - margin) / fold, spec.leftPage!!, e)
+        // 书本姿态胶囊还在顶上
+        assertNull(spec.lowerTop)
     }
 
     @Test
@@ -84,6 +87,8 @@ class WallFoldTest {
         assertEquals(WallMetrics.ShortTablet, wallMetricsFor(false, 701, 841))
         assertEquals(WallMetrics.Phone, spec.metrics)
         assertNull(spec.leftPage)
+        // 胶囊挪到下半屏顶上：折痕下缘再让 16dp
+        assertEquals((1105f + margin) / fold, spec.lowerTop!!, e)
     }
 
     @Test
@@ -95,8 +100,10 @@ class WallFoldTest {
         assertEquals(2784f / duo, seg.end, e)
         assertEquals(WallMetrics.Phone, book.metrics)
         // 双横：上屏，到铰链上缘为止
-        val stacked = wallSpecFor(false, 720, 1114, flatHingeSplit, duo).segment!!
-        assertEquals(WallSegment(vertical = false, start = 0f, end = 1350f / duo), stacked)
+        val stackedSpec = wallSpecFor(false, 720, 1114, flatHingeSplit, duo)
+        assertEquals(WallSegment(vertical = false, start = 0f, end = 1350f / duo), stackedSpec.segment)
+        // 胶囊在下屏顶上，从铰链下缘开始
+        assertEquals(1434f / duo, stackedSpec.lowerTop!!, e)
     }
 
     @Test
@@ -160,6 +167,29 @@ class WallFoldTest {
         assertEquals((40f + seg.end) / 2, c2.centerY, e)
         // 下半屏的按钮不让：大卡区的下沿是折痕，不是 insetBottom
         assertEquals(WallRect(0f, 40f, vp.width, seg.end - 40f), roomy.cardArea)
+    }
+
+    @Test
+    fun tabletopPillMovesDownSoTheCardClearsIt() {
+        val spec = wallSpecFor(false, 701, 841, tableSplit, fold)
+        val seg = spec.segment!!
+        // 状态栏 28dp：胶囊在顶上时让到 84，挪到下半屏后只让 28 + 8
+        val (pillTop, _) = wallInsets(spec.metrics, 28.dp, 0.dp, 841)
+        val (moved, movedBottom) = wallInsets(spec.metrics, 28.dp, 0.dp, 841, pillOnTop = spec.lowerTop == null)
+        assertEquals(84.dp, pillTop)
+        assertEquals(36.dp, moved)
+        val p = SlotPos(1, -1, 9)
+        val scene = WallScene(spec.metrics, fieldFor(50), p)
+        val before = WallViewport(1840f / fold, 2208f / fold, pillTop.value, bottom, seg)
+        val after = before.copy(insetTop = moved.value, insetBottom = movedBottom.value)
+        // 胶囊在顶上：上半屏放不下 332 的大卡，大卡顶边压进胶囊那一排
+        assertTrue(scene.onScreen(p, scene.centerTarget(p, before)).y < pillTop.value)
+        // 胶囊挪走：大卡整张在状态栏下、折痕上，居中在两者之间
+        val card = scene.onScreen(p, scene.centerTarget(p, after))
+        assertTrue("$card", card.y >= moved.value - e && card.bottom <= seg.end + e)
+        assertEquals((moved.value + seg.end) / 2, card.centerY, e)
+        // 胶囊（下半屏顶上 + 8dp）不碰大卡
+        assertTrue(spec.lowerTop!! > card.bottom)
     }
 
     @Test

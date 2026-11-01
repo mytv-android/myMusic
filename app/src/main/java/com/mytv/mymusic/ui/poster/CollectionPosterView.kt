@@ -180,11 +180,13 @@ internal fun CollectionPosterView(
     val lyricsReady = state.lyricsKey == currentKey
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val overlay = LocalOverlayPadding.current.calculateBottomPadding()
-    val insetTop = chrome.insetTop(statusTop.value).dp
-    val insetBottom = chrome.insetBottom(overlay.value).dp
     // 折叠屏书本 / 桌面姿态：大卡在右页 / 上半屏（墙自己处理），这里只把浮层挪开折痕
     val spec = rememberWallSpec(wall)
     val segment = spec.segment
+    // 桌面姿态胶囊挪到下半屏顶上（spec.lowerTop），上半屏顶上只让状态栏，大卡才放得下
+    val lowerTop = spec.lowerTop.takeUnless { chrome.toolbarOnTop }
+    val insetTop = if (lowerTop != null) chrome.insetTopWithoutRow(statusTop.value).dp else chrome.insetTop(statusTop.value).dp
+    val insetBottom = chrome.insetBottom(overlay.value).dp
     // 进度只交给大卡在绘制阶段读，这里不读值
     val position = remember(actions) { actions.position }.collectAsState()
     val pulse = rememberPosterPulse(
@@ -306,9 +308,11 @@ internal fun CollectionPosterView(
             // 电视空闲 6 秒浮层淡出（墙的 chromeVisible）；手机、平板一直显示
             val chromeAlpha = rememberPosterChromeAlpha(wall)
             val fade = Modifier.graphicsLayer { alpha = chromeAlpha.value }
+            // 书本 / 双竖：工具栏收在右页里（约 356dp），平板的 48dp 图标钮会把“播放全部”挤成“播…”，换手机的 40dp
+            val toolbarChrome = if (segment?.vertical == true) chrome.copy(itemWidth = minOf(chrome.itemWidth, 40f)) else chrome
             val toolbar: @Composable (Modifier) -> Unit = { modifier ->
                 PosterToolbar(
-                    chrome = chrome,
+                    chrome = toolbarChrome,
                     playLabel = playLabel,
                     canShuffle = hasSongs,
                     extra = extra,
@@ -365,7 +369,12 @@ internal fun CollectionPosterView(
                         .align(Alignment.TopStart)
                         // 书本 / 双竖：胶囊收在左页里，长标题省略，不压折痕
                         .then(if (leftPage != null) Modifier.widthIn(max = leftPage.dp) else Modifier)
-                        .padding(start = chrome.side.dp, end = chrome.side.dp, top = statusTop + chrome.top.dp)
+                        // 桌面 / 双横：胶囊在下半屏顶上
+                        .padding(
+                            start = chrome.side.dp,
+                            end = chrome.side.dp,
+                            top = (lowerTop?.dp ?: statusTop) + chrome.top.dp,
+                        )
                         .then(fade),
                 )
                 // 书本 / 双竖：工具栏跟大卡一起在右页里居中（整墙居中正好压在折痕上）；桌面姿态本来就在下半屏，不动
@@ -431,6 +440,9 @@ internal data class PosterChrome(
 
     /** 墙的 insetTop：状态栏 + 顶排 + 4dp。电视 20 + 56 + 4 = 80，451dp 的大卡在 540dp 高里正好放下。 */
     fun insetTop(statusTop: Float): Float = statusTop + top + topRowHeight + INSET_GAP
+
+    /** 顶排不在顶上时（桌面姿态胶囊挪到下半屏）的 insetTop：只让状态栏 + 4dp。 */
+    fun insetTopWithoutRow(statusTop: Float): Float = statusTop + INSET_GAP
 
     /** 墙的 insetBottom：底部浮层 + 工具栏 + 4dp；电视工具栏在顶上，底下不让。 */
     fun insetBottom(overlayBottom: Float): Float =

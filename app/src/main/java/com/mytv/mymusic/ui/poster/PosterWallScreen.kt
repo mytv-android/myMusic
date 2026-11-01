@@ -142,7 +142,7 @@ internal fun PosterWallScreen(
     val spec = rememberWallSpec(wall)
     val metrics = spec.metrics
     val insets = WindowInsets.safeDrawing.asPaddingValues()
-    val (insetTop, insetBottom) = wallInsets(metrics, insets.calculateTopPadding(), insets.calculateBottomPadding(), window.heightDp)
+    val (insetTop, insetBottom) = wallInsets(metrics, insets.calculateTopPadding(), insets.calculateBottomPadding(), window.heightDp, pillOnTop = spec.lowerTop == null)
 
     // 先交给墙（弹回、交回焦点、收起别的大卡、清焦点），墙这层没事可做了才离开页面。
     // 预测性返回：手势过程中整页跟手缩小下移淡出，走到一半可以反悔
@@ -285,6 +285,7 @@ internal fun PosterWallScreen(
                 wall = wall,
                 metrics = metrics,
                 leftPage = spec.leftPage,
+                lowerTop = spec.lowerTop,
                 title = title,
                 subtitle = subtitle,
                 screenReader = screenReader,
@@ -335,11 +336,18 @@ internal fun wallSubtitle(feed: ListeningFeedUi?, count: Int, currentIndex: Int)
  * 平板一块约一屏，浮层压在墙的四角，不让；电视让出顶部 80dp 一排。
  * 横屏手机这样让完放不下 332dp 的大卡，就都不让（浮层在角上，压不到居中的大卡）。
  */
-internal fun wallInsets(metrics: WallMetrics, safeTop: Dp, safeBottom: Dp, heightDp: Int): Pair<Dp, Dp> = when (metrics) {
+internal fun wallInsets(
+    metrics: WallMetrics,
+    safeTop: Dp,
+    safeBottom: Dp,
+    heightDp: Int,
+    pillOnTop: Boolean = true,
+): Pair<Dp, Dp> = when (metrics) {
     WallMetrics.Tv -> TvTopRowHeight to 0.dp
     WallMetrics.Tablet, WallMetrics.ShortTablet -> 0.dp to 0.dp
     WallMetrics.Phone -> {
-        val top = safeTop + PhonePillTop + PillHeight
+        // 桌面姿态胶囊挪到下半屏（WallSpec.lowerTop），上半屏顶上只让状态栏
+        val top = safeTop + PhonePillTop + if (pillOnTop) PillHeight else 0.dp
         val bottom = safeBottom + PosterWallBottomChrome
         if (heightDp.dp - top - bottom >= metrics.grownSize.dp) top to bottom else 0.dp to 0.dp
     }
@@ -361,12 +369,14 @@ private const val ChromeScrimAlpha = 0.86f
 /**
  * 手机 / 平板：胶囊在左上，定位和设置在右下（平板留得更宽）。读屏开着时胶囊下面多一个“以列表浏览”。
  * 书本 / 双竖时胶囊收在左页里（[leftPage]，dp），长标题省略，不压折痕；右下的按钮本来就在右页。
+ * 桌面 / 双横时胶囊挪到下半屏顶上（[lowerTop]，墙本地 dp），上半屏整块留给大卡。
  */
 @Composable
 private fun TouchChrome(
     wall: PosterWallState,
     metrics: WallMetrics,
     leftPage: Float?,
+    lowerTop: Float?,
     title: String,
     subtitle: String,
     screenReader: Boolean,
@@ -375,12 +385,19 @@ private fun TouchChrome(
     onOpenQueue: () -> Unit,
 ) {
     val phone = metrics == WallMetrics.Phone
+    val pillTop = if (phone) PhonePillTop else 20.dp
+    // 这一层按安全区内缩过，墙本地的 lowerTop 要先扣掉顶上的安全区
+    val safeTop = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(
             Modifier
                 .align(Alignment.TopStart)
                 .then(if (leftPage != null) Modifier.widthIn(max = leftPage.dp) else Modifier)
-                .padding(start = if (phone) 12.dp else 24.dp, top = if (phone) PhonePillTop else 20.dp, end = 12.dp),
+                .padding(
+                    start = if (phone) 12.dp else 24.dp,
+                    top = if (lowerTop != null) (lowerTop.dp - safeTop).coerceAtLeast(0.dp) + pillTop else pillTop,
+                    end = 12.dp,
+                ),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             WallTitlePill(title, subtitle, onBack)

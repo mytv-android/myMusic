@@ -31,5 +31,9 @@ class PosterWallScreenTest {
         assertEquals(80.dp to 0.dp, wallInsets(WallMetrics.Tv, 0.dp, 0.dp, 540))
         // 横屏手机让完放不下大卡：都不让
         assertEquals(0.dp to 0.dp, wallInsets(WallMetrics.Phone, 24.dp, 0.dp, 360))
+        // 桌面姿态胶囊挪到下半屏：顶上只让状态栏 28 + 8
+        assertEquals(36.dp to 92.dp, wallInsets(WallMetrics.Phone, 28.dp, 0.dp, 841, pillOnTop = false))
+        // 平板 / 电视不受影响
+        assertEquals(0.dp to 0.dp, wallInsets(WallMetrics.Tablet, 24.dp, 48.dp, 800, pillOnTop = false))
     }
 }

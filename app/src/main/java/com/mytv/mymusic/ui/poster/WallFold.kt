@@ -18,12 +18,15 @@ import com.mytv.mymusic.ui.components.Posture
 /**
  * 墙这一次的版式：格距 [metrics]，以及有分页的折痕时大卡要落进去的那一段 [segment]（墙本地 dp）。
  * [leftPage] 是竖折痕时左页的宽（dp）：左上角的胶囊收在左页里，不压折痕；没有竖折痕时为 null。
+ * [lowerTop] 是横折痕、大卡在上半屏时下半屏的起点（dp，已让过折痕）：桌面姿态上半屏是立着看的那一面，
+ * 去掉胶囊才放得下大卡，所以胶囊挪到下半屏顶上，和播放页“上面看、下面操作”一致；其余情况为 null。
  */
 @Immutable
 internal data class WallSpec(
     val metrics: WallMetrics,
     val segment: WallSegment? = null,
     val leftPage: Float? = null,
+    val lowerTop: Float? = null,
     /**
      * 书本 / 桌面姿态下墙还没摆放过，不知道折痕落在哪：只有打开墙的第一帧。这一帧墙先不建，
      * 免得按整屏建好、下一帧又按那一段重建（入场动画重来、大卡从正中跳到右页）。
@@ -64,7 +67,8 @@ internal fun wallSpecFor(isTv: Boolean, widthDp: Int, heightDp: Int, split: Fold
         wallMetricsFor(false, widthDp, seg.size.toInt())
     }
     val leftPage = if (split != null && split.vertical) split.firstEnd / density else null
-    return WallSpec(metrics, seg, leftPage)
+    val lowerTop = if (split != null && !seg.vertical && seg.start <= 0f) split.secondStart / density else null
+    return WallSpec(metrics, seg, leftPage, lowerTop)
 }
 
 /**
