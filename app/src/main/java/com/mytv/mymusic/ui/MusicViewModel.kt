@@ -509,7 +509,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (key.isNotBlank()) NowPlayingShape.resolve(choice, key)
             }
         }
-        viewModelScope.launch {
+        // 电视上没有桌面小组件：不发布快照，也就不加载 WidgetHub / PlaybackSnapshot
+        if (app.widgetsEnabled) viewModelScope.launch {
             combine(base, anchor, connected) { ui, at, player -> widgetSnapshot(ui, at, player) }
                 .distinctUntilChanged()
                 .collect { WidgetHub.playback.value = it }
@@ -3345,7 +3346,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (player.mediaItemCount > 0) {
             // 服务那边已经装好了队列（系统媒体控件的继续播放先到）：界面状态由 buildResumption 写好了
             dormant = null
-            WidgetHub.authoritative.value = true
+            if (app.widgetsEnabled) WidgetHub.authoritative.value = true
             startPersistence()
             return
         }
@@ -3406,7 +3407,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (base.value.queue.isNotEmpty() || (controller?.mediaItemCount ?: 0) > 0) return
             applyDormant(saved)
         } finally {
-            WidgetHub.authoritative.value = true
+            if (app.widgetsEnabled) WidgetHub.authoritative.value = true
             startPersistence()
         }
     }

@@ -1,6 +1,8 @@
 package com.mytv.mymusic
 
 import android.app.Application
+import android.content.ComponentName
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Looper
 import android.os.Process
@@ -52,6 +54,12 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val sleepTimer by lazy { SleepTimer(appScope) }
 
+    /**
+     * 电视上没有桌面小组件：启动时把组件持久禁用，界面和播放层里的小组件代码路径也在入口处短路，
+     * 系统不会拉起组件，Glance 和它依赖的 WorkManager 也就不会被加载。
+     */
+    val widgetsEnabled: Boolean by lazy { !isTelevision() }
+
     override val viewModelStore = ViewModelStore()
 
     /**
@@ -90,6 +98,7 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
             return
         }
         super.onCreate()
+        disableWidgetComponentsOnTelevision()
         registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: android.app.Activity) = ForegroundActivity.set(activity)
             override fun onActivityPaused(activity: android.app.Activity) = ForegroundActivity.clear(activity)
@@ -132,7 +141,25 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         // 屏保、息屏的状态：电视上这时候「离开应用」不是用户真的走了，音乐不能停
         ScreensaverState.start(this)
         // 桌面小组件：播放、设置、收藏、亮灭屏变化时合并刷新（手机和平板才有桌面组件）
-        if (!isTelevision()) WidgetUpdater.start(this)
+        if (widgetsEnabled) WidgetUpdater.start(this)
+    }
+
+    /**
+     * 电视上把小组件组件持久禁用。清单里的 @bool/widgets_enabled 只是保险：实测装 APK 时
+     * 系统解析清单不看 uiMode，values-television 到不了，组件照样是启用状态，所以这里是主力。
+     */
+    private fun disableWidgetComponentsOnTelevision() {
+        if (!isTelevision()) return
+        val pm = packageManager
+        for (name in WIDGET_COMPONENTS) {
+            val component = ComponentName(this, name)
+            if (pm.getComponentEnabledSetting(component) == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) continue
+            pm.setComponentEnabledSetting(
+                component,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP,
+            )
+        }
     }
 
     private fun createMediaCache(): SimpleCache {
@@ -150,5 +177,16 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
 
     companion object {
         private const val MB = 1024L * 1024
+
+        /** 清单里带 @bool/widgets_enabled 的组件；只写类名，避免在电视上加载小组件代码。 */
+        private val WIDGET_COMPONENTS = listOf(
+            "com.mytv.mymusic.widget.NowPlayingWidgetReceiver",
+            "com.mytv.mymusic.widget.LyricsWidgetReceiver",
+            "com.mytv.mymusic.widget.ModeWidgetReceiver",
+            "com.mytv.mymusic.widget.ChartWidgetReceiver",
+            "com.mytv.mymusic.widget.ListWidgetReceiver",
+            "com.mytv.mymusic.widget.ToolsWidgetReceiver",
+            "com.mytv.mymusic.widget.WidgetConfigActivity",
+        )
     }
 }
