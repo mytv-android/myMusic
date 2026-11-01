@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Build
 import android.os.Looper
 import android.os.Process
+import android.os.UserManager
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
@@ -74,12 +75,17 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         get() = Configuration.Builder().build()
 
     override fun onCreate() {
-        // 解锁前被拉起（开机自启、桌面组件、媒体键、其它应用或 adb）的进程，Application 上下文是设备加密（DE）
-        // 存储的，解锁后也不会换成凭据加密存储。此时数据全都读不到，Glance 首次刷新组件时
-        // WorkManager.getInstance 还会抛「Cannot initialize WorkManager in direct boot mode」，
-        // 所以直接结束进程，等用户解锁后由系统重新创建。本应用没有 directBootAware 组件，
-        // 解锁前的进程做不了任何有用的事。
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isDeviceProtectedStorage) {
+        // 解锁前被拉起（开机自启、桌面组件、媒体键、其它应用或 adb）的进程做不了任何有用的事：
+        // 凭据加密存储里的设置、数据库、SecretStore、媒体缓存全都读不到，Glance 首次刷新组件时
+        // WorkManager.getInstance 还会抛「Cannot initialize WorkManager in direct boot mode」。
+        // 直接结束进程，等用户解锁后由系统重新创建。
+        // isDeviceProtectedStorage：进程拿的是设备加密（DE）上下文，解锁后也不会换成 CE；
+        // isUserUnlocked：系统在解锁前强行建进程时给的是 CE 上下文，isDeviceProtectedStorage 反而是 false，
+        //   只有这一项能发现（实测：给组件加 directBootAware 强行拉起，崩的就是 SecretStore 而不是 WorkManager）。
+        val userManager = getSystemService(UserManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N &&
+            (isDeviceProtectedStorage || userManager?.isUserUnlocked == false)
+        ) {
             Process.killProcess(Process.myPid())
             return
         }
