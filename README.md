@@ -10,7 +10,7 @@
 
 myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机、平板、折叠屏和电视。界面使用 Jetpack Compose 与 Material 3；触摸、鼠标、键盘和遥控器使用同一套焦点与播放操作。
 
-音乐平台能力来自 [music-lib](https://github.com/guohuiyuan/music-lib)（AGPL-3.0），本项目已将平台层移植为原生实现，不需要额外的后端服务；只有汽水音乐的会员整曲需要外部签名服务（见下文）。
+音乐平台能力来自 [music-lib](https://github.com/guohuiyuan/music-lib)（AGPL-3.0），本项目已将平台层移植为原生实现，不需要额外的后端服务。
 
 ## 项目与社区
 
@@ -68,25 +68,6 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 - 播放缓存上限可在“设置 › 存储”里调整（128 MB–1 GB），电视默认 256 MB，其他设备默认 512 MB；调低后立即按最近使用淘汰。
 - TalkBack 走查结果见 [docs/accessibility-audit.md](docs/accessibility-audit.md)。
 - 发布包带 Baseline Profile；帧时间测试方法和结果见 [docs/performance.md](docs/performance.md)。
-
-## 平台能力
-
-支持网易云音乐、QQ 音乐、酷狗音乐、酷我音乐、咪咕音乐、千千音乐、汽水音乐、5sing、Jamendo、JOOX、Bilibili 和 Apple Music。每个平台在榜单、歌单和设置中按上游实际能力显示搜索、歌单、专辑、排行榜、分类、歌词、下载和登录。
-
-Apple Music 只提供上游返回的试听预览。上游未实现的歌词、排行榜或登录不会显示为可用操作。
-
-### 汽水音乐会员整曲
-
-汽水音乐的会员整曲需要官方客户端才能生成的请求签名，因此播放流由一个外部签名服务提供，取流与解密都在本机完成：
-
-- 汽水账号登录：`设置 › 平台账号 › 汽水音乐` 支持应用内扫码登录（手机用官方 App 扫应用里的码，电视用手机扫屏幕上的码），也可以粘贴 Cookie。
-- **默认**：`设置 › 平台账号 › 汽水播放签名器` 里选「SodaM 公共」，连的是 SodaM 桌面版默认的同一个公共实例，无需自己部署。签名请求会带着 Cookie 和完整请求头发到该服务，请只在自己信任的网络环境下使用；公共实例不可用时改回「自定义服务」即可。
-- **自定义服务**：选「自定义服务」后填 `POST /sign` 地址（例如 `http://192.168.1.10:8899/sign`）和可选的 Bearer Token。签名服务可运行 SodaM / libresoda 的签名宿主，需要一台能加载官方原生组件的电脑（Windows / macOS / Linux + Wine），手机或电视通过局域网访问；签名器会看到即将发出的完整请求头（含 Cookie），只应指向自己信任的实例，跨公网使用 SSH 隧道或反向代理，并始终设置 Token。
-- 关掉签名器开关，行为回到只有公开试听流：免费曲目照常播放，会员曲目只返回公开试听流。
-
-签名器与相关参考实现不随本应用分发，也不包含任何官方二进制。请只用于播放自己账号有权播放的内容，不要做公共代理或分发凭据。
-
-**来源与许可**：汽水音乐的签名服务、取流链路和加密流解密逻辑参考 [SodaM](https://github.com/sodahub-org/sodam)（AGPL-3.0）与 [libresoda](https://github.com/sodahub-org/libresoda)（AGPL-3.0），签名服务契约参考 [libmssdk](https://github.com/sodahub-org/libmssdk)（MIT，不包含官方组件）。默认连接的公共签名服务由 SodaM 作者提供并授权使用。本项目的实现是对应的衍生作品，同样以 AGPL-3.0 分发；第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 跨平台聚合与同步歌词
 
