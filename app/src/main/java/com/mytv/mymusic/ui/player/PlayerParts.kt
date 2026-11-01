@@ -139,18 +139,34 @@ fun rememberIdleState(holdAwake: Boolean = false, timeoutMs: Long = 4_000L): Idl
     return state
 }
 
-/** 是否开着朗读类无障碍服务（TalkBack 等），开关变化时实时更新。 */
+/**
+ * 是否开着读屏（TalkBack 等），开关变化时实时更新。
+ *
+ * 只认真正靠触摸探索 / 读屏焦点导航的无障碍服务：自动点击、随选朗读这类辅助 App 也常声明“会语音反馈”，
+ * 按语音反馈判断的话它们一开，播放页就再也不会进入空闲。触摸探索开着、或服务声明了触摸探索模式，
+ * 才说明用户是在看不见画面的情况下导航。
+ */
 @Composable
 fun rememberScreenReaderOn(): Boolean {
     val context = LocalContext.current
     val manager = remember(context) { context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager }
-    fun spoken() = manager?.isEnabled == true &&
-        manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_SPOKEN).isNotEmpty()
+    fun spoken(): Boolean {
+        val m = manager ?: return false
+        if (!m.isEnabled) return false
+        if (m.isTouchExplorationEnabled) return true
+        return m.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_SPOKEN)
+            .any { it.flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE != 0 }
+    }
     var on by remember { mutableStateOf(spoken()) }
     DisposableEffect(manager) {
-        val listener = AccessibilityManager.AccessibilityStateChangeListener { on = spoken() }
-        manager?.addAccessibilityStateChangeListener(listener)
-        onDispose { manager?.removeAccessibilityStateChangeListener(listener) }
+        val state = AccessibilityManager.AccessibilityStateChangeListener { on = spoken() }
+        val touch = AccessibilityManager.TouchExplorationStateChangeListener { on = spoken() }
+        manager?.addAccessibilityStateChangeListener(state)
+        manager?.addTouchExplorationStateChangeListener(touch)
+        onDispose {
+            manager?.removeAccessibilityStateChangeListener(state)
+            manager?.removeTouchExplorationStateChangeListener(touch)
+        }
     }
     return on
 }
