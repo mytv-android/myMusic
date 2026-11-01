@@ -2026,6 +2026,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (manual) message("平台歌单暂时没有歌曲，本机内容保持不变")
                 return@launchPlaylistEdit
             }
+            // 拉平台要几秒：期间可能改了名、解除了绑定或删了歌单，重新读一次再写回，
+            // 别把拉取前的那一整行盖回去（解除绑定会被写活、改名会被改回去）
+            val latest = libraryDao.playlistOnce(id) ?: return@launchPlaylistEdit
+            if (latest.deletedAt != null) return@launchPlaylistEdit
             val entries = libraryDao.entriesOnce(id)
             val diff = boundDiff(entries.map { it.songKey }, songs.map { it.key })
             libraryDao.replaceEntries(
@@ -2035,10 +2039,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 },
             )
             if (diff.changed) {
-                libraryDao.putPlaylist(playlist.copy(linkSyncedAt = now, updatedAt = now, dirty = true))
+                libraryDao.putPlaylist(latest.copy(linkSyncedAt = now, updatedAt = now, dirty = true))
                 app.sync.onLocalChange()
             } else {
-                libraryDao.putPlaylist(playlist.copy(linkSyncedAt = now))
+                libraryDao.putPlaylist(latest.copy(linkSyncedAt = now))
             }
             if (manual || diff.changed) {
                 val parts = buildList {
@@ -2046,8 +2050,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     if (diff.removed > 0) add("移除 ${diff.removed} 首")
                 }
                 message(
-                    if (parts.isEmpty()) "「${playlist.name}」已同步，平台没有变化"
-                    else "「${playlist.name}」已同步：${parts.joinToString("，")}"
+                    if (parts.isEmpty()) "「${latest.name}」已同步，平台没有变化"
+                    else "「${latest.name}」已同步：${parts.joinToString("，")}"
                 )
             }
         }

@@ -22,6 +22,7 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
+import androidx.room.Upsert
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.mytv.mymusic.aggregate.AggregationSettings
@@ -609,7 +610,9 @@ interface LibraryDao {
     fun entryCounts(): Flow<List<PlaylistEntryCount>>
     @Query("SELECT COUNT(*) FROM playlist_entries")
     suspend fun entryCount(): Int
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putPlaylist(playlist: PlaylistEntity)
+    // 必须 upsert 不能 INSERT OR REPLACE：REPLACE 先删旧行再插入，playlist_entries 的
+    // ON DELETE CASCADE 会把整份曲目连带删掉（刷新绑定歌单、解除绑定都会把歌曲清空）
+    @Upsert suspend fun putPlaylist(playlist: PlaylistEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putEntries(entries: List<PlaylistEntryEntity>)
     @Query("DELETE FROM playlist_entries WHERE playlist_id = :id") suspend fun clearEntries(id: String)
     @Query("UPDATE playlists SET name = :name, updated_at = :time, dirty = 1 WHERE id = :id")
@@ -663,7 +666,8 @@ interface SyncDao {
 
 @Dao
 interface AggregateDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveTrack(track: CanonicalTrackEntity)
+    // 同 putPlaylist：REPLACE 会级联删掉这个曲目下的 canonical_sources
+    @Upsert suspend fun saveTrack(track: CanonicalTrackEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveSources(sources: List<CanonicalSourceEntity>)
     @Query("SELECT * FROM canonical_sources WHERE canonical_id = :canonicalId ORDER BY provider_id")
     suspend fun sources(canonicalId: String): List<CanonicalSourceEntity>
