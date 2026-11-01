@@ -1,12 +1,15 @@
 package com.mytv.mymusic
 
 import android.app.Application
+import android.os.Build
 import android.os.Looper
+import android.os.Process
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.cache.SimpleCache
+import androidx.work.Configuration
 import com.mytv.mymusic.data.AppDatabase
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.SettingsStore
@@ -32,7 +35,7 @@ import com.mytv.mymusic.ui.theme.isTelevision
 import java.io.File
 
 @androidx.annotation.OptIn(UnstableApi::class)
-class MyMusicApp : Application(), ViewModelStoreOwner {
+class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
     lateinit var repository: MusicRepository
     lateinit var settings: SettingsStore
     lateinit var database: AppDatabase
@@ -63,7 +66,23 @@ class MyMusicApp : Application(), ViewModelStoreOwner {
     /** ViewModel 已经建过了；播放服务收尾时只在它存在时通知，不为此新建一个。 */
     val hasMusicViewModel: Boolean get() = musicViewModelLazy.isInitialized()
 
+    /**
+     * WorkManager 改由这里按需初始化（清单里已去掉 androidx.startup 的自动初始化）：
+     * 解锁后第一次取 WorkManager.getInstance 时才建， Glance 刷新组件、同步 Worker 都在解锁后。
+     */
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder().build()
+
     override fun onCreate() {
+        // 解锁前被拉起（开机自启、桌面组件、媒体键、其它应用或 adb）的进程，Application 上下文是设备加密（DE）
+        // 存储的，解锁后也不会换成凭据加密存储。此时数据全都读不到，Glance 首次刷新组件时
+        // WorkManager.getInstance 还会抛「Cannot initialize WorkManager in direct boot mode」，
+        // 所以直接结束进程，等用户解锁后由系统重新创建。本应用没有 directBootAware 组件，
+        // 解锁前的进程做不了任何有用的事。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isDeviceProtectedStorage) {
+            Process.killProcess(Process.myPid())
+            return
+        }
         super.onCreate()
         registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: android.app.Activity) = ForegroundActivity.set(activity)

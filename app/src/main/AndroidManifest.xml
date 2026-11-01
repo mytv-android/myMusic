@@ -45,6 +45,20 @@
         android:theme="@style/Theme.MyMusic"
         android:enableOnBackInvokedCallback="true"
         tools:targetApi="33">
+        <!-- 解锁前被拉起的进程（开机、桌面组件、媒体键、adb 等）拿到的是设备加密（DE）存储上下文，
+             WorkManager 在构造时检查到 isDeviceProtectedStorage 就直接抛异常，而它在
+             androidx.startup.InitializationProvider 里、Application.onCreate 之前就执行，业务代码拦不住。
+             关掉自动初始化，改由 MyMusicApp 实现 Configuration.Provider 在解锁后按需初始化。 -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:exported="true"
