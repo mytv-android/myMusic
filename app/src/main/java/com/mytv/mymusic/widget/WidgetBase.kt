@@ -25,6 +25,7 @@ import androidx.glance.LocalContext
 import androidx.glance.LocalSize
 import androidx.glance.appwidget.LocalAppWidgetOptions
 import androidx.compose.runtime.collectAsState
+import com.mytv.mymusic.BackgroundWork
 import com.mytv.mymusic.MainActivity
 import com.mytv.mymusic.data.AppSettings
 
@@ -83,6 +84,8 @@ abstract class MusicWidget(protected val kind: WidgetKind) : GlanceAppWidget() {
 /** 接收器：桌面一放上组件就开始监听播放状态。 */
 abstract class MusicWidgetReceiver : GlanceAppWidgetReceiver() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        // Glance 的推送和重组走 WorkManager，DE 上下文里起不来：这里直接不接，别把进程带崩
+        if (!BackgroundWork.available(context)) return
         WidgetUpdater.ensureStarted(context)
         super.onUpdate(context, appWidgetManager, appWidgetIds)
     }

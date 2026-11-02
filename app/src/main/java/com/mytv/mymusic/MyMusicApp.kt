@@ -1,10 +1,7 @@
 package com.mytv.mymusic
 
 import android.app.Application
-import android.os.Build
 import android.os.Looper
-import android.os.Process
-import android.os.UserManager
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
@@ -69,27 +66,18 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
 
     /**
      * WorkManager 改由这里按需初始化（清单里已去掉 androidx.startup 的自动初始化）：
-     * 解锁后第一次取 WorkManager.getInstance 时才建， Glance 刷新组件、同步 Worker 都在解锁后。
+     * 第一次取 WorkManager.getInstance 时才建， Glance 刷新组件、同步 Worker 都在解锁后。
+     * 进程处于 DE 上下文或用户尚未解锁时不要取，见 [BackgroundWork]。
      */
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder().build()
 
     override fun onCreate() {
-        // 解锁前被拉起（开机自启、桌面组件、媒体键、其它应用或 adb）的进程做不了任何有用的事：
-        // 凭据加密存储里的设置、数据库、SecretStore、媒体缓存全都读不到，Glance 首次刷新组件时
-        // WorkManager.getInstance 还会抛「Cannot initialize WorkManager in direct boot mode」。
-        // 直接结束进程，等用户解锁后由系统重新创建。
-        // isDeviceProtectedStorage：进程拿的是设备加密（DE）上下文，解锁后也不会换成 CE；
-        // isUserUnlocked：系统在解锁前强行建进程时给的是 CE 上下文，isDeviceProtectedStorage 反而是 false，
-        //   只有这一项能发现（实测：给组件加 directBootAware 强行拉起，崩的就是 SecretStore 而不是 WorkManager）。
-        val userManager = getSystemService(UserManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N &&
-            (isDeviceProtectedStorage || userManager?.isUserUnlocked == false)
-        ) {
-            Process.killProcess(Process.myPid())
-            return
-        }
         super.onCreate()
+        val backgroundWork = BackgroundWork.available(this)
+        if (!backgroundWork) {
+            android.util.Log.w("MyMusicApp", "设备保护存储或未解锁上下文：跳过桌面组件与 WorkManager 后台调度")
+        }
         registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: android.app.Activity) = ForegroundActivity.set(activity)
             override fun onActivityPaused(activity: android.app.Activity) = ForegroundActivity.clear(activity)
@@ -131,8 +119,9 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         queueStore = QueueStore(this)
         // 屏保、息屏的状态：电视上这时候「离开应用」不是用户真的走了，音乐不能停
         ScreensaverState.start(this)
-        // 桌面小组件：播放、设置、收藏、亮灭屏变化时合并刷新（手机和平板才有桌面组件）
-        if (!isTelevision()) WidgetUpdater.start(this)
+        // 桌面小组件：播放、设置、收藏、亮灭屏变化时合并刷新（手机和平板才有桌面组件）。
+        // DE 上下文里 Glance 依赖的 WorkManager 起不来，直接不启动组件这条链路，主界面照常可用。
+        if (!isTelevision() && backgroundWork) WidgetUpdater.start(this)
     }
 
     private fun createMediaCache(): SimpleCache {

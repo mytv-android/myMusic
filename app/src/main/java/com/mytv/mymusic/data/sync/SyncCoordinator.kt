@@ -9,7 +9,7 @@ import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
+import com.mytv.mymusic.BackgroundWork
 import com.mytv.mymusic.data.AppDatabase
 import com.mytv.mymusic.data.LibraryDao
 import com.mytv.mymusic.data.PlaylistEntity
@@ -773,7 +773,7 @@ class SyncCoordinator(
         syncDao.clearAccounts()
         syncDao.clearBases()
         syncDao.clearConflicts()
-        WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        BackgroundWork.get(context)?.cancelUniqueWork(WORK_NAME)
         _state.update {
             it.copy(
                 account = null,
@@ -883,7 +883,7 @@ class SyncCoordinator(
                 .setInitialDelay(30, TimeUnit.SECONDS)
                 .setConstraints(constraints)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+            BackgroundWork.get(context)?.enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
         }
     }
 

@@ -9,8 +9,8 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.mytv.mymusic.BackgroundWork
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.ProviderInfo
@@ -197,18 +197,19 @@ class ChartWidgetWorker(context: Context, params: WorkerParameters) : CoroutineW
 
         fun schedule(context: Context) {
             val request = PeriodicWorkRequestBuilder<ChartWidgetWorker>(12, TimeUnit.HOURS).setConstraints(network).build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.KEEP, request)
+            BackgroundWork.get(context)?.enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.KEEP, request)
         }
 
         fun cancel(context: Context) {
-            WorkManager.getInstance(context).cancelUniqueWork(PERIODIC)
-            WorkManager.getInstance(context).cancelUniqueWork(NOW)
+            val workManager = BackgroundWork.get(context) ?: return
+            workManager.cancelUniqueWork(PERIODIC)
+            workManager.cancelUniqueWork(NOW)
         }
 
         /** 马上刷一次（组件刚添加、点了重试、配置改了）。没网时等联网再跑。 */
         fun refreshNow(context: Context) {
             val request = OneTimeWorkRequestBuilder<ChartWidgetWorker>().setConstraints(network).build()
-            WorkManager.getInstance(context).enqueueUniqueWork(NOW, ExistingWorkPolicy.REPLACE, request)
+            BackgroundWork.get(context)?.enqueueUniqueWork(NOW, ExistingWorkPolicy.REPLACE, request)
         }
 
         /** 打开 App 时顺带刷新：桌面上有榜单组件、且上次刷新已经过了半小时。 */
