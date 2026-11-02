@@ -16,11 +16,12 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 
 - 项目主页：https://github.com/mytv-android/myMusic
 - 界面与设计稿汇总：https://mytv-android.github.io/myMusic/
-- 友情链接：[SodaM](https://github.com/sodahub-org/sodam) —— Linux / macOS / Windows 上的原生汽水音乐桌面客户端（GPUI + Rust），由 [sodahub-org](https://github.com/sodahub-org) 独立维护，不是 myMusic 项目的一部分。myMusic 播放汽水音乐会员整曲用的签名服务也来自它（AGPL-3.0）：内置的是它的公共实例，可在 `设置 › 平台账号 › 汽水播放签名器` 换成自建实例或关掉。
 - Telegram 群组：https://t.me/mytv_android_channel
 - 配套工具：[易用TV助手](https://github.com/pangtugg/easytv-partner) 收录了 myMusic 及其他开源 TV 应用，可一键安装，并提供扫码遥控、文件传输、应用安装与更新等模块，方便在电视上集中管理和查看各应用的配置与使用教程，无需注册账号。
 
 两个入口在应用的 `设置 › 关于与更新` 里同样提供：手机上点按打开，电视上用手机扫页面上的二维码（二维码由本机编码器生成，不经过第三方图片服务）。
+
+友情链接：[SodaM](https://github.com/sodahub-org/sodam) —— Linux / macOS / Windows 上的汽水音乐桌面客户端，由 [sodahub-org](https://github.com/sodahub-org) 独立维护，不是 myMusic 项目的一部分；myMusic 的整曲签名服务也由它提供。
 
 <p align="center">
   <a href="https://github.com/sodahub-org/sodam"><img src="docs/images/sodam-logo.png" alt="SodaM：第三方汽水音乐桌面客户端，非 myMusic 组成部分" height="88"/></a>
