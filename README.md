@@ -14,7 +14,7 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 
 ## 界面
 
-下面的界面来自 [docs/](docs) 下的设计稿，按同一套视觉规则单独绘制；设计稿本身是可以直接操作的原型。汇总页见 <https://mytv-android.github.io>。
+下面的界面来自 [docs/](docs) 下的设计稿，按同一套视觉规则单独绘制；设计稿本身是可以直接操作的原型。汇总页见 <https://mytv-android.github.io/myMusic/>。
 
 <table>
   <tr>
@@ -63,7 +63,7 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 ## 项目与社区
 
 - 项目主页：https://github.com/mytv-android/myMusic
-- 界面与设计稿汇总：https://mytv-android.github.io
+- 界面与设计稿汇总：https://mytv-android.github.io/myMusic/
 - [SodaM](https://github.com/sodahub-org/sodam)（AGPL-3.0）：汽水音乐会员整曲的公共签名服务，myMusic 默认接入，服务地址与令牌内置在应用里。
 - Telegram 群组：https://t.me/mytv_android_channel
 - 配套工具：[易用TV助手](https://github.com/pangtugg/easytv-partner) 收录了 myMusic 及其他开源 TV 应用，可一键安装，并提供扫码遥控、文件传输、应用安装与更新等模块，方便在电视上集中管理和查看各应用的配置与使用教程，无需注册账号。
