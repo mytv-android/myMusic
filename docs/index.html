@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>myMusic · 设计与界面</title>
+<meta name="description" content="myMusic 是面向 Android 6.0+ 的音乐客户端：跨平台聚合、海报墙、桌面小组件、折叠屏与电视。这里汇总它的界面与设计稿。"/>
+<link rel="icon" href="images/sodam-logo.png"/>
+<script>
+// 主题：默认跟随系统，手动切换后记住选择（放在 head 里，避免首屏闪色）
+(function(){var k='mymusic-theme',s=localStorage.getItem(k),d=document.documentElement;
+d.dataset.theme=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');})();
+</script>
+<style>
+:root{
+  --font-d:"Roboto Flex","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-b:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-m:"Cascadia Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  --green:#006b5f; --green-deep:#083c33; --mint:#52dbc4;
+  --paper:#f5f9f6; --card:#ffffff; --line:#d8e4de; --line-soft:#e9f0ec;
+  --ink:#101a17; --muted:#6b7a74; --soft:#eef5f2;
+  --amber:#8c5d00; --amber-soft:#fff4d9;
+  --shadow:0 18px 48px rgba(16,26,23,.08);
+  --shadow-sm:0 6px 18px rgba(16,26,23,.06);
+  --r:18px;
+}
+html[data-theme="dark"]{
+  --paper:#0a100e; --card:#111a17; --line:#22302b; --line-soft:#1a2622;
+  --ink:#e6f2ed; --muted:#8fa39c; --soft:#152019;
+  --green:#5fd8c2; --green-deep:#0d3b33; --mint:#8ff0dc;
+  --amber:#f0c977; --amber-soft:#2a2210;
+  --shadow:0 18px 48px rgba(0,0,0,.45);
+  --shadow-sm:0 6px 18px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:76px}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-b);
+  -webkit-font-smoothing:antialiased;line-height:1.7}
+h1,h2,h3,h4{font-family:var(--font-d);line-height:1.25;letter-spacing:-.01em;margin:0}
+a{color:inherit}
+img{max-width:100%;display:block}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+
+/* ---------- 顶栏 ---------- */
+.nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);
+  background:var(--paper);border-bottom:1px solid var(--line-soft)}
+@supports (backdrop-filter:blur(14px)){
+  .nav{background:color-mix(in srgb,var(--paper) 82%,transparent)}
+}
+.nav .wrap{display:flex;align-items:center;gap:28px;height:62px}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--font-d);font-weight:700;
+  font-size:19px;text-decoration:none;letter-spacing:-.02em}
+.brand .dot{width:26px;height:26px;border-radius:9px;background:var(--green);position:relative;flex:none}
+.brand .dot::after{content:"";position:absolute;inset:8px 6px;border-radius:50%;background:var(--paper)}
+.nav-links{display:flex;gap:22px;margin-left:auto;font-size:14.5px}
+.nav-links a{text-decoration:none;color:var(--muted);padding:4px 0;border-bottom:2px solid transparent}
+.nav-links a:hover{color:var(--ink);border-color:var(--mint)}
+.tgl{flex:none;width:38px;height:38px;border-radius:12px;border:1px solid var(--line);
+  background:var(--card);color:var(--ink);cursor:pointer;display:grid;place-items:center;font-size:15px}
+.tgl:hover{border-color:var(--mint)}
+@media(max-width:760px){.nav-links{display:none}}
+
+/* ---------- Hero ---------- */
+.hero{padding:76px 0 54px;position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:auto -20% 40% 40%;height:520px;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--mint) 26%,transparent),transparent);filter:blur(10px)}
+.hero .wrap{position:relative;display:grid;grid-template-columns:1.15fr .85fr;gap:48px;align-items:center}
+.hero-logo{width:100%;max-width:520px}
+.eyebrow{font-family:var(--font-m);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--green);margin:0 0 14px}
+.hero h1{font-size:clamp(34px,5vw,58px);font-weight:800}
+.hero p.lead{font-size:clamp(16px,1.6vw,19px);color:var(--muted);margin:20px 0 30px;max-width:34em}
+.cta{display:flex;flex-wrap:wrap;gap:12px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:999px;
+  text-decoration:none;font-weight:600;font-size:15px;border:1px solid var(--line);background:var(--card);
+  color:var(--ink);box-shadow:var(--shadow-sm);transition:transform .15s,box-shadow .15s}
+.btn:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.btn.primary{background:var(--green);border-color:var(--green);color:#fff}
+html[data-theme="dark"] .btn.primary{color:#04120f}
+.hero-shot{display:flex;gap:14px;justify-content:center}
+.hero-shot img{width:min(46%,300px);border-radius:26px;box-shadow:var(--shadow)}
+.hero-shot img:last-child{margin-top:38px}
+@media(max-width:900px){.hero .wrap{grid-template-columns:1fr}.hero-shot{margin-top:34px}
+  .hero-shot img:last-child{margin-top:0}}
+
+/* ---------- 区块 ---------- */
+section{padding:64px 0;border-top:1px solid var(--line-soft)}
+.sec-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:34px;flex-wrap:wrap}
+.sec-head h2{font-size:clamp(24px,3vw,34px);font-weight:750}
+.sec-head p{margin:8px 0 0;color:var(--muted);max-width:52em}
+.kicker{font-family:var(--font-m);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--green)}
+
+/* ---------- 画廊 ---------- */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:26px}
+.chip{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;
+  padding:7px 16px;font-size:13.5px;cursor:pointer;font-family:inherit}
+.chip[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:#fff}
+html[data-theme="dark"] .chip[aria-pressed="true"]{color:#04120f}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:22px}
+.shot{background:var(--card);border:1px solid var(--line-soft);border-radius:var(--r);padding:14px 14px 16px;
+  box-shadow:var(--shadow-sm);transition:transform .18s,box-shadow .18s,opacity .2s}
+.shot:hover{transform:translateY(-4px);box-shadow:var(--shadow)}
+.shot .ph{background:var(--soft);border-radius:12px;overflow:hidden;display:grid;place-items:center;min-height:120px}
+.shot img{width:100%;height:auto}
+.shot h4{margin:14px 0 4px;font-size:15px}
+.shot p{margin:0;font-size:13px;color:var(--muted);line-height:1.55}
+.shot.wide{grid-column:span 2}
+@media(max-width:560px){.shot.wide{grid-column:span 1}}
+.shot.hide{display:none}
+
+/* ---------- 特性 ---------- */
+.feats{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:18px}
+.feat{background:var(--card);border:1px solid var(--line-soft);border-radius:var(--r);padding:24px;box-shadow:var(--shadow-sm)}
+.feat .ico{width:42px;height:42px;border-radius:13px;background:var(--soft);display:grid;place-items:center;
+  font-size:20px;margin-bottom:14px}
+.feat h3{font-size:17px;margin-bottom:8px}
+.feat p{margin:0;font-size:14px;color:var(--muted)}
+
+/* ---------- 设计稿 ---------- */
+.docs{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}
+.doc{display:block;text-decoration:none;background:var(--card);border:1px solid var(--line-soft);
+  border-radius:var(--r);padding:22px;box-shadow:var(--shadow-sm);transition:transform .18s,box-shadow .18s,border-color .18s}
+.doc:hover{transform:translateY(-4px);box-shadow:var(--shadow);border-color:var(--mint)}
+.doc .top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.doc .tag{font-family:var(--font-m);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--green);background:var(--soft);border-radius:6px;padding:3px 8px}
+.doc h3{font-size:17.5px}
+.doc p{margin:0;font-size:13.5px;color:var(--muted)}
+.doc .go{margin-top:14px;font-size:13.5px;color:var(--green);font-weight:600}
+
+/* ---------- 原型 ---------- */
+.proto{margin-top:26px;border:1px solid var(--line);border-radius:22px;overflow:hidden;background:var(--card);box-shadow:var(--shadow)}
+.proto-bar{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line-soft);
+  font-size:13.5px;color:var(--muted)}
+.proto-bar .lights{display:flex;gap:6px}
+.proto-bar .lights i{width:10px;height:10px;border-radius:50%;background:var(--line)}
+.proto-bar a{margin-left:auto;color:var(--green);font-weight:600;text-decoration:none}
+.proto iframe{width:100%;height:min(76vh,880px);border:0;display:block;background:var(--paper)}
+
+/* ---------- 社区 ---------- */
+.links{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
+.link{display:flex;gap:14px;align-items:flex-start;text-decoration:none;background:var(--card);
+  border:1px solid var(--line-soft);border-radius:16px;padding:18px;box-shadow:var(--shadow-sm)}
+.link:hover{border-color:var(--mint)}
+.link .ico{width:38px;height:38px;border-radius:12px;background:var(--soft);display:grid;place-items:center;flex:none;font-size:18px}
+.link b{display:block;font-size:15px;font-family:var(--font-d)}
+.link span{font-size:13px;color:var(--muted)}
+
+footer{padding:44px 0 60px;border-top:1px solid var(--line-soft);color:var(--muted);font-size:13.5px}
+footer .wrap{display:flex;gap:24px;flex-wrap:wrap;justify-content:space-between}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top"><span class="dot"></span>myMusic</a>
+    <div class="nav-links">
+      <a href="#ui">界面</a>
+      <a href="#features">特性</a>
+      <a href="#design">设计稿</a>
+      <a href="#community">社区</a>
+    </div>
+    <button class="tgl" id="theme" title="切换深浅色" aria-label="切换深浅色">◐</button>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">Android 6.0+ · Compose · Material 3</p>
+      <h1>把五个平台<br/>收进一个播放器</h1>
+      <p class="lead">myMusic 聚合网易云、QQ、酷狗、酷我、咪咕的榜单、歌单与单曲，按同一录音合并，自动换源播放。手机、平板、折叠屏、双屏和电视用同一套焦点与播放操作。</p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/mytv-android/myMusic/releases">下载 APK</a>
+        <a class="btn" href="#ui">看界面</a>
+        <a class="btn" href="#design">设计稿</a>
+      </div>
+    </div>
+    <div class="hero-shot">
+      <img src="images/screens/ui-chart.png" alt="榜单界面"/>
+      <img src="images/screens/ui-player.png" alt="播放界面"/>
+    </div>
+  </div>
+</header>
+
+<section id="ui">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <p class="kicker">Screens</p>
+        <h2>界面</h2>
+        <p>按同一套视觉规则单独绘制的界面稿。点下面的分类筛选；每张图都对应一个真实页面，不是概念图。</p>
+      </div>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="gallery" id="gallery"></div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <p class="kicker">Features</p>
+        <h2>它能做什么</h2>
+      </div>
+    </div>
+    <div class="feats">
+      <div class="feat"><div class="ico">🧭</div><h3>跨平台聚合</h3><p>单曲、专辑、歌单并行查询已启用的平台，按同一录音合并；逐条标出完整、试听、VIP 或无音源。</p></div>
+      <div class="feat"><div class="ico">🔁</div><h3>换源播放</h3><p>当前平台没有播放地址时，在其他平台按需检索同一版本并接续播放，保留播放进度。</p></div>
+      <div class="feat"><div class="ico">🎨</div><h3>海报墙</h3><p>播放队列铺成一面可以四向拖动的封面墙，点一格就地放大，再点就从这首开始放。</p></div>
+      <div class="feat"><div class="ico">📱</div><h3>桌面小组件</h3><p>六款 Glance 组件：正在播放、歌词、听歌模式、榜单、歌单与快捷入口，颜色跟随 App 外观。</p></div>
+      <div class="feat"><div class="ico">📖</div><h3>折叠屏与双屏</h3><p>按系统报来的折痕分栏：书本姿态左页封面右页歌词，桌面姿态上半屏歌词、下半屏控制。</p></div>
+      <div class="feat"><div class="ico">🎚️</div><h3>均衡器与响度</h3><p>五段以上实时均衡；用平台返回的响度元数据做音量均衡与峰值限幅，不修改音频文件。</p></div>
+      <div class="feat"><div class="ico">☁️</div><h3>音乐库同步</h3><p>自建歌单同步到 GitHub Gist 或 Gitee，三版本逐歌单合并，冲突时让你选，删除用墓碑。</p></div>
+      <div class="feat"><div class="ico">🎤</div><h3>听歌识曲</h3><p>录音同时查网易云与酷狗两个通道，结果按歌名歌手合并，点一条直接播放。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="design">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <p class="kicker">Design docs</p>
+        <h2>设计稿</h2>
+        <p>这些稿子都是可以点的 HTML：底栏能翻页、来源能切换、冲突能合并。先有界面，再有实现。</p>
+      </div>
+    </div>
+    <div class="docs">
+      <a class="doc" href="redesign.html"><div class="top"><span class="tag">原型</span></div><h3>功能与交互重设计</h3><p>五个入口、34 个界面和一套贯穿全应用的规则：浏览来源不是播放来源、本地先行、内容页只做一套、失败必须给出下一步。</p><div class="go">打开原型 →</div></a>
+      <a class="doc" href="expressive-redesign.html"><div class="top"><span class="tag">视觉</span></div><h3>Expressive 重设计</h3><p>Material 3 Expressive 配色与形状体系：封面取色、模糊背景、电视焦点与无障碍走查。</p><div class="go">查看 →</div></a>
+      <a class="doc" href="player-redesign.html"><div class="top"><span class="tag">播放页</span></div><h3>播放页重设计</h3><p>形状封面、流光背景、常驻两行歌词；手机、平板、电视同一套部件，三种排法。</p><div class="go">查看 →</div></a>
+      <a class="doc" href="poster-wall.html"><div class="top"><span class="tag">海报墙</span></div><h3>队列海报墙</h3><p>改编自 folia-major 的 Lattice：四个模板重新手画，Kotlin 重写，外观换成 Material 3 Expressive。</p><div class="go">查看 →</div></a>
+      <a class="doc" href="widgets.html"><div class="top"><span class="tag">小组件</span></div><h3>桌面小组件</h3><p>六款组件的七档尺寸、歌词背景三态、颜色与深浅跟随 App 主题的取舍。</p><div class="go">查看 →</div></a>
+      <a class="doc" href="foldables.html"><div class="top"><span class="tag">折叠屏</span></div><h3>折叠屏与双屏</h3><p>书本 / 桌面姿态、铰链分栏、弹窗避折痕，附 Pixel Fold 模拟器上的实测。</p><div class="go">查看 →</div></a>
+      <a class="doc" href="beat-sync.html"><div class="top"><span class="tag">律动</span></div><h3>律动跟拍</h3><p>歌词背景的流光场怎么对上真实音频：取样对齐、帧时钟推进、三档强度与校准。</p><div class="go">查看 →</div></a>
+      <a class="doc" href="play-button-redesign.html"><div class="top"><span class="tag">控件</span></div><h3>播放按钮重设计</h3><p>一个播放/暂停按钮的形状、进度与焦点态，以及它在五种场景里的样子。</p><div class="go">查看 →</div></a>
+    </div>
+
+    <div class="proto">
+      <div class="proto-bar">
+        <span class="lights"><i></i><i></i><i></i></span>
+        <span>可直接操作的功能原型</span>
+        <a href="redesign.html" target="_blank" rel="noopener">新标签页打开 ↗</a>
+      </div>
+      <iframe src="redesign.html" title="myMusic 功能与交互原型" loading="lazy"></iframe>
+    </div>
+  </div>
+</section>
+
+<section id="community">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <p class="kicker">Community</p>
+        <h2>项目与社区</h2>
+      </div>
+    </div>
+    <div class="links">
+      <a class="link" href="https://github.com/mytv-android/myMusic"><span class="ico">⭐</span><span><b>myMusic</b><span>源码、Issue 与 Release</span></span></a>
+      <a class="link" href="https://github.com/sodahub-org/sodam"><span class="ico">🥤</span><span><b>SodaM</b><span>汽水音乐整曲签名服务（AGPL-3.0）</span></span></a>
+      <a class="link" href="https://github.com/guohuiyuan/music-lib"><span class="ico">📚</span><span><b>music-lib</b><span>平台协议层（AGPL-3.0）</span></span></a>
+      <a class="link" href="https://t.me/mytv_android_channel"><span class="ico">✈️</span><span><b>Telegram 群组</b><span>更新与反馈</span></span></a>
+      <a class="link" href="https://github.com/pangtugg/easytv-partner"><span class="ico">📺</span><span><b>易用TV助手</b><span>电视上一键安装与扫码遥控</span></span></a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>myMusic · GNU AGPL-3.0 · 界面与设计稿由项目自行绘制</span>
+    <span>学习项目，请遵守所在地法律与各平台服务条款</span>
+  </div>
+</footer>
+
+<script>
+const SHOTS = [
+  {f:'images/screens/ui-chart.png', t:'榜单', c:'来源胶囊只决定榜单内容来源，播放仍按聚合策略自动换源', k:'浏览'},
+  {f:'images/screens/ui-chart-detail.png', t:'榜单详情', c:'播放全部、换源设置与逐曲音源状态', k:'浏览'},
+  {f:'images/screens/ui-playlists.png', t:'歌单 · 推荐', c:'平台来源与推荐 / 分类切换，横向推荐行', k:'浏览'},
+  {f:'images/screens/ui-playlist-detail.png', t:'平台歌单详情', c:'与榜单共用同一套媒体列表，操作位置一致', k:'浏览'},
+  {f:'images/screens/ui-search.png', t:'聚合搜索', c:'按同一录音合并，逐条标出完整 / 试听 / VIP，异常平台单独显示', k:'搜索'},
+  {f:'images/screens/ui-sources.png', t:'音源选择', c:'逐平台列出音源状态，可记住本曲使用的平台', k:'搜索'},
+  {f:'images/screens/ui-library.png', t:'我的 · 歌单', c:'同步状态直接出现在歌单行：已同步、待同步、有冲突', k:'我的'},
+  {f:'images/screens/ui-user-playlist.png', t:'自建歌单', c:'播放全部、添加歌曲、编辑排序与逐曲移除', k:'我的'},
+  {f:'images/screens/ui-sync.png', t:'同步中心', c:'连接状态、同步结果、冲突入口与后端选择', k:'我的'},
+  {f:'images/screens/ui-player.png', t:'全屏播放', c:'封面铺满延伸到状态栏，当前播放源与换源入口常驻', k:'播放'},
+  {f:'images/screens/ui-lyrics.png', t:'歌词', c:'逐行高亮与自动滚动，当前句保持视觉中心', k:'播放'},
+  {f:'images/screens/ui-queue.png', t:'播放队列', c:'队列不属于任何页签，切换页面不会丢失', k:'播放'},
+  {f:'images/screens/beat-stage.png', t:'歌词背景律动', c:'流光场随真实音频的低 / 中 / 高频与鼓点变化', k:'播放'},
+  {f:'images/screens/player-shapes.png', t:'封面形状', c:'十二瓣、九瓣等形状随机抽取，暂停时变圆角方形', k:'播放'},
+  {f:'images/screens/player-layouts.png', t:'播放页三种排布', c:'手机、平板、电视使用同一套部件，三种排法', k:'播放', wide:true},
+  {f:'images/screens/fold-book.png', t:'折叠屏书本姿态', c:'左页封面与控制，右页歌词，按折痕分栏', k:'折叠', wide:true},
+  {f:'images/screens/wall-poster-wall.png', t:'海报墙', c:'队列铺成封面墙，点一格就地放大，再点从这首播放', k:'折叠', wide:true},
+  {f:'images/screens/wall-queue-panel.png', t:'从队列进入', c:'队列面板标题栏的网格按钮，或播放页“更多”菜单', k:'折叠'},
+  {f:'images/screens/wall-detail.png', t:'详情页海报视图', c:'歌单、专辑、榜单一键切成海报视图，下次打开沿用', k:'折叠'},
+  {f:'images/screens/widget-home.png', t:'桌面上的样子', c:'六款组件长按添加，颜色与深浅跟随 App 外观设置', k:'小组件'},
+  {f:'images/screens/widget-now.png', t:'正在播放', c:'七档尺寸，2×3 起有波浪进度条，4×3 带两句歌词', k:'小组件'},
+  {f:'images/screens/widget-lyrics.png', t:'歌词组件', c:'当前一句放大、下一句变淡，有翻译时跟在下面', k:'小组件'},
+  {f:'images/screens/widget-chart.png', t:'榜单组件', c:'任选一张榜，显示前几名与排名变化', k:'小组件'},
+  {f:'images/screens/ui-tablet-tv.png', t:'平板与电视', c:'左侧导航轨、内容网格与常驻播放窗格；遥控器按阅读顺序移动焦点', k:'平板电视', wide:true},
+  {f:'images/screens/ui-settings.png', t:'设置', c:'索引式设置，改动即保存；关于与更新用圆点提示有可用版本', k:'平板电视'}
+];
+
+const gallery = document.getElementById('gallery');
+gallery.innerHTML = SHOTS.map((s, i) => `
+  <figure class="shot${s.wide ? ' wide' : ''}" data-k="${s.k}">
+    <div class="ph"><img loading="lazy" src="${s.f}" alt="${s.t}"/></div>
+    <h4>${s.t}</h4><p>${s.c}</p>
+  </figure>`).join('');
+
+const cats = ['全部', ...new Set(SHOTS.map(s => s.k))];
+const chips = document.getElementById('chips');
+chips.innerHTML = cats.map((c, i) =>
+  `<button class="chip" aria-pressed="${i === 0}" data-c="${c}">${c}</button>`).join('');
+chips.addEventListener('click', e => {
+  const b = e.target.closest('.chip'); if (!b) return;
+  chips.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', c === b));
+  const c = b.dataset.c;
+  gallery.querySelectorAll('.shot').forEach(s => {
+    s.classList.toggle('hide', c !== '全部' && s.dataset.k !== c);
+  });
+});
+
+// 主题切换
+const root = document.documentElement, key = 'mymusic-theme';
+document.getElementById('theme').addEventListener('click', () => {
+  root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem(key, root.dataset.theme);
+});
+</script>
+</body>
+</html>
