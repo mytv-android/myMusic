@@ -119,9 +119,9 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         queueStore = QueueStore(this)
         // 屏保、息屏的状态：电视上这时候「离开应用」不是用户真的走了，音乐不能停
         ScreensaverState.start(this)
-        // 桌面小组件：播放、设置、收藏、亮灭屏变化时合并刷新（手机和平板才有桌面组件）。
+        // 桌面小组件：播放、设置、收藏、亮灭屏变化时合并刷新，电视上同样启用。
         // DE 上下文里 Glance 依赖的 WorkManager 起不来，直接不启动组件这条链路，主界面照常可用。
-        if (!isTelevision() && backgroundWork) WidgetUpdater.start(this)
+        if (backgroundWork) WidgetUpdater.start(this)
     }
 
     private fun createMediaCache(): SimpleCache {
