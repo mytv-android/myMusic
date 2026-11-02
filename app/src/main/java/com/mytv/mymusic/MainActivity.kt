@@ -46,8 +46,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // ViewModel 是进程级的，activity 退出后它还在：全新启动时收起上次留下的播放页
         model.onUiLaunched(fresh = savedInstanceState == null)
-        // 电视上没有桌面小组件：相关代码路径整条跳过，不去加载 Glance / WorkManager
-        if (savedInstanceState == null && (application as com.mytv.mymusic.MyMusicApp).widgetsEnabled) {
+        if (savedInstanceState == null) {
             openWidgetTarget(intent)
             // 桌面上有榜单组件时顺带刷一次榜（上次刷新超过半小时才刷）
             ChartWidgetWorker.refreshOnOpen(this)
@@ -121,7 +120,6 @@ class MainActivity : ComponentActivity() {
 
     /** 桌面小组件点开 App 时带着目标页（播放页、搜索、某个榜单……），交给界面去跳。 */
     private fun openWidgetTarget(intent: Intent?) {
-        if (!(application as com.mytv.mymusic.MyMusicApp).widgetsEnabled) return
         val target = WidgetLinks.parse(intent) ?: return
         WidgetLinks.consume(intent)
         model.openFromWidget(target)

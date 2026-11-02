@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- 桌面小组件：电视上没有桌面，见 values-television 和 MyMusicApp.disableWidgetComponentsOnTelevision -->
-    <bool name="widgets_enabled">true</bool>
-</resources>

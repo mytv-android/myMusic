@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- 电视没有桌面小组件。实测装 APK 时系统解析清单不看 uiMode，这个值到不了组件上，
-         真正生效的是 MyMusicApp 启动时的持久禁用；这里保留作静态声明。 -->
-    <bool name="widgets_enabled">false</bool>
-</resources>

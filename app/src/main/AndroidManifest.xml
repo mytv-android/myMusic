@@ -78,7 +78,6 @@
         <!-- 桌面小组件的配置页（背景、榜单、歌单、听歌模式、歌词翻译）：添加时可跳过，长按组件重新进来 -->
         <activity
             android:name=".widget.WidgetConfigActivity"
-            android:enabled="@bool/widgets_enabled"
             android:exported="true"
             android:excludeFromRecents="true"
             android:label="@string/widget_config_title"
@@ -105,13 +104,9 @@
             </intent-filter>
         </receiver>
 
-        <!-- 桌面小组件（Glance）。全部由 App 推送，见 widget/WidgetUpdater。
-             电视上没有桌面：组件在 MyMusicApp 启动时持久禁用（@bool/widgets_enabled 只是静态兜底，
-             实测装 APK 时系统解析清单不看 uiMode）。禁用后系统不会拉起，Glance 和它依赖的
-             WorkManager 也就不会被加载。 -->
+        <!-- 桌面小组件（Glance）。全部由 App 推送，见 widget/WidgetUpdater -->
         <receiver
             android:name=".widget.NowPlayingWidgetReceiver"
-            android:enabled="@bool/widgets_enabled"
             android:exported="true"
             android:label="@string/widget_now_name">
             <intent-filter>
@@ -123,7 +118,6 @@
         </receiver>
         <receiver
             android:name=".widget.LyricsWidgetReceiver"
-            android:enabled="@bool/widgets_enabled"
             android:exported="true"
             android:label="@string/widget_lyrics_name">
             <intent-filter>
@@ -135,7 +129,6 @@
         </receiver>
         <receiver
             android:name=".widget.ModeWidgetReceiver"
-            android:enabled="@bool/widgets_enabled"
             android:exported="true"
             android:label="@string/widget_mode_name">
             <intent-filter>
@@ -147,7 +140,6 @@
         </receiver>
         <receiver
             android:name=".widget.ChartWidgetReceiver"
-            android:enabled="@bool/widgets_enabled"
             android:exported="true"
             android:label="@string/widget_charts_name">
             <intent-filter>
@@ -159,7 +151,6 @@
         </receiver>
         <receiver
             android:name=".widget.ListWidgetReceiver"
-            android:enabled="@bool/widgets_enabled"
             android:exported="true"
             android:label="@string/widget_list_name">
             <intent-filter>
@@ -171,7 +162,6 @@
         </receiver>
         <receiver
             android:name=".widget.ToolsWidgetReceiver"
-            android:enabled="@bool/widgets_enabled"
             android:exported="true"
             android:label="@string/widget_tools_name">
             <intent-filter>
