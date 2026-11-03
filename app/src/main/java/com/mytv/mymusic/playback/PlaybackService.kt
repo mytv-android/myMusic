@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -32,6 +33,8 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.R
+import com.mytv.mymusic.widget.WidgetLinks
+import com.mytv.mymusic.widget.WidgetTarget
 import kotlinx.coroutines.launch
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -100,7 +103,17 @@ class PlaybackService : MediaSessionService() {
             })
         }
         app?.sleepTimer?.attach(player)
-        session = MediaSession.Builder(this, player).setCallback(ResumptionCallback()).build()
+        // 通知栏卡片、锁屏和系统媒体面板点一下要能回到播放页；不给内容意图的话点了没反应
+        val openPlayer = PendingIntent.getActivity(
+            this,
+            OPEN_PLAYER_REQUEST,
+            WidgetLinks.intent(this, WidgetTarget.Player),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        session = MediaSession.Builder(this, player)
+            .setCallback(ResumptionCallback())
+            .setSessionActivity(openPlayer)
+            .build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = session
@@ -186,6 +199,7 @@ class PlaybackService : MediaSessionService() {
         const val FOREGROUND_GUARD_MS = 8_000L
         const val GUARD_CHANNEL = "playback_resume"
         const val GUARD_NOTIFICATION_ID = 0x6d6d
+        const val OPEN_PLAYER_REQUEST = 0x6d65
     }
 }
 
