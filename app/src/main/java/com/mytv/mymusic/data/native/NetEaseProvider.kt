@@ -212,10 +212,15 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         val response = weapiPost(LYRIC_API, body, cookie)
         val data = json.decodeFromString<NeteaseLyricResponse>(response.body)
         if (data.code != 0 && data.code != 200) throw IllegalStateException("netease lyric api error: ${data.code}")
-        // 优先逐字 YRC，转换不出有效行再退回普通 LRC；翻译和罗马音按同一时间戳叠在原文后面
+        // 优先逐字 YRC，转换不出有效行再退回普通 LRC；翻译和罗马音按 LRC 的行顺序叠在原文后面
         val original = convertYrcToLrc(data.yrc.lyric).ifBlank { data.lrc.lyric.trim() }
         if (original.isNotBlank()) {
-            return mergeLyricLayers(original, translation = data.tlyric.lyric, romaji = data.romalrc.lyric)
+            return mergeLyricLayers(
+                original,
+                translation = data.tlyric.lyric,
+                romaji = data.romalrc.lyric,
+                reference = data.lrc.lyric,
+            )
         }
         val translated = data.tlyric.lyric.trim()
         if (translated.isNotBlank()) return translated
@@ -1455,13 +1460,27 @@ private val LYRIC_LAYER_TAG = Regex("""</?\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>""")
 
 /**
  * 把翻译、罗马音按行时间叠到原文后面，同一时间戳连续排列，解析层会再把它们并回一句。
- * 对不上时间的层丢掉；只有罗马音和翻译完全相同时去重。时间轴按毫秒精确匹配，找不到时允许 ±300ms
- * （各接口返回的 LRC 小数位不完全一致）。
+ * YRC 的行起始时间和 LRC/翻译层不是同一条时间轴，所以优先用 [reference]（同一次接口返回的 LRC）
+ * 按行顺序给每句原文找对应时间，再取翻译；没有 [reference] 或行数对不上时才退回时间戳匹配。
  */
-internal fun mergeLyricLayers(original: String, translation: String = "", romaji: String = ""): String {
+internal fun mergeLyricLayers(
+    original: String,
+    translation: String = "",
+    romaji: String = "",
+    reference: String = "",
+): String {
     val roman = parseLyricLayer(romaji)
     val trans = parseLyricLayer(translation)
     if (roman.isEmpty() && trans.isEmpty()) return original
+    val originalTimes = parseLayerLineTimes(original)
+    val referenceTimes = parseLayerLineTimes(reference)
+    val anchors = alignLayerTimes(originalTimes, referenceTimes)
+    // 翻译层和 LRC 同一时间轴；罗马音在部分 YRC 歌曲里仍跟着 YRC 时间，不能一律用 LRC 对齐。
+    val layers = listOf(
+        roman to (anchors != null && roman.timelineMatches(referenceTimes) >= roman.timelineMatches(originalTimes)),
+        trans to (anchors != null && trans.timelineMatches(referenceTimes) >= trans.timelineMatches(originalTimes)),
+    )
+    var anchorIndex = 0
     val out = StringBuilder()
     original.lineSequence().forEach { line ->
         val trimmed = line.trim()
@@ -1472,19 +1491,90 @@ internal fun mergeLyricLayers(original: String, translation: String = "", romaji
             return@forEach
         }
         val text = LYRIC_LAYER_TIME.replace(trimmed, "").trim()
+        val hasText = LYRIC_LAYER_TAG.replace(text, "").trim().isNotEmpty()
         for (match in times) {
             val time = parseLayerTime(match)
+            val anchor = if (hasText) anchors?.getOrNull(anchorIndex++) ?: -1L else -1L
             out.append('[').append(formatYrcTime(time.toInt())).append(']').append(text).append('\n')
             var previous = text
-            for (layer in listOf(roman, trans)) {
-                val extra = layer.nearest(time)?.takeIf { it != previous } ?: continue
-                out.append('[').append(formatYrcTime(time.toInt())).append(']').append(extra).append('\n')
-                previous = extra
+            for ((layer, anchored) in layers) {
+                val extra = if (anchored && anchor >= 0L) {
+                    layer.at(anchor, LAYER_ANCHOR_TOLERANCE_MS)
+                } else {
+                    layer.at(time, LAYER_TIME_TOLERANCE_MS)
+                }
+                val value = extra?.takeIf { it != previous } ?: continue
+                out.append('[').append(formatYrcTime(time.toInt())).append(']').append(value).append('\n')
+                previous = value
             }
         }
     }
     return out.toString().trimEnd('\n')
 }
+
+/** 每一条非空歌词行的时间（多时间戳行按出现顺序展开），用于按行对齐 YRC 与 LRC。 */
+private fun parseLayerLineTimes(raw: String): List<Long> {
+    if (raw.isBlank()) return emptyList()
+    val out = ArrayList<Long>()
+    raw.lineSequence().forEach { line ->
+        val trimmed = line.trim()
+        val times = LYRIC_LAYER_TIME.findAll(trimmed).toList()
+        if (times.isEmpty()) return@forEach
+        val text = LYRIC_LAYER_TAG.replace(LYRIC_LAYER_TIME.replace(trimmed, ""), "").trim()
+        if (text.isEmpty()) return@forEach
+        times.forEach { out += parseLayerTime(it) }
+    }
+    return out
+}
+
+/**
+ * 按行顺序把原文对齐到参考 LRC：行数相同直接一一对应；不同时用最小时间差对齐，
+ * 多出来的行按 [LAYER_ALIGN_GAP_MS] 的代价跳过。返回每条原文对应的时间，-1 表示没有对应行。
+ */
+private fun alignLayerTimes(original: List<Long>, reference: List<Long>): List<Long>? {
+    if (original.isEmpty() || reference.isEmpty()) return null
+    if (original.size == reference.size) return reference
+    val n = original.size
+    val m = reference.size
+    val dp = Array(n + 1) { LongArray(m + 1) { Long.MAX_VALUE / 4 } }
+    dp[0][0] = 0L
+    for (i in 0..n) {
+        for (j in 0..m) {
+            if (i == 0 && j == 0) continue
+            var best = Long.MAX_VALUE / 4
+            if (i > 0 && j > 0) {
+                best = minOf(best, dp[i - 1][j - 1] + kotlin.math.abs(original[i - 1] - reference[j - 1]))
+            }
+            if (i > 0) best = minOf(best, dp[i - 1][j] + LAYER_ALIGN_GAP_MS)
+            if (j > 0) best = minOf(best, dp[i][j - 1] + LAYER_ALIGN_GAP_MS)
+            dp[i][j] = best
+        }
+    }
+    val out = LongArray(n) { -1L }
+    var i = n
+    var j = m
+    while (i > 0 || j > 0) {
+        val diagonal = if (i > 0 && j > 0) {
+            dp[i - 1][j - 1] + kotlin.math.abs(original[i - 1] - reference[j - 1])
+        } else {
+            Long.MAX_VALUE / 4
+        }
+        when {
+            i > 0 && j > 0 && dp[i][j] == diagonal -> {
+                out[i - 1] = reference[j - 1]
+                i--
+                j--
+            }
+            i > 0 && dp[i][j] == dp[i - 1][j] + LAYER_ALIGN_GAP_MS -> i--
+            else -> j--
+        }
+    }
+    return out.toList()
+}
+
+private const val LAYER_ALIGN_GAP_MS = 1_500L
+private const val LAYER_ANCHOR_TOLERANCE_MS = 50L
+private const val LAYER_TIME_TOLERANCE_MS = 300L
 
 private fun parseLyricLayer(raw: String): Map<Long, String> {
     if (raw.isBlank()) return emptyMap()
@@ -1511,10 +1601,21 @@ private fun parseLayerTime(match: MatchResult): Long {
     return minutes * 60_000 + seconds * 1_000 + millis
 }
 
-private fun Map<Long, String>.nearest(timeMs: Long): String? {
+/** 这一层有多少行能和给定时间轴对上，用来判断它跟的是 LRC 还是 YRC。 */
+private fun Map<Long, String>.timelineMatches(times: List<Long>): Int {
+    if (times.isEmpty() || isEmpty()) return 0
+    var count = 0
+    for (key in keys) {
+        if (times.any { kotlin.math.abs(it - key) <= LAYER_ANCHOR_TOLERANCE_MS }) count++
+    }
+    return count
+}
+
+/** 精确时间取不到时允许一个很小的误差：翻译层和 LRC 是同一套时间轴。 */
+private fun Map<Long, String>.at(timeMs: Long, toleranceMs: Long): String? {
     this[timeMs]?.let { return it }
     var best: String? = null
-    var bestDelta = 300L
+    var bestDelta = toleranceMs
     for ((key, value) in this) {
         val delta = kotlin.math.abs(key - timeMs)
         if (delta <= bestDelta) {

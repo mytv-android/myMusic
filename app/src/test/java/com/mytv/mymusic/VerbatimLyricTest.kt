@@ -42,6 +42,58 @@ class VerbatimLyricTest {
     }
 
     @Test
+    fun neteaseTranslationAlignsWithLrcOrderWhenYrcTimesDiffer() {
+        val yrc = """
+            [0,4000](0,1000,0)编(1000,1000,0)曲(2000,1000,0)：(3000,1000,0)某人
+            [4000,3000](4000,1000,0)我(5000,1000,0)曾(6000,1000,0)将
+            [9000,3000](9000,1000,0)青(10000,1000,0)春(11000,1000,0)翻
+        """.trimIndent()
+        val merged = mergeLyricLayers(
+            original = convertYrcToLrc(yrc),
+            translation = "[00:06.820]I once\n[00:10.460]youth",
+            reference = "[00:04.402]编曲：某人\n[00:06.820]我曾将\n[00:10.460]青春翻",
+        )
+        assertEquals(
+            "[00:00.000]<00:00.000>编</00:01.000><00:01.000>曲</00:02.000><00:02.000>：</00:03.000><00:03.000>某人</00:04.000>\n" +
+                "[00:04.000]<00:04.000>我</00:05.000><00:05.000>曾</00:06.000><00:06.000>将</00:07.000>\n" +
+                "[00:04.000]I once\n" +
+                "[00:09.000]<00:09.000>青</00:10.000><00:10.000>春</00:11.000><00:11.000>翻</00:12.000>\n" +
+                "[00:09.000]youth",
+            merged,
+        )
+    }
+
+    @Test
+    fun neteaseHeaderLineDoesNotStealFirstTranslation() {
+        val merged = mergeLyricLayers(
+            original = "[00:00.700]作词 : X\n[00:00.900]Hello",
+            translation = "[00:00.851]你好",
+            reference = "[00:00.636]作词 : X\n[00:00.851]Hello",
+        )
+        assertEquals("[00:00.700]作词 : X\n[00:00.900]Hello\n[00:00.900]你好", merged)
+    }
+
+    @Test
+    fun neteaseTranslationToleratesFractionFormatting() {
+        val merged = mergeLyricLayers(
+            original = "[00:01.851]Hello",
+            translation = "[00:01.85]你好",
+            reference = "[00:01.851]Hello",
+        )
+        assertEquals("[00:01.851]Hello\n[00:01.851]你好", merged)
+    }
+
+    @Test
+    fun neteaseAlignmentSkipsExtraLrcLine() {
+        val merged = mergeLyricLayers(
+            original = "[00:01.000]A\n[00:05.000]B",
+            translation = "[00:01.050]甲\n[00:05.050]乙",
+            reference = "[00:00.000]作词\n[00:01.050]A\n[00:05.050]B",
+        )
+        assertEquals("[00:01.000]A\n[00:01.000]甲\n[00:05.000]B\n[00:05.000]乙", merged)
+    }
+
+    @Test
     fun neteaseYrcLineWithoutWordsKeepsText() {
         assertEquals("[00:01.000]前奏", convertYrcToLrc("[1000,2000]前奏"))
     }
