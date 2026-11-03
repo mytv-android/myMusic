@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -247,6 +248,10 @@ data class LyricsSizing(val baseSp: Float, val grow: Float, val gapDp: Float, va
 /** 行高取字号的 1.3 倍，和原来 titleLarge / headlineMedium 的行高基本一致。 */
 private const val LyricLineHeight = 1.3f
 private const val FarLyricBlurDp = 1.4f
+/** 翻译相对正文的字号倍数和行高，跟海报墙大卡的比例接近。 */
+private const val LyricTranslationScale = 0.62f
+private const val LyricTranslationLineHeight = 1.25f
+private val LyricTranslationGap = 2.dp
 
 /** 歌词栏两端渐隐的范围（视口高度的比例，对照设计稿的遮罩）：顶上 0–14% 淡入，底下 80–100% 淡出。 */
 internal const val LyricFadeTop = 0.14f
@@ -537,6 +542,12 @@ private fun LyricRow(
     val blurSupported = Build.VERSION.SDK_INT >= 31 && LocalAppearance.current.blur != BlurMode.Off
     val origin = if (LocalLayoutDirection.current == LayoutDirection.Rtl) TransformOrigin(1f, 0.5f) else TransformOrigin(0f, 0.5f)
     val layerScale = { lyricLayerScale(lyricVisualSp(base.value, grow.value, lift.value), layoutSp) }
+    val translationStyle = remember(style, layoutSp) {
+        style.copy(
+            fontSize = (layoutSp * LyricTranslationScale).sp,
+            lineHeight = (layoutSp * LyricTranslationScale * LyricTranslationLineHeight).sp,
+        )
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -592,23 +603,38 @@ private fun LyricRow(
                 }
             },
     ) {
-        // 逐字数据只用于当前行：其他行保持整行文本，避免列表里出现成倍的字级节点
-        if (current && synced && line.words.isNotEmpty() && position != null) {
-            KaraokeLine(line, position, playing.value, style)
-        } else {
-            Text(
-                line.text,
-                modifier = Modifier.fillMaxWidth(),
-                style = style,
-                fontWeight = if (current) FontWeight.Black else FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+        Column(
+            Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(LyricTranslationGap),
+        ) {
+            // 逐字数据只用于当前行：其他行保持整行文本，避免列表里出现成倍的字级节点
+            if (current && synced && line.words.isNotEmpty() && position != null) {
+                KaraokeLine(line, position, playing.value, style)
+            } else {
+                Text(
+                    line.text,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = style,
+                    fontWeight = if (current) FontWeight.Black else FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            // 翻译 / 罗马音跟在原文下面：和海报墙、桌面组件同一套并行动规则
+            if (line.translation.isNotBlank()) {
+                Text(
+                    line.translation,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = translationStyle,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
 
 /**
- * 逐字卡拉OK行：底层暗字、上层亮字按各字起止时间裁剪。播放进度 500ms 才刷新一次，
+ * 逐字卡拉OK行：底层暗字、上层亮字按各字起止时间裁剪。播放进度 100ms 刷新一次，
  * 播放中用帧时钟在两次校准之间线性外推；时间只在 draw 阶段读取，逐帧变化不触发列表重组。
  * 电视上和背景、封面旋转共用 30 帧节拍（[TvFrameGate]），十英尺外看不出填色少了一半帧；
  * [capFrames] 为 true 时（海报墙的大卡）手机、平板上也限 30 帧。

@@ -1025,16 +1025,40 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         }
         val lines = response.data?.lrclist.orEmpty()
         if (lines.isEmpty()) return ""
+        return convertKuwoSongInfoLrc(
+            lines.mapNotNull { line ->
+                val secs = line.time.toDoubleOrNull() ?: return@mapNotNull null
+                secs to line.lineLyric
+            },
+        )
+    }
+
+    /**
+     * songinfo 歌词转 LRC。这个接口把翻译行放在原文前面（例如日文歌：先中文翻译、后日文原文），
+     * 同一时间的几行要倒回来，主播放页才会把原文当正文、翻译跟在下面。
+     */
+    internal fun convertKuwoSongInfoLrc(entries: List<Pair<Double, String>>): String {
         val builder = StringBuilder()
-        for (line in lines) {
-            val secs = line.time.toDoubleOrNull() ?: 0.0
-            val whole = secs.toInt()
-            val minutes = whole / 60
-            val seconds = whole % 60
-            val hundredths = ((secs - whole) * 100).toInt()
-            builder.append(
-                String.format(Locale.ROOT, "[%02d:%02d.%02d]%s\n", minutes, seconds, hundredths, line.lineLyric),
-            )
+        var index = 0
+        while (index < entries.size) {
+            var end = index + 1
+            while (end < entries.size && kotlin.math.abs(entries[end].first - entries[index].first) < 0.001) end++
+            for (i in end - 1 downTo index) {
+                val totalHundredths = kotlin.math.round(entries[i].first * 100).toInt()
+                val whole = totalHundredths / 100
+                val hundredths = totalHundredths % 100
+                builder.append(
+                    String.format(
+                        Locale.ROOT,
+                        "[%02d:%02d.%02d]%s\n",
+                        whole / 60,
+                        whole % 60,
+                        hundredths,
+                        entries[i].second,
+                    ),
+                )
+            }
+            index = end
         }
         return builder.toString()
     }
@@ -1568,11 +1592,13 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         val builder = StringBuilder()
         for (match in matches) {
             val wordStart = match.groupValues[1].toLongOrNull() ?: 0L
+            val duration = match.groupValues[2].toLongOrNull() ?: 0L
             val wordText = match.groupValues[3]
             if (wordText.isEmpty()) continue
             // 时间轴有绝对毫秒和相对行首两种写法：早于行首的按相对处理
             val start = if (wordStart >= lineStartMs) wordStart else lineStartMs + wordStart
             builder.append('<').append(formatKuwoWordTime(start)).append('>').append(wordText)
+            if (duration > 0) builder.append("</").append(formatKuwoWordTime(start + duration)).append('>')
         }
         return if (builder.isEmpty()) kuwoNewLyricPayloadText(payload) else builder.toString()
     }

@@ -669,7 +669,7 @@ private fun NowControls(
                 .weight(1f)
                 .padding(horizontal = 10.dp)
                 .tvFocusRing(SeekFocusShape, scale = 1f),
-            // 波浪不平移：M3 的波浪按屏幕刷新率自己跑，会让整面墙一直 60 帧重画；进度每 500ms 才动一下
+            // 波浪不平移：M3 的波浪按屏幕刷新率自己跑，会让整面墙一直 60 帧重画；进度每 100ms 才动一下
             waveTravel = false,
         )
         if (!tv) CardIconButton(Icons.AutoMirrored.Filled.OpenInNew, "打开播放页", onOpenPlayer)

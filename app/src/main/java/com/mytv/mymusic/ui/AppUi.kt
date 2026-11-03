@@ -178,7 +178,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun moveQueueItemNext(index: Int) = model.moveQueueItemNext(index)
     /** 任意一首（不一定在队列里）的“下一首播放”，详情页海报视图的大卡用。 */
     fun playSongNext(song: Song) = model.playSongNext(song)
-    /** 播放进度（每 500ms），只在需要画进度的叶子里读，见 MusicViewModel.position。 */
+    /** 播放进度（每 100ms），只在需要画进度的叶子里读，见 MusicViewModel.position。 */
     val position: kotlinx.coroutines.flow.StateFlow<Long> get() = model.position
     fun clearQueue() = model.clearQueue()
     fun favorite(song: Song) = model.toggleFavorite(song)

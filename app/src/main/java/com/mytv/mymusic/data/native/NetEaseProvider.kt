@@ -212,11 +212,11 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         val response = weapiPost(LYRIC_API, body, cookie)
         val data = json.decodeFromString<NeteaseLyricResponse>(response.body)
         if (data.code != 0 && data.code != 200) throw IllegalStateException("netease lyric api error: ${data.code}")
-        // 优先逐字 YRC，转换不出有效行再退回普通 LRC
-        val yrc = convertYrcToLrc(data.yrc.lyric)
-        if (yrc.isNotBlank()) return yrc
-        val lrc = data.lrc.lyric.trim()
-        if (lrc.isNotBlank()) return lrc
+        // 优先逐字 YRC，转换不出有效行再退回普通 LRC；翻译和罗马音按同一时间戳叠在原文后面
+        val original = convertYrcToLrc(data.yrc.lyric).ifBlank { data.lrc.lyric.trim() }
+        if (original.isNotBlank()) {
+            return mergeLyricLayers(original, translation = data.tlyric.lyric, romaji = data.romalrc.lyric)
+        }
         val translated = data.tlyric.lyric.trim()
         if (translated.isNotBlank()) return translated
         throw IllegalStateException("lyric is empty or not found")
@@ -1432,9 +1432,11 @@ internal fun convertYrcToLrc(raw: String): String {
         var words = 0
         for (wordMatch in NETEASE_YRC_WORD.findAll(content)) {
             val wordStart = wordMatch.groupValues[1].toIntOrNull() ?: 0
+            val duration = wordMatch.groupValues[2].toIntOrNull() ?: 0
             val text = wordMatch.groupValues[3]
             if (text.isEmpty()) continue
             builder.append('<').append(formatYrcTime(wordStart)).append('>').append(text)
+            if (duration > 0) builder.append("</").append(formatYrcTime(wordStart + duration)).append('>')
             words++
         }
         if (words == 0 && content.isNotBlank()) builder.append(content.trim())
@@ -1446,6 +1448,81 @@ internal fun convertYrcToLrc(raw: String): String {
 private fun formatYrcTime(milliseconds: Int): String {
     val ms = milliseconds.coerceAtLeast(0)
     return String.format(Locale.ROOT, "%02d:%02d.%03d", ms / 60000, (ms % 60000) / 1000, ms % 1000)
+}
+
+private val LYRIC_LAYER_TIME = Regex("""\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?]""")
+private val LYRIC_LAYER_TAG = Regex("""</?\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>""")
+
+/**
+ * 把翻译、罗马音按行时间叠到原文后面，同一时间戳连续排列，解析层会再把它们并回一句。
+ * 对不上时间的层丢掉；只有罗马音和翻译完全相同时去重。时间轴按毫秒精确匹配，找不到时允许 ±300ms
+ * （各接口返回的 LRC 小数位不完全一致）。
+ */
+internal fun mergeLyricLayers(original: String, translation: String = "", romaji: String = ""): String {
+    val roman = parseLyricLayer(romaji)
+    val trans = parseLyricLayer(translation)
+    if (roman.isEmpty() && trans.isEmpty()) return original
+    val out = StringBuilder()
+    original.lineSequence().forEach { line ->
+        val trimmed = line.trim()
+        if (trimmed.isEmpty()) return@forEach
+        val times = LYRIC_LAYER_TIME.findAll(trimmed).toList()
+        if (times.isEmpty()) {
+            out.append(trimmed).append('\n')
+            return@forEach
+        }
+        val text = LYRIC_LAYER_TIME.replace(trimmed, "").trim()
+        for (match in times) {
+            val time = parseLayerTime(match)
+            out.append('[').append(formatYrcTime(time.toInt())).append(']').append(text).append('\n')
+            var previous = text
+            for (layer in listOf(roman, trans)) {
+                val extra = layer.nearest(time)?.takeIf { it != previous } ?: continue
+                out.append('[').append(formatYrcTime(time.toInt())).append(']').append(extra).append('\n')
+                previous = extra
+            }
+        }
+    }
+    return out.toString().trimEnd('\n')
+}
+
+private fun parseLyricLayer(raw: String): Map<Long, String> {
+    if (raw.isBlank()) return emptyMap()
+    val out = LinkedHashMap<Long, String>()
+    raw.lineSequence().forEach { line ->
+        val trimmed = line.trim()
+        val match = LYRIC_LAYER_TIME.find(trimmed) ?: return@forEach
+        val text = LYRIC_LAYER_TAG.replace(trimmed.substring(match.range.last + 1), "").trim()
+        if (text.isNotEmpty()) out[parseLayerTime(match)] = text
+    }
+    return out
+}
+
+private fun parseLayerTime(match: MatchResult): Long {
+    val minutes = match.groupValues[1].toLongOrNull() ?: 0L
+    val seconds = match.groupValues[2].toLongOrNull() ?: 0L
+    val fraction = match.groupValues[3]
+    val millis = when (fraction.length) {
+        1 -> fraction.toLongOrNull()?.times(100) ?: 0L
+        2 -> fraction.toLongOrNull()?.times(10) ?: 0L
+        3 -> fraction.toLongOrNull() ?: 0L
+        else -> 0L
+    }
+    return minutes * 60_000 + seconds * 1_000 + millis
+}
+
+private fun Map<Long, String>.nearest(timeMs: Long): String? {
+    this[timeMs]?.let { return it }
+    var best: String? = null
+    var bestDelta = 300L
+    for ((key, value) in this) {
+        val delta = kotlin.math.abs(key - timeMs)
+        if (delta <= bestDelta) {
+            bestDelta = delta
+            best = value
+        }
+    }
+    return best
 }
 
 @Serializable

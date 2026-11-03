@@ -248,7 +248,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** 界面（MainActivity）打开过。组件、系统媒体控件拉起进程时不读榜单、不检查更新，等界面真正打开。 */
     private val uiLaunched = MutableStateFlow(false)
 
-    /** 播放进度锚点：只在播放 / 暂停、跳转、切歌时更新，组件按它推算进度，不跟着 500ms 的进度流刷新。 */
+    /** 播放进度锚点：只在播放 / 暂停、跳转、切歌时更新，组件按它推算进度，不跟着 100ms 的进度流刷新。 */
     private val anchor = MutableStateFlow(PositionAnchor())
 
     private data class PositionAnchor(val key: String = "", val positionMs: Long = 0L, val at: Long = 0L)
@@ -318,7 +318,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val accountProfiles: StateFlow<Map<String, AccountProfile>> = _accountProfiles
     private val accountInfoJobs = ConcurrentHashMap<String, Job>()
 
-    // 播放进度单独成流：每 500ms 更新一次，放在 MusicUiState 里会让所有页面跟着重组
+    // 播放进度单独成流：每 100ms 更新一次，放在 MusicUiState 里会让所有页面跟着重组
     private val _position = MutableStateFlow(0L)
     val position: StateFlow<Long> = _position
 
@@ -2678,6 +2678,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         controller?.seekTo(position)
+        progressJumpAllowed = true
         _position.value = position.coerceAtLeast(0)
     }
 
@@ -2785,7 +2786,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * 系统媒体条只有两行：歌名和歌手。开关打开时把第二行换成当前这句歌词。
-     * 每 500ms 比对一次当前曲目的 artist，只在需要时替换；关掉开关后把歌手名换回来。
+     * 每个进度 tick（100ms）比对一次当前曲目的 artist，只在需要时替换；关掉开关后把歌手名换回来。
      */
     private fun syncNotificationLyrics(positionMs: Long) {
         val player = controller ?: return
@@ -3271,6 +3272,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     Player.EVENT_PLAYBACK_STATE_CHANGED,
                 )
             ) {
+                progressJumpAllowed = true
                 anchor.value = PositionAnchor(song?.key ?: previous?.key.orEmpty(), player.currentPosition.coerceAtLeast(0), SystemClock.elapsedRealtime())
                 persistCursor()
             }
@@ -3295,19 +3297,51 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 controller?.let {
                     // 从磁盘接上、还没装进播放器的队列：进度停在存下来的位置
                     if (dormant != null && it.mediaItemCount == 0) return@let
-                    _position.value = it.currentPosition.coerceAtLeast(0)
-                    syncNotificationLyrics(_position.value)
+                    val key = base.value.current?.key.orEmpty()
+                    val raw = it.currentPosition.coerceAtLeast(0)
+                    val now = SystemClock.elapsedRealtime()
+                    val clock = progressClock
+                    // MediaController 的进度要等会话推送（最长约 3 秒）才刷新，不能直接当刻度用：
+                    // 自己的锚点按 elapsedRealtime 往前推，只在跳转、切歌、暂停和真正漂移时重新对齐。
+                    // raw 没变说明只是还没推新值，不能拿它把外推的进度拉回去。
+                    val fresh = raw != lastProgressRaw
+                    lastProgressRaw = raw
+                    val anchored = progressJumpAllowed || key != clock.key || !it.isPlaying ||
+                        clock.key.isEmpty() || (fresh && raw > clock.positionAt(now) + POSITION_RESYNC_MS)
+                    val position = if (anchored) raw else clock.positionAt(now)
+                    if (anchored) progressClock = ProgressClock(key, raw, now, it.isPlaying)
+                    progressJumpAllowed = false
                     val duration = it.duration
+                    val bounded = if (duration != C.TIME_UNSET && duration > 0) position.coerceAtMost(duration) else position
+                    _position.value = bounded
+                    syncNotificationLyrics(bounded)
                     if (duration != C.TIME_UNSET && base.value.duration != duration.coerceAtLeast(0)) {
                         base.value = base.value.copy(duration = duration.coerceAtLeast(0))
                     }
                     // 播放中每 10 秒存一次位置：进程被杀后组件和继续播放从这里接上
                     if (it.isPlaying && ++ticks % CURSOR_SAVE_TICKS == 0) persistCursor()
                 }
-                delay(500)
+                delay(PROGRESS_TICK_MS)
             }
         }
     }
+
+    /** 播放进度的本地时钟；[positionAt] 按 elapsedRealtime 外推，不跟着会话推送的节奏跳。 */
+    private data class ProgressClock(
+        val key: String = "",
+        val positionMs: Long = 0L,
+        val at: Long = 0L,
+        val playing: Boolean = false,
+    ) {
+        fun positionAt(now: Long): Long =
+            if (playing) positionMs + (now - at).coerceAtLeast(0) else positionMs
+    }
+
+    private var progressClock = ProgressClock()
+    private var lastProgressRaw = -1L
+
+    /** 跳转、切歌、播放/缓冲状态变化时允许进度倒退一次。 */
+    private var progressJumpAllowed = true
 
     // ---------- 播放器连接、队列落盘、继续播放 ----------
 
@@ -3327,6 +3361,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             controllerFuture = null
             val player = runCatching { future.get() }.getOrNull() ?: return@addListener
             controller = player
+            progressClock = ProgressClock()
+            lastProgressRaw = -1L
+            progressJumpAllowed = true
             player.addListener(playerListener)
             connected.value = player
             if (progressJob?.isActive != true) startProgress()
@@ -3360,6 +3397,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         lost.removeListener(playerListener)
         controller = null
         connected.value = null
+        progressClock = ProgressClock()
+        lastProgressRaw = -1L
+        progressJumpAllowed = true
         // 播放器没了：没有可以接着放的东西，回前台也不自动开播
         interruptedBySystem = false
         autoPauseInFlight = false
@@ -4208,8 +4248,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         /** 队列变动后停这么久再落盘，连续改队列（听歌模式续一批、批量加入）只写一次。 */
         const val QUEUE_SAVE_DEBOUNCE_MS = 1_000L
 
-        /** 进度循环 500ms 一圈，20 圈存一次位置。 */
-        const val CURSOR_SAVE_TICKS = 20
+        /** 进度循环 100ms 一圈：歌词换行、系统媒体条和进度条都靠它，越密跟得越紧。100 圈（10 秒）存一次位置。 */
+        const val PROGRESS_TICK_MS = 100L
+        const val CURSOR_SAVE_TICKS = 100
+
+        /** 播放器新报的进度和本地外推差这么多才重新对齐，避免把正常的会话推送误差变成跳变。 */
+        const val POSITION_RESYNC_MS = 300L
 
         /** 继续播放最多往后试几首、总共等多久：系统要求前台服务 10 秒内起来。 */
         const val RESUME_TRIES = 3

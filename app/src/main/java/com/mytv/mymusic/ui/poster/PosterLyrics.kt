@@ -48,10 +48,7 @@ import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/**
- * 大卡里的一句歌词：原文行和它的翻译。播放页把翻译当成同一时间戳的独立行列出（QQ、酷我把罗马音 / 翻译
- * 写在原文后面、用同一个时间戳），这里把它们并回原文下面。
- */
+/** 大卡里的一句歌词：原文行和它的翻译。翻译由 [LyricsParser] 按同一时间戳并进 [LyricLine.translation]。 */
 @Immutable
 internal data class PosterLine(val line: LyricLine, val translation: String = "")
 
@@ -59,24 +56,10 @@ internal data class PosterLine(val line: LyricLine, val translation: String = ""
 @Immutable
 internal data class PosterLyricSize(val bodySp: Float, val translationSp: Float)
 
-/**
- * 同一时间戳的连续几行并成一句：第一行是原文，后面的取最后一行当翻译（QQ 和酷我都按原文、罗马音、翻译的顺序写，
- * 只有罗马音时就显示罗马音）。只处理同步歌词；未同步的返回空，大卡按“没有歌词”显示。
- */
+/** 只处理同步歌词；未同步的返回空，大卡按“没有歌词”显示。翻译见 [LyricLine.translation]。 */
 internal fun posterLines(lyrics: ParsedLyrics): List<PosterLine> {
     if (!lyrics.synced) return emptyList()
-    val out = ArrayList<PosterLine>(lyrics.lines.size)
-    var i = 0
-    val lines = lyrics.lines
-    while (i < lines.size) {
-        val head = lines[i]
-        var j = i + 1
-        while (j < lines.size && lines[j].timeMs == head.timeMs) j++
-        val translation = if (j - i > 1) lines[j - 1].text.trim() else ""
-        out += PosterLine(head, translation.takeUnless { it == head.text.trim() }.orEmpty())
-        i = j
-    }
-    return out
+    return lyrics.lines.map { PosterLine(it, it.translation) }
 }
 
 /** 正文行高（字号倍数），对照原型的 1.18。 */
@@ -301,7 +284,7 @@ internal fun PosterLyrics(
     val density = LocalDensity.current
     val hasTranslation = remember(lines) { lines.any { it.translation.isNotEmpty() } }
     val starts = remember(lines) { lines.map { it.line } }
-    // 进度每 500ms 变一次；派生状态只在换行时通知，读它的只有歌词列
+    // 进度每 100ms 变一次；派生状态只在换行时通知，读它的只有歌词列
     val active = remember(starts, position) { derivedStateOf { LyricsParser.activeLineIndex(starts, position.value) } }
     // 歌词框高度只在第一次量到、或者框变了大小时变（大卡按放大到位的尺寸排版，平时不变）
     val boxHeight = remember { mutableIntStateOf(0) }

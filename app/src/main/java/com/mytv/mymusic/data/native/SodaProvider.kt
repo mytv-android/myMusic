@@ -2366,11 +2366,13 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val builder = StringBuilder()
         for (match in matches) {
             val wordStart = match.groupValues[1].toIntOrNull() ?: 0
+            val duration = match.groupValues[2].toIntOrNull() ?: 0
             val wordText = match.groupValues[3]
             if (wordText.isEmpty()) continue
             // 与酷我一致：早于行首的时间按相对行首处理
             val start = if (wordStart >= lineStartMs) wordStart else lineStartMs + wordStart
             builder.append('<').append(formatSodaWordTime(start)).append('>').append(wordText)
+            if (duration > 0) builder.append("</").append(formatSodaWordTime(start + duration)).append('>')
         }
         return if (builder.isEmpty()) SODA_LYRIC_WORD.replace(content, "") else builder.toString()
     }

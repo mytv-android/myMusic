@@ -146,7 +146,7 @@ fun PlayerScreen(
     val lyricsState = rememberParsedLyrics(state.lyrics)
     val lyrics = lyricsState.lyrics
     val lyricsLoading = lyricsState.loading
-    // 进度每 500ms 变一次；派生状态只记录依赖，不在这里读取，当前行由歌词 leaf 消费
+    // 进度每 100ms 变一次；派生状态只记录依赖，不在这里读取，当前行由歌词 leaf 消费
     val active = remember(lyrics, position) {
         derivedStateOf {
             if (lyrics.synced) LyricsParser.activeLineIndex(lyrics.lines, position.value) else -1

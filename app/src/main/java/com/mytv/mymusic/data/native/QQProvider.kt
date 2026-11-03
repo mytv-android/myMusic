@@ -3618,6 +3618,9 @@ private fun lineToLrc(line: QQrcLine, forcedStart: QQrcTime): String {
             builder.append('<').append(formatLrcTime(word.start.ms)).append('>')
         }
         builder.append(word.text)
+        if (word.end.ok) {
+            builder.append("</").append(formatLrcTime(word.end.ms)).append('>')
+        }
     }
     return builder.toString()
 }

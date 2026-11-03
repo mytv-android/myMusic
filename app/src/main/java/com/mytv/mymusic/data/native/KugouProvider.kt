@@ -2402,6 +2402,9 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         for (word in line.words) {
             if (word.text.isEmpty()) continue
             builder.append('<').append(formatKugouTime(word.startMs)).append('>').append(word.text)
+            if (word.endMs > word.startMs) {
+                builder.append("</").append(formatKugouTime(word.endMs)).append('>')
+            }
         }
         return builder.toString()
     }

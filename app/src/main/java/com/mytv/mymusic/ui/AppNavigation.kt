@@ -133,7 +133,7 @@ fun MyMusicApp(model: MusicViewModel) {
     val favorites by model.favorites.collectAsState()
     val search by model.searchState.collectAsState()
     val sleep by model.sleepTimer.collectAsState()
-    // 不在这里读 value：进度每 500ms 变一次，读了会让整棵界面跟着重组
+    // 不在这里读 value：进度每 100ms 变一次，读了会让整棵界面跟着重组
     val position = model.position.collectAsState()
     val update by model.updateDetails.collectAsState()
     val updateProgress = model.updateState.collectAsState()

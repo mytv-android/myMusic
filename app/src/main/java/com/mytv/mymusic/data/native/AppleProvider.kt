@@ -670,7 +670,9 @@ private data class AppleLyricsRelationship(val data: List<AppleLyricData> = empt
 // Apple Music TTML 歌词：行 `<p begin="..">..</p>`，逐字 `<span begin="..">词</span>`；
 // 时间为 HH:MM:SS.mmm / MM:SS.mmm / 秒.mmm（可带 s 后缀）。
 private val TTML_LINE = Regex("""<p\b[^>]*\bbegin="([^"]+)"[^>]*>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL)
-private val TTML_WORD = Regex("""<span\b[^>]*\bbegin="([^"]+)"[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
+private val TTML_WORD = Regex("""<span\b([^>]*)>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
+private val TTML_BEGIN = Regex("""\bbegin="([^"]*)"""")
+private val TTML_END = Regex("""\bend="([^"]*)"""")
 private val TTML_ENTITY = Regex("""&(amp|lt|gt|quot|apos|#39|#x27);""")
 
 /**
@@ -694,11 +696,14 @@ internal fun convertTtmlToLrc(ttml: String): String {
         builder.append('[').append(formatTtmlTime(lineStart)).append(']')
         var words = 0
         for (wordMatch in wordMatches) {
+            val attrs = wordMatch.groupValues[1]
             val wordText = decodeTtmlEntities(wordMatch.groupValues[2]).trim()
             if (wordText.isEmpty()) continue
-            var wordStart = parseTtmlTime(wordMatch.groupValues[1])
+            var wordStart = parseTtmlTime(TTML_BEGIN.find(attrs)?.groupValues?.getOrNull(1).orEmpty())
             if (wordStart < 0) wordStart = lineStart
             builder.append('<').append(formatTtmlTime(wordStart)).append('>').append(wordText)
+            val wordEnd = parseTtmlTime(TTML_END.find(attrs)?.groupValues?.getOrNull(1).orEmpty())
+            if (wordEnd > wordStart) builder.append("</").append(formatTtmlTime(wordEnd)).append('>')
             words++
         }
         if (words == 0) continue
