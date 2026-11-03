@@ -2184,13 +2184,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         return startTrack(selected, ordered, null, openPlayer)
     }
 
-    /** 换一份新队列：听歌模式到此结束（否则会在普通歌单尾部继续续推荐流），选中的这首排第一。 */
+    /**
+     * 换一份新队列：听歌模式到此结束（否则会在普通歌单尾部继续续推荐流），点中的这首起播。
+     * 队列从点中的这首开始排：点第 5 首就 5、6、7……放完再绕回 1、2、3、4，别一上来就跳回第一首。
+     */
     private fun newQueue(song: Song, queue: List<Song>): Pair<CanonicalTrack, List<CanonicalTrack>> {
         activeFeed = null
         _playlists.update { if (it.listenActive.isEmpty()) it else it.copy(listenActive = "") }
         val selected = canonicalForSong(song)
         val tracks = queue.map { canonicalForSong(it) }.ifEmpty { listOf(selected) }
-        return selected to (listOf(selected) + tracks.filter { it.id != selected.id })
+        val at = tracks.indexOfFirst { it.id == selected.id }
+        val ordered = if (at < 0) {
+            listOf(selected) + tracks.filter { it.id != selected.id }
+        } else {
+            (tracks.drop(at) + tracks.take(at)).distinctBy { it.id }
+        }
+        return selected to ordered
     }
 
     fun playTrack(
@@ -2214,7 +2223,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             base.value = base.value.copy(error = "播放器尚未就绪")
             return false
         }
-        val ordered = (listOf(track) + queue.filter { it.id != track.id }).distinctBy { it.id }
+        // 队列里已经有这首就照队列给的顺序放（newQueue 已把起点轮转过），从它的位置起播；不在就排到最前面
+        val startIndex = queue.indexOfFirst { it.id == track.id }
+        val ordered = if (startIndex < 0) (listOf(track) + queue).distinctBy { it.id } else queue.distinctBy { it.id }
         val local = localFileFor(track)
         var playableTrack = track
         var ready: Resolution.Ready? = null
@@ -2252,7 +2263,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             else -> ""
         }
         dormant = null
-        player.setMediaItems(queueSongs.map(::mediaItem), 0, 0)
+        player.setMediaItems(queueSongs.map(::mediaItem), startIndex.coerceAtLeast(0), 0)
         player.prepare()
         player.play()
         base.value = base.value.copy(
