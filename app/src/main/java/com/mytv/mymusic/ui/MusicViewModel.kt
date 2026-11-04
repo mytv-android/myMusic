@@ -144,11 +144,21 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
+/** 设置里存的是枚举名字；旧数据或空值都回到默认的「推荐」。 */
+private fun String?.toPlaylistMode(): PlaylistMode =
+    PlaylistMode.entries.firstOrNull { it.name == this } ?: PlaylistMode.Recommend
+
 data class MusicUiState(
     val providers: List<ProviderInfo> = emptyList(),
     val providerId: String = "netease",
     val chartsSource: String = "",
     val playlistsSource: String = "",
+    /** 冷启动打开的顶层入口（TopTab.route），空表示还没读到设置。 */
+    val startupTab: String = "",
+    /** 歌单页上次用的浏览方式；还没读到设置时是默认的「推荐」。 */
+    val playlistsMode: PlaylistMode = PlaylistMode.Recommend,
+    /** 听歌模式页上次选的分组，空表示「全部」。 */
+    val listenGroup: String = "全部",
     val theme: String = "system",
     val appearance: Appearance = Appearance(),
     val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
@@ -211,7 +221,17 @@ data class MusicUiState(
     val mergeTrack: CanonicalTrack? = null,
     val playbackNotice: String = "",
     val deepLink: String = "",
-)
+) {
+    /**
+     * 来源胶囊用的平台：先按 [filter] 筛能力，再按设置里的音乐源顺序排（见 [AggregationSettings.priorityFor]）。
+     * 没启用的平台排在后面而不是消失——换源、组件配置仍可能用到它们。
+     */
+    fun sources(filter: (ProviderInfo) -> Boolean): List<ProviderInfo> {
+        val order = aggregation.priorityFor(providers.map { it.id }).withIndex()
+            .associate { (index, id) -> id to index }
+        return providers.filter(filter).sortedBy { order[it.id] ?: Int.MAX_VALUE }
+    }
+}
 
 /**
  * 整个进程只有一份（[MyMusicApp.musicViewModel]）：界面、桌面小组件、播放服务的继续播放都通过它控制播放器，
@@ -229,6 +249,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         SharingStarted.Eagerly,
         AppSettings(),
     )
+
+    /**
+     * DataStore 的第一帧到没到。[settingsState] 带着初始值，所以 [state] 在磁盘那一帧落下来之前
+     * 全是默认设置；界面这时候组合会按默认的启动页、主题画一帧再跳走，外壳要等这个变成 true。
+     */
+    private val _settingsReady = MutableStateFlow(false)
+    val settingsReady: StateFlow<Boolean> = _settingsReady.asStateFlow()
     private var controller: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private val connected = MutableStateFlow<MediaController?>(null)
@@ -403,6 +430,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             providerId = settings.provider,
             chartsSource = settings.chartsSource,
             playlistsSource = settings.playlistsSource,
+            startupTab = settings.startupTab,
+            playlistsMode = settings.playlistsMode.toPlaylistMode(),
+            listenGroup = settings.listenGroup.ifBlank { "全部" },
             theme = settings.theme,
             appearance = settings.toAppearance(),
             lyricsBackground = settings.lyricsBackground,
@@ -456,6 +486,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val coverSeeds = CoverSeedRepository(application, SingletonImageLoader.get(application))
 
     init {
+        viewModelScope.launch {
+            // 等磁盘上真正那一帧设置：失败也要放行，不能把界面关在门外
+            runCatching { app.settings.state.first() }
+            _settingsReady.value = true
+        }
         viewModelScope.launch {
             settingsState.map { it.cookies }.distinctUntilChanged().collect { cookies ->
                 cookies.forEach { (id, cookie) ->
@@ -541,6 +576,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- charts ----------
 
+    /** 按设置里的音乐源顺序排平台：默认来源、来源胶囊、换源面板都按这个先后。 */
+    private fun List<ProviderInfo>.bySourceOrder(): List<ProviderInfo> {
+        val order = settingsState.value.aggregation.priorityFor(map { it.id }).withIndex()
+            .associate { (index, id) -> id to index }
+        return sortedBy { order[it.id] ?: Int.MAX_VALUE }
+    }
+
     fun selectChartSource(providerId: String) {
         if (_charts.value.providerId == providerId && _charts.value.loadedAt > 0) return
         viewModelScope.launch { app.settings.chartsSource(providerId) }
@@ -554,7 +596,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadCharts(providerId: String?, force: Boolean) {
         val providers = base.value.providers
         if (providers.isEmpty()) return
-        val candidates = providers.filter { it.topLists || it.hotSongs }
+        val candidates = providers.filter { it.topLists || it.hotSongs }.bySourceOrder()
         val preferred = providerId ?: settingsState.value.chartsSource.takeIf { it.isNotBlank() }
         val target = preferred?.let { id -> candidates.find { it.id == id } ?: providers.find { it.id == id } }
             ?: candidates.find { it.id == settingsState.value.provider }
@@ -642,6 +684,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (mode == PlaylistMode.Category && !current.canCategorize) return
         if (mode == PlaylistMode.Listening && !current.canListen) return
         _playlists.value = current.copy(mode = mode)
+        // 记住上次选的浏览方式：下次打开歌单页还停在这儿，不用每次重新切
+        viewModelScope.launch { app.settings.playlistsMode(mode.name) }
         if (mode == PlaylistMode.Category && current.categoryPlaylists.isEmpty() && !current.categoryLoading) {
             loadCategory(current.selectedCategoryId, page = 1)
         }
@@ -651,7 +695,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectListenGroup(group: String) {
+        if (_playlists.value.listenGroup == group) return
         _playlists.update { it.copy(listenGroup = group) }
+        viewModelScope.launch { app.settings.listenGroup(group) }
     }
 
     fun refreshListeningModes() = loadListeningModes()
@@ -666,12 +712,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val result = runCatching { app.repository.listeningModes(providerId, cookieFor(providerId)) }
             if (generation != listenGeneration) return@launch
             result.onSuccess { modes ->
+                // 记住的分组在这个平台上可能不存在（换源、平台改了分组）：落回「全部」并一起记住。
+                // 读最新状态而不是函数开头那份：拉列表时用户可能已经点了别的分组
+                val remembered = _playlists.value.listenGroup
+                val group = remembered
+                    .takeIf { it == "全部" || modes.any { mode -> mode.group == it } } ?: "全部"
+                if (group != remembered) app.settings.listenGroup(group)
                 _playlists.update {
                     it.copy(
                         listenModes = modes,
                         listenLoading = false,
                         listenError = "",
-                        listenGroup = it.listenGroup.takeIf { group -> group == "全部" || modes.any { mode -> mode.group == group } } ?: "全部",
+                        listenGroup = group,
                     )
                 }
             }.onFailure { error ->
@@ -737,10 +789,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 场景类入口更适合直接开播；没有场景就按服务端给的顺序来。 */
+    /**
+     * 「随便听听」先试哪个模式：上次在播的那个 → 平台自己的主推荐（偏好模式、私人漫游这些非场景入口）
+     * → 场景电台兜底。场景类入口未登录也出歌，但那是兜底，不该盖过平台给的主推荐。
+     */
     private fun quickListenCandidates(modes: List<ListeningMode>): List<ListeningMode> {
-        val scenes = modes.filter { it.group.contains("场景") }
-        return scenes + modes.filterNot { it.group.contains("场景") }
+        val ordered = mutableListOf<ListeningMode>()
+        val seen = mutableSetOf<String>()
+        fun offer(mode: ListeningMode) {
+            if (seen.add(mode.id)) ordered += mode
+        }
+        _playlists.value.listenActive.takeIf { it.isNotBlank() }
+            ?.let { active -> modes.find { it.id == active } }
+            ?.let { offer(it) }
+        modes.filterNot { it.group.contains("场景") }.forEach { offer(it) }
+        modes.forEach { offer(it) }
+        return ordered
     }
 
     /**
@@ -826,7 +890,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadPlaylists(providerId: String?, force: Boolean) {
         val providers = base.value.providers
         if (providers.isEmpty()) return
-        val candidates = providers.filter { it.recommendedPlaylists || it.playlistCategories }
+        val candidates = providers.filter { it.recommendedPlaylists || it.playlistCategories }.bySourceOrder()
         val preferred = providerId ?: settingsState.value.playlistsSource.takeIf { it.isNotBlank() }
         val target = preferred?.let { id -> candidates.find { it.id == id } ?: providers.find { it.id == id } }
             ?: candidates.find { it.id == settingsState.value.provider }
@@ -834,6 +898,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             ?: providers.first()
         val generation = ++playlistsGeneration
         val sameProvider = _playlists.value.providerId == target.id
+        // 进程刚起来时 _playlists 还是初始状态：这时候用上次记住的浏览方式和分组，
+        // 之后换源、刷新都沿用当前状态（换源时目标平台不支持才回退）
+        val resumed = sameProvider || _playlists.value.providerId.isNotBlank()
+        val mode = (if (resumed) _playlists.value.mode else settingsState.value.playlistsMode.toPlaylistMode())
+            .takeIf { it != PlaylistMode.Category || target.playlistCategories }
+            ?.takeIf { it != PlaylistMode.Listening || target.listeningModes }
+            ?: PlaylistMode.Recommend
         _playlists.value = PlaylistsUiState(
             providerId = target.id,
             providerName = target.name,
@@ -842,13 +913,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             canListen = target.listeningModes,
             // 换源后听歌模式要重新拉：不同平台的模式列表完全不是一回事
             listenModes = _playlists.value.listenModes.takeIf { sameProvider }.orEmpty(),
-            listenGroup = _playlists.value.listenGroup.takeIf { sameProvider } ?: "全部",
+            listenGroup = if (resumed) {
+                _playlists.value.listenGroup
+            } else {
+                settingsState.value.listenGroup.ifBlank { "全部" }
+            },
             listenActive = _playlists.value.listenActive.takeIf { sameProvider }.orEmpty(),
-            // 换源时尽量停在当前这种浏览方式上，目标平台支持才保留
-            mode = _playlists.value.mode
-                .takeIf { it != PlaylistMode.Category || target.playlistCategories }
-                ?.takeIf { it != PlaylistMode.Listening || target.listeningModes }
-                ?: PlaylistMode.Recommend,
+            mode = mode,
             recommendationsLoading = target.recommendedPlaylists,
             categoriesLoading = target.playlistCategories,
         )
@@ -3847,14 +3918,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setMiniPlayerTarget(value: MiniPlayerTarget) = viewModelScope.launch { app.settings.miniPlayerTarget(value) }
     fun setShowBottomNav(value: Boolean) = viewModelScope.launch { app.settings.showBottomNav(value) }
 
-    fun toggleAggregateProvider(id: String) = viewModelScope.launch {
-        val current = settingsState.value.aggregation
-        val enabled = current.enabledProviders.toMutableList()
-        if (id in enabled) enabled.remove(id) else enabled.add(id)
-        searchEngine.clearCache()
-        app.settings.saveAggregation(current.copy(enabledProviders = enabled))
-    }
-
     fun setPlaybackMode(mode: PlaybackMode) = viewModelScope.launch {
         app.settings.saveAggregation(settingsState.value.aggregation.copy(playbackMode = mode))
     }
@@ -3878,18 +3941,53 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         app.settings.saveAggregation(settingsState.value.aggregation.copy(matchStrictness = value))
     }
 
-    fun moveProviderPriority(id: String, delta: Int) = viewModelScope.launch {
-        val available = base.value.providers.filter { it.search }.map { it.id }
+    fun setStartupTab(route: String) = viewModelScope.launch { app.settings.startupTab(route) }
+
+    /**
+     * 音乐源开关。关掉的平台从启用列表和优先列表里一起消失：聚合搜索、来源条、换源都不再用它，
+     * 之后想用得在「音乐源」里重新打开。
+     */
+    fun toggleAggregateProvider(id: String) = viewModelScope.launch {
         val current = settingsState.value.aggregation
-        val list = current.priorityFor(available).toMutableList()
+        val enabled = current.enabledProviders.toMutableList()
+        val priority = current.providerPriority.toMutableList()
+        if (id in enabled) {
+            enabled.remove(id)
+            priority.remove(id)
+        } else {
+            // 重新打开的排到最后：顺序是用户自己排的，不猜它想插在哪儿
+            enabled += id
+            priority += id
+        }
+        searchEngine.clearCache()
+        app.settings.saveAggregation(current.copy(enabledProviders = enabled, providerPriority = priority))
+    }
+
+    /** 音乐源排序：只在已启用的平台之间挪。这个顺序同时决定聚合搜索、来源条和换源的先后。 */
+    fun moveSource(id: String, delta: Int) = viewModelScope.launch {
+        val current = settingsState.value.aggregation
+        val available = base.value.providers.map { it.id }.toSet()
+        // 只排还在平台上的：已经下线的 id 不占位置，否则挪完看着没动
+        val list = current.enabledProviders.filter { it in available }.toMutableList()
         val index = list.indexOf(id)
         if (index < 0) return@launch
         val target = (index + delta).coerceIn(0, list.lastIndex)
         if (target == index) return@launch
-        val item = list.removeAt(index)
-        list.add(target, item)
+        list.add(target, list.removeAt(index))
         searchEngine.clearCache()
-        app.settings.saveAggregation(current.copy(providerPriority = list))
+        app.settings.saveAggregation(current.copy(enabledProviders = list))
+    }
+
+    /** 音乐源恢复默认的平台与顺序；换源模式、匹配严格度这些不动。 */
+    fun resetSources() = viewModelScope.launch {
+        val defaults = AggregationSettings()
+        searchEngine.clearCache()
+        app.settings.saveAggregation(
+            settingsState.value.aggregation.copy(
+                enabledProviders = defaults.enabledProviders,
+                providerPriority = defaults.providerPriority,
+            )
+        )
     }
 
     fun clearMatchCache() {

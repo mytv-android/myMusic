@@ -85,8 +85,6 @@ internal fun settingsOverview(
     downloadsBytes: Long,
 ): SettingsOverview {
     val appearance = state.appearance
-    val searchable = state.providers.filter { it.search }.map { it.id }
-    val enabled = state.aggregation.enabledOrDefault(searchable).size
     val eqLabel = EqPresets.byId(equalizer.presetId)?.label ?: "自定义"
     val logged = state.providers.filter { !state.cookies[it.id].isNullOrBlank() }
     val account = sync.account
@@ -105,7 +103,8 @@ internal fun settingsOverview(
                 if (state.aggregation.matchStrictness == MatchStrictness.Strict) " · 严格匹配" else "",
             SettingsSection.Report to if (state.playReportEnabled) "已开启" else "已关闭",
             SettingsSection.Equalizer to "$eqLabel · ${if (equalizer.enabled) "已开启" else "已关闭"}",
-            SettingsSection.Search to "$enabled 个聚合平台 · 默认${providerName(state.providers, state.providerId)}",
+            SettingsSection.Sources to sourceSummary(state),
+            SettingsSection.Search to "默认${providerName(state.providers, state.providerId)}",
             SettingsSection.Accounts to when {
                 logged.isEmpty() -> "未登录任何平台"
                 logged.size <= 2 -> "已登录 ${logged.joinToString("、") { it.name }}"
@@ -133,6 +132,18 @@ private fun playbackModeSummary(mode: PlaybackMode): String = when (mode) {
     PlaybackMode.Auto -> "自动换源"
     PlaybackMode.Priority -> "按优先平台"
     PlaybackMode.Pinned -> "固定平台"
+}
+
+/** 音乐源的当前值：启用几个、第一个是谁。顺序就是用户排的顺序。 */
+private fun sourceSummary(state: MusicUiState): String {
+    val searchable = state.providers.filter { it.search }
+    val enabled = state.aggregation.enabledOrDefault(searchable.map { it.id })
+    val first = enabled.firstOrNull()?.let { id -> providerName(state.providers, id) }
+    return when {
+        enabled.isEmpty() -> "全部关闭"
+        first.isNullOrBlank() -> "${enabled.size} 个平台"
+        else -> "${enabled.size} 个平台 · 先$first"
+    }
 }
 
 /** 手机（和 <840dp 平板）的设置首页：三组分段列表，每项下方是当前值，点进各自的子页。 */

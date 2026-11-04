@@ -145,8 +145,12 @@ data class AggregationSettings(
     fun enabledOrDefault(available: List<String>): List<String> =
         enabledProviders.filter { it in available }
 
+    /**
+     * 平台顺序。用户在设置里排的 [enabledProviders] 就是顺序本身（启用的在前、未启用的垫底），
+     * [providerPriority] 只给没在启用列表里出现过的 id（换源时碰到的冷门平台）兜底。
+     */
     fun priorityFor(available: List<String>): List<String> {
-        val ordered = providerPriority.filter { it in available }.distinct()
+        val ordered = (enabledProviders + providerPriority).distinct().filter { it in available }
         return ordered + available.filter { it !in ordered }
     }
 }

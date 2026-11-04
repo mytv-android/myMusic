@@ -87,7 +87,7 @@ private fun SectionContent(
         }
         SettingsSection.Playback -> {
             val state by app.model.state.collectAsState()
-            PlaybackSettingsScreen(state, actions, onBack, embedded)
+            PlaybackSettingsScreen(state, actions, onBack, embedded, onOpen)
         }
         SettingsSection.Report -> {
             val state by app.model.state.collectAsState()
@@ -98,9 +98,13 @@ private fun SectionContent(
             val equalizer by app.model.equalizerState.collectAsState()
             EqualizerScreen(state, equalizer, actions, onBack, embedded)
         }
+        SettingsSection.Sources -> {
+            val state by app.model.state.collectAsState()
+            SourcesSettingsScreen(state, actions, onBack, embedded)
+        }
         SettingsSection.Search -> {
             val state by app.model.state.collectAsState()
-            SearchBrowseSettingsScreen(state, actions, onBack, embedded)
+            SearchBrowseSettingsScreen(state, actions, onBack, embedded, onOpen)
         }
         SettingsSection.Accounts -> {
             val state by app.model.state.collectAsState()

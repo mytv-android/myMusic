@@ -88,6 +88,9 @@ class SettingsStore(private val context: Context) {
     private val providerKey = stringPreferencesKey("provider")
     private val chartsSourceKey = stringPreferencesKey("charts_source")
     private val playlistsSourceKey = stringPreferencesKey("playlists_source")
+    private val startupTabKey = stringPreferencesKey("startup_tab")
+    private val playlistsModeKey = stringPreferencesKey("playlists_mode")
+    private val listenGroupKey = stringPreferencesKey("listen_group")
     private val themeKey = stringPreferencesKey("theme")
     private val layoutModeKey = stringPreferencesKey("layout_mode")
     private val cookiesKey = stringPreferencesKey("cookies")
@@ -146,6 +149,9 @@ class SettingsStore(private val context: Context) {
             provider = values[providerKey] ?: "netease",
             chartsSource = values[chartsSourceKey] ?: "",
             playlistsSource = values[playlistsSourceKey] ?: "",
+            startupTab = values[startupTabKey] ?: "",
+            playlistsMode = values[playlistsModeKey] ?: "",
+            listenGroup = values[listenGroupKey] ?: "",
             theme = values[themeKey] ?: "system",
             layoutMode = values[layoutModeKey] ?: "Auto",
             cookies = runCatching { json.decodeFromString<Map<String, String>>(values[cookiesKey] ?: "{}") }
@@ -204,6 +210,9 @@ class SettingsStore(private val context: Context) {
     suspend fun provider(value: String) = context.dataStore.edit { it[providerKey] = value }
     suspend fun chartsSource(value: String) = context.dataStore.edit { it[chartsSourceKey] = value }
     suspend fun playlistsSource(value: String) = context.dataStore.edit { it[playlistsSourceKey] = value }
+    suspend fun startupTab(value: String) = context.dataStore.edit { it[startupTabKey] = value }
+    suspend fun playlistsMode(value: String) = context.dataStore.edit { it[playlistsModeKey] = value }
+    suspend fun listenGroup(value: String) = context.dataStore.edit { it[listenGroupKey] = value }
     suspend fun theme(value: String) = context.dataStore.edit { it[themeKey] = value }
     suspend fun layoutMode(value: String) = context.dataStore.edit { it[layoutModeKey] = value }
     suspend fun dynamicColor(value: Boolean) = context.dataStore.edit { it[dynamicColorKey] = value }
@@ -372,6 +381,12 @@ data class AppSettings(
     val provider: String = "netease",
     val chartsSource: String = "",
     val playlistsSource: String = "",
+    /** 冷启动打开的顶层入口（TopTab.route），空表示默认「榜单」。 */
+    val startupTab: String = "",
+    /** 歌单页上次用的浏览方式（PlaylistMode 名字），空表示默认「推荐」。 */
+    val playlistsMode: String = "",
+    /** 听歌模式页上次选的分组，空表示「全部」。 */
+    val listenGroup: String = "",
     val theme: String = "system",
     /** 界面布局：Auto / Phone / Tablet / Tv。 */
     val layoutMode: String = "Auto",

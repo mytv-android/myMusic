@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -74,13 +75,14 @@ internal enum class SettingsSection(
     val icon: ImageVector,
     val tone: IconTone,
 ) {
-    Appearance("settings/appearance", "外观", "布局、文字大小、主题、配色与对比度", Icons.Filled.Palette, IconTone.Primary),
+    Appearance("settings/appearance", "外观", "布局、启动页、文字大小、主题、配色与对比度", Icons.Filled.Palette, IconTone.Primary),
     // 原来叫“歌词”；枚举名和路由保持不变，旧的深链接和保存的选中项继续有效
     Lyrics("settings/lyrics", "播放页", "封面形状、歌词背景、律动与跟拍校准", Icons.Filled.PlayCircle, IconTone.Primary),
     Playback("settings/playback", "播放与换源", "换源模式、平台优先级与匹配", Icons.Filled.SwapHoriz, IconTone.Primary),
     Report("settings/report", "播放上报", "把播放记录回传给平台，推荐跟着口味走", Icons.Filled.Analytics, IconTone.Primary),
     Equalizer("settings/equalizer", "均衡器", "本机播放音效，不影响下载文件", Icons.Filled.GraphicEq, IconTone.Primary),
-    Search("settings/search", "搜索与浏览", "聚合平台与默认浏览来源", Icons.Filled.Search, IconTone.Primary),
+    Sources("settings/sources", "音乐源", "启用哪些平台、按什么顺序", Icons.Filled.Tune, IconTone.Primary),
+    Search("settings/search", "搜索与浏览", "默认浏览来源", Icons.Filled.Search, IconTone.Primary),
     Accounts("settings/accounts", "平台账号", "扫码登录、Cookie 与退出", Icons.Filled.Person, IconTone.Secondary),
     Sync("settings/sync", "音乐库同步", "自建歌单的云端同步", Icons.Filled.Cloud, IconTone.Secondary),
     Storage("settings/storage", "存储", "缓存、下载与占用", Icons.Filled.Storage, IconTone.Tertiary),
@@ -94,7 +96,7 @@ internal enum class SettingsSection(
     companion object {
         /** 设置首页 / 双栏左栏的三组。 */
         val groups = listOf(
-            listOf(Appearance, Lyrics, Playback, Report, Equalizer, Search),
+            listOf(Appearance, Lyrics, Playback, Report, Equalizer, Sources, Search),
             listOf(Accounts, Sync),
             listOf(Storage, About),
         )

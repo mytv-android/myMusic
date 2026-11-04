@@ -117,7 +117,8 @@ fun PlaylistsScreen(
     onOpenSearch: () -> Unit,
     categoryEnd: Boolean = false,
 ) {
-    val sources = state.providers.filter { it.recommendedPlaylists || it.playlistCategories || it.listeningModes }
+    // 来源条按设置里的音乐源顺序排（见 MusicUiState.sources）
+    val sources = state.sources { it.recommendedPlaylists || it.playlistCategories || it.listeningModes }
     if (LocalAppWindow.current.isTv) {
         TvPlaylists(playlists, sources, actions, onOpenSearch)
     } else {

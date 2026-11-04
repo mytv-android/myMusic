@@ -3,6 +3,7 @@ package com.mytv.mymusic.ui
 import android.app.Activity
 import android.os.SystemClock
 import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.platform.LocalContext
@@ -126,10 +127,21 @@ class AppNav(
     }
 }
 
+/** 设置里存的启动页路由 → 顶层入口；空或认不出来就回默认「榜单」。 */
+private fun String?.toTopTab(): TopTab =
+    TopTab.entries.firstOrNull { it.route == this } ?: TopTab.Charts
+
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun MyMusicApp(model: MusicViewModel) {
     val state by model.state.collectAsState()
+    // DataStore 第一帧没到之前整个外壳都不组合：启动页、主题、外观都要等设置落地，
+    // 不然冷启动会先按默认值画一帧再跳走
+    val ready by model.settingsReady.collectAsState()
+    if (!ready) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
+        return
+    }
     val favorites by model.favorites.collectAsState()
     val search by model.searchState.collectAsState()
     val sleep by model.sleepTimer.collectAsState()
@@ -144,7 +156,9 @@ fun MyMusicApp(model: MusicViewModel) {
     val window = rememberAppWindow(state.appearance.layout)
     val hazeState = rememberHazeState()
     val pageChrome = remember { PageChromeScheme() }
-    var selectedTab by rememberSaveable { mutableStateOf(TopTab.Charts.route) }
+    // 启动页只在建图时定一次；记住的是用户选的那个，切走的tab由返回栈同步
+    val startupTab = state.startupTab.toTopTab()
+    var selectedTab by rememberSaveable { mutableStateOf(startupTab.route) }
     var queueOpen by rememberSaveable { mutableStateOf(false) }
     var timerOpen by rememberSaveable { mutableStateOf(false) }
 
@@ -322,7 +336,7 @@ fun MyMusicApp(model: MusicViewModel) {
                         CompositionLocalProvider(LocalOverlayPadding provides PaddingValues(bottom = overlayBottom)) {
                             NavHost(
                                 navController = nav,
-                                startDestination = TopTab.Charts.route,
+                                startDestination = startupTab.route,
                                 modifier = Modifier.fillMaxSize().hazeSource(hazeState),
                                 enterTransition = { if (state.reduceMotion) EnterTransition.None else fadeIn(enterSpec) },
                                 exitTransition = { if (state.reduceMotion) ExitTransition.None else fadeOut(exitSpec) },

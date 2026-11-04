@@ -142,7 +142,8 @@ fun ChartsScreen(
     recommended: List<Playlist> = emptyList(),
     history: List<Song> = emptyList(),
 ) {
-    val sources = state.providers.filter { it.topLists || it.hotSongs }
+    // 来源条按设置里的音乐源顺序排（见 MusicUiState.sources）
+    val sources = state.sources { it.topLists || it.hotSongs }
     var target by remember { mutableStateOf<SongAction?>(null) }
     val onMore: (Song, List<Song>) -> Unit = { song, queue -> target = SongAction(song, queue) }
     if (LocalAppWindow.current.isTv) {

@@ -104,9 +104,11 @@ object ChartStore {
         return ChartTarget(source, id, prefs.getString("defaultChart.name", null).orEmpty())
     }
 
-    /** 可以放进组件的平台：支持榜单和榜单歌曲。 */
+    /** 可以放进组件的平台：支持榜单和榜单歌曲，按音乐源顺序排，没启用的不出现。 */
     suspend fun providers(app: MyMusicApp): List<ProviderInfo> =
-        runCatching { app.repository.providers() }.getOrDefault(emptyList()).filter { it.topLists && it.topListSongs }
+        runCatching { app.repository.providers() }.getOrDefault(emptyList())
+            .filter { it.topLists && it.topListSongs }
+            .bySourceOrder(app)
 
     suspend fun charts(app: MyMusicApp, source: String): List<TopList> {
         val cookie = app.settings.state.first().cookies[source].orEmpty()
@@ -260,9 +262,11 @@ object ModeStore {
         return list
     }
 
-    /** 支持听歌模式的平台。 */
+    /** 支持听歌模式的平台，按音乐源顺序排，没启用的不出现。 */
     suspend fun providers(app: MyMusicApp): List<ProviderInfo> =
-        runCatching { app.repository.providers() }.getOrDefault(emptyList()).filter { it.listeningModes }
+        runCatching { app.repository.providers() }.getOrDefault(emptyList())
+            .filter { it.listeningModes }
+            .bySourceOrder(app)
 
     /**
      * 组件绑定的模式；没配过时用第一个已登录平台的第一个模式，都没登录就用第一个平台的。
@@ -311,4 +315,16 @@ object ModeStore {
         val next = (listOf(cover) + list.filter { it != cover }).take(COVERS)
         prefs(context).edit { putString("covers.$modeId", next.joinToString("\n")) }
     }
+}
+
+/**
+ * 组件用的平台列表：按设置里的音乐源顺序排，没启用的平台不出现——用户在「音乐源」里关掉的源，
+ * 不该再由组件默认选中。已经配过的组件不受影响：它们存的是明确的平台 id。
+ */
+private suspend fun List<ProviderInfo>.bySourceOrder(app: MyMusicApp): List<ProviderInfo> {
+    val settings = app.settings.state.first()
+    val order = settings.aggregation.priorityFor(map { it.id }).withIndex()
+        .associate { (index, id) -> id to index }
+    val enabled = settings.aggregation.enabledProviders.toSet()
+    return sortedBy { order[it.id] ?: Int.MAX_VALUE }.filter { it.id in enabled }
 }

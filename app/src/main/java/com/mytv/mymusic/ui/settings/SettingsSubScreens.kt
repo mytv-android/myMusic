@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
@@ -122,6 +123,7 @@ import com.mytv.mymusic.ui.InfoNote
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicChip
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.TopTab
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
 import com.mytv.mymusic.ui.components.IconTone
@@ -179,6 +181,10 @@ fun AppearanceSettingsScreen(state: MusicUiState, actions: MusicActions, onBack:
                 LayoutModeChips(appearance.layout) { actions.setLayoutMode(it) }
                 SettingsNote(layoutModeHint(appearance.layout))
             }
+        }
+        item(key = "startupHead", contentType = "sectionHeader") { SectionLabel("启动页") }
+        item(key = "startup", contentType = "startupOptions") {
+            StartupPageOptions(state.startupTab) { actions.setStartupTab(it) }
         }
         item(key = "fontHead", contentType = "sectionHeader") { SectionLabel("文字大小") }
         item(key = "fontScale", contentType = "fontScaleOptions") {
@@ -290,6 +296,20 @@ private fun LayoutModeChips(selected: LayoutMode, onSelect: (LayoutMode) -> Unit
         LayoutMode.entries.forEach { mode ->
             MusicChip(mode.label, mode == selected, description = "布局模式：${mode.label}") { onSelect(mode) }
         }
+    }
+}
+
+/** 启动页：冷打开应用时先停在哪个顶层入口。设置里存的是路由，认不出来的回默认「榜单」。 */
+@Composable
+private fun StartupPageOptions(selectedRoute: String, onSelect: (String) -> Unit) {
+    val selected = TopTab.entries.firstOrNull { it.route == selectedRoute } ?: TopTab.Charts
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TopTab.entries.forEach { tab ->
+                MusicChip(tab.label, tab == selected, description = "启动页：${tab.label}") { onSelect(tab.route) }
+            }
+        }
+        SettingsNote("从桌面图标、最近任务打开时停在这一页；桌面小组件点开仍然去它指定的页面。")
     }
 }
 
@@ -498,11 +518,16 @@ private fun StyleChips(label: String, selected: SchemeStyle, onSelect: (SchemeSt
 
 // ======================= 播放与换源 =======================
 
-/** 播放与换源：换源模式按钮组、平台优先级、匹配选项。电视上优先级用“OK 拿起、上下移动”。 */
+/** 播放与换源：换源模式按钮组、平台顺序入口、匹配选项。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: () -> Unit, embedded: Boolean = false) {
-    val tv = LocalAppWindow.current.isTv
+internal fun PlaybackSettingsScreen(
+    state: MusicUiState,
+    actions: MusicActions,
+    onBack: () -> Unit,
+    embedded: Boolean = false,
+    onOpen: (SettingsSection) -> Unit = {},
+) {
     val aggregation = state.aggregation
     val searchable = state.providers.filter { it.search }
     val priority = aggregation.priorityFor(searchable.map { it.id })
@@ -543,18 +568,22 @@ fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
             }
         }
         item(key = "priorityHead", contentType = "sectionHeader") {
-            SectionLabel("平台优先级") {
+            SectionLabel("平台顺序") {
                 Text("越靠前越先尝试", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        item(key = "priority", contentType = "priorityList") {
-            if (priority.isEmpty()) {
-                SkeletonRows(4)
-            } else {
-                PriorityList(priority, state.providers) { id, delta -> actions.movePriority(id, delta) }
-            }
+        item(key = "priority", contentType = "settingRow") {
+            ListRow(
+                // 顺序全应用只有一份，就在「音乐源」里排；这里只说明现在是什么顺序
+                title = priority.take(3).joinToString(" → ") { providerName(state.providers, it) }
+                    .ifBlank { "还没有平台" },
+                index = 0,
+                count = 1,
+                onClick = { onOpen(SettingsSection.Sources) },
+                icon = Icons.Filled.Tune,
+                summary = "自动换源和手动换源都按这个顺序回退；去「音乐源」里调整",
+            )
         }
-        if (tv) item(key = "priorityTip", contentType = "note") { SettingsNote("按 OK 拿起平台，用上下键移动，再按 OK 放下。") }
         item(key = "matchHead", contentType = "sectionHeader") { SectionLabel("匹配") }
         item(key = "strict", contentType = "switch") {
             SwitchRow(
@@ -600,9 +629,87 @@ fun PlaybackSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
     }
 }
 
+// ======================= 音乐源 =======================
+
+/**
+ * 音乐源：启用哪些平台、按什么顺序。顺序全应用只有这一份——聚合搜索、榜单和歌单的来源条、
+ * 换源面板、播放换源都按它排。关掉的平台不参与这些；换源时碰上仍会排在最后试着用。
+ */
 @Composable
-private fun PriorityList(priority: List<String>, providers: List<ProviderInfo>, onMove: (String, Int) -> Unit) {
+internal fun SourcesSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: () -> Unit, embedded: Boolean = false) {
     val tv = LocalAppWindow.current.isTv
+    val searchable = state.providers.filter { it.search }
+    val enabledIds = state.aggregation.enabledOrDefault(searchable.map { it.id })
+    val enabled = searchable.filter { it.id in enabledIds }
+    val disabled = searchable.filterNot { it.id in enabledIds }
+    SettingsPage(SettingsSection.Sources, embedded, onBack) {
+        item(key = "enabledHead", contentType = "sectionHeader") {
+            SectionLabel("已启用") {
+                Text(
+                    "${enabled.size} 个 · 越靠前越优先",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        when {
+            searchable.isEmpty() -> item(key = "loading", contentType = "skeleton") { SkeletonRows(6) }
+            enabled.isEmpty() -> item(key = "enabledEmpty", contentType = "note") {
+                SettingsNote("还没有启用任何平台：聚合搜索和换源都不会有结果，榜单、歌单的来源条也只剩没启用的。")
+            }
+            else -> item(key = "enabled", contentType = "sourceList") {
+                SourceOrderList(enabled, tv, actions::moveSource, actions::toggleAggregateProvider)
+            }
+        }
+        item(key = "disabledHead", contentType = "sectionHeader") { SectionLabel("已关闭") }
+        if (disabled.isNotEmpty()) {
+            item(key = "disabled", contentType = "sourceList") {
+                SegmentedGroup {
+                    disabled.forEachIndexed { index, provider ->
+                        key(provider.id) {
+                            ListRow(
+                                title = provider.name,
+                                index = index,
+                                count = disabled.size,
+                                onClick = { actions.toggleAggregateProvider(provider.id) },
+                                modifier = Modifier.semantics {
+                                    role = Role.Switch
+                                    stateDescription = "已关闭"
+                                },
+                                leading = { ProviderMark(provider.name, 36.dp) },
+                                summary = capabilities(provider),
+                                showChevron = false,
+                                trailing = { Switch(checked = false, onCheckedChange = null) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "note", contentType = "note") {
+            SettingsNote("顺序同时决定聚合搜索、榜单和歌单的来源条、换源面板和播放换源的先后。")
+        }
+        item(key = "reset", contentType = "settingRow") {
+            ListRow(
+                title = "恢复默认平台与顺序",
+                index = 0,
+                count = 1,
+                onClick = actions::resetSources,
+                icon = Icons.Filled.Refresh,
+                summary = "只动音乐源；换源模式、匹配严格度这些不受影响",
+            )
+        }
+    }
+}
+
+/** 已启用平台的排序列表：电话 / 平板用上下按钮，电视用 OK 拿起、方向键移动、OK 放下。 */
+@Composable
+private fun SourceOrderList(
+    enabled: List<ProviderInfo>,
+    tv: Boolean,
+    onMove: (String, Int) -> Unit,
+    onToggle: (String) -> Unit,
+) {
     var moving by remember { mutableStateOf<String?>(null) }
     // 移动模式没有可预览的画面，手势仍然走预测性返回：松手才取消，划到一半可以反悔
     PredictiveBackHandler(enabled = moving != null) { events ->
@@ -613,18 +720,19 @@ private fun PriorityList(priority: List<String>, providers: List<ProviderInfo>, 
         }
     }
     SegmentedGroup {
-        priority.forEachIndexed { index, id ->
+        enabled.forEachIndexed { index, provider ->
             // key 保证移动后还是同一个节点，电视上焦点跟着这一行走
-            key(id) {
-                PriorityRow(
+            key(provider.id) {
+                SourceRow(
                     rank = index + 1,
-                    name = providerName(providers, id),
+                    provider = provider,
                     index = index,
-                    count = priority.size,
+                    count = enabled.size,
                     tv = tv,
-                    moving = moving == id,
-                    onToggleMove = { moving = if (moving == id) null else id },
-                    onMove = { delta -> onMove(id, delta) },
+                    moving = moving == provider.id,
+                    onToggleMove = { moving = if (moving == provider.id) null else provider.id },
+                    onMove = { delta -> onMove(provider.id, delta) },
+                    onToggle = { onToggle(provider.id) },
                 )
             }
         }
@@ -632,75 +740,95 @@ private fun PriorityList(priority: List<String>, providers: List<ProviderInfo>, 
 }
 
 @Composable
-private fun PriorityRow(
+private fun SourceRow(
     rank: Int,
-    name: String,
+    provider: ProviderInfo,
     index: Int,
     count: Int,
     tv: Boolean,
     moving: Boolean,
     onToggleMove: () -> Unit,
     onMove: (Int) -> Unit,
+    onToggle: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val name = provider.name
     val shape = if (moving) RoundedCornerShape(16.dp) else segmentShape(index, count)
-    val tvControls = if (tv) {
-        Modifier
-            .onPreviewKeyEvent { event ->
-                if (!moving || event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when (event.key) {
-                    Key.DirectionUp -> {
-                        if (index > 0) onMove(-1)
-                        true
-                    }
-                    Key.DirectionDown -> {
-                        if (index < count - 1) onMove(1)
-                        true
-                    }
-                    // 拿起时左右键不离开这一行
-                    Key.DirectionLeft, Key.DirectionRight -> true
-                    else -> false
+    // 拿起时上下键在这一行上挪，左右键不离开它；没拿起就不拦按键
+    val moveKeys = if (tv && moving) {
+        Modifier.onPreviewKeyEvent { event ->
+            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            when (event.key) {
+                Key.DirectionUp -> {
+                    if (index > 0) onMove(-1)
+                    true
                 }
+                Key.DirectionDown -> {
+                    if (index < count - 1) onMove(1)
+                    true
+                }
+                Key.DirectionLeft, Key.DirectionRight -> true
+                else -> false
             }
-            .clickable(onClickLabel = if (moving) "放下" else "拿起", onClick = onToggleMove)
-            .semantics { stateDescription = if (moving) "正在移动" else "第 $rank 位" }
+        }
     } else {
         Modifier
     }
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
+            .heightIn(min = 64.dp)
             .then(if (tv) Modifier.tvFocusRing(shape, scale = 1.02f) else Modifier)
             .clip(shape)
             .background(if (moving) scheme.secondaryContainer else scheme.surfaceContainerLow)
-            .then(tvControls)
-            .padding(start = 8.dp, end = if (tv) 16.dp else 4.dp, top = 4.dp, bottom = 4.dp),
+            .then(moveKeys)
+            // 整行可点就是开关（读屏角色和 Switch 都由整行给出）；拿起时按 OK 是放下
+            .clickable(
+                onClickLabel = if (moving) "放下" else "关闭$name",
+                onClick = { if (moving) onToggleMove() else onToggle() },
+            )
+            .semantics {
+                role = Role.Switch
+                stateDescription = if (moving) "正在移动" else "第 $rank 位，已启用"
+            }
+            .padding(start = 8.dp, end = if (tv) 12.dp else 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             "$rank",
             // 电视上名次已由整行的“第 N 位”读出
-            Modifier.width(32.dp).then(if (tv) Modifier.clearAndSetSemantics {} else Modifier),
+            Modifier.width(28.dp).then(if (tv) Modifier.clearAndSetSemantics {} else Modifier),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
             color = if (moving) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
         )
-        ProviderMark(name, 32.dp)
-        Text(
-            name,
-            Modifier.weight(1f).padding(start = 12.dp),
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Medium,
-            color = if (moving) scheme.onSecondaryContainer else scheme.onSurface,
-        )
-        if (tv) {
-            Icon(
-                if (moving) Icons.Filled.SwapVert else Icons.Filled.DragHandle,
-                contentDescription = null,
-                tint = if (moving) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
+        ProviderMark(name, 36.dp)
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(
+                name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = if (moving) scheme.onSecondaryContainer else scheme.onSurface,
             )
+            Text(
+                capabilities(provider),
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // Switch 只作显示：开关由整行点，和别的设置行一致
+        Switch(checked = true, onCheckedChange = null)
+        if (tv) {
+            IconButton(onClick = onToggleMove, modifier = Modifier.tvFocusRing(CircleShape)) {
+                Icon(
+                    if (moving) Icons.Filled.SwapVert else Icons.Filled.DragHandle,
+                    if (moving) "放下$name" else "拿起$name",
+                    tint = if (moving) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
+                )
+            }
         } else {
             IconButton(onClick = { onMove(-1) }, enabled = index > 0) {
                 Icon(Icons.Filled.KeyboardArrowUp, "上移$name")
@@ -714,56 +842,44 @@ private fun PriorityRow(
 
 // ======================= 搜索与浏览 =======================
 
-/** 搜索与浏览：默认浏览来源（点开选择）+ 每个平台是否参与聚合搜索。 */
+/** 搜索与浏览：默认浏览来源（点开选择）+ 跳到音乐源管理平台的启停与顺序。 */
 @Composable
-fun SearchBrowseSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: () -> Unit, embedded: Boolean = false) {
-    val searchable = state.providers.filter { it.search }
-    val enabledIds = state.aggregation.enabledOrDefault(searchable.map { it.id })
+internal fun SearchBrowseSettingsScreen(
+    state: MusicUiState,
+    actions: MusicActions,
+    onBack: () -> Unit,
+    embedded: Boolean = false,
+    onOpen: (SettingsSection) -> Unit = {},
+) {
     var pickerOpen by rememberSaveable { mutableStateOf(false) }
     val currentName = providerName(state.providers, state.providerId)
+    val searchable = state.providers.filter { it.search }
+    val enabled = state.aggregation.enabledOrDefault(searchable.map { it.id }).size
     SettingsPage(SettingsSection.Search, embedded, onBack) {
         item(key = "browseHead", contentType = "sectionHeader") { SectionLabel("默认浏览来源") }
         item(key = "browse", contentType = "settingRow") {
             ListRow(
                 title = currentName,
                 index = 0,
-                count = 1,
+                count = 2,
                 onClick = { pickerOpen = true },
                 leading = { ProviderMark(currentName, 40.dp, active = true) },
                 summary = "榜单、歌单页打开时的来源；不影响播放换源",
             )
         }
-        item(key = "aggHead", contentType = "sectionHeader") {
-            SectionLabel("参与聚合搜索的平台") {
-                Text("已启用 ${enabledIds.size} 个", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+        item(key = "sources", contentType = "settingRow") {
+            ListRow(
+                title = "音乐源",
+                index = 1,
+                count = 2,
+                onClick = { onOpen(SettingsSection.Sources) },
+                icon = Icons.Filled.Tune,
+                summary = "已启用 $enabled 个平台 · 启停与顺序",
+            )
         }
-        if (searchable.isEmpty()) {
-            item(key = "aggLoading", contentType = "skeleton") { SkeletonRows(6) }
-        } else {
-            itemsIndexed(
-                searchable,
-                key = { _, provider -> "agg:${provider.id}" },
-                contentType = { _, _ -> "provider" },
-            ) { index, provider ->
-                val on = provider.id in enabledIds
-                ListRow(
-                    title = provider.name,
-                    index = index,
-                    count = searchable.size,
-                    onClick = { actions.toggleAggregateProvider(provider.id) },
-                    modifier = Modifier.semantics {
-                        role = Role.Switch
-                        stateDescription = if (on) "已启用" else "已关闭"
-                    },
-                    leading = { ProviderMark(provider.name, 36.dp, active = on) },
-                    summary = capabilities(provider),
-                    showChevron = false,
-                    trailing = { Switch(checked = on, onCheckedChange = null) },
-                )
-            }
+        item(key = "note", contentType = "note") {
+            SettingsNote("平台越多结果越全，搜索和匹配也可能更慢。在「音乐源」里可以关掉不用的平台、调整先后。")
         }
-        item(key = "note", contentType = "note") { SettingsNote("平台越多结果越全，搜索和匹配也可能更慢。关闭的平台不参与聚合搜索。") }
     }
     if (pickerOpen) {
         BrowseSourceSheet(state, actions, onDismiss = { pickerOpen = false })

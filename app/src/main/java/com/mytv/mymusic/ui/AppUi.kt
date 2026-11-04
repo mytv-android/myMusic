@@ -242,6 +242,9 @@ class MusicActions(private val model: MusicViewModel) {
     fun setReduceMotion(value: Boolean) = model.setReduceMotion(value)
     fun setVolumeNormalization(value: Boolean) = model.setVolumeNormalization(value)
     fun toggleAggregateProvider(id: String) = model.toggleAggregateProvider(id)
+    fun moveSource(id: String, delta: Int) = model.moveSource(id, delta)
+    fun resetSources() = model.resetSources()
+    fun setStartupTab(route: String) = model.setStartupTab(route)
     fun setPlaybackMode(mode: PlaybackMode) = model.setPlaybackMode(mode)
     fun setPinnedProvider(id: String?) = model.setPinnedProvider(id)
     fun setAllowPreview(value: Boolean) = model.setAllowPreview(value)
@@ -249,7 +252,6 @@ class MusicActions(private val model: MusicViewModel) {
         if (value) com.mytv.mymusic.aggregate.MatchStrictness.Strict
         else com.mytv.mymusic.aggregate.MatchStrictness.Balanced
     )
-    fun movePriority(id: String, delta: Int) = model.moveProviderPriority(id, delta)
     fun clearMatchCache() = model.clearMatchCache()
     fun clearMediaCache() = model.clearMediaCache()
     fun setCacheLimit(mb: Int) = model.setCacheLimit(mb)
