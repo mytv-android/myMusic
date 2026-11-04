@@ -121,6 +121,8 @@ class SettingsStore(private val context: Context) {
     private val cacheLimitKey = intPreferencesKey("cache_limit_mb")
     private val lyricsBackgroundKey = stringPreferencesKey("lyrics_background")
     private val notificationLyricsKey = booleanPreferencesKey("notification_lyrics")
+    /** Apple Music 匿名歌词走第三方中转（zarz / paxsenix / AMLL）的总开关。 */
+    private val thirdPartyLyricsKey = booleanPreferencesKey("third_party_lyrics")
     private val rhythmIntensityKey = stringPreferencesKey("rhythm_intensity")
     private val coverShapeKey = stringPreferencesKey("cover_shape")
     private val tvAmbientClockKey = booleanPreferencesKey("tv_ambient_clock")
@@ -159,6 +161,7 @@ class SettingsStore(private val context: Context) {
             sodaSignerUrl = values[sodaSignerUrlKey] ?: "",
             sodaSignerToken = values[sodaSignerTokenKey] ?: "",
             sodaSignerEnabled = values[sodaSignerEnabledKey] ?: true,
+            thirdPartyLyrics = values[thirdPartyLyricsKey] ?: true,
             aggregation = runCatching {
                 json.decodeFromString<AggregationSettings>(values[aggregationKey] ?: "")
             }.getOrDefault(AggregationSettings()),
@@ -282,6 +285,10 @@ class SettingsStore(private val context: Context) {
         it[sodaSignerEnabledKey] = enabled
     }
 
+    suspend fun thirdPartyLyrics(enabled: Boolean) = context.dataStore.edit {
+        it[thirdPartyLyricsKey] = enabled
+    }
+
     suspend fun cookie(provider: String, cookie: String) = context.dataStore.edit {
         val current = runCatching {
             json.decodeFromString<Map<String, String>>(it[cookiesKey] ?: "{}")
@@ -398,6 +405,11 @@ data class AppSettings(
     val sodaSignerUrl: String = "",
     val sodaSignerToken: String = "",
     val sodaSignerEnabled: Boolean = true,
+    /**
+     * Apple Music 匿名歌词是否走第三方中转（zarz / paxsenix / AMLL）。默认开；
+     * 关掉后 Apple 歌词只试 Apple 自己的接口，匿名用户等于没有歌词。
+     */
+    val thirdPartyLyrics: Boolean = true,
     val aggregation: AggregationSettings = AggregationSettings(),
     val dynamicColor: Boolean = false,
     val reduceMotion: Boolean = false,

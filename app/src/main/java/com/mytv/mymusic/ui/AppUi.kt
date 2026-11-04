@@ -260,6 +260,9 @@ class MusicActions(private val model: MusicViewModel) {
     fun saveSodaSigner(url: String, token: String, enabled: Boolean = true) =
         model.saveSodaSigner(url, token, enabled)
 
+    /** Apple Music 匿名歌词中转总开关，见 MusicViewModel.setThirdPartyLyrics。 */
+    fun setThirdPartyLyrics(value: Boolean) = model.setThirdPartyLyrics(value)
+
     /** 播放上报总开关：是否把播放记录回传给平台（见 PlayReporter）。 */
     fun setPlayReportEnabled(value: Boolean) = model.setPlayReportEnabled(value)
     fun logout(providerId: String) = model.logout(providerId)

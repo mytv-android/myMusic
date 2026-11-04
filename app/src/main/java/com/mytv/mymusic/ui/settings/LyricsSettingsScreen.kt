@@ -152,6 +152,20 @@ fun LyricsSettingsScreen(
                 summary = "把当前这句歌词放到系统通知、锁屏等媒体播放条的第二行，歌手名会被替换；歌词不同步时仍显示歌手。",
             )
         }
+        item(key = "appleLyricHead", contentType = "sectionHeader") { SectionLabel("Apple Music 歌词") }
+        item(key = "appleLyricProxy", contentType = "switch") {
+            SwitchRow(
+                title = "使用第三方歌词中转",
+                checked = state.thirdPartyLyrics,
+                onCheckedChange = actions::setThirdPartyLyrics,
+                index = 0,
+                count = 1,
+                summary = "Apple Music 已不再向未登录用户提供歌词。开启后由 zarz.moe、paxsenix、AMLL 等社区服务代为取回逐词歌词；请求会把 Apple Music 歌曲 ID 发给这些服务。关掉后只走 Apple 官方接口，未登录时将没有歌词。",
+            )
+        }
+        item(key = "appleLyricNote", contentType = "note") {
+            SettingsNote("三个来源按顺序尝试，全部失败时该首歌曲不显示歌词。这些是社区运营的公共服务，可能随时过载或下线。")
+        }
         // 强度只对“律动”有意义；开启“减少动画”时背景回退成静止，但选项照常显示
         if (mode == LyricsBackgroundMode.Reactive) {
             item(key = "intensityHead", contentType = "sectionHeader") { SectionLabel("律动强度") }

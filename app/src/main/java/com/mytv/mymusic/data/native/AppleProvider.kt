@@ -74,14 +74,28 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
 
     override suspend fun lyrics(cookie: String, song: Song): String {
         if (song.id.isBlank()) throw IllegalArgumentException("song id is empty")
+        // Apple 自己的接口：以前 include=lyrics 直接回 TTML，现在匿名拿不到了；
+        // 仍先试一次，万一 Apple 把歌词关系还回来，就不必走第三方代理。
+        val native = runCatching { appleNativeLyrics(cookie, song.id) }.getOrDefault("")
+        if (native.isNotBlank()) return native
+        if (!AppleLyricsConfig.thirdPartyLyrics) return ""
+        for (source in APPLE_LYRIC_SOURCES) {
+            val ttml = runCatching { source.fetch(song.id) }.getOrNull()?.takeIf { it.isNotBlank() } ?: continue
+            val lrc = convertTtmlToLrc(ttml)
+            if (lrc.isNotBlank()) return lrc
+        }
+        return ""
+    }
+
+    /** amp-api 的 `/songs/{id}?include=lyrics`；匿名用户现在只会拿到空的歌词关系。 */
+    private suspend fun appleNativeLyrics(cookie: String, songId: String): String {
         val body = ampGet(
             cookie,
-            "/v1/catalog/${storefront(cookie)}/songs/${song.id}",
+            "/v1/catalog/${storefront(cookie)}/songs/$songId",
             mapOf("include" to "lyrics", "extend" to "extendedAssetUrls"),
         )
         val resource = json.decodeFromString<AppleResourceResponse>(body).data.firstOrNull() ?: return ""
-        val ttml = resource.relationships.lyrics.data.firstOrNull()?.attributes?.ttml.orEmpty()
-        return convertTtmlToLrc(ttml)
+        return convertTtmlToLrc(resource.relationships.lyrics.data.firstOrNull()?.attributes?.ttml.orEmpty())
     }
 
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
@@ -640,6 +654,95 @@ internal fun appleBundlePaths(html: String): List<String> =
 /** 前端包里出现的所有 JWT，保持出现顺序去重；调用方负责挑出对 amp-api 可用的那个。 */
 internal fun appleTokens(js: String): List<String> =
     APPLE_JWT_REGEX.findAll(js).map { it.value }.distinct().toList()
+
+/**
+ * Apple Music 匿名歌词中转总开关。Apple 官方接口已不再向未登录用户返回歌词，
+ * 关掉后 [AppleProvider.lyrics] 只试 Apple 自己的接口，等于没有歌词；
+ * 好处是请求不再发给第三方服务（见 [APPLE_LYRIC_SOURCES]）。
+ */
+object AppleLyricsConfig {
+    @Volatile
+    var thirdPartyLyrics: Boolean = true
+        private set
+
+    fun configure(enabled: Boolean) {
+        thirdPartyLyrics = enabled
+    }
+}
+
+/**
+ * Apple Music 匿名歌词的第三方来源。Apple 自己的 amp-api 已经不再向未登录用户返回
+ * `relationships.lyrics`，这些服务用已登录的 Apple Music 账号中转，返回的仍是 Apple 原生
+ * 逐词 TTML（`itunes:timing="Word"`），所以能直接喂给 [convertTtmlToLrc]。
+ *
+ * 它们都是社区运营的公共服务，可能随时过载或下线，因此按顺序逐个尝试，全部失败就返回空；
+ * 用户也可以在设置里整体关掉（见 [AppleLyricsConfig]）。
+ */
+internal val APPLE_LYRIC_SOURCES: List<AppleLyricSource> = listOf(
+    // JSON：{"ttmlContent": "<tt ...>", "type": "Syllable", ...}
+    AppleLyricSource(
+        name = "zarz",
+        url = "https://api.zarz.moe/apple-music/lyrics",
+        query = { id -> "id=${encodeId(id)}&v=1" },
+        extract = ::appleTtmlFromZarz,
+    ),
+    // 带 ttml=true 时直接回 TTML 文本
+    AppleLyricSource(
+        name = "paxsenix",
+        url = "https://lyrics.paxsenix.org/apple-music/lyrics",
+        query = { id -> "id=${encodeId(id)}&ttml=true" },
+        extract = ::appleTtmlFromPaxsenix,
+    ),
+    // AMLL 社区逐词词库，JSON：{"data": {"lyrics": "<tt ...>"}}
+    AppleLyricSource(
+        name = "amll",
+        url = "https://api.amll.dev/v1/lyrics/get",
+        query = { id -> "appleMusicId=${encodeId(id)}" },
+        extract = ::appleTtmlFromAmll,
+    ),
+)
+
+/** zarz 回的是 JSON，TTML 在 `ttmlContent`；没歌词时是 404，根本走不到这里。 */
+internal fun appleTtmlFromZarz(body: String): String = runCatching {
+    NativeHttp.json.decodeFromString<ZarzLyricsResponse>(body).ttmlContent
+}.getOrDefault("")
+
+/** paxsenix 带 `ttml=true` 时直接回 TTML 文本；过载时回 HTML/JSON，按非 TTML 丢掉。 */
+internal fun appleTtmlFromPaxsenix(body: String): String {
+    val trimmed = body.trimStart()
+    // 错误页也是 `<` 开头（<html>…），所以只认 TTML 根元素和 XML 声明
+    return if (trimmed.startsWith("<tt") || trimmed.startsWith("<?xml")) trimmed else ""
+}
+
+/** AMLL 回的是 JSON，TTML 在 `data.lyrics`；词库没有这首歌时回错误对象，按空丢掉。 */
+internal fun appleTtmlFromAmll(body: String): String = runCatching {
+    NativeHttp.json.decodeFromString<AmllLyricsResponse>(body).data.lyrics
+}.getOrDefault("")
+
+/**
+ * 一个第三方 Apple 歌词来源：[url] 加 Apple Music 歌曲 ID 取回 TTML。
+ * [query] 由各源自己拼，因为它们要的参数名不一样。
+ */
+internal class AppleLyricSource(
+    val name: String,
+    val url: String,
+    val query: (id: String) -> String,
+    val extract: (body: String) -> String,
+) {
+    suspend fun fetch(id: String): String =
+        extract(NativeHttp.get("$url?${query(id)}", userAgent = NativeHttp.DEFAULT_USER_AGENT))
+}
+
+private fun encodeId(id: String): String = URLEncoder.encode(id, "UTF-8")
+
+@Serializable
+private data class ZarzLyricsResponse(val ttmlContent: String = "")
+
+@Serializable
+private data class AmllLyricsResponse(val data: AmllSongItem = AmllSongItem())
+
+@Serializable
+private data class AmllSongItem(val lyrics: String = "")
 
 @Serializable
 private data class AppleSearchResponse(val results: AppleSearchResults = AppleSearchResults())

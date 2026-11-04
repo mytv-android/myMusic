@@ -49,6 +49,23 @@ All of these channels are best-effort: they carry no user-identifying data beyon
 - Upstream: https://github.com/MakcRe/KuGouMusicApi (MIT License), https://github.com/MoeKoeMusic/MoeKoeMusic
 - Usage: reference for the `fingerprint.service/v1/music_trackid_mulit` request format (8 kHz 16-bit mono PCM body plus the Android signature). The Kotlin implementation in `data/native/KugouProvider.kt` (`matchAudio`) is written against the protocol; no upstream code or binary is bundled.
 
+## Apple Music anonymous lyrics proxies
+
+Apple Music no longer returns song lyrics to unauthenticated clients: `amp-api.music.apple.com`'s `include=lyrics` / `with=lyrics` / `extend=lyrics` no longer yields a `relationships.lyrics` resource, and the only remaining anonymous endpoint (`/v1/lyrics/{storefront}/snippet/songs/{id}`) requires a `tk` token that Apple's native apps mint server-side when sharing a lyrics snippet. Full lyrics require a `media-user-token`, i.e. a signed-in Apple Music account, which this app does not have.
+
+`data/native/AppleProvider.kt` therefore falls back to community-operated services that relay lyrics using their own signed-in Apple Music accounts. They return Apple's native word-by-word TTML (`itunes:timing="Word"`), which the existing `convertTtmlToLrc` in the same file turns into enhanced LRC — no third-party lyric text is stored or re-serialised by this app.
+
+| Source | Endpoint | Notes |
+| --- | --- | --- |
+| zarz | `https://api.zarz.moe/apple-music/lyrics?id=<appleMusicId>&v=1` | JSON; TTML in `ttmlContent`. Primary: measured the most reliable of the three. |
+| paxsenix | `https://lyrics.paxsenix.org/apple-music/lyrics?id=<appleMusicId>&ttml=true` | Raw TTML text with `ttml=true`. Frequently returns `503`/`502`; falls through when it does. |
+| AMLL TTML DB | `https://api.amll.dev/v1/lyrics/get?appleMusicId=<appleMusicId>` | JSON; TTML in `data.lyrics`. Smallest catalogue (~3.4k entries) but the only one with published API docs and an OpenAPI schema. |
+
+- Usage: tried in the order above, first non-empty result wins. The user can switch all three off in `设置 › 播放页 › Apple Music 歌词 › 使用第三方歌词中转` (`AppleLyricsConfig` / the `third_party_lyrics` preference); with it off, only Apple's own endpoint is tried and unauthenticated users get no lyrics.
+- What leaves the device: the Apple Music song ID of the track currently being played, sent to whichever of the three services is tried. No username, cookie, media-user-token, playback URL or file content is sent.
+- Attribution: this relay approach, and the endpoint contracts above, follow the same pattern used by [Mornye](https://github.com/mornyeapp/Mornye) (`rust_backend/crates/providers/src/lyrics/builtin/apple.rs`) and [musicdl](https://github.com/CharlesPikachu/musicdl). No upstream source code is bundled in this repository.
+- Stability: these are volunteer-run public services with no SLA and may rate-limit or disappear; the app treats any failure as "no lyrics for this track" rather than surfacing an error.
+
 ## YesPlayMusic (lyrics background rhythm)
 
 - Upstream: https://github.com/ijoji42/YesPlayMusic

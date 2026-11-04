@@ -66,6 +66,7 @@ import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.TrackOverrideEntity
+import com.mytv.mymusic.data.native.AppleLyricsConfig
 import com.mytv.mymusic.data.native.KugouProvider
 import com.mytv.mymusic.data.native.NativeProviders
 import com.mytv.mymusic.data.native.NetEaseProvider
@@ -163,6 +164,8 @@ data class MusicUiState(
     val appearance: Appearance = Appearance(),
     val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
     val notificationLyrics: Boolean = false,
+    /** Apple Music 匿名歌词是否走第三方中转；见 [setThirdPartyLyrics]。 */
+    val thirdPartyLyrics: Boolean = true,
     val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,
     val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
     val tvAmbientClock: Boolean = true,
@@ -437,6 +440,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             appearance = settings.toAppearance(),
             lyricsBackground = settings.lyricsBackground,
             notificationLyrics = settings.notificationLyrics,
+            thirdPartyLyrics = settings.thirdPartyLyrics,
             rhythmIntensity = settings.rhythmIntensity,
             coverShape = settings.coverShape,
             tvAmbientClock = settings.tvAmbientClock,
@@ -489,6 +493,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             // 等磁盘上真正那一帧设置：失败也要放行，不能把界面关在门外
             runCatching { app.settings.state.first() }
+            AppleLyricsConfig.configure(settingsState.value.thirdPartyLyrics)
             _settingsReady.value = true
         }
         viewModelScope.launch {
@@ -4065,6 +4070,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 else -> "汽水签名器已保存"
             },
         )
+    }
+
+    /**
+     * Apple Music 匿名歌词中转总开关。关掉后 Apple 歌词只试 Apple 自己的接口，
+     * 未登录用户等于没有歌词；好处是请求不再发给第三方服务。
+     */
+    fun setThirdPartyLyrics(enabled: Boolean) = viewModelScope.launch {
+        app.settings.thirdPartyLyrics(enabled)
+        AppleLyricsConfig.configure(enabled)
+        message(if (enabled) "已开启 Apple Music 歌词中转" else "已关闭 Apple Music 歌词中转")
     }
 
     /** 播放上报总开关。关掉时丢掉还没发完的半条记录，不补报。 */
