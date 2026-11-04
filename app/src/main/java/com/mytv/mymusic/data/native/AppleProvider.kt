@@ -383,40 +383,65 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     }
 
     private suspend fun ampGetRaw(cookie: String, uri: String): String {
-        val token = ensureToken(cookie)
         val full = if (uri.startsWith("/")) "$AMP_API$uri" else uri
-        val headers = buildMap {
-            put("Authorization", "Bearer $token")
-            put("Origin", APPLE_HOME)
-        }
-        val mediaToken = mediaUserToken(cookie)
-        return NativeHttp.get(
-            full,
-            headers = headers,
-            cookie = if (mediaToken.isBlank()) "" else "media-user-token=$mediaToken",
-            userAgent = NativeHttp.DEFAULT_USER_AGENT,
-        )
+        val cookieHeader = mediaUserToken(cookie).takeIf { it.isNotBlank() }?.let { "media-user-token=$it" }.orEmpty()
+        val userToken = parseCookieParts(cookie)["token"]?.takeIf { it.isNotBlank() }
+        val token = userToken ?: ensureToken()
+        return runCatching { ampRequest(full, token, cookieHeader) }
+            .recoverCatching { error ->
+                // developer token 过期或被 Apple 换掉时，清掉缓存重新抓一个再试一次，避免整个源失效
+                if (userToken != null || !error.isUnauthorized()) throw error
+                ampRequest(full, ensureToken(forceRefresh = true), cookieHeader)
+            }
+            .getOrThrow()
     }
 
-    private suspend fun ensureToken(cookie: String): String {
-        val cookieToken = parseCookieParts(cookie)["token"].orEmpty()
-        if (cookieToken.isNotBlank()) return cookieToken
-        cachedToken.takeIf { it.isNotBlank() }?.let { return it }
-        val home = NativeHttp.get(
-            APPLE_HOME,
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    private suspend fun ampRequest(url: String, token: String, cookieHeader: String): String =
+        NativeHttp.get(
+            url,
+            headers = mapOf("Authorization" to "Bearer $token", "Origin" to APPLE_HOME),
+            cookie = cookieHeader,
+            userAgent = NativeHttp.DEFAULT_USER_AGENT,
         )
-        val jsPath = Regex("""/(assets/index-legacy[~\-][^/"]+\.js)""").find(home)?.groupValues?.getOrNull(1)
-            ?: throw IllegalStateException("apple: index.js URI not found")
-        val js = NativeHttp.get(
-            "$APPLE_HOME/$jsPath",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        )
-        val token = Regex("""(?:=["'])(eyJh[^"']+)""").find(js)?.groupValues?.getOrNull(1)
-            ?: throw IllegalStateException("apple: token not found in index.js")
-        cachedToken = token
-        return token
+
+    /**
+     * Apple Music 的 developer token 由 music.apple.com 的前端包分发，会随前端发版轮换：
+     * 入口包名从 `index-legacy~<hash>.js` 换成了 `index~<hash>.js`，token 前缀也从 `eyJh...`
+     * 变成 `eyJ0eXAi...`，而且同一个包里会带多个 JWT，只有一个对 amp-api 的 catalog 接口有效。
+     * 所以这里不写死包名和前缀：把首页引用的前端包里所有 JWT 取出来逐个试，缓存第一个能用的。
+     */
+    private suspend fun ensureToken(forceRefresh: Boolean = false): String {
+        if (!forceRefresh) cachedToken.takeIf { it.isNotBlank() }?.let { return it }
+        val home = NativeHttp.get(APPLE_HOME, userAgent = APPLE_WEB_UA)
+        val bundles = appleBundlePaths(home)
+        if (bundles.isEmpty()) throw IllegalStateException("apple: index.js URI not found")
+        var lastError: String = "apple: token not found in ${bundles.joinToString()}"
+        for (bundle in bundles) {
+            val js = NativeHttp.get("$APPLE_HOME/$bundle", userAgent = APPLE_WEB_UA)
+            val tokens = appleTokens(js)
+            if (tokens.isEmpty()) continue
+            // 只有一个候选时不必试探，直接用；真出了问题由真实请求把错误抛出来
+            val chosen = if (tokens.size == 1) tokens.first() else tokens.firstOrNull { tokenWorks(it) }
+            chosen?.let {
+                cachedToken = it
+                return it
+            }
+            lastError = "apple: no usable token in $bundle (${tokens.size} candidates)"
+        }
+        throw IllegalStateException(lastError)
     }
+
+    private suspend fun tokenWorks(token: String): Boolean = runCatching {
+        NativeHttp.get(
+            "$AMP_API/v1/catalog/us/search?term=apple&types=songs&limit=1",
+            headers = mapOf("Authorization" to "Bearer $token", "Origin" to APPLE_HOME),
+            userAgent = NativeHttp.DEFAULT_USER_AGENT,
+        )
+        true
+    }.getOrDefault(false)
+
+    /** OkHttp 的异常信息形如 `HTTP 401 Unauthorized: ...`，用来识别 token 失效。 */
+    private fun Throwable.isUnauthorized(): Boolean = APPLE_UNAUTHORIZED.containsMatchIn(message.orEmpty())
 
     private fun storefront(cookie: String): String {
         val value = parseCookieParts(cookie)["storefront"].orEmpty().trim().lowercase(Locale.ROOT)
@@ -542,6 +567,8 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         const val APPLE_HOME = "https://music.apple.com"
         const val AMP_API = "https://amp-api.music.apple.com"
         const val LOOKUP_API = "https://itunes.apple.com/lookup"
+        const val APPLE_WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        val APPLE_UNAUTHORIZED = Regex("""HTTP 40[13]\b""")
         const val CHART_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         val CHART_HOSTS = listOf(
@@ -591,6 +618,28 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         )
     }
 }
+
+/** music.apple.com 首页里可能承载 developer token 的 JS 包路径，按优先级去重。 */
+internal val APPLE_BUNDLE_REGEXES = listOf(
+    // 入口包：现行 index~<hash>.js，历史命名 index-legacy~<hash>.js
+    Regex("""/(assets/index[^/"]*\.js)"""),
+    // 兜底：assets 下任意 js
+    Regex("""/(assets/[A-Za-z0-9._~-]+\.js)"""),
+)
+
+/** JWT：header.payload.signature 三段；Apple 的 developer token 也长这样。 */
+internal val APPLE_JWT_REGEX = Regex("""eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}""")
+
+/** 首页引用的前端包路径，入口包优先；最多返回前两个，避免一次冷启动拉太多包。 */
+internal fun appleBundlePaths(html: String): List<String> =
+    APPLE_BUNDLE_REGEXES.flatMap { regex -> regex.findAll(html).map { it.groupValues[1] } }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .take(2)
+
+/** 前端包里出现的所有 JWT，保持出现顺序去重；调用方负责挑出对 amp-api 可用的那个。 */
+internal fun appleTokens(js: String): List<String> =
+    APPLE_JWT_REGEX.findAll(js).map { it.value }.distinct().toList()
 
 @Serializable
 private data class AppleSearchResponse(val results: AppleSearchResults = AppleSearchResults())
