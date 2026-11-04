@@ -134,6 +134,10 @@ class SettingsStore(private val context: Context) {
     private val posterTvDriftKey = booleanPreferencesKey("poster_tv_drift")
     private val collectionViewKey = stringPreferencesKey("collection_view")
     private val miniPlayerTargetKey = stringPreferencesKey("mini_player_target")
+    // 播放上报：把播放记录回传给平台，让推荐流跟着口味走；关掉后一个请求都不发
+    private val playReportEnabledKey = booleanPreferencesKey("play_report_enabled")
+    // 汽水上报用的设备标识：每次启动重新生成就没法积累口味，所以落盘
+    private val sodaReportDeviceIdKey = stringPreferencesKey("soda_report_device_id")
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -168,6 +172,8 @@ class SettingsStore(private val context: Context) {
             poster = posterPrefs(values),
             collectionView = values[collectionViewKey].toCollectionView(),
             miniPlayerTarget = values[miniPlayerTargetKey].toMiniPlayerTarget(),
+            playReportEnabled = values[playReportEnabledKey] ?: true,
+            sodaReportDeviceId = values[sodaReportDeviceIdKey] ?: "",
             equalizer = EqualizerSettings(
                 enabled = values[equalizerEnabledKey] ?: false,
                 presetId = values[equalizerPresetKey] ?: "flat",
@@ -224,6 +230,19 @@ class SettingsStore(private val context: Context) {
     suspend fun rhythmDebug(value: Boolean) = context.dataStore.edit { it[rhythmDebugKey] = value }
     suspend fun collectionView(value: CollectionView) = context.dataStore.edit { it[collectionViewKey] = value.name }
     suspend fun miniPlayerTarget(value: MiniPlayerTarget) = context.dataStore.edit { it[miniPlayerTargetKey] = value.name }
+    suspend fun playReportEnabled(value: Boolean) = context.dataStore.edit { it[playReportEnabledKey] = value }
+
+    /**
+     * 汽水上报的设备标识：第一次用随机值落盘，之后一直复用。
+     * 官方客户端靠它把同一个人的播放行为串起来，每次启动都换就等于没有历史。
+     */
+    suspend fun sodaReportDeviceId(): String {
+        val existing = context.dataStore.data.first()[sodaReportDeviceIdKey]
+        if (!existing.isNullOrBlank()) return existing
+        val generated = java.util.UUID.randomUUID().toString().replace("-", "")
+        context.dataStore.edit { it[sodaReportDeviceIdKey] = generated }
+        return generated
+    }
     suspend fun lastSeed(value: Int) = context.dataStore.edit { it[lastSeedKey] = value }
     suspend fun sleepFade(value: Boolean) = context.dataStore.edit { it[sleepFadeKey] = value }
     suspend fun cacheLimitMb(value: Int) = context.dataStore.edit { it[cacheLimitKey] = value }
@@ -393,6 +412,10 @@ data class AppSettings(
     val collectionView: CollectionView = CollectionView.List,
     /** 点按迷你播放器打开播放页还是海报墙（设置 › 播放页）。 */
     val miniPlayerTarget: MiniPlayerTarget = MiniPlayerTarget.Player,
+    /** 播放上报总开关：关掉后任何平台都不再回传播放记录。 */
+    val playReportEnabled: Boolean = true,
+    /** 汽水上报用的设备标识，空表示还没生成过（见 SettingsStore.sodaReportDeviceId）。 */
+    val sodaReportDeviceId: String = "",
     val equalizer: EqualizerSettings = EqualizerSettings(),
     val searchHistory: List<String> = emptyList(),
     val lastUpdateCheck: Long = 0L,

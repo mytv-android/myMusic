@@ -55,6 +55,9 @@ import com.mytv.mymusic.data.PlaylistEntity
 import com.mytv.mymusic.data.PlaylistEntryEntity
 import com.mytv.mymusic.data.PosterPrefs
 import com.mytv.mymusic.data.ProviderInfo
+import com.mytv.mymusic.data.playreport.PlayEndReason
+import com.mytv.mymusic.data.playreport.PlayFrame
+import com.mytv.mymusic.data.playreport.PlayReportHub
 import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.RepeatMode
 import com.mytv.mymusic.data.SavedSong
@@ -161,6 +164,8 @@ data class MusicUiState(
     val poster: PosterPrefs = PosterPrefs(),
     val collectionView: CollectionView = CollectionView.List,
     val miniPlayerTarget: MiniPlayerTarget = MiniPlayerTarget.Player,
+    /** 播放上报总开关；关掉后不再把播放记录回传给任何平台。 */
+    val playReportEnabled: Boolean = true,
     val coverSeed: Int = 0,
     val sleepFade: Boolean = true,
     val cacheLimitMb: Int = 512,
@@ -412,6 +417,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             poster = settings.poster,
             collectionView = settings.collectionView,
             miniPlayerTarget = settings.miniPlayerTarget,
+            playReportEnabled = settings.playReportEnabled,
             sleepFade = settings.sleepFade,
             cacheLimitMb = settings.cacheLimitMb.takeIf { it > 0 } ?: app.defaultCacheLimitMb(),
             reduceMotion = settings.reduceMotion,
@@ -2659,8 +2665,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val player = controller ?: return
         when (action) {
             "play" -> if (player.isPlaying) player.pause() else player.play()
-            "next" -> player.seekToNextMediaItem()
-            "previous" -> player.seekToPreviousMediaItem()
+            "next" -> {
+                // 上报要知道上一首是被「下一首」切走的，不是自己播完的
+                base.value.current?.let { PlayReportHub.userAction(it.source, PlayEndReason.Next) }
+                player.seekToNextMediaItem()
+            }
+            "previous" -> {
+                base.value.current?.let { PlayReportHub.userAction(it.source, PlayEndReason.Previous) }
+                player.seekToPreviousMediaItem()
+            }
             else -> toggleMode(player, action)
         }
     }
@@ -2701,6 +2714,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val player = controller ?: return
+        base.value.current?.let { PlayReportHub.userAction(it.source, PlayEndReason.ChangeQueue) }
         player.seekTo(index, 0)
         player.play()
     }
@@ -3037,6 +3051,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
+            // 上报要知道上一首是怎么结束的：自动接下一首是自然播完，换了队列是 change_queue。
+            // base.value.current 此刻还是上一首（onEvents 之后才更新），正好是要结束的那首
+            val finishedBy = when (reason) {
+                Player.MEDIA_ITEM_TRANSITION_REASON_AUTO -> PlayEndReason.Finished
+                Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED -> PlayEndReason.ChangeQueue
+                else -> null
+            }
+            if (finishedBy != null) {
+                base.value.current?.let { PlayReportHub.userAction(it.source, finishedBy) }
+            }
             val index = controller?.currentMediaItemIndex ?: return
             val song = base.value.queue.getOrNull(index) ?: return
             val track = base.value.canonicalQueue.getOrNull(index)
@@ -3331,6 +3355,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     // 播放中每 10 秒存一次位置：进程被杀后组件和继续播放从这里接上
                     if (it.isPlaying && ++ticks % CURSOR_SAVE_TICKS == 0) persistCursor()
+                    // 播放上报喂一帧：平台据此判断该发什么（见 PlayReportHub）
+                    val reported = base.value.current
+                    if (reported != null && reported.source.isNotEmpty()) {
+                        PlayReportHub.frame(
+                            reported.source,
+                            PlayFrame(
+                                trackId = reported.id,
+                                playing = it.isPlaying,
+                                positionMs = bounded,
+                                // 时长没就绪时给 0，上报侧会等有值了再算播放比例
+                                durationMs = if (duration == C.TIME_UNSET) 0L else duration.coerceAtLeast(0),
+                                finished = it.playbackState == Player.STATE_ENDED,
+                                extra = reported.extra,
+                            ),
+                        )
+                    }
                 }
                 delay(PROGRESS_TICK_MS)
             }
@@ -3927,6 +3967,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 else -> "汽水签名器已保存"
             },
         )
+    }
+
+    /** 播放上报总开关。关掉时丢掉还没发完的半条记录，不补报。 */
+    fun setPlayReportEnabled(value: Boolean) = viewModelScope.launch {
+        app.settings.playReportEnabled(value)
+        PlayReportHub.setEnabled(value)
+        message(if (value) "已开启播放上报，推荐会跟着听歌记录走" else "已关闭播放上报，不再回传播放记录")
     }
 
     fun logout(providerId: String = settingsState.value.provider) = viewModelScope.launch {

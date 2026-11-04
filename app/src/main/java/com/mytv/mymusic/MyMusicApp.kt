@@ -11,7 +11,14 @@ import androidx.work.Configuration
 import com.mytv.mymusic.data.AppDatabase
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.SettingsStore
+import com.mytv.mymusic.data.native.NativeProviders
+import com.mytv.mymusic.data.native.SodaPlayReporter
 import com.mytv.mymusic.data.native.SodaProvider
+import com.mytv.mymusic.data.playreport.KuwoPlayReporter
+import com.mytv.mymusic.data.playreport.NetEasePlayReporter
+import com.mytv.mymusic.data.playreport.PlayReportHub
+import com.mytv.mymusic.data.playreport.QQPlayReporter
+import com.mytv.mymusic.data.playreport.QianqianPlayReporter
 import com.mytv.mymusic.data.sync.SecretStore
 import com.mytv.mymusic.data.sync.SyncCoordinator
 import com.mytv.mymusic.data.update.UpdateRepository
@@ -117,6 +124,36 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         )
         update = UpdateRepository(this, settings)
         queueStore = QueueStore(this)
+        // 播放上报：开关、落盘的设备指纹、平台 Cookie 都从设置里来，
+        // 和签名器一样改设置即时生效，不需要重启
+        var reportDeviceIdReady = false
+        appScope.launch(Dispatchers.IO) {
+            settings.state.collect { values ->
+                PlayReportHub.setEnabled(values.playReportEnabled)
+                PlayReportHub.updateCookies(values.cookies)
+                SodaProvider.configureFallbackDeviceId(values.sodaReportDeviceId)
+                // 第一次开启：先把设备指纹落盘，之后每次启动都用同一个
+                if (values.playReportEnabled && values.sodaReportDeviceId.isBlank() && !reportDeviceIdReady) {
+                    reportDeviceIdReady = true
+                    SodaProvider.configureFallbackDeviceId(settings.sodaReportDeviceId())
+                }
+            }
+        }
+        val sodaProvider = NativeProviders.get(SodaProvider.SODA_PROVIDER_ID) as? SodaProvider
+        if (sodaProvider != null) {
+            PlayReportHub.register(
+                SodaPlayReporter(
+                    provider = sodaProvider,
+                    cookie = { PlayReportHub.cookie(SodaProvider.SODA_PROVIDER_ID) },
+                    deviceId = { sodaProvider.effectiveDeviceId() },
+                ),
+            )
+        }
+        // 其余平台：有公开上报接口的才注册，咪咕 / JOOX 没有，见 README
+        PlayReportHub.register(NetEasePlayReporter { PlayReportHub.cookie("netease") })
+        PlayReportHub.register(QQPlayReporter { PlayReportHub.cookie("qq") })
+        PlayReportHub.register(KuwoPlayReporter { PlayReportHub.cookie("kuwo") })
+        PlayReportHub.register(QianqianPlayReporter { PlayReportHub.cookie("qianqian") })
         // 屏保、息屏的状态：电视上这时候「离开应用」不是用户真的走了，音乐不能停
         ScreensaverState.start(this)
         // 桌面小组件：播放、设置、收藏、亮灭屏变化时合并刷新，电视上同样启用。

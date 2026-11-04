@@ -89,6 +89,10 @@ private fun SectionContent(
             val state by app.model.state.collectAsState()
             PlaybackSettingsScreen(state, actions, onBack, embedded)
         }
+        SettingsSection.Report -> {
+            val state by app.model.state.collectAsState()
+            ReportSettingsScreen(state, actions, onBack, embedded)
+        }
         SettingsSection.Equalizer -> {
             val state by app.model.state.collectAsState()
             val equalizer by app.model.equalizerState.collectAsState()

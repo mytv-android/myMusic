@@ -11,6 +11,7 @@ import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.QRSession
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
+import com.mytv.mymusic.data.playreport.PlayReportHub
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -490,7 +491,11 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         }
         val payload = buildString {
             append("{")
-            append("\"played_media\":[],")
+            // played_media 是服务端判断口味的真正通道：把最近真放过的曲目连播放毫秒一起回传，
+            // 空数组就等于「这个人什么都没听过」，推荐流只能给通用的热门内容
+            append("\"played_media\":")
+            append(PlayReportHub.playedMediaJson(info.id, PlayReportHub.PLAYED_MEDIA_LIMIT))
+            append(",")
             append("\"is_first_request\":true,")
             append("\"is_did_first_request\":true,")
             append("\"feed_counts\":{\"mix_session_count\":1},")
@@ -528,6 +533,15 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     // ---------------------------------------------------------------------
     // HTTP helpers
     // ---------------------------------------------------------------------
+
+    /** 当前生效的设备标识（优先签名器 /config 给出的那份）；埋点要和它保持一致。 */
+    internal suspend fun effectiveDeviceId(): String = ensureSignerCredentials().deviceId
+
+    /** 登录用户的平台内部 id；没登录或取不到时为空，上报按匿名设备处理。 */
+    internal suspend fun userId(cookie: String): String {
+        if (cookie.isBlank()) return ""
+        return runCatching { fetchPcMe(cookie).myInfo.id.trim() }.getOrNull().orEmpty()
+    }
 
     private suspend fun fetchAndroidSearch(
         cookie: String,
@@ -950,8 +964,10 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             // /config 不是所有签名器都提供；缺设备身份时用本地生成值
         }
         if (deviceId.isEmpty()) {
+            // 签名器没给 /config 时用落盘的那份：每次启动重新生成的话，
+            // 服务端（埋点、播放计数、推荐口味的 played_media）永远攒不起同一个人的历史
             val now = System.currentTimeMillis()
-            deviceId = now.toString()
+            deviceId = fallbackDeviceId.ifEmpty { now.toString() }
             iid = (now + 1).toString()
             fp = deviceId
         }
@@ -971,6 +987,53 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             }
         }
         return base.trimEnd('/') + "/config"
+    }
+
+    /**
+     * 业务写接口的带签名 POST：播放上报（`/luna/pc/action`、`/luna/pc/me/recently-played-media`）
+     * 和取流共用同一套签名器与设备指纹，请求头也必须和送进签名器的那份一致。
+     * 签名器没配或签名失败时按原样发出——播放计数不带签名服务端也收。
+     */
+    internal suspend fun businessPost(
+        path: String,
+        body: String,
+        cookie: String,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): NativeResponse {
+        // 签名器关掉时不上网取指纹：播放上报不带签名服务端也收
+        val signing = isSignerConfigured()
+        val creds = if (signing) ensureSignerCredentials() else localAppCredentials()
+        val params = pcAppParams()
+        params["device_id"] = creds.deviceId
+        params["iid"] = creds.iid
+        params["fp"] = creds.fp
+        val requestUrl = "https://api.qishui.com$path?${buildQuery(params)}"
+        val headers = linkedMapOf(
+            "User-Agent" to creds.userAgentOrDefault(),
+            "Content-Type" to "application/json; charset=utf-8",
+            "Accept" to "application/json",
+            "X-SS-STUB" to NativeCrypto.md5Hex(body).uppercase(Locale.ROOT),
+            "x-luna-background-type" to "foreground",
+            "x-luna-is-background-req" to "0",
+            "x-luna-is-local-user" to "1",
+            "Cookie" to cookie,
+        )
+        headers.putAll(extraHeaders)
+        val signed = if (signing) runCatching { signRequest(requestUrl, body, headers) }.getOrNull() else null
+        signed?.headers?.forEach { (key, value) -> headers[key] = value }
+        return NativeHttp.postJson(
+            signed?.url ?: requestUrl,
+            body,
+            headers,
+            cookie = cookie,
+            userAgent = creds.userAgentOrDefault(),
+        )
+    }
+
+    /** 签名器不可用时本地生成的一份设备身份，仅供播放上报这类不强制签名的接口用。 */
+    private fun localAppCredentials(): SodaAppCredentials {
+        val deviceId = fallbackDeviceId.ifEmpty { System.currentTimeMillis().toString() }
+        return SodaAppCredentials(deviceId = deviceId, iid = deviceId, fp = deviceId)
     }
 
     private fun pcTrackV2Url(creds: SodaAppCredentials): String {
@@ -2596,7 +2659,24 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
         fun isSignerConfigured(): Boolean = signerEnabled && effectiveSignerUrl().isNotBlank()
 
+        /**
+         * 落盘的设备标识：签名器不给 /config 时用它兜底，跨启动保持同一个值，
+         * 播放上报（埋点 / 播放计数 / 推荐口味的 played_media）才攒得起历史。
+         */
+        @Volatile
+        private var fallbackDeviceId = ""
+
+        fun configureFallbackDeviceId(deviceId: String) {
+            val next = deviceId.trim()
+            if (next == fallbackDeviceId) return
+            fallbackDeviceId = next
+            // 指纹变了，签名器缓存的那份作废
+            signerCredentials = null
+        }
+
         private const val SODA_SOURCE = "soda"
+        /** 平台 id，和 [SODA_INFO] 的 id 一致；播放上报按它路由。 */
+        const val SODA_PROVIDER_ID = "soda"
         const val SODA_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
         const val PC_APP_USER_AGENT = "LunaPC/3.3.0(359450208)"

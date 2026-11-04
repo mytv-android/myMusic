@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.Check
@@ -112,6 +113,7 @@ import coil3.compose.AsyncImage
 import com.mytv.mymusic.aggregate.MatchStrictness
 import com.mytv.mymusic.aggregate.PlaybackMode
 import com.mytv.mymusic.data.ProviderInfo
+import com.mytv.mymusic.data.playreport.PlayReportHub
 import com.mytv.mymusic.ui.AccountProfile
 import com.mytv.mymusic.ui.Cover
 import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
@@ -1437,6 +1439,74 @@ private fun StorageUsageCard(cacheBytes: Long, downloadsBytes: Long) {
     }
 }
 
+// ======================= 播放上报 =======================
+
+/**
+ * 播放上报：把「听了什么、听了多久、听完了没有」回传给平台。
+ * 汽水的推荐流、每日推荐、听歌模式都靠这个才有个人口味，关掉之后首页推荐会一直是通用内容。
+ */
+@Composable
+fun ReportSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: () -> Unit, embedded: Boolean = false) {
+    val providers = remember { PlayReportHub.reportingProviders() }
+    SettingsPage(SettingsSection.Report, embedded, onBack) {
+        item(key = "switch", contentType = "switch") {
+            SwitchRow(
+                title = "播放上报",
+                checked = state.playReportEnabled,
+                onCheckedChange = actions::setPlayReportEnabled,
+                index = 0,
+                count = 1,
+                summary = if (state.playReportEnabled) {
+                    "听歌记录会回传给对应平台，推荐跟着口味走"
+                } else {
+                    "已关闭：不发任何播放记录，推荐只按热门内容给"
+                },
+                icon = Icons.Filled.Analytics,
+            )
+        }
+        item(key = "platformsHead", contentType = "sectionHeader") { SectionLabel("会上报的平台") }
+        item(key = "platforms", contentType = "platformRows") {
+            Column {
+                providers.forEachIndexed { index, id ->
+                    ListRow(
+                        title = PlayReportHub.displayName(id),
+                        index = index,
+                        count = providers.size,
+                        onClick = null,
+                        icon = Icons.Filled.CheckCircle,
+                        summary = platformReportSummary(id, state),
+                        showChevron = false,
+                    )
+                }
+            }
+        }
+        item(key = "what", contentType = "note") {
+            SettingsNote(
+                "上报内容包括曲目 ID、实际播放时长（暂停不计）、是否播完，以及切歌 / 暂停 / 换队列的原因。" +
+                    "汽水还会把最近听过的曲目连时长一起带在推荐请求里，服务端据此调整推荐。" +
+                    "不上报用户名、Cookie、播放地址或文件内容。",
+            )
+        }
+        item(key = "note", contentType = "note") {
+            Box(Modifier.padding(top = 4.dp)) {
+                InfoNote("开关只影响播放上报；搜索、取流、歌词和下载不受影响。关掉后已经发出去的记录不会撤回。")
+            }
+        }
+    }
+}
+
+/** 平台上报的当前状态：各平台自己的说明 + 有没有登录态。 */
+private fun platformReportSummary(providerId: String, state: MusicUiState): String {
+    val reporter = PlayReportHub.reporter(providerId) ?: return ""
+    val detail = reporter.reportSummary().ifBlank { "正在上报" }
+    val login = when {
+        !state.playReportEnabled -> "总开关已关闭"
+        state.cookies[providerId].isNullOrBlank() -> "未登录：只按设备记录"
+        else -> "已登录"
+    }
+    return "$detail\n$login"
+}
+
 // ======================= 开源许可 / 隐私说明 =======================
 
 private const val LICENSE_URL = "https://github.com/mytv-android/myMusic/blob/main/LICENSE"
@@ -1493,6 +1563,7 @@ fun PrivacyScreen(onBack: () -> Unit, embedded: Boolean = false) {
         "歌词背景音频分析" to "“律动”只分析 ExoPlayer 已解码、正在输出的 PCM，不读取麦克风，不申请录音权限，也不保存或上传音频及频谱。暂停或离开播放页后停止分析。",
         "写入你选择的云端" to "启用同步后，自建歌单、收藏和平台账号 Cookie 会写入你的 GitHub Gist 或 Gitee 代码片段。Cookie 以明文保存，请勿公开文件链接；同步文件不包含同步令牌、播放地址和下载文件。",
         "网络请求" to "应用直接请求音乐平台上游接口、更新清单和同步服务，没有 myMusic 自建中转服务器。汽水播放签名器默认使用 SodaM 的公共签名服务（可在设置里关闭或换成自建实例），会员整曲的取流请求会带着 Cookie 和完整请求头发给该服务。第三方仍会看到其服务所需的常规请求信息。扫码登录的二维码在本机生成。",
+        "播放上报" to "开启“播放上报”（设置 › 播放上报，默认开）后，正在播放的曲目 ID、实际播放时长（暂停不计）、是否播完，以及切歌 / 暂停 / 换队列的原因会回传给该曲目所属的平台，用来让推荐流跟上你的口味；汽水还会把最近听过的曲目连时长一起带在推荐请求里。接入的平台有汽水音乐、网易云音乐、QQ音乐、酷我音乐和千千音乐；咪咕与 JOOX 公开面上没有可实现的上报接口。上报不带用户名、Cookie、播放地址或文件内容。关掉开关后一个请求都不发，已经发出去的服务端记录不会撤回。",
         "诊断信息" to "复制诊断只包含版本、设备型号、Android 版本、启用平台和最近错误；不包含 Cookie、令牌或完整播放 URL。",
     )
     SettingsPage(SettingsSection.Privacy, embedded, onBack) {

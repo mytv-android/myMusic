@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.GraphicEq
@@ -77,6 +78,7 @@ internal enum class SettingsSection(
     // 原来叫“歌词”；枚举名和路由保持不变，旧的深链接和保存的选中项继续有效
     Lyrics("settings/lyrics", "播放页", "封面形状、歌词背景、律动与跟拍校准", Icons.Filled.PlayCircle, IconTone.Primary),
     Playback("settings/playback", "播放与换源", "换源模式、平台优先级与匹配", Icons.Filled.SwapHoriz, IconTone.Primary),
+    Report("settings/report", "播放上报", "把播放记录回传给平台，推荐跟着口味走", Icons.Filled.Analytics, IconTone.Primary),
     Equalizer("settings/equalizer", "均衡器", "本机播放音效，不影响下载文件", Icons.Filled.GraphicEq, IconTone.Primary),
     Search("settings/search", "搜索与浏览", "聚合平台与默认浏览来源", Icons.Filled.Search, IconTone.Primary),
     Accounts("settings/accounts", "平台账号", "扫码登录、Cookie 与退出", Icons.Filled.Person, IconTone.Secondary),
@@ -92,7 +94,7 @@ internal enum class SettingsSection(
     companion object {
         /** 设置首页 / 双栏左栏的三组。 */
         val groups = listOf(
-            listOf(Appearance, Lyrics, Playback, Equalizer, Search),
+            listOf(Appearance, Lyrics, Playback, Report, Equalizer, Search),
             listOf(Accounts, Sync),
             listOf(Storage, About),
         )

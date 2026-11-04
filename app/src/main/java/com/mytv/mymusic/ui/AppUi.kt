@@ -257,6 +257,9 @@ class MusicActions(private val model: MusicViewModel) {
     fun saveCookie(providerId: String, cookie: String) = model.saveCookie(providerId, cookie)
     fun saveSodaSigner(url: String, token: String, enabled: Boolean = true) =
         model.saveSodaSigner(url, token, enabled)
+
+    /** 播放上报总开关：是否把播放记录回传给平台（见 PlayReporter）。 */
+    fun setPlayReportEnabled(value: Boolean) = model.setPlayReportEnabled(value)
     fun logout(providerId: String) = model.logout(providerId)
     fun startQrLogin(providerId: String, type: String) = model.startQrLogin(providerId, type)
     fun cancelLogin() = model.cancelLogin()

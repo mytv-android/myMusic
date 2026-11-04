@@ -103,6 +103,7 @@ internal fun settingsOverview(
             SettingsSection.Lyrics to "封面${state.coverShape.label} · 背景${state.lyricsBackground.label}",
             SettingsSection.Playback to playbackModeSummary(state.aggregation.playbackMode) +
                 if (state.aggregation.matchStrictness == MatchStrictness.Strict) " · 严格匹配" else "",
+            SettingsSection.Report to if (state.playReportEnabled) "已开启" else "已关闭",
             SettingsSection.Equalizer to "$eqLabel · ${if (equalizer.enabled) "已开启" else "已关闭"}",
             SettingsSection.Search to "$enabled 个聚合平台 · 默认${providerName(state.providers, state.providerId)}",
             SettingsSection.Accounts to when {
