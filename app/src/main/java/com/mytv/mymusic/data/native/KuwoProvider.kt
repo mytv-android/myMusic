@@ -172,6 +172,16 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         }
     }
 
+    /** 酷我的登录态：uid/token 从 cookie 里取，取不到就保持匿名的 0。 */
+    private fun kuwoLoginParams(cookie: String): Array<Pair<String, String>> {
+        val jar = parseCookie(cookie)
+        val uid = firstNonEmpty(jar["uid"].orEmpty(), jar["userid"].orEmpty(), jar["user_id"].orEmpty())
+            .takeIf { value -> value.isNotEmpty() && value.all { it.isDigit() } }
+        val token = firstNonEmpty(jar["token"].orEmpty(), jar["usertoken"].orEmpty())
+        if (uid == null || token.isEmpty()) return arrayOf("loginUid" to "0", "loginSid" to "0")
+        return arrayOf("loginUid" to uid, "loginSid" to token)
+    }
+
     private fun randomHex(length: Int): String {
         val chars = "0123456789abcdef"
         return buildString(length) {
@@ -370,8 +380,7 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
             "prod" to "kwplayer_pc_9.1.1.2",
             "vipver" to "9.1.1.2",
             "source" to "kwplayer_pc_9.1.1.2",
-            "loginUid" to "0",
-            "loginSid" to "0",
+            *kuwoLoginParams(cookie),
             "appUid" to "38668888",
         )
         val body = NativeHttp.get(url, cookie = cookie, randomIp = true, userAgent = KUWO_USER_AGENT)
@@ -411,8 +420,10 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         val safePage = if (page < 1) 1 else page
         val safeLimit = if (limit < 1) 20 else limit
         val params = mutableListOf(
-            "loginUid" to "0",
-            "loginSid" to "0",
+            "prod" to "kwplayer_pc_9.1.1.2",
+            "vipver" to "9.1.1.2",
+            "source" to "kwplayer_pc_9.1.1.2",
+            *kuwoLoginParams(cookie),
             "appUid" to "38668888",
             "pn" to safePage.toString(),
             "rn" to safeLimit.toString(),

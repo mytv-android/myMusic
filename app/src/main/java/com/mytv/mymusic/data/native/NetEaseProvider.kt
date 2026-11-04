@@ -261,7 +261,8 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             put("total", true)
             put("n", 1000)
         }
-        val response = weapiPost(RECOMMENDED_API, body, cookie, sendCookie = false)
+        // 推荐歌单是个性化接口，登录后才按口味出；未登录时不带 cookie，行为与之前一致
+        val response = weapiPost(RECOMMENDED_API, body, cookie, sendCookie = cookie.isNotBlank())
         val data = json.decodeFromString<NeteaseRecommendedResponse>(response.body)
         if (data.code != 200) throw IllegalStateException("netease api error code: ${data.code}")
         return data.result.map { item ->
@@ -365,7 +366,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
 
     override suspend fun categories(cookie: String): List<PlaylistCategory> {
         val body = buildJsonObject { put("csrf_token", "") }
-        val response = weapiPost(CATEGORY_API, body, cookie, sendCookie = false)
+        val response = weapiPost(CATEGORY_API, body, cookie, sendCookie = cookie.isNotBlank())
         val data = json.decodeFromString<NeteaseCategoryResponse>(response.body)
         if (data.code != 200) throw IllegalStateException("netease api error code: ${data.code}")
         val result = mutableListOf(
@@ -404,7 +405,8 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             put("total", safePage == 1)
             put("csrf_token", "")
         }
-        val response = weapiPost(CATEGORY_PLAYLIST_API, body, cookie, sendCookie = false)
+        // 新版 /weapi/playlist/list 未登录只回极少结果，登录后带上 cookie 才拿得到完整分页
+        val response = weapiPost(CATEGORY_PLAYLIST_API, body, cookie, sendCookie = cookie.isNotBlank())
         val data = json.decodeFromString<NeteasePlaylistListResponse>(response.body)
         if (data.code != 200) throw IllegalStateException("netease api error code: ${data.code}")
         return data.playlists.map { item ->

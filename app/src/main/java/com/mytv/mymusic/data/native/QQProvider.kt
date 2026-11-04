@@ -459,8 +459,13 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     }
 
     override suspend fun recommendedPlaylists(cookie: String): List<Playlist> {
+        val (uin, gtk) = qqLogin(cookie)
         val body = buildJsonObject {
-            putJsonObject("comm") { put("ct", 24) }
+            putJsonObject("comm") {
+                put("ct", 24)
+                put("uin", uin)
+                put("g_tk", gtk)
+            }
             putJsonObject("recomPlaylist") {
                 put("method", "get_hot_recommend")
                 put("module", "playlist.HotRecommendServer")
@@ -644,12 +649,13 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         val safePage = page.coerceAtLeast(1)
         val safeLimit = if (limit < 1) 20 else limit
         val offset = (safePage - 1) * safeLimit
+        val (uin, gtk) = qqLogin(cookie)
         val url = QQ_CATEGORY_PLAYLIST_API + "?" + qqQuery(
             "picmid" to "1",
             "rnd" to "0.1",
-            "g_tk" to "5381",
-            "loginUin" to "0",
-            "hostUin" to "0",
+            "g_tk" to gtk.toString(),
+            "loginUin" to uin,
+            "hostUin" to uin,
             "format" to "json",
             "inCharset" to "utf8",
             "outCharset" to "utf-8",
@@ -800,6 +806,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     }
 
     override suspend fun topLists(cookie: String): List<TopList> {
+        val (uin, gtk) = qqLogin(cookie)
         val payload = buildJsonObject {
             putJsonObject("comm") {
                 put("cv", 4747474)
@@ -810,9 +817,9 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                 put("notice", 0)
                 put("platform", "yqq.json")
                 put("needNewCode", 1)
-                put("uin", "0")
-                put("g_tk_new_20200303", 5381)
-                put("g_tk", 5381)
+                put("uin", uin)
+                put("g_tk_new_20200303", gtk)
+                put("g_tk", gtk)
             }
             putJsonObject("topList") {
                 put("module", "musicToplist.ToplistInfoServer")
@@ -882,11 +889,12 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
 
     /** 电台分类即听歌模式：热门 / 心情 / 主题 / 场景 / 曲风 / 语言 / 人群 / 乐器 / 陪你听 / 厂牌。 */
     override suspend fun listeningModes(cookie: String): List<ListeningMode> {
+        val (uin, _) = qqLogin(cookie)
         val payload = buildJsonObject {
             putJsonObject("comm") {
                 put("ct", 24)
                 put("cv", 0)
-                put("uin", "0")
+                put("uin", uin)
                 put("format", "json")
             }
             putJsonObject("radiolist") {
@@ -958,11 +966,12 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     }
 
     private suspend fun fetchRadioTracks(cookie: String, radioId: String): List<Song> {
+        val (uin, _) = qqLogin(cookie)
         val payload = buildJsonObject {
             putJsonObject("comm") {
                 put("ct", 24)
                 put("cv", 0)
-                put("uin", "0")
+                put("uin", uin)
                 put("format", "json")
             }
             putJsonObject("songlist") {
@@ -1240,6 +1249,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     }
 
     private suspend fun fetchPlaylistDetail(cookie: String, id: String): Pair<Playlist, List<Song>> {
+        val (uin, gtk) = qqLogin(cookie)
         val params = linkedMapOf(
             "type" to "1",
             "json" to "1",
@@ -1247,9 +1257,9 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             "onlysong" to "0",
             "disstid" to id,
             "format" to "json",
-            "g_tk" to "5381",
-            "loginUin" to "0",
-            "hostUin" to "0",
+            "g_tk" to gtk.toString(),
+            "loginUin" to uin,
+            "hostUin" to uin,
             "inCharset" to "utf8",
             "outCharset" to "utf-8",
             "notice" to "0",
@@ -1530,7 +1540,8 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         page: Int,
         limit: Int,
     ): List<Playlist> {
-        val url = QQ_PROFILE_ORDER_API + "?" + profileOrderAssetQuery(uin, "3", page, limit)
+        val (_, gtk) = qqLogin(cookie)
+        val url = QQ_PROFILE_ORDER_API + "?" + profileOrderAssetQuery(uin, gtk, "3", page, limit)
         val body = NativeHttp.get(
             url,
             headers = mapOf("Referer" to "https://y.qq.com/"),
@@ -1571,7 +1582,8 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         page: Int,
         limit: Int,
     ): Pair<Int, List<Song>> {
-        val url = QQ_PROFILE_ORDER_API + "?" + profileOrderAssetQuery(uin, "1", page, limit)
+        val (_, gtk) = qqLogin(cookie)
+        val url = QQ_PROFILE_ORDER_API + "?" + profileOrderAssetQuery(uin, gtk, "1", page, limit)
         val body = NativeHttp.get(
             url,
             headers = mapOf("Referer" to "https://y.qq.com/"),
@@ -1629,7 +1641,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         }
     }
 
-    private fun profileOrderAssetQuery(uin: String, reqType: String, page: Int, limit: Int): String {
+    private fun profileOrderAssetQuery(uin: String, gtk: Int, reqType: String, page: Int, limit: Int): String {
         val safePage = page.coerceAtLeast(1)
         val safeLimit = if (limit < 1) 50 else limit
         val offset = (safePage - 1) * safeLimit
@@ -1640,9 +1652,9 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             "platform" to "yqq.json",
             "needNewCode" to "0",
             "loginUin" to uin,
-            "hostUin" to "0",
+            "hostUin" to uin,
             "notice" to "0",
-            "g_tk" to "5381",
+            "g_tk" to gtk.toString(),
             "ct" to "20",
             "cid" to "205360956",
             "userid" to uin,
@@ -2299,6 +2311,17 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         )
         if (uin.startsWith("o")) uin = uin.substring(1)
         return uin.trimStart('0').trim()
+    }
+
+    /**
+     * musicu 接口的登录态：uin 取 cookie 里的 QQ 号，g_tk 由 p_skey/skey 算。
+     * 拿不到登录态时返回匿名的 "0"/5381，行为和以前一致。
+     */
+    private fun qqLogin(cookie: String): Pair<String, Int> {
+        val uin = normalizeQqUin(cookie)
+        if (uin.isBlank() || !uin.all { it.isDigit() }) return "0" to 5381
+        val skey = firstNonEmpty(cookieValue(cookie, "p_skey"), cookieValue(cookie, "skey"))
+        return uin to if (skey.isBlank()) 5381 else gtk33(skey)
     }
 
     private fun cookieValue(cookie: String, key: String): String {
