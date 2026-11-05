@@ -11,8 +11,6 @@ class SourceResolver(
     private val cookies: () -> Map<String, String>,
     private val settings: () -> AggregationSettings,
     private val workDir: () -> File,
-    /** 福利中心 VIP 生效中：跨平台优先选无损 / 高码率音源，见 [SourcePolicy.qualityFirst]。 */
-    private val vipQualityFirst: () -> Boolean = { false },
 ) {
     private data class CachedUrl(
         val url: String,
@@ -36,7 +34,6 @@ class SourceResolver(
             priority = current.priorityFor(available),
             pinnedProvider = pinnedProvider ?: configuredPinned,
             allowPreview = current.allowPreview,
-            qualityFirst = vipQualityFirst(),
         )
     }
 
@@ -66,14 +63,8 @@ class SourceResolver(
                 !(status == Availability.VipOnly && cookieMap[source.providerId].isNullOrBlank()) &&
                 status != Availability.PreviewOnly
         }.sortedWith(
-            if (policy.mode == PlaybackMode.Priority && !policy.qualityFirst) {
+            if (policy.mode == PlaybackMode.Priority) {
                 compareBy<TrackSource> { priorityIndex(it) }.thenByDescending { it.matchScore }
-            } else if (policy.qualityFirst) {
-                // VIP「无损优先」：先挑无损源，再看平台优先级，最后比码率和匹配度
-                compareBy<TrackSource> { if (it.isLossless) 0 else 1 }
-                    .thenBy { priorityIndex(it) }
-                    .thenByDescending { it.song.bitrate }
-                    .thenByDescending { it.matchScore }
             } else {
                 compareBy<TrackSource> { priorityIndex(it) }
                     .thenByDescending { it.song.bitrate }

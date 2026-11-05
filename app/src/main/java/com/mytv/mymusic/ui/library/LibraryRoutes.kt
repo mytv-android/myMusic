@@ -1,16 +1,20 @@
 package com.mytv.mymusic.ui.library
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavType
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.mytv.mymusic.ui.AppNav
 import com.mytv.mymusic.ui.TvExitBackHandler
+import com.mytv.mymusic.ui.components.LocalAppSnackbar
+import kotlinx.coroutines.launch
 
 /**
  * 我的：本机音乐库、喜欢 / 最近 / 下载、自建歌单和同步。
@@ -27,6 +31,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
         val covers by app.model.localPlaylistCovers.collectAsState()
         val sync by app.model.syncState.collectAsState()
         val listen by app.model.listenTaskState.collectAsState()
+        val soda by app.model.sodaWelfare.collectAsState()
         val nav = remember(app) {
             LibraryNav(
                 openSettings = { app.openSettings("settings") },
@@ -39,6 +44,8 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
                 openWelfare = { app.nav.navigate("welfare") },
             )
         }
+        // 「我的」页的入口卡也要显示任务进度，进页面就把服务端状态读回来
+        LaunchedEffect(Unit) { app.model.ensureSodaWelfareLoaded() }
         LibraryScreen(
             state = state,
             favorites = favorites,
@@ -48,6 +55,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
             covers = covers,
             sync = sync,
             listen = listen,
+            soda = soda,
             actions = app.actions,
             nav = nav,
             // ≥840dp 平板：选中的歌单直接显示在右栏，不跳页
@@ -107,11 +115,21 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
     }
     composable("welfare") {
         TvExitBackHandler()
+        val soda by app.model.sodaWelfare.collectAsState()
         val listen by app.model.listenTaskState.collectAsState()
+        val snackbar = LocalAppSnackbar.current
+        val scope = rememberCoroutineScope()
         WelfareScreen(
-            listen = listen,
-            onClaim = { task, onResult -> app.model.claimListenTask(task, onResult) },
-            onActivate = { app.model.activateVip() },
+            soda = soda,
+            todayMinutes = listen.todayMinutes,
+            onRefresh = app.model::refreshSodaWelfare,
+            onApply = {
+                app.model.applySodaFreeVip { result ->
+                    scope.launch { snackbar.showSnackbar(result.message) }
+                }
+            },
+            // 没登录汽水时去平台账号页扫码
+            onLogin = { app.openSettings("settings/accounts") },
             onBack = app::back,
         )
     }

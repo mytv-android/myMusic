@@ -145,7 +145,6 @@ import com.mytv.mymusic.ui.theme.BlurMode
 import com.mytv.mymusic.ui.theme.BrandSeed
 import com.mytv.mymusic.ui.theme.ColorSource
 import com.mytv.mymusic.ui.theme.CustomSeedSwatches
-import com.mytv.mymusic.ui.theme.VipSeedSwatches
 import com.mytv.mymusic.ui.theme.FontScale
 import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.LocalAppearance
@@ -175,7 +174,6 @@ fun AppearanceSettingsScreen(
     actions: MusicActions,
     onBack: () -> Unit,
     embedded: Boolean = false,
-    vipActive: Boolean = false,
 ) {
     val window = LocalAppWindow.current
     val tv = window.isTv
@@ -232,7 +230,7 @@ fun AppearanceSettingsScreen(
         item(key = "source", contentType = "colorOptions") { ColorSourceOptions(state, actions, perRow = if (window.twoPane) 4 else 2) }
         if (appearance.colorSource == ColorSource.Custom) {
             item(key = "swatches", contentType = "swatches") {
-                SeedSwatches(appearance.customSeed, vipActive) { actions.setCustomSeed(it) }
+                SeedSwatches(appearance.customSeed) { actions.setCustomSeed(it) }
             }
         }
         item(key = "styleHead", contentType = "sectionHeader") { SectionLabel("配色风格") }
@@ -482,7 +480,7 @@ private fun ColorSourceSample(source: ColorSource, state: MusicUiState, modifier
 /** 自选颜色的色板。选中项色块缩小并加一圈描边，不只靠颜色区分。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SeedSwatches(selected: Int, vipActive: Boolean, onSelect: (Int) -> Unit) {
+private fun SeedSwatches(selected: Int, onSelect: (Int) -> Unit) {
     val ring = MaterialTheme.colorScheme.onSurface
     FlowRow(
         Modifier.fillMaxWidth().padding(top = 12.dp).selectableGroup(),
@@ -505,50 +503,6 @@ private fun SeedSwatches(selected: Int, vipActive: Boolean, onSelect: (Int) -> U
                 if (isSelected) Box(Modifier.size(42.dp).border(3.dp, ring, CircleShape))
             }
         }
-        // VIP 专属的三款跟在后面：没会员时压暗加锁，点了也不给选
-        VipSeedSwatches.forEachIndexed { index, color ->
-            val argb = color.toArgb()
-            val isSelected = argb == selected
-            Box(
-                Modifier
-                    .size(48.dp)
-                    .tvFocusRing(CircleShape)
-                    .clip(CircleShape)
-                    .selectable(
-                        selected = isSelected,
-                        enabled = vipActive,
-                        role = Role.RadioButton,
-                        onClick = { if (vipActive) onSelect(argb) },
-                    )
-                    .semantics {
-                        contentDescription =
-                            if (vipActive) "VIP 色板 ${index + 1}" else "VIP 专属色板 ${index + 1}，未解锁"
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    Modifier
-                        .size(if (isSelected) 30.dp else 38.dp)
-                        .clip(CircleShape)
-                        .background(if (vipActive) color else color.copy(alpha = 0.35f)),
-                )
-                if (isSelected) Box(Modifier.size(42.dp).border(3.dp, ring, CircleShape))
-                if (!vipActive) {
-                    Box(
-                        Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Filled.Lock, null, Modifier.size(18.dp), tint = Color.White)
-                    }
-                }
-            }
-        }
-    }
-    if (!vipActive) {
-        SettingsNote("后 3 款是 VIP 专属色板，在「我的 › 福利中心」听歌就能领。", Modifier.padding(top = 12.dp))
     }
 }
 

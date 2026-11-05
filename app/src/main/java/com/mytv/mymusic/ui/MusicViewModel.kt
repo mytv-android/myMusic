@@ -42,6 +42,10 @@ import com.mytv.mymusic.data.CanonicalSourceEntity
 import com.mytv.mymusic.data.CanonicalTrackEntity
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.ListenTaskState
+import com.mytv.mymusic.data.native.SodaApplyFreeVipResult
+import com.mytv.mymusic.data.native.SodaCommerceInfo
+import com.mytv.mymusic.data.native.SodaProvider
+import com.mytv.mymusic.data.native.SodaWelfare
 import com.mytv.mymusic.data.bindingTarget
 import com.mytv.mymusic.data.boundDiff
 import com.mytv.mymusic.data.CollectionView
@@ -72,7 +76,6 @@ import com.mytv.mymusic.data.native.AppleLyricsConfig
 import com.mytv.mymusic.data.native.KugouProvider
 import com.mytv.mymusic.data.native.NativeProviders
 import com.mytv.mymusic.data.native.NetEaseProvider
-import com.mytv.mymusic.data.native.SodaProvider
 import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.data.update.InstallResult
 import com.mytv.mymusic.data.update.UpdatePhase
@@ -151,6 +154,20 @@ import java.util.concurrent.ConcurrentHashMap
 /** 设置里存的是枚举名字；旧数据或空值都回到默认的「推荐」。 */
 private fun String?.toPlaylistMode(): PlaylistMode =
     PlaylistMode.entries.firstOrNull { it.name == this } ?: PlaylistMode.Recommend
+
+/**
+ * 汽水「天天送会员」的界面状态。任务阈值、完成数、VIP 到期都以服务端为准
+ * （见 [com.mytv.mymusic.data.native.SodaWelfare]），本机只存加载态。
+ */
+data class SodaWelfareUi(
+    // 首帧当成正在读，入口卡才不会闪一下「获取失败」
+    val loading: Boolean = true,
+    val applying: Boolean = false,
+    /** 是否已登录汽水音乐；未登录时界面引导去扫码。 */
+    val loggedIn: Boolean = true,
+    val info: SodaCommerceInfo = SodaCommerceInfo(),
+    val error: String = "",
+)
 
 data class MusicUiState(
     val providers: List<ProviderInfo> = emptyList(),
@@ -372,14 +389,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val equalizerState = app.equalizer.state
     val sleepTimer = app.sleepTimer.state
 
-    /** 「天天听歌」福利中心的账本：任务进度、VIP 天数和到期时间。 */
+    /** 「天天听歌」的本机听歌计时，只给汽水的任务进度当个参考。 */
     val listenTaskState: StateFlow<ListenTaskState> = app.listenTasks.state
         .stateIn(viewModelScope, SharingStarted.Eagerly, ListenTaskState())
-    /** VIP 是否生效中：选源的无损优先、外观的 VIP 色板都看它。 */
-    val vipActive: StateFlow<Boolean> = listenTaskState
-        .map { it.vipActive }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    /** 汽水音乐「天天送会员」：服务端的任务状态和免费 VIP 领取。 */
+    private val _sodaWelfare = MutableStateFlow(SodaWelfareUi())
+    val sodaWelfare: StateFlow<SodaWelfareUi> = _sodaWelfare.asStateFlow()
+    private var sodaWelfareJob: Job? = null
+
+    /** 还没读过服务端（statusCode 还是初值）时读一次，已读过就不重复请求。 */
+    fun ensureSodaWelfareLoaded() {
+        if (_sodaWelfare.value.info.statusCode < 0) refreshSodaWelfare()
+    }
 
     private val _recognition = MutableStateFlow(RecognitionUiState())
     val recognitionState: StateFlow<RecognitionUiState> = _recognition
@@ -493,7 +514,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         cookies = { settingsState.value.cookies },
         settings = { settingsState.value.aggregation },
         workDir = { app.cacheDir },
-        vipQualityFirst = { vipActive.value },
     )
     private val matchJob = MatchJob(
         repository = app.repository,
@@ -3528,14 +3548,49 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         app.listenTasks.addListening(ms)
     }
 
-    /** 领取「天天听歌」任务奖励，[onResult] 收到领到的 VIP 天数（0 = 没领成）。 */
-    fun claimListenTask(taskId: String, onResult: (Int) -> Unit = {}) {
-        viewModelScope.launch { onResult(app.listenTasks.claim(taskId)) }
+    /** 刷新汽水「天天送会员」状态；没登录汽水时只回一个未登录态。 */
+    fun refreshSodaWelfare() {
+        val cookie = settingsState.value.cookies[SodaProvider.SODA_PROVIDER_ID].orEmpty()
+        if (cookie.isBlank()) {
+            _sodaWelfare.value = SodaWelfareUi(loading = false, loggedIn = false)
+            return
+        }
+        sodaWelfareJob?.cancel()
+        sodaWelfareJob = viewModelScope.launch {
+            _sodaWelfare.value = _sodaWelfare.value.copy(loading = true, loggedIn = true)
+            val result = runCatching { SodaWelfare.commerceInfo(cookie) }
+            _sodaWelfare.value = result.fold(
+                onSuccess = { info ->
+                    SodaWelfareUi(
+                        loading = false,
+                        loggedIn = !info.notLoggedIn,
+                        info = info,
+                        error = if (info.ok || info.notLoggedIn) "" else info.statusMsg,
+                    )
+                },
+                onFailure = { error ->
+                    SodaWelfareUi(loading = false, loggedIn = true, error = error.message.orEmpty())
+                },
+            )
+        }
     }
 
-    /** 把领到的 VIP 天数全部激活续期；[onResult] 为是否成功激活。 */
-    fun activateVip(onResult: (Boolean) -> Unit = {}) {
-        viewModelScope.launch { onResult(app.listenTasks.activateVip()) }
+    /** 领取已达标的免费 VIP；[onResult] 带服务端返回的提示。 */
+    fun applySodaFreeVip(onResult: (SodaApplyFreeVipResult) -> Unit = {}) {
+        val cookie = settingsState.value.cookies[SodaProvider.SODA_PROVIDER_ID].orEmpty()
+        if (cookie.isBlank()) {
+            onResult(SodaApplyFreeVipResult(false, "未登录汽水音乐"))
+            return
+        }
+        viewModelScope.launch {
+            _sodaWelfare.value = _sodaWelfare.value.copy(applying = true)
+            val result = runCatching { SodaWelfare.applyFreeVip(cookie) }.getOrElse {
+                SodaApplyFreeVipResult(false, it.message.orEmpty())
+            }
+            _sodaWelfare.value = _sodaWelfare.value.copy(applying = false)
+            if (result.success) refreshSodaWelfare()
+            onResult(result)
+        }
     }
 
     /** 播放进度的本地时钟；[positionAt] 按 elapsedRealtime 外推，不跟着会话推送的节奏跳。 */

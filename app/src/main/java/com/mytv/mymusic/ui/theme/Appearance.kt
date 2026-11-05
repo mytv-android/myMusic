@@ -82,11 +82,3 @@ val CustomSeedSwatches = listOf(
     Color(0xFF7D4BA0), Color(0xFFD9668F), Color(0xFFB8322A), Color(0xFFE8833A),
     Color(0xFFB08B47), Color(0xFF5E7D3A),
 )
-
-/**
- * VIP 专属色板：金属调的三款，跟在普通色板后面，没领会员时上锁。
- * 领取见「我的 › 福利中心」的「天天听歌」任务。
- */
-val VipSeedSwatches = listOf(
-    Color(0xFFD4A017), Color(0xFFD98E8E), Color(0xFF7FA8C9),
-)

@@ -2619,6 +2619,51 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         const val DEFAULT_SIGNER_URL = "http://103.236.75.83:8899/sign"
         const val DEFAULT_SIGNER_TOKEN = "b356ad402bc31ee9e5a99cfdbf41eaa39961a562251c3359"
 
+        /**
+         * 「天天送会员」接口用的 UA：服务端按它判断客户端形态，和桌面版同款即可，
+         * 这两个接口（commerce_info / apply_free_vip）不要求应用级签名。
+         */
+        const val WELFARE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36"
+
+        /** 天天送会员接口的公共查询参数；device_id / iid / fp 每次现生成，接口不校验唯一性。 */
+        fun welfareAppParams(): String {
+            val now = System.currentTimeMillis()
+            val deviceId = now.toString()
+            val iid = (now + 1).toString()
+            return welfareQuery(
+                mapOf(
+                    "aid" to "386088",
+                    "app_name" to "luna_pc",
+                    "region" to "cn",
+                    "geo_region" to "cn",
+                    "os_region" to "cn",
+                    "sim_region" to "",
+                    "device_id" to deviceId,
+                    "cdid" to "",
+                    "iid" to iid,
+                    "version_name" to "3.3.0",
+                    "version_code" to "30030000",
+                    "channel" to "official",
+                    "build_mode" to "master",
+                    "network_carrier" to "",
+                    "ac" to "wifi",
+                    "tz_name" to "Asia/Shanghai",
+                    "resolution" to "",
+                    "device_platform" to "windows",
+                    "device_type" to "Windows",
+                    "os_version" to "Windows 11",
+                    "fp" to deviceId,
+                ),
+            )
+        }
+
+        private fun welfareQuery(params: Map<String, String>): String =
+            params.entries.sortedBy { it.key }
+                .joinToString("&") { (key, value) -> "${welfareEscape(key)}=${welfareEscape(value)}" }
+
+        private fun welfareEscape(value: String): String =
+            java.net.URLEncoder.encode(value, "UTF-8")
+
         /** 扫码登录会话的登记寿命：远长于二维码自身 TTL，只用来清理遗留条目。 */
         private const val LOGIN_SESSION_TTL_MS = 10 * 60_000L
 

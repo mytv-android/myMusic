@@ -113,6 +113,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.ListenTaskState
+import com.mytv.mymusic.ui.SodaWelfareUi
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
@@ -181,6 +182,7 @@ fun LibraryScreen(
     covers: Map<String, List<String>>,
     sync: SyncUiState,
     listen: ListenTaskState,
+    soda: SodaWelfareUi,
     actions: MusicActions,
     nav: LibraryNav,
     detailPane: @Composable (playlistId: String, onClosed: () -> Unit) -> Unit,
@@ -197,9 +199,9 @@ fun LibraryScreen(
     }
 
     when {
-        window.isTv -> TvLibrary(state, history, playlists, covers, sync, stats, listen, actions, nav, menu)
-        window.isTablet && window.twoPane -> TabletLibrary(playlists, covers, sync, stats, favorites, listen, actions, nav, menu, detailPane, state.providers)
-        else -> PhoneLibrary(playlists, covers, sync, stats, favorites, listen, actions, nav, menu, state.providers)
+        window.isTv -> TvLibrary(state, history, playlists, covers, sync, stats, listen, soda, actions, nav, menu)
+        window.isTablet && window.twoPane -> TabletLibrary(playlists, covers, sync, stats, favorites, listen, soda, actions, nav, menu, detailPane, state.providers)
+        else -> PhoneLibrary(playlists, covers, sync, stats, favorites, listen, soda, actions, nav, menu, state.providers)
     }
 
     if (createOpen) {
@@ -230,6 +232,7 @@ private fun PhoneLibrary(
     stats: LibraryStats,
     favorites: List<SavedSong>,
     listen: ListenTaskState,
+    soda: SodaWelfareUi,
     actions: MusicActions,
     nav: LibraryNav,
     menu: NewMenu,
@@ -273,7 +276,7 @@ private fun PhoneLibrary(
                         tileHeight = if (phone) 100.dp else 112.dp,
                     )
                 }
-                item(key = "welfare", contentType = "card") { WelfareEntryCard(listen, nav.openWelfare) }
+                item(key = "welfare", contentType = "card") { WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare) }
                 item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
                     SectionLabel("自建歌单", trailing = { CountTag("${playlists.size} 个") })
@@ -357,6 +360,7 @@ private fun TabletLibrary(
     stats: LibraryStats,
     favorites: List<SavedSong>,
     listen: ListenTaskState,
+    soda: SodaWelfareUi,
     actions: MusicActions,
     nav: LibraryNav,
     menu: NewMenu,
@@ -423,7 +427,7 @@ private fun TabletLibrary(
                         }
                     }
                 }
-                item(key = "welfare", contentType = "card") { WelfareEntryCard(listen, nav.openWelfare) }
+                item(key = "welfare", contentType = "card") { WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare) }
                 item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
                     SectionLabel("自建歌单", trailing = { NewPlaylistSplitButton(menu) })
@@ -473,6 +477,7 @@ private fun TvLibrary(
     sync: SyncUiState,
     stats: LibraryStats,
     listen: ListenTaskState,
+    soda: SodaWelfareUi,
     actions: MusicActions,
     nav: LibraryNav,
     menu: NewMenu,
@@ -522,8 +527,8 @@ private fun TvLibrary(
                         content = MaterialTheme.colorScheme.onPrimaryContainer,
                         onClick = nav.openWelfare,
                     ) {
-                        Text("福利中心", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text(welfareHeadline(listen), style = MaterialTheme.typography.bodyMedium)
+                        Text("汽水天天送会员", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(welfareHeadline(soda, listen.todayMinutes), style = MaterialTheme.typography.bodyMedium)
                     }
                     TvTile(
                         modifier = Modifier.width(200.dp),
