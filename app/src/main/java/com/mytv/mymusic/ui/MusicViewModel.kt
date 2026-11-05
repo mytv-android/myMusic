@@ -77,6 +77,7 @@ import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.data.update.InstallResult
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
+import com.mytv.mymusic.playback.AppleWidevineDrmCallback
 import com.mytv.mymusic.playback.NowPlayingShape
 import com.mytv.mymusic.playback.PlaybackService
 import com.mytv.mymusic.playback.SavedCursor
@@ -3109,14 +3110,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun remember(bucket: String, song: Song) =
         app.database.dao().save(SavedSong(song.key, bucket, json.encodeToString(song), System.currentTimeMillis()))
 
-    private fun mediaItem(song: Song) = MediaItem.Builder().setMediaId(song.key).setUri(song.url).setMediaMetadata(
-        MediaMetadata.Builder()
-            .setTitle(song.title)
-            .setArtist(song.artist)
-            .setAlbumTitle(song.album)
-            .setArtworkUri(song.cover.takeIf { it.isNotBlank() }?.let(Uri::parse))
-            .build()
-    ).build()
+    private fun mediaItem(song: Song): MediaItem {
+        val builder = MediaItem.Builder().setMediaId(song.key).setUri(song.url).setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(song.title)
+                .setArtist(song.artist)
+                .setAlbumTitle(song.album)
+                .setArtworkUri(song.cover.takeIf { it.isNotBlank() }?.let(Uri::parse))
+                .build()
+        )
+        // Apple Music 整曲是 Widevine 加密的 HLS。adamId 和 PSSH 由 AppleProvider.playableStream
+        // 取流后写进 Song.extra，这里把它们搭在 licenseUri 上送给 AppleWidevineDrmCallback
+        // ——那个 query 不是真的请求地址，真正的端点在回调里。
+        val pssh = song.extra[AppleWidevineDrmCallback.EXTRA_DRM_PSSH].orEmpty()
+        if (song.extra[AppleWidevineDrmCallback.EXTRA_DRM_SCHEME] == AppleWidevineDrmCallback.DRM_SCHEME_WIDEVINE && pssh.isNotBlank()) {
+            builder.setDrmConfiguration(
+                MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
+                    .setLicenseUri(
+                        AppleWidevineDrmCallback.licenseUri(
+                            adamId = song.extra[AppleWidevineDrmCallback.EXTRA_DRM_ADAM_ID]?.takeIf { it.isNotBlank() } ?: song.id,
+                            pssh = pssh,
+                        ),
+                    )
+                    .setMultiSession(false)
+                    .build(),
+            )
+        }
+        return builder.build()
+    }
 
     private fun formatPosition(position: Long): String =
         String.format(Locale.ROOT, "%02d:%02d", position / 60_000, (position / 1000) % 60)

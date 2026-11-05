@@ -13,6 +13,8 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.drm.DefaultDrmSessionManager
+import androidx.media3.exoplayer.drm.DrmSessionManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -58,16 +60,24 @@ class PlaybackService : MediaSessionService() {
         ).setHandleAudioBecomingNoisy(true)
             // 息屏后在线播放也要保持网络和 CPU，避免 Wi-Fi 休眠导致卡住
             .setWakeMode(C.WAKE_MODE_NETWORK)
-        if (cache != null) {
-            builder.setMediaSourceFactory(
-                DefaultMediaSourceFactory(
-                    CacheDataSource.Factory()
-                        .setCache(cache)
-                        .setUpstreamDataSourceFactory(DefaultDataSource.Factory(this))
-                )
-            )
-        }
         app?.let { builder.setRenderersFactory(RhythmRenderersFactory(this, it.rhythmAnalyzer)) }
+        // 冷启动竞态：媒体按键 / 续播可以在设置流首帧到达前把服务拉起来，那时候
+        // AppleSession 还是空的，授权会白跑一次。先主动取一次。
+        app?.appScope?.let { AppleSession.refreshAsync(app.settings, it) }
+        // Apple Music 整曲是 Widevine 加密的 HLS，交给设备自带的 CDM 解。
+        // 只有带 DrmConfiguration 的 MediaItem 才会走这套，其余源原样播放。
+        val drmManager = DefaultDrmSessionManager.Builder()
+            .build(AppleWidevineDrmCallback { AppleSession.cookie })
+        builder.setMediaSourceFactory(
+            DefaultMediaSourceFactory(
+                cache?.let {
+                    CacheDataSource.Factory().setCache(it).setUpstreamDataSourceFactory(DefaultDataSource.Factory(this))
+                } ?: DefaultDataSource.Factory(this),
+            ).setDrmSessionManagerProvider { mediaItem ->
+                val scheme = mediaItem.localConfiguration?.drmConfiguration?.scheme
+                if (scheme == C.WIDEVINE_UUID) drmManager else DrmSessionManager.DRM_UNSUPPORTED
+            },
+        )
         val player = builder.build()
         // 随机顺序跟着队列改动走：随机时“下一首播放”照样下一首放，解析完换地址也不会跳到别的歌
         player.setShuffleOrder(QueueShuffleOrder())

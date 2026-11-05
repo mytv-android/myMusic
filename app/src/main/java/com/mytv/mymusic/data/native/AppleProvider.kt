@@ -6,6 +6,7 @@ import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
+import com.mytv.mymusic.playback.AppleWidevineDrmCallback
 import android.content.Context
 import java.io.File
 import kotlinx.serialization.Serializable
@@ -53,7 +54,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         val body = ampGet(
             cookie,
             "/v1/catalog/${storefront(cookie)}/search",
-            mapOf("term" to keyword, "types" to "songs", "limit" to "30"),
+            mapOf("term" to keyword, "types" to "songs", "limit" to "30", "extend" to "extendedAssetUrls"),
         )
         val storefront = storefront(cookie)
         return json.decodeFromString<AppleSearchResponse>(body).results.songs.data
@@ -76,10 +77,76 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         if (song.url.isNotBlank()) return song.url
         val parsed = parseSong(cookie, song.id)
         if (parsed.url.isBlank()) {
-            throw IllegalStateException("apple music: no preview URL available (full download requires gamdl)")
+            throw IllegalStateException("apple music: no preview URL available")
         }
         return parsed.url
     }
+
+    /**
+     * 整曲走 [AppleWidevineDrmCallback] 授权的 HLS；登录态或授权拿不到就退回试听片段，
+     * 并按 `preview = true` 交出去，让聚合解析器去试别的平台。
+     *
+     * 返回的 [PlayableStream.extra] 里带 DRM 三件套（scheme / pssh / adamId），
+     * `SourceResolver` 会合进 `Song.extra`，最终由 `MusicViewModel.mediaItem()`
+     * 拼成 `MediaItem.DrmConfiguration`。
+     */
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+        val master = song.extra[EXTRA_APPLE_HLS]?.takeIf { it.isNotBlank() }
+            ?: appleEnhancedHls(cookie, song)
+        if (!master.isNullOrBlank()) {
+            val variant = appleHlsVariant(master)
+            if (variant != null) {
+                return PlayableStream(
+                    url = variant.playlistUrl,
+                    ext = "m4a",
+                    bitrate = variant.bitrate,
+                    extra = buildMap {
+                        put(AppleWidevineDrmCallback.EXTRA_DRM_SCHEME, AppleWidevineDrmCallback.DRM_SCHEME_WIDEVINE)
+                        put(AppleWidevineDrmCallback.EXTRA_DRM_PSSH, variant.pssh)
+                        put(AppleWidevineDrmCallback.EXTRA_DRM_ADAM_ID, song.id)
+                    },
+                )
+            }
+        }
+        // 整曲这条路不通：退回片段，并明确标出来
+        val preview = song.url.ifBlank { parseSong(cookie, song.id).url }
+        if (preview.isBlank()) throw IllegalStateException("apple music: 没有可播放的地址")
+        return PlayableStream(url = preview, ext = "m4a", bitrate = 0, preview = true)
+    }
+
+    /** 从歌曲资源上取整曲主清单；拿不到（没登录 / 该曲没有 enhancedHls）返回空。 */
+    private suspend fun appleEnhancedHls(cookie: String, song: Song): String? {
+        val storefront = song.extra["storefront"]?.takeIf { it.matches(Regex("^[a-z]{2}$")) } ?: storefront(cookie)
+        val body = runCatching {
+            ampGet(
+                cookie,
+                "/v1/catalog/$storefront/songs/${song.id}",
+                mapOf("extend" to "extendedAssetUrls"),
+            )
+        }.getOrNull() ?: return null
+        val resource = runCatching { json.decodeFromString<AppleResourceResponse>(body).data.firstOrNull() }.getOrNull()
+        return resource?.attributes?.extendedAssetUrls?.enhancedHls?.takeIf { it.isNotBlank() }
+    }
+
+    /** 主清单 + 档位媒体清单各一次请求，选出可用档位并取出 Widevine PSSH。 */
+    private suspend fun appleHlsVariant(masterUrl: String): AppleHlsVariant? {
+        val master = runCatching { NativeHttp.get(masterUrl, userAgent = APPLE_WEB_UA) }.getOrNull() ?: return null
+        val base = masterUrl.substringBeforeLast('/')
+        val baseUri = runCatching { java.net.URI(base) }.getOrNull() ?: return null
+        for (variant in AppleHlsManifest.variants(master).sortedBy { AppleHlsManifest.AUDIO_GROUPS.indexOf(it.group) }) {
+            val playlistUrl = runCatching { baseUri.resolve(variant.uri)?.toString() }.getOrNull() ?: continue
+            val media = runCatching { NativeHttp.get(playlistUrl, userAgent = APPLE_WEB_UA) }.getOrNull() ?: continue
+            val pssh = AppleHlsManifest.widevinePssh(media) ?: continue
+            return AppleHlsVariant(playlistUrl = playlistUrl, pssh = pssh, bitrate = variant.bitrateKbps)
+        }
+        return null
+    }
+
+    private data class AppleHlsVariant(
+        val playlistUrl: String,
+        val pssh: String,
+        val bitrate: Int,
+    )
 
     override suspend fun lyrics(cookie: String, song: Song): String {
         if (song.id.isBlank()) throw IllegalArgumentException("song id is empty")
@@ -187,7 +254,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         val body = ampGet(
             cookie,
             "/v1/catalog/${storefront(cookie)}/albums/$albumId",
-            mapOf("extend" to "extendedAssetUrls"),
+            mapOf("extend" to "extendedAssetUrls", "extend[songs]" to "extendedAssetUrls"),
         )
         val resource = json.decodeFromString<AppleResourceResponse>(body).data.firstOrNull()
             ?: throw IllegalStateException("apple album not found: $albumId")
@@ -378,7 +445,11 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
                 val body = ampGet(
                     cookie,
                     "/v1/catalog/$storefront/playlists/$playlistId/tracks",
-                    mapOf("limit" to APPLE_TRACK_PAGE.toString(), "offset" to offset.toString()),
+                    mapOf(
+                        "limit" to APPLE_TRACK_PAGE.toString(),
+                        "offset" to offset.toString(),
+                        "extend" to "extendedAssetUrls",
+                    ),
                 )
                 json.decodeFromString<AppleResourceListResponse>(body).data
             }.getOrNull()?.takeIf { it.isNotEmpty() } ?: break
@@ -480,6 +551,9 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
                 if (attr.isrc.isNotBlank()) put("isrc", attr.isrc)
                 // adam ID 是分商店的，取歌词子资源时要用同一个商店，否则 404
                 if (storefront.matches(Regex("^[a-z]{2}$"))) put("storefront", storefront)
+                // 整曲主清单；请求时带 extend=extendedAssetUrls 才有。encrypted，见 playableStream
+                val hls = attr.extendedAssetUrls.enhancedHls
+                if (hls.isNotBlank()) put(EXTRA_APPLE_HLS, hls)
             },
             isVip = false,
         )
@@ -837,6 +911,9 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             "1564180390" to "空间音频",
             "989010186" to "亲子",
         )
+
+        /** [Song.extra] 里整曲主清单的键，只有 AppleProvider 自己用。 */
+        const val EXTRA_APPLE_HLS = "apple_hls"
     }
 }
 
@@ -1092,6 +1169,21 @@ private data class AppleAttributes(
     /** `/songs/{id}/lyrics` 子资源返回的 TTML；`extend=ttmlLocalizations` 时另有本地化版本。 */
     val ttml: String = "",
     val ttmlLocalizations: String = "",
+    /**
+     * `extend=extendedAssetUrls` 才回的整曲地址。[enhancedHls] 是 HLS 主清单（含 ALAC /
+     * Atmos / 256k 等全部档位），其余几个是 `.m4p` 直链。注意这些都是加密的，见
+     * [AppleProvider.playableStream]。
+     */
+    val extendedAssetUrls: AppleAssetUrls = AppleAssetUrls(),
+)
+
+@Serializable
+private data class AppleAssetUrls(
+    val enhancedHls: String = "",
+    val lightweight: String = "",
+    val lightweightPlus: String = "",
+    val plus: String = "",
+    val superLightweight: String = "",
 )
 
 @Serializable

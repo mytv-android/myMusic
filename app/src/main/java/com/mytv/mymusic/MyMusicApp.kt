@@ -26,6 +26,7 @@ import com.mytv.mymusic.data.sync.SecretStore
 import com.mytv.mymusic.data.sync.SyncCoordinator
 import com.mytv.mymusic.data.update.UpdateRepository
 import com.mytv.mymusic.playback.AdjustableLruEvictor
+import com.mytv.mymusic.playback.AppleSession
 import com.mytv.mymusic.playback.EqualizerController
 import com.mytv.mymusic.playback.QueueStore
 import com.mytv.mymusic.playback.RhythmAnalyzer
@@ -141,6 +142,7 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
             settings.state.collect { values ->
                 PlayReportHub.setEnabled(values.playReportEnabled)
                 PlayReportHub.updateCookies(values.cookies)
+                AppleSession.update(values.cookies)
                 SodaProvider.configureFallbackDeviceId(values.sodaReportDeviceId)
                 // 第一次开启：先把设备指纹落盘，之后每次启动都用同一个
                 if (values.playReportEnabled && values.sodaReportDeviceId.isBlank() && !reportDeviceIdReady) {

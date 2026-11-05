@@ -67,6 +67,21 @@ Apple Music no longer returns song lyrics to unauthenticated clients: `amp-api.m
 - Attribution: this relay approach, and the endpoint contracts above, follow the same pattern used by [Mornye](https://github.com/mornyeapp/Mornye) (`rust_backend/crates/providers/src/lyrics/builtin/apple.rs`) and [musicdl](https://github.com/CharlesPikachu/musicdl). No upstream source code is bundled in this repository.
 - Stability: these are volunteer-run public services with no SLA and may rate-limit or disappear; the app treats any failure as "no lyrics for this track" rather than surfacing an error.
 
+### Apple Music full-track playback (Widevine)
+
+A song resource requested with `extend=extendedAssetUrls` carries an `extendedAssetUrls.enhancedHls` URL — a full-length HLS master manifest (measured: the complete track duration, with ALAC, Dolby Atmos, AAC 256k, AAC-HE 64k and binaural/downmix variants), available with only the anonymous developer token. The `.m4p` direct links in the same object are FairPlay-protected (`moov` contains `sinf` + `frma`), and every variant of the master manifest is triple-DRM `SAMPLE-AES`: `com.apple.streamingkeydelivery` (FairPlay, `skd://itunes.apple.com/…`), `com.microsoft.playready` and Widevine. There is no unencrypted path — `previews` is the only clear content, and it is 30–90 seconds.
+
+Android can only satisfy Widevine of the three (FairPlay's Streaming SDK is licensed by Apple to approved partners only and has no public implementation; PlayReady's MediaDrm plugin is essentially absent from phones). The app therefore hands DRM to the device's own Widevine CDM through Media3: `DefaultDrmSessionManager` + a `MediaDrmCallback` (`playback/AppleWidevineDrm.kt`) that wraps the CDM's challenge in Apple's JSON envelope and POSTs it to `https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense`, decoding the base64 `license` field from the response. The `DrmConfiguration.licenseUri` carries `adamId` and the PSSH as query parameters because the callback needs them and `ExoMediaDrm.KeyRequest` does not expose them. The default developer token and the pasted Cookie's `media-user-token` are sent exactly as they are for `amp-api` requests — a missing or expired token makes Apple answer `failureType: 2002` ("Your session has ended"), which surfaces as a playback error and falls back to the preview. No Widevine device private key (`.wvd`) or equivalent is used, bundled or required; decryption happens inside the platform CDM.
+
+Two details worth keeping if this is ever revisited:
+
+- The media playlist carries **two** Widevine `#EXT-X-KEY` entries. The first, before `#EXT-X-MAP`, is the init-segment default and must be skipped — `data/native/AppleHlsManifest.kt` hardcodes it. That constant is a two-line string literal in the upstream source and is easy to transcribe one `A` short, which silently breaks the skip while leaving tests green when the fixture copies the same wrong value; `AppleHlsManifestTest` therefore pins its length and base64 validity.
+- Only AAC tiers are selected (`audio-stereo-256` first, then 128k and HE 64k). ALAC would need the FairPlay wrapper, and Atmos (`ec-3`) decoders are not universal.
+
+Attribution: the license-exchange envelope, the `data:text/plain;base64,<PSSH>` URI form passed as `uri`, and the default-key skip follow [gamdl](https://github.com/glomatico/gamdl) (`gamdl/api/apple_music.py`, `gamdl/interface/song.py`, `gamdl/interface/constants.py`). No upstream source code is bundled in this repository; only the endpoint contracts and the ordering of the flow were reused.
+
+- Not verified on device: whether Apple's Widevine licence server accepts a generic Android device's CDM, and whether the resulting stream decrypts, could not be tested in this environment (no signed-in Apple Music account was available on the development emulator). The failure mode is a playback error that falls back to the preview, i.e. no worse than before this was added.
+
 ## YesPlayMusic (lyrics background rhythm)
 
 - Upstream: https://github.com/ijoji42/YesPlayMusic
