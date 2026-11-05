@@ -154,7 +154,8 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         val body = ampGet(
             cookie,
             "/v1/catalog/${storefront(cookie)}/search",
-            mapOf("term" to keyword, "types" to "playlists", "limit" to "20"),
+            // 实测 limit=50 能正常返回（"周杰伦" 拿到 37 个），100 会报错，所以取 50
+            mapOf("term" to keyword, "types" to "playlists", "limit" to "50"),
         )
         return json.decodeFromString<AppleSearchResponse>(body).results.playlists.data.map(::playlistFromResource)
     }
@@ -199,7 +200,52 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     override suspend fun categories(cookie: String): List<PlaylistCategory> =
         APPLE_CATEGORIES.map { PlaylistCategory(id = it.first, name = it.second, source = "apple") }
 
+    /**
+     * 分类下的歌单。`/apple-curators/{id}/playlists` 只给策划自己挂的那几个（cn 的「热门」
+     * 实测只有 8 个，`limit` 上限 25），而官网的分类页要丰富得多。差别在于官网走的是
+     * grouping 树：一次 `ids[apple-curators]=` + `include=grouping,playlists` +
+     * `include[editorial-elements]=children,contents,room` 会把整棵 editorial 树内联回来，
+     * cn「热门」实测能走出 **244 个独立歌单**。
+     *
+     * `platform=web` 不能省——少了它 Apple 返回 200 但 `meta.failures.response` 是
+     * `partial-failure`、树是空的，属于静默失败，必须当错误处理。
+     */
     override suspend fun categoryPlaylists(cookie: String, id: String, page: Int, limit: Int): List<Playlist> {
+        val storefront = storefront(cookie)
+        val body = ampGet(
+            cookie,
+            "/v1/catalog/$storefront",
+            mapOf(
+                "ids[apple-curators]" to id,
+                "include" to "grouping,playlists",
+                "extend[apple-curators]" to "playlistCount",
+                "include[editorial-elements]" to "children,contents,room",
+                "platform" to "web",
+                "l" to "zh-Hans-CN",
+            ),
+        )
+        val response = json.decodeFromString<AppleGroupingResponse>(body)
+        // 静默失败：HTTP 200 但没有树，此时退回老的扁平接口，至少能拿到策划自己那批
+        val tree = response.data.firstOrNull()?.relationships?.grouping?.data
+        if (tree.isNullOrEmpty()) {
+            return curatorPlaylistsFlat(cookie, id, page, limit)
+        }
+        val collected = mutableListOf<Playlist>()
+        val seen = mutableSetOf<String>()
+        tree.forEach { collectPlaylists(it, collected, seen, 0) }
+        // 树里的顺序是官网的栏目顺序，已经比扁平接口好；分页仍按调用方的 page/limit 切
+        val safeLimit = limit.coerceAtLeast(1)
+        val from = ((page.coerceAtLeast(1) - 1) * safeLimit).coerceAtMost(collected.size)
+        return collected.drop(from).take(safeLimit)
+    }
+
+    /** grouping 失败时的退路：`/apple-curators/{id}/playlists`，limit 上限 25。 */
+    private suspend fun curatorPlaylistsFlat(
+        cookie: String,
+        id: String,
+        page: Int,
+        limit: Int,
+    ): List<Playlist> {
         val safeLimit = limit.coerceAtLeast(1)
         var offset = (page.coerceAtLeast(1) - 1) * safeLimit
         val result = mutableListOf<Playlist>()
@@ -209,11 +255,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             val body = ampGet(
                 cookie,
                 "/v1/catalog/cn/apple-curators/$id/playlists",
-                mapOf(
-                    "limit" to batch.toString(),
-                    "offset" to offset.toString(),
-                    "l" to "zh-Hans-CN",
-                ),
+                mapOf("limit" to batch.toString(), "offset" to offset.toString(), "l" to "zh-Hans-CN"),
             )
             val response = json.decodeFromString<AppleResourceListResponse>(body)
             result += response.data.map(::playlistFromResource)
@@ -222,6 +264,26 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             guard += 1
         }
         return result.take(safeLimit)
+    }
+
+    /**
+     * 递归走 grouping 树收集歌单。树里混着 albums / songs / stations 等节点，
+     * 只取 `playlists`；深度设上限防止 Apple 哪天给出环形结构。
+     */
+    private fun collectPlaylists(
+        node: AppleResource,
+        out: MutableList<Playlist>,
+        seen: MutableSet<String>,
+        depth: Int,
+    ) {
+        if (depth > 6 || node.id in seen) return
+        seen += node.id
+        if (node.type == "playlists") out += playlistFromResource(node)
+        val relationships = node.relationships
+        relationships.tabs.data.forEach { collectPlaylists(it, out, seen, depth + 1) }
+        relationships.children.data.forEach { collectPlaylists(it, out, seen, depth + 1) }
+        relationships.contents.data.forEach { collectPlaylists(it, out, seen, depth + 1) }
+        relationships.playlists.data.forEach { collectPlaylists(it, out, seen, depth + 1) }
     }
 
     /**
@@ -276,32 +338,54 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     }
 
     private suspend fun fetchPlaylistDetail(cookie: String, playlistId: String): Pair<Playlist, List<Song>> {
-        val body = ampGet(
-            cookie,
-            "/v1/catalog/${storefront(cookie)}/playlists/$playlistId",
-            mapOf("limit[tracks]" to "300", "extend" to "extendedAssetUrls"),
-        )
-        val resource = json.decodeFromString<AppleResourceResponse>(body).data.firstOrNull()
-            ?: throw IllegalStateException("apple playlist not found: $playlistId")
-        val tracks = fetchAllTrackResources(cookie, resource.relationships.tracks)
+        val storefront = storefront(cookie)
+        val resource = runCatching {
+            val body = ampGet(
+                cookie,
+                "/v1/catalog/$storefront/playlists/$playlistId",
+                mapOf("limit[tracks]" to APPLE_TRACK_PAGE.toString(), "extend" to "extendedAssetUrls"),
+            )
+            json.decodeFromString<AppleResourceResponse>(body).data.firstOrNull()
+        }.getOrNull() ?: throw IllegalStateException("apple playlist not found: $playlistId")
+        val tracks = fetchAllTrackResources(cookie, storefront, playlistId, resource.relationships.tracks)
         val playlist = playlistFromResource(resource)
-        val songs = tracks.map { songFromCatalog(it, storefront(cookie)) }
+        val songs = tracks.map { songFromCatalog(it, storefront) }
         return playlist.copy(trackCount = if (playlist.trackCount == 0 || songs.size > playlist.trackCount) songs.size else playlist.trackCount) to songs
     }
 
+    /**
+     * 歌单曲目分页。两个坑都实测过：
+     *  - `limit[tracks]` 配合 `offset` 打歌单资源时，**offset 被静默忽略**——返回 200 且数据
+     *    看着正常，其实永远是第一页；
+     *  - 响应里的 `next` **会把 limit 丢掉**，跟着走会退化成服务端默认的 100。
+     * 所以第一页用 `limit[tracks]=300` 拿满，之后一律走
+     * `/playlists/{id}/tracks?limit=300&offset=N` 自己翻。`limit` 上限 300（301 直接被
+     * 参数校验拒掉）；offset 越界返回 404，就地收尾。
+     */
     private suspend fun fetchAllTrackResources(
         cookie: String,
-        relationship: AppleTrackRelationship,
+        storefront: String,
+        playlistId: String,
+        first: AppleTrackRelationship,
     ): List<AppleResource> {
-        val all = relationship.data.toMutableList()
-        var next = relationship.next.trim()
+        val all = first.data.toMutableList()
+        // 第一页就没满一页，说明没有了
+        if (first.data.size < APPLE_TRACK_PAGE) return all
+        var offset = first.data.size
         var guard = 0
-        while (next.isNotBlank() && guard < 30) {
-            val body = ampGetRaw(cookie, next)
-            val page = json.decodeFromString<AppleResourceListResponse>(body)
-            all += page.data
-            next = page.next.trim()
+        while (guard < 30) {
+            val page = runCatching {
+                val body = ampGet(
+                    cookie,
+                    "/v1/catalog/$storefront/playlists/$playlistId/tracks",
+                    mapOf("limit" to APPLE_TRACK_PAGE.toString(), "offset" to offset.toString()),
+                )
+                json.decodeFromString<AppleResourceListResponse>(body).data
+            }.getOrNull()?.takeIf { it.isNotEmpty() } ?: break
+            all += page
+            offset += page.size
             guard += 1
+            if (page.size < APPLE_TRACK_PAGE) break
         }
         return all
     }
@@ -691,6 +775,9 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
 
     private companion object {
         const val APPLE_HOME = "https://music.apple.com"
+        /** 歌单曲目分页的每页大小；Apple 的参数上限就是 300，301 会被直接拒掉。 */
+        const val APPLE_TRACK_PAGE = 300
+
         /** 只为拿入口 JS 包名用的轻量首页，2.7KB；[APPLE_HOME] 的 HTML 有 2MB。 */
         const val APPLE_BETA_HOME = "https://beta.music.apple.com/"
         const val AMP_API = "https://amp-api.music.apple.com"
@@ -957,6 +1044,23 @@ private data class AppleResourceListResponse(
     val next: String = "",
 )
 
+/** `ids[apple-curators]=` 批量查询的响应：`data` 里带整棵 grouping 树。 */
+@Serializable
+private data class AppleGroupingResponse(
+    val data: List<AppleResource> = emptyList(),
+    val meta: AppleGroupingMeta = AppleGroupingMeta(),
+)
+
+/**
+ * 少了 `platform=web` 时 Apple 返回 200 但树是空的，并把原因放在这里——
+ * `failures.response == "partial-failure"`。属于静默失败，调用方要当错误处理。
+ */
+@Serializable
+private data class AppleGroupingMeta(val failures: AppleGroupingFailures = AppleGroupingFailures())
+
+@Serializable
+private data class AppleGroupingFailures(val response: String = "")
+
 @Serializable
 private data class AppleResourceList(val data: List<AppleResource> = emptyList())
 
@@ -1003,7 +1107,17 @@ private data class AppleText(val short: String = "", val standard: String = "")
 private data class AppleRelationships(
     val tracks: AppleTrackRelationship = AppleTrackRelationship(),
     val lyrics: AppleLyricsRelationship = AppleLyricsRelationship(),
+    /** grouping 树的下钻关系：tab → children → contents → playlists。 */
+    val tabs: AppleNodeList = AppleNodeList(),
+    val children: AppleNodeList = AppleNodeList(),
+    val contents: AppleNodeList = AppleNodeList(),
+    val playlists: AppleNodeList = AppleNodeList(),
+    /** `ids[apple-curators]=` 批量查询时，树根挂在这里。 */
+    val grouping: AppleNodeList = AppleNodeList(),
 )
+
+@Serializable
+private data class AppleNodeList(val data: List<AppleResource> = emptyList())
 
 @Serializable
 private data class AppleTrackRelationship(
