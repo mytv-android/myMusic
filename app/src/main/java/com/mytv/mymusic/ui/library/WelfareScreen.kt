@@ -1,6 +1,7 @@
 package com.mytv.mymusic.ui.library
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,7 +30,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,7 +42,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.mytv.mymusic.data.native.SodaCommerceInfo
+import com.mytv.mymusic.data.native.SodaWelfareInfo
 import com.mytv.mymusic.ui.components.IconTone
 import com.mytv.mymusic.ui.components.ListRow
 import com.mytv.mymusic.ui.components.LocalAppWindow
@@ -55,9 +59,10 @@ import java.time.format.FormatStyle
 import java.util.Locale
 
 /**
- * 汽水音乐「天天送会员」：听歌达标领免费 VIP，直接领到用户的汽水账号上。
- * 任务阈值和完成情况以汽水服务端为准（见 [com.mytv.mymusic.data.native.SodaWelfare]），
- * 本机只听歌计时给个参考进度。未登录汽水时引导去平台账号扫码。
+ * 汽水音乐「天天送会员」：活动期内每天打开汽水 App 听歌就能领 1 天免费 VIP，
+ * 直接领到用户的汽水账号上。任务阈值、领取情况和会员到期都以汽水服务端为准
+ * （见 [com.mytv.mymusic.data.native.SodaWelfare]），本机只听歌计时给个参考进度。
+ * 未登录汽水时引导去平台账号扫码。
  */
 @Composable
 fun WelfareScreen(
@@ -99,23 +104,26 @@ fun WelfareScreen(
                 }
                 else -> {
                     item(key = "vip", contentType = "vipCard") {
-                        WelfareVipCard(soda, todayMinutes, vipFocus, onApply)
+                        WelfareVipCard(soda, vipFocus, onApply)
                     }
-                    item(key = "taskHead", contentType = "section") {
-                        SectionLabel("听歌任务", trailing = {
-                            Text(
-                                "每天 0 点刷新",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        })
+                    // 听歌时长任务只有一部分账号有，没配阈值的账号不显示这一段
+                    if (soda.info.hasTasks) {
+                        item(key = "taskHead", contentType = "section") {
+                            SectionLabel("听歌任务", trailing = {
+                                Text(
+                                    "每天 0 点刷新",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            })
+                        }
+                        item(key = "tasks", contentType = "card") { WelfareTaskCard(soda, todayMinutes) }
                     }
-                    item(key = "tasks", contentType = "card") { WelfareTaskCard(soda, todayMinutes) }
+                    item(key = "rules", contentType = "card") { WelfareRulesCard(soda.info) }
                     item(key = "note", contentType = "note") {
                         SettingsNote(
                             "听歌时长由汽水音乐服务端累计：在本 App 里听歌会上报播放记录，" +
-                                "在汽水官方 App 里听的同样算。达标后点「领取」就会把免费 VIP " +
-                                "发到当前登录的汽水账号，多端通用。",
+                                "在汽水官方 App 里听的同样算。领到的免费 VIP 发在当前登录的汽水账号上，多端通用。",
                         )
                     }
                 }
@@ -127,7 +135,7 @@ fun WelfareScreen(
             }
         }
     }
-    // 登录状态变化时重新拉一次；任务完成情况只有服务端算得准
+    // 登录状态变化时重新拉一次；领取情况只有服务端算得准
     LaunchedEffect(soda.loggedIn) { if (soda.loggedIn) onRefresh() }
 }
 
@@ -135,7 +143,6 @@ fun WelfareScreen(
 @Composable
 internal fun WelfareEntryCard(soda: SodaWelfareUi, todayMinutes: Int, onOpen: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val claimable = soda.info.let { it.ok && it.hasTasks && !it.allTasksDone && it.rewardTasksFinished > 0 }
     ListRow(
         title = "汽水天天送会员",
         index = 0,
@@ -164,7 +171,6 @@ internal fun WelfareEntryCard(soda: SodaWelfareUi, todayMinutes: Int, onOpen: ()
 @Composable
 private fun WelfareVipCard(
     soda: SodaWelfareUi,
-    todayMinutes: Int,
     focusRequester: FocusRequester?,
     onApply: () -> Unit,
 ) {
@@ -198,7 +204,7 @@ private fun WelfareVipCard(
                 Column(Modifier.weight(1f)) {
                     Text("免费 VIP", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                     Text(
-                        if (active) "有效期至 ${formatVipDate(info.expireAt)}" else "还没有生效的免费 VIP",
+                        if (active) "有效期至 ${formatVipDate(info.vipExpireAt)}" else "今天还没有免费 VIP",
                         style = MaterialTheme.typography.bodyMedium,
                         color = dim,
                     )
@@ -207,35 +213,41 @@ private fun WelfareVipCard(
                     Tag("生效中", scheme.onPrimaryContainer.copy(alpha = 0.12f), scheme.onPrimaryContainer, Icons.Filled.Check)
                 }
             }
-            if (info.hasTasks) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "今日任务 ${info.rewardTasksFinished} / ${info.tasksTotal}",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            if (info.allTasksDone) "已全部达标，点右边领取" else "本机今日已听 $todayMinutes 分钟（服务端统计为准）",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = dim,
-                        )
-                    }
-                    Button(
-                        onClick = onApply,
-                        enabled = !soda.applying && info.rewardTasksFinished > 0,
-                        modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
-                    ) {
-                        if (soda.applying) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = scheme.onPrimary)
-                        } else {
-                            Text("领取")
-                        }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when {
+                        info.todayClaimed -> "今天已经领过了，明天再来"
+                        info.claimable -> "今天这一份还没领"
+                        !info.activityActive -> "活动不在期内"
+                        else -> "暂时不能领取"
+                    },
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                )
+                Button(
+                    onClick = onApply,
+                    enabled = !soda.applying && info.claimable,
+                    modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+                ) {
+                    if (soda.applying) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = scheme.onPrimary)
+                    } else {
+                        Text(if (info.todayClaimed) "已领取" else "领取")
                     }
                 }
-            } else if (info.ok) {
+            }
+            val period = info.activityPeriod
+            if (period.isNotBlank()) {
                 Text(
-                    "汽水没有返回可做的听歌任务，可能活动已结束或账号不在活动范围。",
+                    "活动期 $period · 已领 ${info.appliedCount} 天",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = dim,
+                )
+            }
+            if (!info.activityActive && info.ok) {
+                Text(
+                    "汽水没有返回进行中的天天送活动，可能活动已结束或账号不在受邀范围。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = dim,
                 )
@@ -253,7 +265,7 @@ private fun WelfareTaskCard(soda: SodaWelfareUi, todayMinutes: Int) {
     Surface(shape = shape, color = scheme.surfaceContainerLow, modifier = tvCardFocus(shape)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             minutes.forEachIndexed { index, target ->
-                val done = index < info.rewardTasksFinished
+                val done = index < info.tasksFinished
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(
                         Modifier.size(24.dp).clip(CircleShape)
@@ -291,6 +303,54 @@ private fun WelfareTaskCard(soda: SodaWelfareUi, todayMinutes: Int) {
     }
 }
 
+/** 活动规则：服务端原文，默认收起。 */
+@Composable
+private fun WelfareRulesCard(info: SodaWelfareInfo) {
+    val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(20.dp)
+    var expanded by remember { mutableStateOf(false) }
+    Surface(shape = shape, color = scheme.surfaceContainerLow, modifier = tvCardFocus(shape)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .tvFocusRing(shape)
+                    .focusable()
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("活动规则", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "每天打开汽水 App 听歌即可获得 1 天免费 VIP",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    if (expanded) "收起" else "展开",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = scheme.primary,
+                )
+            }
+            if (expanded && info.rules.isNotBlank()) {
+                Text(
+                    info.rulesTitle.ifBlank { "VIP天天送活动规则" },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    info.rules,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun WelfareLoginCard(onLogin: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
@@ -307,7 +367,7 @@ private fun WelfareLoginCard(onLogin: () -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text("先登录汽水音乐", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        "听歌任务和免费 VIP 都发在汽水账号上，扫码登录后即可查看和领取。",
+                        "免费 VIP 发在汽水账号上，扫码登录后即可查看和领取。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = scheme.onSurfaceVariant,
                     )
@@ -341,16 +401,18 @@ private fun WelfareLoadingCard() {
 private fun tvCardFocus(shape: Shape): Modifier =
     if (LocalAppWindow.current.isTv) Modifier.tvFocusRing(shape, scale = 1.02f).focusable() else Modifier
 
-/** 入口卡和页头的摘要：VIP 中 > 可领 > 任务进度 > 未登录。 */
+/** 入口卡和页头的摘要：VIP 中 > 今日待领 > 已领 > 未登录。 */
 internal fun welfareHeadline(soda: SodaWelfareUi, todayMinutes: Int = 0): String {
     val info = soda.info
     return when {
         !soda.loggedIn -> "扫码登录汽水音乐后即可参与"
         soda.loading && info.statusCode < 0 -> "正在读取任务状态…"
-        info.vipActive -> "免费 VIP 有效期至 ${formatVipDate(info.expireAt)}"
-        info.ok && info.hasTasks && info.allTasksDone -> "今日任务已全部达标，去领取"
-        info.ok && info.hasTasks -> "今日任务 ${info.rewardTasksFinished} / ${info.tasksTotal}，本机已听 $todayMinutes 分钟"
-        info.ok -> "暂时没有可做的听歌任务"
+        info.vipActive -> "免费 VIP 有效期至 ${formatVipDate(info.vipExpireAt)}"
+        info.todayClaimed -> "今天已领取，明天再来"
+        info.claimable -> "今天这一份还没领"
+        info.ok && info.hasTasks && !info.allTasksDone ->
+            "今日任务 ${info.tasksFinished} / ${info.tasksTotal}，本机已听 $todayMinutes 分钟"
+        info.ok -> "暂时没有可领的免费 VIP"
         else -> "获取失败，点此重试"
     }
 }

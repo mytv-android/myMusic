@@ -43,7 +43,7 @@ import com.mytv.mymusic.data.CanonicalTrackEntity
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.ListenTaskState
 import com.mytv.mymusic.data.native.SodaApplyFreeVipResult
-import com.mytv.mymusic.data.native.SodaCommerceInfo
+import com.mytv.mymusic.data.native.SodaWelfareInfo
 import com.mytv.mymusic.data.native.SodaProvider
 import com.mytv.mymusic.data.native.SodaWelfare
 import com.mytv.mymusic.data.bindingTarget
@@ -165,7 +165,7 @@ data class SodaWelfareUi(
     val applying: Boolean = false,
     /** 是否已登录汽水音乐；未登录时界面引导去扫码。 */
     val loggedIn: Boolean = true,
-    val info: SodaCommerceInfo = SodaCommerceInfo(),
+    val info: SodaWelfareInfo = SodaWelfareInfo(),
     val error: String = "",
 )
 
