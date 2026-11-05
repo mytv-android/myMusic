@@ -743,12 +743,15 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         val cookieMap = parseKugouCookie(cookie)
         val token = cookieMap["token"].orEmpty().trim()
         val userid = cookieMap["userid"].orEmpty().trim()
+        // mid/dfid 是设备指纹，接口收 "-" 当匿名值（登录态那几个接口就是这么兜的）。
+        // 粘贴来的 Cookie 常常不带它们，这里不能因此判定「没登录」，否则账号卡片永远空着。
         val mid = firstNonEmpty(
             cookieMap["KUGOU_API_MID"].orEmpty(),
             cookieMap["kg_mid"].orEmpty(),
             cookieMap["mid"].orEmpty(),
+            "-",
         )
-        if (token.isEmpty() || userid.isEmpty() || userid == "0" || mid.isEmpty()) return null
+        if (token.isEmpty() || userid.isEmpty() || userid == "0") return null
         val dfid = firstNonEmpty(
             cookieMap["dfid"].orEmpty(),
             cookieMap["KUGOU_API_DFID"].orEmpty(),

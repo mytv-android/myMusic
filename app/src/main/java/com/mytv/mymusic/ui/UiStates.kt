@@ -111,6 +111,21 @@ data class AccountProfile(
     val detail: String = "",
 )
 
+/**
+ * 把平台返回的资料变成账号卡片要显示的那份。
+ *
+ * 昵称为空是合法情况：Apple Music 只暴露订阅状态，不向网页端给昵称和头像
+ * （见 `AppleProvider.accountInfo`）。这时候昵称退回平台名，会员等级照样要显示，
+ * 所以判成功看的是「接口通了」，不是「拿到了昵称」。
+ */
+fun accountProfileOf(providerId: String, platformName: String, info: com.mytv.mymusic.data.native.AccountInfo): AccountProfile =
+    AccountProfile(
+        providerId = providerId,
+        nickname = info.nickname.trim().ifBlank { platformName },
+        avatar = info.avatar,
+        detail = info.detail,
+    )
+
 data class CollectionUiState(
     val kind: CollectionKind = CollectionKind.Playlist,
     val id: String = "",

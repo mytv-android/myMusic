@@ -271,6 +271,8 @@ class MusicActions(private val model: MusicViewModel) {
 
     fun syncNow() = model.syncNow()
     fun syncIfStaleOnScreen() = model.syncIfStaleOnScreen()
+    /** 打开平台账号页时重新拉一遍各平台的头像、昵称、会员等级。 */
+    fun refreshAccountProfiles() = model.refreshAccountProfiles()
     fun syncBoundPlaylistsOnScreen() = model.refreshStaleBoundPlaylists()
     fun connectSync(providerId: String, token: String, remote: String) = model.connectSync(providerId, token, remote)
     fun resolveInitial(strategy: SyncStrategy) = model.resolveInitialSync(strategy)

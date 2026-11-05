@@ -37,6 +37,7 @@ import com.mytv.mymusic.aggregate.TrackMatcher
 import com.mytv.mymusic.aggregate.TrackSource
 import com.mytv.mymusic.aggregate.availabilityOf
 import com.mytv.mymusic.data.AppSettings
+import com.mytv.mymusic.data.CachedAccountProfile
 import com.mytv.mymusic.data.CanonicalSourceEntity
 import com.mytv.mymusic.data.CanonicalTrackEntity
 import com.mytv.mymusic.data.DownloadRecord
@@ -352,6 +353,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _accountProfiles = MutableStateFlow<Map<String, AccountProfile>>(emptyMap())
     val accountProfiles: StateFlow<Map<String, AccountProfile>> = _accountProfiles
     private val accountInfoJobs = ConcurrentHashMap<String, Job>()
+    /** 上次成功拉到的账号资料（落盘那份），用来判断要不要重新拉；内存里留一份不反复读盘。 */
+    private var accountProfileCache: Map<String, CachedAccountProfile> = emptyMap()
 
     // 播放进度单独成流：每 100ms 更新一次，放在 MusicUiState 里会让所有页面跟着重组
     private val _position = MutableStateFlow(0L)
@@ -497,11 +500,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             _settingsReady.value = true
         }
         viewModelScope.launch {
+            // 冷启动先把上次存下来的账号资料铺上：等各平台用户信息接口返回之前，
+            // 账号卡片已经有头像和昵称可看，不然每次开 App 都要空一会儿
+            accountProfileCache = app.accountProfiles.snapshot()
+            _accountProfiles.update { current ->
+                current + accountProfileCache.values.associateBy { it.providerId }
+                    .mapValues { (id, cached) -> AccountProfile(id, cached.nickname, cached.avatar, cached.detail) }
+            }
+        }
+        viewModelScope.launch {
             settingsState.map { it.cookies }.distinctUntilChanged().collect { cookies ->
                 cookies.forEach { (id, cookie) ->
                     if (cookie.isBlank()) {
                         accountInfoJobs.remove(id)?.cancel()
                         _accountProfiles.update { it - id }
+                        accountProfileCache = accountProfileCache - id
+                        viewModelScope.launch { app.accountProfiles.remove(id) }
                     } else {
                         refreshAccountProfile(id, cookie)
                     }
@@ -4031,6 +4045,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     app.settings.cookie(providerId, result.cookie)
                     app.sync.onLocalChange()
                     base.value = base.value.copy(login = null, loginProviderId = "")
+                    // 新账号的资料必须重拉：缓存里可能是同一个平台上一个人的旧资料
+                    refreshAccountProfile(providerId, result.cookie, force = true)
                     return@launch
                 }
                 if (result.status == "expired" || result.status == "failed") return@launch
@@ -4044,19 +4060,65 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         app.settings.cookie(providerId, cookie)
         app.sync.onLocalChange()
         base.value = base.value.copy(login = null, loginProviderId = "")
+        // 换了一份 Cookie 就重拉资料；清空 Cookie 时把缓存里那份也丢掉，别留着上一个号的头像
+        if (cookie.isBlank()) {
+            accountInfoJobs.remove(providerId)?.cancel()
+            _accountProfiles.update { it - providerId }
+            accountProfileCache = accountProfileCache - providerId
+            app.accountProfiles.remove(providerId)
+        } else {
+            refreshAccountProfile(providerId, cookie, force = true)
+        }
         message("Cookie 已保存")
     }
 
-    /** 拉取登录账号的资料给账号卡片；失败就保持空，界面只显示“已登录”。 */
-    private fun refreshAccountProfile(providerId: String, cookie: String) {
+    /**
+     * 拉取登录账号的资料给账号卡片；失败就保持上次那份（缓存或空），界面退化成「已登录」。
+     *
+     * 两个坑都在这里堵：
+     * - 资料接口是每个平台各自的用户信息，Cookie 不变就只会在冷启动触发一次，失败一次等于
+     *   永远不再显示，所以带重试；
+     * - 拉到的结果落盘，冷启动先显示上次的，后台再静默刷新。
+     *
+     * [force] 为真时无视缓存新旧直接重拉：刚登录/刚粘贴 Cookie、用户打开了平台账号页。
+     */
+    private fun refreshAccountProfile(providerId: String, cookie: String, force: Boolean = false) {
+        if (cookie.isBlank()) return
+        if (force) accountInfoJobs.remove(providerId)?.cancel()
         if (accountInfoJobs[providerId]?.isActive == true) return
         accountInfoJobs[providerId] = viewModelScope.launch {
-            val info = runCatching { app.repository.accountInfo(providerId, cookie) }.getOrNull() ?: return@launch
-            val nickname = info.nickname.ifBlank { providerName(providerId) }
-            _accountProfiles.update { current ->
-                current + (providerId to AccountProfile(providerId, nickname, info.avatar, info.detail))
+            val cached = accountProfileCache[providerId]
+            if (!force && cached != null && !cached.isStale()) return@launch
+            repeat(ACCOUNT_INFO_ATTEMPTS) { attempt ->
+                val info = runCatching { app.repository.accountInfo(providerId, cookie) }.getOrNull()
+                // 只要接口通了就算成功：Apple 只给订阅状态，昵称和头像是空的，
+                // 那种平台的昵称退回平台名，会员等级照样要显示出来
+                if (info != null) {
+                    val profile = accountProfileOf(providerId, providerName(providerId), info)
+                    _accountProfiles.update { current -> current + (providerId to profile) }
+                    accountProfileCache = accountProfileCache + (
+                        providerId to CachedAccountProfile(
+                            providerId,
+                            profile.nickname,
+                            profile.avatar,
+                            profile.detail,
+                            System.currentTimeMillis(),
+                        )
+                        )
+                    app.accountProfiles.save(providerId, profile.nickname, profile.avatar, profile.detail)
+                    return@launch
+                }
+                if (attempt < ACCOUNT_INFO_ATTEMPTS - 1) delay(ACCOUNT_INFO_RETRY_MS * (attempt + 1))
             }
         }
+    }
+
+    /**
+     * 打开平台账号页时刷一遍：那是唯一看头像、昵称、会员等级的地方，进去就该是最新的。
+     * [force] 传真会重新请求，传假则一天内拉过的平台直接用缓存。
+     */
+    fun refreshAccountProfiles(force: Boolean = true) {
+        settingsState.value.cookies.forEach { (id, cookie) -> refreshAccountProfile(id, cookie, force) }
     }
 
     fun saveSodaSigner(url: String, token: String, enabled: Boolean = true) = viewModelScope.launch {
@@ -4094,6 +4156,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         searchEngine.clearCache()
         app.settings.cookie(providerId, "")
         app.sync.onLocalChange()
+        accountInfoJobs.remove(providerId)?.cancel()
+        _accountProfiles.update { it - providerId }
+        accountProfileCache = accountProfileCache - providerId
+        app.accountProfiles.remove(providerId)
         message("已退出平台账号")
     }
 
@@ -4422,6 +4488,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         /** 进度循环 100ms 一圈：歌词换行、系统媒体条和进度条都靠它，越密跟得越紧。100 圈（10 秒）存一次位置。 */
         const val PROGRESS_TICK_MS = 100L
         const val CURSOR_SAVE_TICKS = 100
+
+        /**
+         * 账号资料最多试几次、每次隔多久：各平台的用户信息接口偶发超时/风控，
+         * 失败一次就再也不显示太亏，但也不能没完没了地重试。
+         */
+        const val ACCOUNT_INFO_ATTEMPTS = 3
+        const val ACCOUNT_INFO_RETRY_MS = 1_500L
 
         /** 播放器新报的进度和本地外推差这么多才重新对齐，避免把正常的会话推送误差变成跳变。 */
         const val POSITION_RESYNC_MS = 300L

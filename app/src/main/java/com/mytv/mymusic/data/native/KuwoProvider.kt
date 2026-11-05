@@ -125,8 +125,8 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         val jar = parseCookie(cookie)
         val uid = firstNonEmpty(jar["uid"].orEmpty(), jar["userid"].orEmpty(), jar["user_id"].orEmpty())
             .takeIf { value -> value.isNotEmpty() && value.all { it.isDigit() } } ?: return null
-        val token = firstNonEmpty(jar["token"].orEmpty(), jar["usertoken"].orEmpty())
-        if (token.isEmpty()) return null
+        // 公开资料接口：uid 是必须的，token 有就带上、没有也能查（有些 App Cookie 不带 token）
+        val token = firstNonEmpty(jar["token"].orEmpty(), jar["usertoken"].orEmpty(), jar["kw_token"].orEmpty())
         val url = "https://bd-api.kuwo.cn/api/ucenter/users/pub/$uid" +
             "?fromUid=$uid&uid=$uid&token=${urlEncode(token)}"
         val headers = mapOf(

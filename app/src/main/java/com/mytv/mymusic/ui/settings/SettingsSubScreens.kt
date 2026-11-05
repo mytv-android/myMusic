@@ -951,6 +951,8 @@ private fun BrowseSourceSheet(state: MusicUiState, actions: MusicActions, onDism
 fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: () -> Unit, embedded: Boolean = false) {
     val tv = LocalAppWindow.current.isTv
     LaunchedEffect(Unit) { actions.syncIfStaleOnScreen() }
+    // 头像、昵称、会员等级只在冷启动拉过一次；进这个页面就重拉，失败也有上次缓存兜着
+    LaunchedEffect(Unit) { actions.refreshAccountProfiles() }
     var cookieFor by remember { mutableStateOf<ProviderInfo?>(null) }
     var qrFor by remember { mutableStateOf<ProviderInfo?>(null) }
     var signerOpen by remember { mutableStateOf(false) }

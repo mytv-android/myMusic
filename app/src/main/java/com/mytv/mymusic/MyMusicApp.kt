@@ -9,6 +9,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.work.Configuration
 import com.mytv.mymusic.data.AppDatabase
+import com.mytv.mymusic.data.AccountProfileStore
 import com.mytv.mymusic.data.ListenTaskStore
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.SettingsStore
@@ -56,6 +57,8 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
     lateinit var queueStore: QueueStore
     /** 「天天听歌」福利中心：听歌时长、任务领取和 VIP 天数，只存本机。 */
     lateinit var listenTasks: ListenTaskStore
+    /** 平台账号资料（头像、昵称、会员等级）的本机缓存，见 AccountProfileStore。 */
+    lateinit var accountProfiles: AccountProfileStore
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val sleepTimer by lazy { SleepTimer(appScope) }
@@ -130,6 +133,7 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         update = UpdateRepository(this, settings)
         queueStore = QueueStore(this)
         listenTasks = ListenTaskStore(this)
+        accountProfiles = AccountProfileStore(this)
         // 播放上报：开关、落盘的设备指纹、平台 Cookie 都从设置里来，
         // 和签名器一样改设置即时生效，不需要重启
         var reportDeviceIdReady = false
