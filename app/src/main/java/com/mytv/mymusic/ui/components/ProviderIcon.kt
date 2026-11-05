@@ -100,7 +100,7 @@ fun ProviderIcon(
             Image(
                 painter = painterResource(icon),
                 contentDescription = null,
-                modifier = Modifier.size(size * 0.66f),
+                modifier = Modifier.size(size * 0.70f),
                 colorFilter = ColorFilter.tint(foreground),
             )
         } else {

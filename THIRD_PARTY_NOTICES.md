@@ -121,7 +121,9 @@ SOFTWARE.
 
 ## Music platform brand marks
 
-The platform icons in `app/src/main/res/drawable/ic_provider_*.xml` are **original monochrome vector marks drawn for myMusic**, using the corresponding service's familiar silhouette only as a visual reference. They are not copies of the official application icons or upstream SVG artwork. All marks use the same 24 × 24 canvas, consistent stroke weights and optical sizing; `ui/components/ProviderIcon.kt` supplies a shared rounded container and tints each mark with Material theme roles, so they follow light/dark themes and dynamic color instead of carrying unrelated brand backgrounds.
+The platform icons in `app/src/main/res/drawable/ic_provider_*.xml` are **monochrome vector adaptations of the platforms' real brand marks**. Their outlines are traced from the official application artwork previously sourced through Apple's public App Store Search API, with Jamendo's mark taken from the official Jamendo website icon (all retrieved 2026-11-05). The geometry is normalized to a shared 24 × 24 canvas, but the characteristic shapes, negative spaces and proportions are preserved rather than redesigned. QQ Music uses only its actual green-note silhouette (not the yellow app-icon backdrop), and Bilibili uses only the `bilibili` wordmark (not the temporary event caption).
+
+`ui/components/ProviderIcon.kt` supplies a shared rounded container and tints each mark with Material theme roles, so the icons follow light/dark themes and dynamic color instead of carrying unrelated brand backgrounds.
 
 The set includes NetEase Cloud Music, QQ Music, Kugou Music, Kuwo Music, Migu Music, Apple Music, Soda Music / 汽水音乐, Bilibili, JOOX, 5sing, Qianqian Music and Jamendo. The local-files mark is adapted from Google's Material Icons `library_music` (Apache License 2.0).
 

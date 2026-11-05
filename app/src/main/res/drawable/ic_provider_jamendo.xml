@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Jamendo：六边形外框中的三道斜杠。 -->
+<!-- 按官方应用图标的真实轮廓提取；仅转为单色，不重设计标志。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.6" android:strokeLineJoin="round"
-        android:pathData="M12,2.5L20.2,7.2V16.8L12,21.5L3.8,16.8V7.2Z" />
-    <path android:fillColor="#FFFFFFFF"
-        android:pathData="M5.8,14.8L8.4,8.5H10.6L8,14.8Z M10,14.8L12.6,8.5H14.8L12.2,14.8Z M14.2,14.8L16.8,8.5H19L16.4,14.8Z" />
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M8.9,12L7.73,12L6.34,14.88L7.52,14.88Z M17.55,9.01L16.38,9.01L13.49,14.88L14.67,14.88Z M15.2,9.01L14.03,9.01L12.53,11.89L13.71,11.89Z M12.85,9.01L11.57,9.01L8.69,14.88L9.86,14.88Z M11.68,1.75L11.57,1.96L3.14,6.77L3.14,17.12L11.57,21.93L11.68,22.14L12.21,22.14L12.32,21.93L20.76,17.12L20.76,6.77L12.32,1.96L12.21,1.75Z M11.79,3.24L12.11,3.24L19.58,7.62L19.58,16.27L12.11,20.65L11.79,20.65L4.31,16.27L4.31,7.62Z" />
 </vector>
