@@ -128,11 +128,19 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         return resource?.attributes?.extendedAssetUrls?.enhancedHls?.takeIf { it.isNotBlank() }
     }
 
-    /** 主清单 + 档位媒体清单各一次请求，选出可用档位并取出 Widevine PSSH。 */
+    /**
+     * 主清单 + 档位媒体清单各一次请求，选出可用档位并取出 Widevine PSSH。
+     *
+     * 变体地址是相对引用，必须**拿主清单自己的 URL 去 resolve**——主清单长这样：
+     * `.../52/597d52ca-…/P1511502822_lossless.m3u8`，父目录是那串 UUID。要是先
+     * `substringBeforeLast('/')` 再 resolve，等于拿 `.../52/597d52ca-…` 当基址，
+     * 它只是个路径段不是目录，最后一段会被换掉，拼出 `.../52/P1511502822_…`
+     * 少一层直接 404。（踩过：手工用字符串拼接是对的，代码用 URI.resolve 是错的，
+     * 两边指向不同 URL，而 runCatching 把 404 吞了，症状就是整曲永远退化成试听。）
+     */
     private suspend fun appleHlsVariant(masterUrl: String): AppleHlsVariant? {
         val master = runCatching { NativeHttp.get(masterUrl, userAgent = APPLE_WEB_UA) }.getOrNull() ?: return null
-        val base = masterUrl.substringBeforeLast('/')
-        val baseUri = runCatching { java.net.URI(base) }.getOrNull() ?: return null
+        val baseUri = runCatching { java.net.URI(masterUrl) }.getOrNull() ?: return null
         for (variant in AppleHlsManifest.variants(master).sortedBy { AppleHlsManifest.AUDIO_GROUPS.indexOf(it.group) }) {
             val playlistUrl = runCatching { baseUri.resolve(variant.uri)?.toString() }.getOrNull() ?: continue
             val media = runCatching { NativeHttp.get(playlistUrl, userAgent = APPLE_WEB_UA) }.getOrNull() ?: continue
@@ -278,6 +286,10 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
      * `partial-failure`、树是空的，属于静默失败，必须当错误处理。
      */
     override suspend fun categoryPlaylists(cookie: String, id: String, page: Int, limit: Int): List<Playlist> {
+        // 还没选中分类时 id 是空的。Apple 对空的 ids[apple-curators]= 直接回 400
+        // "No ids specified"，那个异常会一路冒到界面变成「这个分类没有加载出来」——
+        // 可这会儿只是「没选分类」，该显示的是空状态。
+        if (id.isBlank()) return emptyList()
         val storefront = storefront(cookie)
         val body = ampGet(
             cookie,

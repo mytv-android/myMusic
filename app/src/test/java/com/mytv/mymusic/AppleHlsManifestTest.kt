@@ -182,6 +182,26 @@ class AppleHlsManifestTest {
         assertEquals("", AppleWidevineDrmCallback(cookieProvider = { "" }).mediaUserToken())
     }
 
+    @Test
+    fun `variant url resolves against the master itself, not its parent segment`() {
+        // 真实结构：.../52/<uuid>/P1511502822_lossless.m3u8，变体是相对引用。
+        // 必须拿主清单自己的 URL 去 resolve；先 substringBeforeLast('/') 再 resolve 是错的——
+        // 那串 UUID 只是路径段不是目录，最后一段会被换掉，拼出来少一层，CDN 404。
+        // （踩过：手工字符串拼接 "$base/$uri" 是对的，代码用 URI.resolve 是错的，
+        //  两边指向不同 URL，而 runCatching 把 404 吞了，症状是整曲永远退化成试听。）
+        val master =
+            "https://aod.itunes.apple.com/itunes-assets/HLSMusic221/v4/59/7d/52/597d52ca-1d85-ec27-553d-811384ab67bd/P1511502822_lossless.m3u8"
+        val uri = "P1511502822_A6818209989_audio_en_gr256_mp4a-40-2.m3u8"
+        val uuidSegment = "/597d52ca-1d85-ec27-553d-811384ab67bd/"
+
+        val correct = java.net.URI(master).resolve(uri).toString()
+        assertTrue("父目录段被吃掉了: $correct", correct.contains(uuidSegment))
+        assertTrue(correct.endsWith(uri))
+
+        val wrong = java.net.URI(master.substringBeforeLast('/')).resolve(uri).toString()
+        assertTrue("这个断言该成立才能证明两种写法确实不同", !wrong.contains(uuidSegment))
+    }
+
     private fun uuidAt(bytes: ByteArray, offset: Int): UUID =
         UUID(java.nio.ByteBuffer.wrap(bytes, offset, 8).long, java.nio.ByteBuffer.wrap(bytes, offset + 8, 8).long)
 
