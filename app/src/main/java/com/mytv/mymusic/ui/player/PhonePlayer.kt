@@ -185,7 +185,7 @@ internal fun PhonePlayer(
             { if (showDefault) PhoneNotice(notice, defaultAlpha) },
             // 矮窗口放不下三行歌词：空闲时封面旁那一行歌词留着就够了
             { if (showDefault && !short) PhoneIdleLyrics(lyrics, active, position, playing, chrome, defaultAlpha) },
-            { if (showDefault) PhoneThinProgress(position, duration, chrome, defaultAlpha) },
+            { if (showDefault) PhoneThinProgress(position, duration, chrome, defaultAlpha, song.isLive) },
             {
                 if (showLyrics) {
                     PhoneLyricsPage(
@@ -458,7 +458,7 @@ private fun CurrentLyric(line: LyricLine, position: State<Long>, playing: Boolea
 
 /** 空闲时的细进度线（3dp）。进度只在绘制阶段读。 */
 @Composable
-private fun PhoneThinProgress(position: State<Long>, duration: Long, chrome: State<Float>, pageAlpha: () -> Float) {
+private fun PhoneThinProgress(position: State<Long>, duration: Long, chrome: State<Float>, pageAlpha: () -> Float, live: Boolean = false) {
     val shown by remember(chrome) { derivedStateOf { chrome.value < 0.999f } }
     if (!shown) return
     val track = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
@@ -471,7 +471,8 @@ private fun PhoneThinProgress(position: State<Long>, duration: Long, chrome: Sta
             .drawBehind {
                 val radius = CornerRadius(size.height / 2f)
                 drawRoundRect(track, cornerRadius = radius)
-                val fraction = if (duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f
+                // 直播没有可走的进度：HLS 会给个窗口时长，照画就成了假进度
+                val fraction = if (!live && duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f
                 drawRoundRect(fill, size = Size(size.width * fraction, size.height), cornerRadius = radius)
             },
     )
@@ -509,6 +510,7 @@ private fun PhoneControls(
                 Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                 amplitudeScale = waveScale,
                 waveBpm = waveBpm,
+                live = song.isLive,
             )
             // 矮窗口：小号按钮组，工具栏已经并进顶栏
             TransportButtonGroup(
@@ -618,7 +620,7 @@ private fun PhoneLyricsPage(
         IdleGuard(idle, false, Modifier.padding(start = 20.dp, end = 16.dp, bottom = 8.dp).graphicsLayer { this.alpha = chrome.value }) {
             val awake = !idle.idle
             Column {
-                WavySeekBar(position, duration, playing && awake, actions::seek, Modifier.padding(start = 4.dp, end = 8.dp), amplitudeScale = waveScale, waveBpm = waveBpm)
+                WavySeekBar(position, duration, playing && awake, actions::seek, Modifier.padding(start = 4.dp, end = 8.dp), amplitudeScale = waveScale, waveBpm = waveBpm, live = song.isLive)
                 Row(
                     Modifier.fillMaxWidth().padding(top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,

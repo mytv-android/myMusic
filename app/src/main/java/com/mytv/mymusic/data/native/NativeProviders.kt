@@ -17,6 +17,7 @@ object NativeProviders {
         addProvider { FivesingProvider() }
         addProvider { JamendoProvider() }
         addProvider { SodaProvider() }
+        addProvider { YuntingProvider() }
     }
 
     private fun MutableList<NativeProvider>.addProvider(factory: () -> NativeProvider) {

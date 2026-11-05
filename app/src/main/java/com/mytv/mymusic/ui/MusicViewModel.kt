@@ -3540,8 +3540,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             ),
                         )
                     }
-                    // 听歌时长喂给福利中心：只算真正播出来的部分
-                    accumulateListenTime(it.isPlaying, base.value.current?.key.orEmpty(), bounded)
+                    // 听歌时长喂给福利中心：只算真正播出来的部分；直播没有时长，不参与计时
+                    if (base.value.current?.isLive != true) {
+                        accumulateListenTime(it.isPlaying, base.value.current?.key.orEmpty(), bounded)
+                    }
                 }
                 delay(PROGRESS_TICK_MS)
             }

@@ -20,6 +20,7 @@ class NativeProvidersTest {
             "joox",
             "bilibili",
             "apple",
+            "yunting",
         )
         val providers = NativeProviders.all()
         assertEquals(expected, providers.map { it.info.id }.toSet())

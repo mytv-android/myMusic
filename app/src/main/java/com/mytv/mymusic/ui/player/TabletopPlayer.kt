@@ -157,7 +157,7 @@ internal fun TabletopPlayer(
                 },
                 { WideNotice(notice) },
                 { TabletopMeta(song, favorite, actions, thumb = shown != TabletopTop.Cover) },
-                { WavySeekBar(position, duration, playing, actions::seek, Modifier.fillMaxWidth(), amplitudeScale = waveScale, waveBpm = waveBpm) },
+                { WavySeekBar(position, duration, playing, actions::seek, Modifier.fillMaxWidth(), amplitudeScale = waveScale, waveBpm = waveBpm, live = song.isLive) },
                 {
                     TransportButtonGroup(
                         playing = playing,

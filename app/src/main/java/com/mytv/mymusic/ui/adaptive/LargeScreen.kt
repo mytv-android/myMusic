@@ -209,6 +209,7 @@ fun BottomPlayerBar(
                 playing = state.playing,
                 onSeek = actions::seek,
                 modifier = modifier,
+                live = state.current?.isLive == true,
             )
         }
         val tail: @Composable () -> Unit = {
@@ -401,7 +402,7 @@ fun NowPlayingPane(
                         },
                     )
                 }
-                WavySeekBar(position, state.duration, state.playing, actions::seek)
+                WavySeekBar(position, state.duration, state.playing, actions::seek, live = state.current?.isLive == true)
                 // 和播放页同一个连接按钮组，用小号
                 TransportButtonGroup(
                     playing = state.playing,

@@ -51,6 +51,9 @@ data class Song(
     @SerialName("is_vip") val isVip: Boolean = false,
 ) {
     val key get() = "$source:$id"
+
+    /** 直播流（云听电台）：没有时长，播放器里不显示进度、不参与听歌计时。 */
+    val isLive get() = extra["live"] == "1"
     val title get() = name.ifBlank { "未命名歌曲" }
     val subtitle get() = listOf(artist, album).filter { it.isNotBlank() }.joinToString(" · ")
 }

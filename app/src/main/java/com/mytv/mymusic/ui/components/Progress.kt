@@ -86,6 +86,7 @@ fun WavySeekBar(
     amplitudeScale: () -> Float = { 1f },
     waveBpm: () -> Float = { 0f },
     waveTravel: Boolean = true,
+    live: Boolean = false,
 ) {
     val reduceMotion = LocalAppearance.current.reduceMotion
     var dragging by remember { mutableStateOf(false) }
@@ -105,16 +106,22 @@ fun WavySeekBar(
                 .fillMaxWidth()
                 .height(32.dp)
                 .semantics {
-                    contentDescription = "播放进度"
-                    stateDescription = "已播放 ${spokenTime(spokenPosition)}，共 ${spokenTime(duration)}"
-                    progressBarRangeInfo = ProgressBarRangeInfo(spokenFraction, 0f..1f)
-                    setProgress { target ->
-                        if (duration > 0) seek((target.coerceIn(0f, 1f) * duration).toLong())
-                        true
+                    if (live) {
+                        // 直播没有进度可报，读屏只说明这是直播
+                        contentDescription = "直播"
+                        stateDescription = "正在直播"
+                    } else {
+                        contentDescription = "播放进度"
+                        stateDescription = "已播放 ${spokenTime(spokenPosition)}，共 ${spokenTime(duration)}"
+                        progressBarRangeInfo = ProgressBarRangeInfo(spokenFraction, 0f..1f)
+                        setProgress { target ->
+                            if (duration > 0) seek((target.coerceIn(0f, 1f) * duration).toLong())
+                            true
+                        }
                     }
                 }
                 .onKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown || duration <= 0) return@onKeyEvent false
+                    if (live || event.type != KeyEventType.KeyDown || duration <= 0) return@onKeyEvent false
                     when (event.key) {
                         Key.DirectionLeft -> { seek((position.value - 10_000).coerceAtLeast(0)); true }
                         Key.DirectionRight -> { seek((position.value + 10_000).coerceAtMost(duration)); true }
@@ -126,7 +133,7 @@ fun WavySeekBar(
                 .pointerInput(duration) {
                     // 宽度每次现取：旋转、分屏改变尺寸时不会重启这个协程
                     detectTapGestures { offset ->
-                        if (duration > 0) seek(((offset.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f) * duration).toLong())
+                        if (!live && duration > 0) seek(((offset.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f) * duration).toLong())
                     }
                 }
                 .pointerInput(duration) {
@@ -136,7 +143,7 @@ fun WavySeekBar(
                             dragFraction = (offset.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
                         },
                         onDragEnd = {
-                            if (duration > 0) seek((dragFraction * duration).toLong())
+                            if (!live && duration > 0) seek((dragFraction * duration).toLong())
                             dragging = false
                         },
                         onDragCancel = { dragging = false },
@@ -148,9 +155,12 @@ fun WavySeekBar(
         ) {
             LinearWavyProgressIndicator(
                 progress = {
-                    if (dragging) dragFraction
-                    else if (duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f)
-                    else 0f
+                    when {
+                        live -> 0f
+                        dragging -> dragFraction
+                        duration > 0 -> (position.value.toFloat() / duration).coerceIn(0f, 1f)
+                        else -> 0f
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 color = color,
@@ -162,12 +172,19 @@ fun WavySeekBar(
             )
         }
         if (showTimes) {
-            ProgressTimes(
-                position = position,
-                duration = duration,
-                dragging = { dragging },
-                dragFraction = { dragFraction },
-            )
+            if (live) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("● 直播中", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text("LIVE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                ProgressTimes(
+                    position = position,
+                    duration = duration,
+                    dragging = { dragging },
+                    dragFraction = { dragFraction },
+                )
+            }
         }
     }
 }

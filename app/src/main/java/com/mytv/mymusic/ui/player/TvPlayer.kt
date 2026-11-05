@@ -201,7 +201,7 @@ internal fun TvPlayer(
                     onOpenSource = onOpenSource,
                 )
             },
-            { TvThinProgress(position, duration, fade) },
+            { TvThinProgress(position, duration, fade, song.isLive) },
             { if (ambientClock) TvClock(fade) },
         ),
         modifier = Modifier.fillMaxSize(),
@@ -348,6 +348,7 @@ private fun TvDock(
                 onSeek = actions::seek,
                 modifier = Modifier.weight(1f).tvFocusRing(RoundedCornerShape(16.dp), scale = 1f),
                 showTimes = false,
+                live = song.isLive,
                 amplitudeScale = waveScale,
                 waveBpm = waveBpm,
             )
@@ -410,7 +411,7 @@ private fun TvNotice(notice: String, alpha: () -> Float) {
 
 /** 环境模式底部的细进度线（3dp）。只在环境模式（含淡入淡出途中）组合，进度只在绘制阶段读。 */
 @Composable
-private fun TvThinProgress(position: State<Long>, duration: Long, fade: State<Float>) {
+private fun TvThinProgress(position: State<Long>, duration: Long, fade: State<Float>, live: Boolean = false) {
     val shown by remember(fade) { derivedStateOf { fade.value > 0.001f } }
     if (!shown) return
     val track = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
@@ -422,7 +423,7 @@ private fun TvThinProgress(position: State<Long>, duration: Long, fade: State<Fl
             .drawBehind {
                 val radius = CornerRadius(size.height / 2f)
                 drawRoundRect(track, cornerRadius = radius)
-                val fraction = if (duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f
+                val fraction = if (!live && duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f
                 drawRoundRect(fill, size = Size(size.width * fraction, size.height), cornerRadius = radius)
             },
     )

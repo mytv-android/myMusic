@@ -554,6 +554,7 @@ private fun NowCard(
                 onNext = onNext,
                 onSeek = onSeek,
                 onOpenPlayer = onOpenPlayer,
+                live = song.isLive,
             )
         }
     }
@@ -607,6 +608,7 @@ private fun NowControls(
     onNext: () -> Unit,
     onSeek: (Long) -> Unit,
     onOpenPlayer: () -> Unit,
+    live: Boolean = false,
 ) {
     val hovered by reveal.hover.collectIsHoveredAsState()
     val expanded = hovered || reveal.cardFocus.value || reveal.keyReveal.value || reveal.focused
@@ -665,6 +667,7 @@ private fun NowControls(
             // 落定前波浪拉平：放大途中只有封面和标题在动
             playing = playing && settled,
             onSeek = onSeek,
+            live = live,
             modifier = Modifier
                 .weight(1f)
                 .padding(horizontal = 10.dp)

@@ -139,7 +139,7 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
             .shadow(8.dp, shape, ambientColor = Color.Black.copy(alpha = 0.3f), spotColor = Color.Black.copy(alpha = 0.3f))
             .clip(shape)
             .frosted(if (blur) container.copy(alpha = 0.82f) else container, shape)
-            .miniPlayerProgress(position, state.duration)
+            .miniPlayerProgress(position, state.duration, state.current?.isLive == true)
             .combinedClickable(
                 onClickLabel = state.miniPlayerTarget.openLabel,
                 onLongClickLabel = "打开播放队列",
@@ -216,11 +216,11 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
 
 /** 整条迷你播放器底边的 2dp 进度；只在绘制阶段读进度，不触发其他内容重组。 */
 @Composable
-private fun Modifier.miniPlayerProgress(position: State<Long>, duration: Long): Modifier {
+private fun Modifier.miniPlayerProgress(position: State<Long>, duration: Long, live: Boolean = false): Modifier {
     val progressColor = MaterialTheme.colorScheme.primary
     val trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.12f)
     return drawBehind {
-        val fraction = if (duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f
+        val fraction = if (!live && duration > 0) (position.value.toFloat() / duration).coerceIn(0f, 1f) else 0f
         val lineHeight = 2.dp.toPx()
         val topLeft = Offset(0f, size.height - lineHeight)
         drawRect(trackColor, topLeft = topLeft, size = Size(size.width, lineHeight))
