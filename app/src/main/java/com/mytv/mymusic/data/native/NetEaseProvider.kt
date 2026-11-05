@@ -150,7 +150,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
 
     override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
         val stream = resolveStream(cookie, song)
-        return PlayableStream(stream.url, stream.ext, stream.bitrate, stream.level, extra = stream.extra)
+        return PlayableStream(stream.url, stream.ext, stream.bitrate, stream.level, preview = stream.preview, extra = stream.extra)
     }
 
     private suspend fun resolveStream(cookie: String, song: Song): NeteaseStream {
@@ -189,6 +189,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
                     level = "",
                     ext = item.type.lowercase(Locale.ROOT).ifBlank { extensionFromUrl(url) },
                     bitrate = item.br / 1000,
+                    preview = item.preview,
                     extra = item.volumeExtra(),
                 )
                 urlCache[cacheKey] = CachedUrl(stream, System.currentTimeMillis() + CACHE_TTL_MS)
@@ -874,6 +875,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             level = item.level.ifBlank { quality },
             ext = item.type.lowercase(Locale.ROOT).ifBlank { extensionFromUrl(url) },
             bitrate = item.br / 1000,
+            preview = item.preview,
             extra = item.volumeExtra(),
         )
     }
@@ -1017,6 +1019,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         val level: String,
         val ext: String,
         val bitrate: Int,
+        val preview: Boolean = false,
         val extra: Map<String, String> = emptyMap(),
     )
 
@@ -1409,7 +1412,7 @@ private data class NeteaseTopList(
 private data class NeteaseDownloadResponse(val data: List<NeteaseDownloadData> = emptyList())
 
 @Serializable
-private data class NeteaseDownloadData(
+internal data class NeteaseDownloadData(
     val url: String = "",
     val code: Int = 0,
     val br: Int = 0,
@@ -1419,7 +1422,14 @@ private data class NeteaseDownloadData(
     val peak: Double? = null,
     val closedGain: Double? = null,
     val closedPeak: Double? = null,
-)
+    val freeTrialInfo: NeteaseFreeTrialInfo? = null,
+) {
+    /** freeTrialInfo 出现即试听片段：地址能播但只有片段（会员曲未购时返回）。 */
+    val preview: Boolean get() = freeTrialInfo != null
+}
+
+@Serializable
+internal data class NeteaseFreeTrialInfo(val start: Long = 0, val end: Long = 0)
 
 // 网易逐字歌词（YRC）：行 `[行起毫秒,行时长毫秒]`，词 `(词起毫秒,词时长毫秒,0)词`，
 // 时间轴均为绝对毫秒。行/词格式与 QQ QRC 同源，移植自 third_party/music-lib lyrics.ParseYRC。

@@ -1,12 +1,15 @@
 package com.mytv.mymusic
 
+import com.mytv.mymusic.data.native.NeteaseDownloadData
 import com.mytv.mymusic.data.native.neteaseLevelCandidates
 import com.mytv.mymusic.data.native.neteaseMembershipLabel
 import com.mytv.mymusic.data.native.neteaseVipLabel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NeteaseQualityTest {
@@ -96,6 +99,28 @@ class NeteaseQualityTest {
         )
         assertNull(neteaseMembershipLabel(expired, now))
         assertNull(neteaseMembershipLabel(null, now))
+    }
+
+    @Test
+    fun `freeTrialInfo marks trial streams`() {
+        val json = Json { ignoreUnknownKeys = true }
+        val trial = json.decodeFromString<NeteaseDownloadData>(
+            """
+            {"url":"https://m704.music.126.net/xxx.mp3","code":200,"br":128000,"type":"mp3",
+             "freeTrialInfo":{"start":0,"end":30000}}
+            """.trimIndent(),
+        )
+        assertTrue(trial.preview)
+
+        val full = json.decodeFromString<NeteaseDownloadData>(
+            """{"url":"https://m704.music.126.net/xxx.mp3","br":320000,"type":"mp3","freeTrialInfo":null}""",
+        )
+        assertFalse(full.preview)
+
+        val absent = json.decodeFromString<NeteaseDownloadData>(
+            """{"url":"https://m704.music.126.net/xxx.flac","br":900000,"type":"flac","level":"lossless"}""",
+        )
+        assertFalse(absent.preview)
     }
 
     private fun json(text: String) = Json.parseToJsonElement(text.trimIndent()).jsonObject

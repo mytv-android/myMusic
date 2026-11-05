@@ -17,6 +17,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.File
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.Locale
@@ -876,6 +877,16 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
         return path.contains("wav_3d/") && !path.contains("wav_3d_60s/")
     }
 
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+        val url = song.url.ifBlank { downloadUrl(cookie, song) }
+        return PlayableStream(
+            url = url,
+            ext = extensionFromUrl(url).ifBlank { song.ext },
+            bitrate = song.bitrate,
+            preview = miguTrialUrl(url),
+        )
+    }
+
     private fun normalizeTone(value: String): String {
         val tone = value.trim().removePrefix(".").uppercase(Locale.ROOT)
         return if (tone in TONE_EXTENSIONS) tone else ""
@@ -1001,6 +1012,15 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
             Triple("睡前", "场景", false),
         )
     }
+}
+
+/**
+ * 咪咕试听地址：CDN 路径里带 `_60s` 段（如 `wav_3d_60s/`）的是 60 秒片段，
+ * 付费曲未购时接口会照常给地址、但只是片段，标记出来让解析器换源。
+ */
+internal fun miguTrialUrl(url: String): Boolean {
+    val path = runCatching { java.net.URI(url).path }.getOrNull().orEmpty()
+    return Regex("/[^/]*_60s/").containsMatchIn(path)
 }
 
 @Serializable
