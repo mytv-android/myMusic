@@ -132,6 +132,8 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
             scope = appScope,
         )
         update = UpdateRepository(this, settings)
+        // 日志导出用的设备和版本信息，启动时采一次就够
+        AppLog.captureHeader(this)
         queueStore = QueueStore(this)
         listenTasks = ListenTaskStore(this)
         accountProfiles = AccountProfileStore(this)

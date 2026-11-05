@@ -175,11 +175,15 @@ class AppleHlsManifestTest {
 
     @Test
     fun `mediaUserToken is read out of a cookie or accepted bare`() {
-        val callback = AppleWidevineDrmCallback(cookieProvider = { "foo=bar; media-user-token=TOKEN123; storefront=cn" })
-        assertEquals("TOKEN123", callback.mediaUserToken())
-        assertEquals("TOKEN123", AppleWidevineDrmCallback(cookieProvider = { "TOKEN123" }).mediaUserToken())
-        assertEquals("", AppleWidevineDrmCallback(cookieProvider = { "foo=bar; storefront=cn" }).mediaUserToken())
-        assertEquals("", AppleWidevineDrmCallback(cookieProvider = { "" }).mediaUserToken())
+        fun cb(cookie: String) = AppleWidevineDrmCallback(
+            cookieProvider = { cookie },
+            adamId = "1193701392",
+            pssh = "data:text/plain;base64,AAAA",
+        )
+        assertEquals("TOKEN123", cb("foo=bar; media-user-token=TOKEN123; storefront=cn").mediaUserToken())
+        assertEquals("TOKEN123", cb("TOKEN123").mediaUserToken())
+        assertEquals("", cb("foo=bar; storefront=cn").mediaUserToken())
+        assertEquals("", cb("").mediaUserToken())
     }
 
     @Test

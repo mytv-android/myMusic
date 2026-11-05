@@ -2,6 +2,7 @@ package com.mytv.mymusic.playback
 
 import android.net.Uri
 import androidx.media3.common.C
+import com.mytv.mymusic.AppLog
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.exoplayer.drm.ExoMediaDrm
@@ -41,6 +42,10 @@ import java.util.concurrent.TimeUnit
 class AppleWidevineDrmCallback(
     /** 取当前 Apple 登录 Cookie，里面要有 `media-user-token`；为空就是没登录。 */
     private val cookieProvider: () -> String,
+    /** adam ID 和 PSSH 由调用方按 MediaItem 绑好传进来，原因见下面 [executeKeyRequest]。 */
+    private val adamId: String,
+    private val pssh: String,
+    private val isLibrary: Boolean = false,
 ) : MediaDrmCallback {
 
     private val client = OkHttpClient.Builder()
@@ -53,13 +58,20 @@ class AppleWidevineDrmCallback(
         if (uuid != C.WIDEVINE_UUID) {
             throw failure(uuid, IllegalStateException("只接了 Widevine，收到 $uuid"))
         }
-        val params = parseQuery(request.licenseServerUrl.orEmpty())
-        val adamId = params["adamId"].orEmpty()
-        val pssh = params["pssh"].orEmpty()
+        // adamId / PSSH 是构造时按 MediaItem 绑好的，不能从 request 里取——
+        // ExoMediaDrm.KeyRequest.getLicenseServerUrl() 拿到的其实是 CDM 从 PSSH 解出来的
+        // 默认授权地址（FrameworkMediaDrm 传的是 MediaDrm.KeyRequest.getDefaultUrl()），
+        // Apple 的 PSSH 里只有 key_id、没有授权地址，所以它是空的。DrmConfiguration.licenseUri
+        // 只是搭车把参数送到播放侧的载体，到不了这个回调里。
         if (adamId.isBlank() || pssh.isBlank()) {
-            throw failure(uuid, IllegalStateException("授权参数缺失: ${request.licenseServerUrl}"))
+            throw failure(uuid, IllegalStateException("授权参数缺失: adamId=${adamId.length} pssh=${pssh.length}"))
         }
         val mediaUserToken = mediaUserToken()
+        AppLog.d(
+            TAG,
+            "授权请求 adamId=$adamId isLibrary=$isLibrary challenge=${request.data.size}B " +
+                "token=${mediaUserToken.take(6)}…${mediaUserToken.takeLast(4)} len=${mediaUserToken.length}",
+        )
 
         val challenge = android.util.Base64.encodeToString(request.data, android.util.Base64.NO_WRAP)
         val payload = Json.encodeToString(
@@ -69,7 +81,7 @@ class AppleWidevineDrmCallback(
                 keySystem = KEY_SYSTEM,
                 uri = pssh,
                 adamId = adamId,
-                isLibrary = params["library"] == "1",
+                isLibrary = isLibrary,
                 userInitiated = true,
             ),
         )
@@ -93,22 +105,31 @@ class AppleWidevineDrmCallback(
         val body = runCatching {
             client.newCall(httpRequest).execute().use { response ->
                 val text = response.body?.string().orEmpty()
+                AppLog.d(TAG, "授权响应 HTTP=${response.code} len=${text.length} body=${text.take(400)}")
                 if (!response.isSuccessful) {
                     throw IllegalStateException("授权失败 HTTP ${response.code}: ${text.take(200)}")
                 }
                 text
             }
-        }.getOrElse { throw failure(uuid, it) }
+        }.getOrElse {
+            AppLog.e(TAG, "授权请求异常", it)
+            throw failure(uuid, it)
+        }
 
         val parsed = runCatching { Json.decodeFromString(AppleLicenseResponse.serializer(), body) }.getOrNull()
         // Apple 的 failureType 2002 是「会话过期，重新登录」，原样带在消息里好排查
         val license = parsed?.license.orEmpty()
         if (license.isBlank()) {
             val detail = "${parsed?.failureType.orEmpty()} ${parsed?.customerMessage.orEmpty()}".trim()
+            AppLog.e(TAG, "授权没给 license${if (detail.isBlank()) "" else "（$detail）"}")
             throw failure(uuid, IllegalStateException("授权没给 license${if (detail.isBlank()) "" else "（$detail）"}: ${body.take(200)}"))
         }
         val bytes = runCatching { android.util.Base64.decode(license, android.util.Base64.DEFAULT) }
-            .getOrElse { throw failure(uuid, it) }
+            .getOrElse {
+                AppLog.e(TAG, "license base64 解不开", it)
+                throw failure(uuid, it)
+            }
+        AppLog.i(TAG, "授权成功，license ${bytes.size}B")
         return MediaDrmCallback.Response(bytes)
     }
 
@@ -160,6 +181,7 @@ class AppleWidevineDrmCallback(
     )
 
     companion object {
+        private const val TAG = "AppleDrm"
         const val LICENSE_ENDPOINT = "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense"
         const val KEY_SYSTEM = "com.widevine.alpha"
         private const val APPLE_WEB_ORIGIN = "https://music.apple.com"

@@ -65,17 +65,36 @@ class PlaybackService : MediaSessionService() {
         // AppleSession 还是空的，授权会白跑一次。先主动取一次。
         app?.appScope?.let { AppleSession.refreshAsync(app.settings, it) }
         // Apple Music 整曲是 Widevine 加密的 HLS，交给设备自带的 CDM 解。
-        // 只有带 DrmConfiguration 的 MediaItem 才会走这套，其余源原样播放。
-        val drmManager = DefaultDrmSessionManager.Builder()
-            .build(AppleWidevineDrmCallback { AppleSession.cookie })
+        // 只有带 DrmConfiguration 的 MediaItem 才走这套，其余源原样播放。
+        //
+        // 每个 MediaItem 单独建一个 session manager：adamId / PSSH 必须按曲目绑进回调里，
+        // 而 ExoMediaDrm.KeyRequest.getLicenseServerUrl() 拿到的是 CDM 从 PSSH 解出来的默认
+        // 授权地址（Apple 的 PSSH 里没有），是空的，搭在 licenseUri 上的参数到不了回调。
+        // 按 licenseUri 缓存，换歌不重复建。
+        val drmManagers = mutableMapOf<String, DrmSessionManager>()
+        val drmLock = Any()
         builder.setMediaSourceFactory(
             DefaultMediaSourceFactory(
                 cache?.let {
                     CacheDataSource.Factory().setCache(it).setUpstreamDataSourceFactory(DefaultDataSource.Factory(this))
                 } ?: DefaultDataSource.Factory(this),
             ).setDrmSessionManagerProvider { mediaItem ->
-                val scheme = mediaItem.localConfiguration?.drmConfiguration?.scheme
-                if (scheme == C.WIDEVINE_UUID) drmManager else DrmSessionManager.DRM_UNSUPPORTED
+                val drm = mediaItem.localConfiguration?.drmConfiguration
+                if (drm?.scheme != C.WIDEVINE_UUID) return@setDrmSessionManagerProvider DrmSessionManager.DRM_UNSUPPORTED
+                val uri = drm.licenseUri?.toString().orEmpty()
+                val params = AppleWidevineDrmCallback.parseQuery(uri)
+                synchronized(drmLock) {
+                    drmManagers.getOrPut(uri) {
+                        DefaultDrmSessionManager.Builder().build(
+                            AppleWidevineDrmCallback(
+                                cookieProvider = { AppleSession.cookie },
+                                adamId = params["adamId"].orEmpty(),
+                                pssh = params["pssh"].orEmpty(),
+                                isLibrary = params["library"] == "1",
+                            ),
+                        )
+                    }
+                }
             },
         )
         val player = builder.build()

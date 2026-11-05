@@ -1,5 +1,6 @@
 package com.mytv.mymusic.data.native
 
+import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
@@ -93,9 +94,11 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
         val master = song.extra[EXTRA_APPLE_HLS]?.takeIf { it.isNotBlank() }
             ?: appleEnhancedHls(cookie, song)
+        AppLog.d(TAG, "playableStream ${song.name} master=${master?.take(80)}")
         if (!master.isNullOrBlank()) {
             val variant = appleHlsVariant(master)
             if (variant != null) {
+                AppLog.i(TAG, "整曲就绪 ${song.name} ${variant.bitrate}kbps ${variant.playlistUrl.take(100)}")
                 return PlayableStream(
                     url = variant.playlistUrl,
                     ext = "m4a",
@@ -107,6 +110,9 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
                     },
                 )
             }
+            AppLog.w(TAG, "整曲清单没解析出可用档位，退回试听: $master")
+        } else {
+            AppLog.w(TAG, "没有 enhancedHls，退回试听: ${song.name}")
         }
         // 整曲这条路不通：退回片段，并明确标出来
         val preview = song.url.ifBlank { parseSong(cookie, song.id).url }
@@ -860,6 +866,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     }
 
     private companion object {
+        private const val TAG = "AppleProvider"
         const val APPLE_HOME = "https://music.apple.com"
         /** 歌单曲目分页的每页大小；Apple 的参数上限就是 300，301 会被直接拒掉。 */
         const val APPLE_TRACK_PAGE = 300

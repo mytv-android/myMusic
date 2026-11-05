@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.Button
@@ -187,7 +188,7 @@ fun AboutScreen(
                 ListRow(
                     title = "复制诊断信息",
                     index = 5,
-                    count = 6,
+                    count = 7,
                     onClick = {
                         scope.launch {
                             clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("myMusic 诊断信息", actions.diagnostics())))
@@ -196,7 +197,19 @@ fun AboutScreen(
                     },
                     icon = Icons.Filled.ContentCopy,
                     iconTone = IconTone.Tertiary,
-                    summary = "不含 Cookie、令牌和完整播放地址",
+                    summary = "设备、版本、启用平台和最近 ${com.mytv.mymusic.AppLog.snapshot().size} 条运行日志",
+                    showChevron = false,
+                )
+                ListRow(
+                    title = "导出日志文件",
+                    index = 6,
+                    count = 7,
+                    onClick = {
+                        scope.launch { snackbar.showSnackbar(actions.exportLog()) }
+                    },
+                    icon = Icons.Filled.Share,
+                    iconTone = IconTone.Tertiary,
+                    summary = "运行日志写成文件后分享，适合条数多的时候",
                     showChevron = false,
                 )
             }
@@ -204,6 +217,11 @@ fun AboutScreen(
         item(key = "sodam", contentType = "creditCard") {
             Box(Modifier.padding(top = 12.dp)) {
                 SodamCredit(note = "汽水会员整曲的签名服务与协议来自 SodaM（AGPL-3.0）")
+            }
+        }
+        item(key = "logNote", contentType = "infoNote") {
+            Box(Modifier.padding(top = 8.dp)) {
+                InfoNote("运行日志只记在本机内存里，最多 800 条，退出应用即清空。Cookie 和令牌在写入前就已抹掉，导出前也会再过滤一遍，但仍建议只发给可信的人。")
             }
         }
         item(key = "links", contentType = "linksCard") { LinksCard(openUri) }

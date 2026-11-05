@@ -16,6 +16,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.ForegroundActivity
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.aggregate.AggregateSearchEngine
@@ -4549,6 +4550,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             else -> info.versionCode.toString()
         }
         val enabled = enabledProviders().joinToString("、") { it.name }
+        val log = AppLog.snapshot()
         return buildString {
             appendLine("myMusic 诊断信息")
             appendLine("版本：${info?.versionName.orEmpty()} ($code)")
@@ -4558,8 +4560,43 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             appendLine("汽水签名器：${signerStatus()}")
             appendLine("同步：${syncState.value.message.ifBlank { syncState.value.error.ifBlank { syncState.value.status.name } }}")
             appendLine("更新：${updateState.value.error.ifBlank { updateState.value.message.ifBlank { updateState.value.phase.name } }}")
+            if (log.isEmpty()) {
+                appendLine("运行日志：空")
+            } else {
+                appendLine("运行日志（${log.size} 条，最早 ${AppLog.timeOf(log.first())}）：")
+                log.forEach { appendLine(it.format()) }
+            }
             append("本信息不包含 Cookie、令牌或播放地址。")
         }
+    }
+
+    /**
+     * 把运行日志写成文件并唤起系统分享。日志可能几百条，剪贴板不好使，
+     * 走文件 + ACTION_SEND 才能整份带出去。
+     */
+    fun exportLog(): String {
+        val context = getApplication<Application>()
+        val text = AppLog.exportText()
+        if (text.isBlank()) return "还没有日志"
+        val dir = java.io.File(context.cacheDir, "logs").apply { mkdirs() }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT)
+            .format(java.util.Date())
+        val file = java.io.File(dir, "mymusic-$stamp.txt")
+        runCatching { file.writeText(text) }.onFailure { return "写日志文件失败：${it.message}" }
+        val uri = runCatching {
+            androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        }.getOrNull() ?: return "无法生成分享用的 content URI"
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "myMusic 日志 $stamp")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(
+            android.content.Intent.createChooser(intent, "导出日志")
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        return "已导出 ${AppLog.snapshot().size} 条日志"
     }
 
     /** 诊断信息里的签名器状态：只说公共 / 自定义 / 关闭，不带地址和 Token。 */

@@ -299,6 +299,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun saveEqCustom() = model.saveEqualizerCustom()
 
     fun diagnostics(): String = model.diagnostics()
+    fun exportLog(): String = model.exportLog()
 }
 
 /** “正在播放”入口点按后去哪，读屏和 onClickLabel 用。 */
