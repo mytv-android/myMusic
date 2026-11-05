@@ -15,6 +15,9 @@ import com.mytv.mymusic.data.native.NativeHttp
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -118,13 +121,18 @@ class AppleWidevineDrmCallback(
             throw failure(uuid, it)
         }
 
-        val parsed = runCatching { Json.decodeFromString(AppleLicenseResponse.serializer(), body) }.getOrNull()
-        // Apple 的 failureType 2002 是「会话过期，重新登录」，原样带在消息里好排查
-        val license = parsed?.license.orEmpty()
+        // 响应里 license 之外还有别的字段，严格 schema 一碰见未知键整个解析就失败——
+        // 真机上 Apple 明明回了 200 + license，却被当成"没给 license"扔掉，重试四轮全废。
+        // 按 gamdl 的方式从字典里取值，其余字段一概不管。
+        val license = licenseField(body, "license")
         if (license.isBlank()) {
-            val detail = "${parsed?.failureType.orEmpty()} ${parsed?.customerMessage.orEmpty()}".trim()
-            AppLog.e(TAG, "授权没给 license${if (detail.isBlank()) "" else "（$detail）"}")
-            throw failure(uuid, IllegalStateException("授权没给 license${if (detail.isBlank()) "" else "（$detail）"}: ${body.take(200)}"))
+            // Apple 的 failureType 2002 是「会话过期，重新登录」，原样带在消息里好排查
+            val detail = listOf(licenseField(body, "failureType"), licenseField(body, "customerMessage"))
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+            val message = "授权没给 license${if (detail.isBlank()) "" else "（$detail）"}: ${body.take(120)}…${body.takeLast(80)}"
+            AppLog.e(TAG, message)
+            throw failure(uuid, IllegalStateException(message))
         }
         val bytes = runCatching { android.util.Base64.decode(license, android.util.Base64.DEFAULT) }
             .getOrElse {
@@ -185,14 +193,6 @@ class AppleWidevineDrmCallback(
         @SerialName("user-initiated") val userInitiated: Boolean,
     )
 
-    @Serializable
-    private data class AppleLicenseResponse(
-        val license: String = "",
-        val status: Int = 0,
-        val failureType: String = "",
-        val customerMessage: String = "",
-    )
-
     companion object {
         private const val TAG = "AppleDrm"
         const val LICENSE_ENDPOINT = "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense"
@@ -227,6 +227,17 @@ class AppleWidevineDrmCallback(
                 if (index < 0) null else part.substring(0, index) to UriCompat.decode(part.substring(index + 1))
             }.toMap()
         }
+
+        /**
+         * 从授权响应里取一个字符串字段。故意按字典取值而不是映射成 data class：
+         * 响应里的额外字段（真机抓到的 925B 响应里 license 只是一部分）会让严格
+         * schema 整个解析失败，license 在手里也被当成"没给"。字段缺失、类型不是
+         * 字符串、响应根本不是 JSON，都返回空串，由调用方按失败处理。
+         */
+        internal fun licenseField(body: String, name: String): String =
+            runCatching {
+                (Json.parseToJsonElement(body).jsonObject[name] as? JsonPrimitive)?.contentOrNull
+            }.getOrNull().orEmpty()
     }
 }
 
