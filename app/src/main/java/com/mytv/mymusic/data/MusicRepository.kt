@@ -7,7 +7,8 @@ import com.mytv.mymusic.data.native.PlayableStream
 import com.mytv.mymusic.data.native.SongSearchPage
 import java.io.File
 
-class MusicRepository {
+/** open 供测试替身覆写 playableStream，不发起真实网络请求。 */
+open class MusicRepository {
     suspend fun providers(): List<ProviderInfo> = NativeProviders.infos()
 
     suspend fun searchSongs(provider: String, cookie: String, keyword: String): List<Song> =
@@ -27,7 +28,7 @@ class MusicRepository {
     suspend fun parseSong(provider: String, cookie: String, link: String): Song =
         requireProvider(provider).parseSong(cookie, link)
 
-    suspend fun playableStream(song: Song, cookie: String, workDir: File): PlayableStream =
+    open suspend fun playableStream(song: Song, cookie: String, workDir: File): PlayableStream =
         requireProvider(song.source).playableStream(cookie, song, workDir)
 
     suspend fun lyrics(song: Song, cookie: String): String =

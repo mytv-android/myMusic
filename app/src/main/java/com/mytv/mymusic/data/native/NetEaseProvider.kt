@@ -150,7 +150,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
 
     override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
         val stream = resolveStream(cookie, song)
-        return PlayableStream(stream.url, stream.ext, stream.bitrate, stream.level, stream.extra)
+        return PlayableStream(stream.url, stream.ext, stream.bitrate, stream.level, extra = stream.extra)
     }
 
     private suspend fun resolveStream(cookie: String, song: Song): NeteaseStream {

@@ -138,6 +138,8 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             // 播放信息里的码率是 bps，Song.bitrate 是 kbps
             bitrate = info.bitrate.takeIf { it > 0 }?.let(::normalizeSodaBitrate) ?: song.bitrate,
             level = info.quality,
+            // 会员曲拿到的可能只是片段：地址能用但时长对不上整曲，标记出来让解析器换源
+            preview = info.preview,
         )
     }
 

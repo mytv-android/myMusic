@@ -113,6 +113,11 @@ class SourceResolver(
             val now = System.currentTimeMillis()
             val cached = synchronized(lock) { urlCache[source.song.key] }
             if (cached != null && now - cached.at < URL_TTL_MS) {
+                // 汽水这类取流后才知道是试听的源，缓存里带着试听标记：同样受「允许试听」约束
+                if (cached.preview && !policy.allowPreview && !explicit) {
+                    attempts += Attempt(source, "仅提供试听")
+                    continue
+                }
                 val cachedSource = source.withQuality(cached.ext, cached.bitrate, cached.extra)
                 return Resolution.Ready(cachedSource, cached.url, cached.preview, cached.at)
             }
@@ -141,7 +146,7 @@ class SourceResolver(
                 attempts += Attempt(source, reason)
                 continue
             }
-            val preview = source.isPreview || isPreviewSource(source.providerId, source.song)
+            val preview = source.isPreview || stream?.preview == true || isPreviewSource(source.providerId, source.song)
             val resolvedSource = source.withQuality(
                 stream?.ext.orEmpty(),
                 stream?.bitrate ?: 0,
@@ -156,6 +161,12 @@ class SourceResolver(
                     bitrate = resolvedSource.song.bitrate,
                     extra = stream?.extra.orEmpty(),
                 )
+            }
+            // 地址拿到了但只是片段，而设置里不允许试听：当没有可用地址，继续试下一个平台；
+            // 缓存里留着这份试听地址，用户打开「允许试听」后可以直接复用
+            if (preview && !policy.allowPreview && !explicit) {
+                attempts += Attempt(source, "仅提供试听")
+                continue
             }
             return Resolution.Ready(resolvedSource, url, preview)
         }

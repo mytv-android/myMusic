@@ -2,6 +2,7 @@ package com.mytv.mymusic
 
 import com.mytv.mymusic.aggregate.AggregationSettings
 import com.mytv.mymusic.aggregate.Availability
+import com.mytv.mymusic.aggregate.Resolution
 import com.mytv.mymusic.aggregate.SourcePolicy
 import com.mytv.mymusic.aggregate.SourceResolver
 import com.mytv.mymusic.aggregate.TrackMatcher
@@ -9,10 +10,13 @@ import com.mytv.mymusic.aggregate.TrackSource
 import com.mytv.mymusic.aggregate.availabilityOf
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.native.PlayableStream
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class SourceResolverTest {
     private val resolver = SourceResolver(
@@ -95,5 +99,104 @@ class SourceResolverTest {
         )
         assertFalse(candidates.any { it.providerId == "qq" })
         assertTrue(candidates.any { it.providerId == "netease" })
+    }
+
+    // ---------- resolve()：取流后才知道是试听（汽水会员曲）的换源行为 ----------
+
+    /** 按平台返回固定流；没配置的平台返回空地址（等价于解析失败）。 */
+    private class FakeRepository(private val streams: Map<String, PlayableStream>) : MusicRepository() {
+        override suspend fun playableStream(song: Song, cookie: String, workDir: File): PlayableStream =
+            streams[song.key] ?: PlayableStream(url = "")
+    }
+
+    /** 汽水会员曲：静态可用性查不出试听（签名器在），取流才带回顾片段标记。 */
+    private fun sodaVipSource() = TrackSource("soda", "汽水音乐", song("s1", "soda", vip = true))
+
+    private fun neteaseSource() = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/full.mp3"))
+
+    private fun previewResolver(streams: Map<String, PlayableStream>, cookies: Map<String, String> = mapOf("soda" to "sid=1")) = SourceResolver(
+        repository = FakeRepository(streams),
+        cookies = { cookies },
+        settings = { AggregationSettings() },
+        workDir = { File(".") },
+    )
+
+    @Test
+    fun previewStreamFallsThroughToNextPlatform() = runBlocking {
+        val resolver = previewResolver(
+            mapOf(
+                "soda:s1" to PlayableStream(url = "https://example.com/soda-trial.mp3", preview = true),
+                "netease:n1" to PlayableStream(url = "https://example.com/netease-full.mp3"),
+            ),
+        )
+        val resolution = resolver.resolve(
+            track(listOf(sodaVipSource(), neteaseSource())),
+            policy = SourcePolicy(priority = listOf("soda", "netease"), allowPreview = false),
+        )
+        val ready = resolution as Resolution.Ready
+        assertEquals("netease", ready.source.providerId)
+        assertEquals("https://example.com/netease-full.mp3", ready.url)
+        assertFalse(ready.isPreview)
+    }
+
+    @Test
+    fun previewOnlyAttemptReportsTrialReason() = runBlocking {
+        val resolver = previewResolver(
+            mapOf("soda:s1" to PlayableStream(url = "https://example.com/soda-trial.mp3", preview = true)),
+        )
+        val resolution = resolver.resolve(
+            track(listOf(sodaVipSource())),
+            policy = SourcePolicy(priority = listOf("soda"), allowPreview = false),
+        )
+        val none = resolution as Resolution.None
+        assertEquals(listOf("仅提供试听"), none.attempts.map { it.reason })
+    }
+
+    @Test
+    fun previewStreamPlaysWhenPreviewAllowed() = runBlocking {
+        val resolver = previewResolver(
+            mapOf("soda:s1" to PlayableStream(url = "https://example.com/soda-trial.mp3", preview = true)),
+        )
+        val resolution = resolver.resolve(
+            track(listOf(sodaVipSource())),
+            policy = SourcePolicy(priority = listOf("soda"), allowPreview = true),
+        )
+        val ready = resolution as Resolution.Ready
+        assertEquals("soda", ready.source.providerId)
+        assertTrue(ready.isPreview)
+    }
+
+    @Test
+    fun explicitPinnedPreviewStreamStillPlays() = runBlocking {
+        val resolver = previewResolver(
+            mapOf("soda:s1" to PlayableStream(url = "https://example.com/soda-trial.mp3", preview = true)),
+        )
+        val resolution = resolver.resolve(
+            track(listOf(sodaVipSource(), neteaseSource())),
+            pinnedProvider = "soda",
+            policy = SourcePolicy(priority = listOf("soda", "netease"), pinnedProvider = "soda", allowPreview = false),
+        )
+        val ready = resolution as Resolution.Ready
+        assertEquals("soda", ready.source.providerId)
+        assertTrue(ready.isPreview)
+    }
+
+    @Test
+    fun cachedPreviewIsSkippedAfterPreviewDisallowed() = runBlocking {
+        val resolver = previewResolver(
+            mapOf(
+                "soda:s1" to PlayableStream(url = "https://example.com/soda-trial.mp3", preview = true),
+                "netease:n1" to PlayableStream(url = "https://example.com/netease-full.mp3"),
+            ),
+        )
+        val track = track(listOf(sodaVipSource(), neteaseSource()))
+        // 第一次允许试听：汽水片段进地址缓存
+        val first = resolver.resolve(track, policy = SourcePolicy(priority = listOf("soda", "netease"), allowPreview = true))
+        assertEquals("soda", (first as Resolution.Ready).source.providerId)
+        // 关掉「允许试听」后再解析：命中的缓存带试听标记，要跳过去换下一个平台
+        val second = resolver.resolve(track, policy = SourcePolicy(priority = listOf("soda", "netease"), allowPreview = false))
+        val ready = second as Resolution.Ready
+        assertEquals("netease", ready.source.providerId)
+        assertFalse(ready.isPreview)
     }
 }

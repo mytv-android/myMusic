@@ -25,6 +25,8 @@ data class PlayableStream(
     val ext: String = "",
     val bitrate: Int = 0,
     val level: String = "",
+    /** 取流之后才知道只是试听片段（汽水会员曲只给出片段地址）；解析器按它继续尝试其他平台。 */
+    val preview: Boolean = false,
     /** 取流响应里带回来的附加信息（响度 gain/peak 等），会合并进播放队列里的 Song.extra。 */
     val extra: Map<String, String> = emptyMap(),
 )
