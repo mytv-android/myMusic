@@ -167,6 +167,63 @@ class VerbatimLyricTest {
     }
 
     @Test
+    fun sodaTranslationFollowsItsOriginalLine() {
+        // 汽水《Mystery of Love》抓来的原文与 translations.cn
+        val raw = "[17660,4240]<0,430,0>Oh <560,430,0>to <1040,360,0>see <1400,350,0>without <1800,430,0>my <2230,2010,0>eyes\n" +
+            "[21900,4560]<0,320,0>The <320,310,0>first <720,430,0>time <1320,430,0>that <1840,430,0>you <2320,1360,0>kissed <3680,880,0>me\n" +
+            "[26460,4280]<0,1070,0>Boundless <1200,340,0>by <1540,200,0>the <1740,240,0>time <1980,370,0>I <2350,1930,0>cried\n" +
+            "[30740,4640]<0,410,0>I <410,300,0>built <760,430,0>your <1320,550,0>walls <1960,430,0>around <3560,1080,0>me\n" +
+            "[35380,4440]<0,550,0>White <560,510,0>noise <1160,320,0>what <1480,270,0>an <1750,480,0>awful <2230,2210,0>sound\n" +
+            "[39820,4480]<0,1110,0>Fumbling <1200,430,0>by <1680,710,0>rogue <2390,2090,0>river"
+        val translation = "[00:17.66]Oh 不用眼睛就能看见\n" +
+            "[00:21.90]你初次吻我的场景\n" +
+            "[00:26.46]我的泪水似乎流之不尽\n" +
+            "[00:30.74]将自己困在你的温柔乡之中\n" +
+            "[00:35.38]白噪声真是令人焦虑的声音\n" +
+            "[00:39.82]在罗格河畔游荡"
+        val lines = LyricsParser.parse(soda.parseSodaLyric(raw, translation)).lines
+        assertEquals(6, lines.size)
+        assertEquals("Oh to see without my eyes", lines[0].text)
+        assertEquals("Oh 不用眼睛就能看见", lines[0].translation)
+        assertEquals(6, lines[0].words.size)
+        assertEquals("The first time that you kissed me", lines[1].text)
+        assertEquals("你初次吻我的场景", lines[1].translation)
+        assertEquals("Boundless by the time I cried", lines[2].text)
+        assertEquals("我的泪水似乎流之不尽", lines[2].translation)
+        assertEquals("将自己困在你的温柔乡之中", lines[3].translation)
+        assertEquals("白噪声真是令人焦虑的声音", lines[4].translation)
+        assertEquals("Fumbling by rogue river", lines[5].text)
+        assertEquals("在罗格河畔游荡", lines[5].translation)
+    }
+
+    @Test
+    fun sodaTranslationMergesIntoLyricLineTranslation() {
+        val lrc = soda.parseSodaLyric("[17660,4240]<0,430,0>Oh <560,430,0>to", "[00:17.66]不用眼睛就能看见")
+        val line = LyricsParser.parse(lrc).lines.single()
+        assertEquals("Oh to", line.text)
+        assertEquals("不用眼睛就能看见", line.translation)
+    }
+
+    @Test
+    fun sodaWithoutTranslationKeepsOriginalOnly() {
+        assertEquals(
+            "[00:05.00]<00:05.100>难</00:05.400>\n",
+            soda.parseSodaLyric("[5000,2000]<100,300>难", ""),
+        )
+    }
+
+    @Test
+    fun sodaTranslationSameAsOriginalIsNotRepeated() {
+        assertEquals("[00:05.00]难道\n", soda.parseSodaLyric("[5000,2000]难道", "[00:05.00]难道"))
+    }
+
+    @Test
+    fun sodaTranslationSkipsBlankAndUnparsableLines() {
+        val lrc = soda.parseSodaLyric("[5000,2000]难道", "\n[坏]译文\n[00:05.00]\n[00:09.00]后来")
+        assertEquals("[00:05.00]难道\n[00:05.00]后来\n", lrc)
+    }
+
+    @Test
     fun appleTtmlConvertsSpansToWords() {
         val ttml = """
             <tt xmlns="http://www.w3.org/ns/ttml"><body><div>

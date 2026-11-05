@@ -43,6 +43,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlin.math.abs
 
 private val SODA_INFO = ProviderInfo(
     id = "soda",
@@ -245,7 +246,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             throw IllegalStateException("failed to fetch lyric API: ${error.message}", error)
         }
         if (resp.lyric.content.isEmpty()) return ""
-        return parseSodaLyric(resp.lyric.content)
+        return parseSodaLyric(resp.lyric.content, sodaChineseTranslation(resp.lyric))
     }
 
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
@@ -748,14 +749,17 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         }
         val seoTrack = seo.seoTrack ?: SodaSeoTrack()
         val track = seoTrack.track
-        val seoLyric = seoTrack.lyric.content
+        val seoLyric = seoTrack.lyric
+        val topLyric = seo.lyric
         val resp = SodaTrackV2Response(
             statusCode = 0,
             track = track,
             trackInfo = track,
             trackPlayer = seo.trackPlayer ?: SodaTrackPlayer(),
             lyric = SodaLyric(
-                content = if (seoLyric.trim().isNotEmpty()) seoLyric else seo.lyric?.content.orEmpty()
+                content = if (seoLyric.content.trim().isNotEmpty()) seoLyric.content else topLyric?.content.orEmpty(),
+                // 翻译挂在顶层 lyric 上，seo_track.lyric 里一般是空的
+                translations = topLyric?.translations?.takeIf { it.isNotEmpty() } ?: seoLyric.translations,
             ),
         )
         if (resp.track.id.trim().isEmpty()) throw IllegalStateException("soda seo_track missing track id")
@@ -2406,23 +2410,84 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return info.duration + 5 < fullDurationSeconds
     }
 
-    internal fun parseSodaLyric(raw: String): String {
-        val builder = StringBuilder()
+    internal fun parseSodaLyric(raw: String, translation: String = ""): String {
+        val originals = mutableListOf<Pair<Int, String>>()
         raw.split("\n").forEach { rawLine ->
             val line = rawLine.trim()
             if (line.isEmpty()) return@forEach
             val match = SODA_LYRIC_LINE.find(line) ?: return@forEach
             val startTime = match.groupValues[1].toIntOrNull() ?: 0
-            val content = match.groupValues[3]
-            val minutes = startTime / 60000
-            val seconds = (startTime % 60000) / 1000
-            val millis = (startTime % 1000) / 10
-            builder.append(
-                "[%02d:%02d.%02d]%s\n".format(Locale.ROOT, minutes, seconds, millis, sodaVerbatimContent(content, startTime))
-            )
+            originals += startTime to sodaVerbatimContent(match.groupValues[3], startTime)
+        }
+        if (originals.isEmpty()) return ""
+        val translations = sodaTranslationLines(translation, originals)
+        val builder = StringBuilder()
+        var cursor = 0
+        originals.forEachIndexed { index, entry ->
+            builder.appendSodaLyricLine(entry.first, entry.second)
+            while (cursor < translations.size && translations[cursor].first == index) {
+                // 中文歌偶尔会把原文也塞进 translations，和原文一样的行不再重复一遍
+                val text = translations[cursor].second
+                if (text != SODA_LYRIC_WORD.replace(entry.second, "")) {
+                    builder.appendSodaLyricLine(entry.first, text)
+                }
+                cursor++
+            }
         }
         return builder.toString()
     }
+
+    private fun StringBuilder.appendSodaLyricLine(startTime: Int, content: String) {
+        append(
+            "[%02d:%02d.%02d]%s\n".format(
+                Locale.ROOT,
+                startTime / 60000,
+                (startTime % 60000) / 1000,
+                (startTime % 1000) / 10,
+                content,
+            )
+        )
+    }
+
+    /**
+     * 汽水的 `translations` 是 `{"cn":"[00:17.66]译文…"}` 这样的标准 LRC。
+     * 每行译文贴到时间最接近的那句原文后面，歌词解析端才会把同一时间戳的两行并成
+     * 「原文 + 翻译」；只取中文，其他语言（罗马音之类）保持原样不显示。
+     */
+    private fun sodaTranslationLines(translation: String, originals: List<Pair<Int, String>>): List<Pair<Int, String>> {
+        if (translation.isBlank() || originals.isEmpty()) return emptyList()
+        val out = mutableListOf<Pair<Int, String>>()
+        translation.split("\n").forEach { rawLine ->
+            val line = rawLine.trim()
+            if (line.isEmpty()) return@forEach
+            val match = SODA_LYRIC_TRANSLATION_LINE.find(line) ?: return@forEach
+            val text = match.groupValues[4].trim()
+            if (text.isEmpty()) return@forEach
+            val time = sodaLrcTimeMs(match) ?: return@forEach
+            // 译文和原文都按时间升序，最近的一句就是对应那句
+            val index = originals.indices.minByOrNull { abs(originals[it].first - time) } ?: return@forEach
+            out += index to text
+        }
+        return out
+    }
+
+    private fun sodaLrcTimeMs(match: MatchResult): Int? {
+        val minutes = match.groupValues[1].toIntOrNull() ?: return null
+        val seconds = match.groupValues[2].toIntOrNull() ?: return null
+        val millis = when (match.groupValues[3].length) {
+            1 -> match.groupValues[3].toIntOrNull()?.times(100) ?: 0
+            2 -> match.groupValues[3].toIntOrNull()?.times(10) ?: 0
+            3 -> match.groupValues[3].toIntOrNull() ?: 0
+            else -> 0
+        }
+        return (minutes * 60_000 + seconds * 1_000 + millis).coerceAtLeast(0)
+    }
+
+    /** 取汽水自带的中文翻译；键是语言码，中文歌没有这个字段。 */
+    private fun sodaChineseTranslation(lyric: SodaLyric): String =
+        lyric.translations.entries
+            .firstOrNull { it.key.equals("cn", ignoreCase = true) || it.key.startsWith("zh", ignoreCase = true) }
+            ?.value.orEmpty()
 
     /** 汽水逐字载荷 `<词起,词时[,0]>词` 转 `<mm:ss.SSS>` 增强 LRC；没有词标签时退回剥掉标签的纯文本。 */
     private fun sodaVerbatimContent(content: String, lineStartMs: Int): String {
@@ -2791,6 +2856,8 @@ private val SODA_STREAM_CLIENT: OkHttpClient by lazy {
 private val SODA_LYRIC_LINE = Regex("^\\[(\\d+),(\\d+)\\](.*)")
 private val SODA_LYRIC_WORD = Regex("<[^>]+>")
 private val SODA_LYRIC_WORD_TAG = Regex("""<(\d+),(\d+)(?:,\d+)?>([^<]*)""")
+/** 翻译是标准 LRC：`[mm:ss.cc]译文`，时间可省略、百分位一到三位。 */
+private val SODA_LYRIC_TRANSLATION_LINE = Regex("""^\[(\d+):(\d+)(?:[.:](\d{1,3}))?](.*)$""")
 
 private data class SodaCategoryTag(val id: Int, val name: String, val group: String)
 
@@ -3088,7 +3155,11 @@ private data class SodaTrackPlayer(
 )
 
 @Serializable
-private data class SodaLyric(val content: String = "")
+private data class SodaLyric(
+    val content: String = "",
+    /** 外国歌的中文翻译：`{"cn":"[00:17.66]译文…"}`，中文歌整个字段都不返回。 */
+    @SerialName("translations") val translations: Map<String, String> = emptyMap(),
+)
 
 @Serializable
 private data class SodaTrackV2Response(
