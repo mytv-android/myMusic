@@ -224,6 +224,14 @@ class VerbatimLyricTest {
     }
 
     @Test
+    fun sodaTranslationPairsByLineWhenCountsDiffer() {
+        // 译文比原文少一行（中间有纯音乐段），按时间就近贴，不能整段错位
+        val raw = "[1000,1000]one\n[2000,1000]two\n[9000,1000]three"
+        val translation = "[00:01.00]一\n[00:09.00]三"
+        assertEquals("[00:01.00]one\n[00:01.00]一\n[00:02.00]two\n[00:09.00]three\n[00:09.00]三\n", soda.parseSodaLyric(raw, translation))
+    }
+
+    @Test
     fun appleTtmlConvertsSpansToWords() {
         val ttml = """
             <tt xmlns="http://www.w3.org/ns/ttml"><body><div>

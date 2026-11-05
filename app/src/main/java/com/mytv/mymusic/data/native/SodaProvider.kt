@@ -759,7 +759,9 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             lyric = SodaLyric(
                 content = if (seoLyric.content.trim().isNotEmpty()) seoLyric.content else topLyric?.content.orEmpty(),
                 // 翻译挂在顶层 lyric 上，seo_track.lyric 里一般是空的
-                translations = topLyric?.translations?.takeIf { it.isNotEmpty() } ?: seoLyric.translations,
+                translations = topLyric?.translations
+                    ?.takeIf { it is JsonObject && it.isNotEmpty() }
+                    ?: seoLyric.translations,
             ),
         )
         if (resp.track.id.trim().isEmpty()) throw IllegalStateException("soda seo_track missing track id")
@@ -2422,16 +2424,13 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         if (originals.isEmpty()) return ""
         val translations = sodaTranslationLines(translation, originals)
         val builder = StringBuilder()
-        var cursor = 0
         originals.forEachIndexed { index, entry ->
             builder.appendSodaLyricLine(entry.first, entry.second)
-            while (cursor < translations.size && translations[cursor].first == index) {
+            translations[index]?.forEach { text ->
                 // 中文歌偶尔会把原文也塞进 translations，和原文一样的行不再重复一遍
-                val text = translations[cursor].second
                 if (text != SODA_LYRIC_WORD.replace(entry.second, "")) {
                     builder.appendSodaLyricLine(entry.first, text)
                 }
-                cursor++
             }
         }
         return builder.toString()
@@ -2451,12 +2450,12 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
     /**
      * 汽水的 `translations` 是 `{"cn":"[00:17.66]译文…"}` 这样的标准 LRC。
-     * 每行译文贴到时间最接近的那句原文后面，歌词解析端才会把同一时间戳的两行并成
-     * 「原文 + 翻译」；只取中文，其他语言（罗马音之类）保持原样不显示。
+     * 每行译文贴到对应的原文后面（原文索引 → 译文），歌词解析端才会把同一时间戳的两行
+     * 并成「原文 + 翻译」；只取中文，其他语言（罗马音之类）保持原样不显示。
      */
-    private fun sodaTranslationLines(translation: String, originals: List<Pair<Int, String>>): List<Pair<Int, String>> {
-        if (translation.isBlank() || originals.isEmpty()) return emptyList()
-        val out = mutableListOf<Pair<Int, String>>()
+    private fun sodaTranslationLines(translation: String, originals: List<Pair<Int, String>>): Map<Int, List<String>> {
+        if (translation.isBlank() || originals.isEmpty()) return emptyMap()
+        val parsed = mutableListOf<Pair<Int, String>>()
         translation.split("\n").forEach { rawLine ->
             val line = rawLine.trim()
             if (line.isEmpty()) return@forEach
@@ -2464,9 +2463,19 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             val text = match.groupValues[4].trim()
             if (text.isEmpty()) return@forEach
             val time = sodaLrcTimeMs(match) ?: return@forEach
-            // 译文和原文都按时间升序，最近的一句就是对应那句
-            val index = originals.indices.minByOrNull { abs(originals[it].first - time) } ?: return@forEach
-            out += index to text
+            parsed += time to text
+        }
+        if (parsed.isEmpty()) return emptyMap()
+        // 译文和原文行数一致时按行号对齐（有些逐字歌词的时间戳和译文差好几秒，按时间配会配错）；
+        // 行数不一致（间奏、纯音乐段落之类）才退回按时间找最近的一句
+        val out = mutableMapOf<Int, MutableList<String>>()
+        parsed.forEachIndexed { lineIndex, (time, text) ->
+            val index = if (parsed.size == originals.size) {
+                lineIndex
+            } else {
+                originals.indices.minByOrNull { abs(originals[it].first - time) }
+            } ?: return@forEachIndexed
+            out.getOrPut(index) { mutableListOf() } += text
         }
         return out
     }
@@ -2485,9 +2494,12 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
     /** 取汽水自带的中文翻译；键是语言码，中文歌没有这个字段。 */
     private fun sodaChineseTranslation(lyric: SodaLyric): String =
-        lyric.translations.entries
-            .firstOrNull { it.key.equals("cn", ignoreCase = true) || it.key.startsWith("zh", ignoreCase = true) }
-            ?.value.orEmpty()
+        (lyric.translations as? JsonObject)?.entries
+            ?.firstOrNull {
+                it.key.equals("cn", ignoreCase = true) || it.key.startsWith("zh", ignoreCase = true)
+            }
+            ?.value?.let { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+            .orEmpty()
 
     /** 汽水逐字载荷 `<词起,词时[,0]>词` 转 `<mm:ss.SSS>` 增强 LRC；没有词标签时退回剥掉标签的纯文本。 */
     private fun sodaVerbatimContent(content: String, lineStartMs: Int): String {
@@ -3157,8 +3169,12 @@ private data class SodaTrackPlayer(
 @Serializable
 private data class SodaLyric(
     val content: String = "",
-    /** 外国歌的中文翻译：`{"cn":"[00:17.66]译文…"}`，中文歌整个字段都不返回。 */
-    @SerialName("translations") val translations: Map<String, String> = emptyMap(),
+    /**
+     * 外国歌的中文翻译：`{"cn":"[00:17.66]译文…"}`，中文歌整个字段都不返回。
+     * 用 JsonElement 收着而不是 Map<String, String>：万一哪天某个语言的值换了形状，
+     * 反序列化失败会把整首歌的歌词一起带没，宁可这里降级成没有翻译。
+     */
+    @SerialName("translations") val translations: JsonElement = JsonNull,
 )
 
 @Serializable
