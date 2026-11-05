@@ -1,5 +1,6 @@
 package com.mytv.mymusic.playback
 
+import com.mytv.mymusic.AppLog
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -83,6 +84,10 @@ class PlaybackService : MediaSessionService() {
                 if (drm?.scheme != C.WIDEVINE_UUID) return@setDrmSessionManagerProvider DrmSessionManager.DRM_UNSUPPORTED
                 val uri = drm.licenseUri?.toString().orEmpty()
                 val params = AppleWidevineDrmCallback.parseQuery(uri)
+                AppLog.i(
+                    "PlaybackDrm",
+                    "建 Widevine session manager adamId=${params["adamId"]} pssh=${params["pssh"]?.length ?: 0}B",
+                )
                 synchronized(drmLock) {
                     drmManagers.getOrPut(uri) {
                         DefaultDrmSessionManager.Builder().build(

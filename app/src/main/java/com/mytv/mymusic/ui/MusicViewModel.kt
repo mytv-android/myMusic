@@ -2982,8 +2982,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val policy = resolver.buildPolicy(track, null)
         val source = resolver.orderCandidates(track, null, emptySet(), policy).firstOrNull()
         val song = source?.song ?: track.sources.first().song
-        // 汽水的 URL 可能只是试听或加密流，切歌时交回解析器走签名/解密
-        return if (song.source == "soda") song.copy(url = "") else song
+        // 列表里的 url 不一定能直接放，切歌时交回解析器重新取流：
+        //  - 汽水：可能是试听或加密流，要签名/解密；
+        //  - Apple：url 恒为 30 秒试听片段（`previews[0]`），整曲是 Widevine 加密的 HLS，
+        //    只有 playableStream 才拿得到。不清掉的话 onMediaItemTransition 看到 url 非空
+        //    就直接放片段，永远不会解析，DRM 三件套也就挂不上 MediaItem。
+        return if (song.source in NEEDS_RESOLVE_ON_SWITCH) song.copy(url = "") else song
     }
 
     private fun localFileFor(track: CanonicalTrack): Pair<TrackSource, File>? {
@@ -3144,7 +3148,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // 取流后写进 Song.extra，这里把它们搭在 licenseUri 上送给 AppleWidevineDrmCallback
         // ——那个 query 不是真的请求地址，真正的端点在回调里。
         val pssh = song.extra[AppleWidevineDrmCallback.EXTRA_DRM_PSSH].orEmpty()
-        if (song.extra[AppleWidevineDrmCallback.EXTRA_DRM_SCHEME] == AppleWidevineDrmCallback.DRM_SCHEME_WIDEVINE && pssh.isNotBlank()) {
+        val scheme = song.extra[AppleWidevineDrmCallback.EXTRA_DRM_SCHEME].orEmpty()
+        if (scheme == AppleWidevineDrmCallback.DRM_SCHEME_WIDEVINE && pssh.isNotBlank()) {
+            AppLog.i(
+                "MediaItem",
+                "挂 DRM ${song.name} adamId=${song.extra[AppleWidevineDrmCallback.EXTRA_DRM_ADAM_ID]} pssh=${pssh.length}B",
+            )
             builder.setDrmConfiguration(
                 MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
                     .setLicenseUri(
@@ -3155,6 +3164,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     .setMultiSession(false)
                     .build(),
+            )
+        } else if (song.source == "apple" && song.url.contains(".m3u8", ignoreCase = true)) {
+            // 整曲清单却没有 DRM 三件套，放出去必然解不开。这条路以前是哑的——日志里只看到
+            // "整曲就绪"，然后播放没动静，中间发生了什么完全看不出来。
+            AppLog.w(
+                "MediaItem",
+                "Apple 整曲清单没挂上 DRM: scheme='$scheme' pssh=${pssh.length}B extra=${song.extra.keys}",
             )
         }
         return builder.build()
@@ -4633,6 +4649,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val BROWSE_CACHE_MS = 10L * 60 * 1000
+
+        /**
+         * 切歌时必须重新走一遍解析的来源：这些平台列表里给的 url 不是能直接放的流。
+         * 见 [preferredSong]——不清掉 url，onMediaItemTransition 会把它当成已有地址直接放。
+         */
+        val NEEDS_RESOLVE_ON_SWITCH = setOf("soda", "apple")
 
         /** 听歌模式队列剩这么多首时开始续取，避免放到最后一首才去请求。 */
         const val FEED_EXTEND_THRESHOLD = 3
