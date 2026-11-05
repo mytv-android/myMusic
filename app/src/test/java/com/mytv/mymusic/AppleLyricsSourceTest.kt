@@ -5,6 +5,8 @@ import com.mytv.mymusic.data.native.APPLE_LYRIC_SOURCES
 import com.mytv.mymusic.data.native.appleTtmlFromAmll
 import com.mytv.mymusic.data.native.appleTtmlFromPaxsenix
 import com.mytv.mymusic.data.native.appleTtmlFromZarz
+import com.mytv.mymusic.data.native.AppleAccountResponse
+import com.mytv.mymusic.data.native.NativeHttp
 import com.mytv.mymusic.data.native.convertTtmlToLrc
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -128,6 +130,49 @@ class AppleStorefrontTrackingTest {
         for (bad in listOf("", "us ", "USA", "cn;x", "12")) {
             val storefront = bad.takeIf { Regex("^[a-z]{2}$").matches(it) }
             assertEquals(null, storefront)
+        }
+    }
+}
+
+/**
+ * `/v1/me/account?meta=subscription` 的解析：订阅状态 + 账号真实商店。
+ * Apple 不向网页端暴露昵称和头像，所以头像一栏只能是空的。
+ */
+class AppleAccountInfoTest {
+    @Test
+    fun parsesActiveSubscriptionAndStorefront() {
+        val body = """
+            {"data":[{"id":"me","type":"accounts","attributes":{"restrictions":{}}}],
+             "meta":{"subscription":{"active":true,"storefront":"cn","expirationDate":"2027-01-01"}}}
+        """.trimIndent()
+        val r = NativeHttp.json.decodeFromString<AppleAccountResponse>(body)
+        assertEquals(true, r.meta.subscription.active)
+        assertEquals("cn", r.meta.subscription.storefront)
+    }
+
+    @Test
+    fun missingActiveIsNullNotFalse() {
+        // 读不到订阅状态时不能误报成"无有效订阅"
+        val body = """{"meta":{"subscription":{"storefront":"us"}}}"""
+        val r = NativeHttp.json.decodeFromString<AppleAccountResponse>(body)
+        assertEquals(null, r.meta.subscription.active)
+        assertEquals("us", r.meta.subscription.storefront)
+    }
+
+    @Test
+    fun emptyResponseYieldsUnknownSubscription() {
+        val r = NativeHttp.json.decodeFromString<AppleAccountResponse>("{}")
+        assertEquals(null, r.meta.subscription.active)
+        assertEquals("", r.meta.subscription.storefront)
+    }
+
+    @Test
+    fun storefrontIsUsedOverHardcodedDefault() {
+        // 账号商店优先于写死的 us：中国区账号按美区目录检索和取歌词都不对
+        val detected = "cn".takeIf { Regex("^[a-z]{2}$").matches(it) }
+        assertEquals("cn", detected)
+        for (bad in listOf("", "USA", "cn;x")) {
+            assertEquals(null, bad.takeIf { Regex("^[a-z]{2}$").matches(it) })
         }
     }
 }

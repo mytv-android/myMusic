@@ -6,12 +6,19 @@ import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
+import android.content.Context
+import java.io.File
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonPrimitive
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.util.Base64
 import java.util.Locale
 
 private val APPLE_INFO = ProviderInfo(
@@ -89,12 +96,38 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     }
 
     /**
+     * Apple Music 账号信息。Apple 不向网页端暴露 Apple ID 的昵称和头像，所以头像一栏
+     * 只能是空的；能拿到的是订阅状态和账号所在商店。
+     *
+     * `/v1/me/account?meta=subscription` 同时给出 `meta.subscription.active`（是否会员）
+     * 和 `meta.subscription.storefront`（账号真实商店），后者正好用来纠正默认的 us——
+     * 中国区账号按美区目录检索和取歌词都会不对。
+     */
+    override suspend fun accountInfo(cookie: String): AccountInfo? {
+        if (mediaUserToken(cookie).isBlank()) return null
+        val body = runCatching {
+            ampGet(cookie, "/v1/me/account", mapOf("meta" to "subscription"), mediaTokenHeader = true)
+        }.getOrNull() ?: return null
+        val response = runCatching { json.decodeFromString<AppleAccountResponse>(body) }.getOrNull() ?: return null
+        val subscription = response.meta.subscription
+        // 商店是账号属性，缓存下来给 storefront() 用；读不到就不动
+        subscription.storefront.takeIf { it.matches(Regex("^[a-z]{2}$")) }?.let { AppleAccount.storefront = it }
+        val detail = when (subscription.active) {
+            true -> "Apple Music 会员"
+            false -> "已登录 · 无有效订阅"
+            null -> "已登录"
+        }
+        return AccountInfo(nickname = "", avatar = "", detail = detail)
+    }
+
+    /**
      * Apple 自己的歌词接口。注意不是歌曲资源上的 `include=lyrics`——那个关系匿名和被登录
      * 都已经不再返回；真正还有歌词的是 `/songs/{id}/lyrics` 和 `/syllable-lyrics` 两个子资源，
      * 且必须同时带上 `media-user-token` 请求头和 Cookie，只发 Cookie 拿不到。
      *
      * 商店必须和歌曲所属的目录一致（adam ID 是分商店的），所以优先用搜索时记在 [Song.extra]
-     * 里的 storefront，其次才是 Cookie 里声明的那个，最后才退回默认的 us。
+     * 里的 storefront，其次是账号真实商店（[AppleAccount]），再才是 Cookie 里声明的，
+     * 最后才退回默认的 us。
      */
     private suspend fun appleNativeLyrics(cookie: String, song: Song): String {
         val storefront = song.extra["storefront"]?.takeIf { it.matches(Regex("^[a-z]{2}$")) }
@@ -191,25 +224,41 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         return result.take(safeLimit)
     }
 
-    override suspend fun topLists(cookie: String): List<TopList> =
+    /**
+     * Apple 的榜单没有自己的封面图，RSS 里的 `icon` 只是 Apple favicon。
+     * 用榜单第一名歌曲的封面顶替：并发拉各商店的 feed，失败就留空（和其他平台一样有兜底）。
+     */
+    override suspend fun topLists(cookie: String): List<TopList> = coroutineScope {
         APPLE_STOREFRONTS.map { (code, name) ->
-            val id = "most-played:songs:$code"
-            TopList(
-                id = id,
-                name = "$name Top 100",
-                description = "Apple Music · $name 热门歌曲 Top 100",
-                updateFrequency = "每日更新",
-                trackCount = 100,
-                source = "apple",
-                link = "https://music.apple.com/$code/new/top-charts",
-                extra = mapOf(
-                    "storefront" to JsonPrimitive(code),
-                    "chart" to JsonPrimitive("most-played"),
-                    "media" to JsonPrimitive("songs"),
-                    "toplist_type" to JsonPrimitive("chart"),
-                ),
-            )
-        }
+            async {
+                val id = "most-played:songs:$code"
+                val cover = runCatching { chartCover(code) }.getOrDefault("")
+                TopList(
+                    id = id,
+                    name = "$name Top 100",
+                    cover = cover,
+                    description = "Apple Music · $name 热门歌曲 Top 100",
+                    updateFrequency = "每日更新",
+                    trackCount = 100,
+                    source = "apple",
+                    link = "https://music.apple.com/$code/new/top-charts",
+                    extra = mapOf(
+                        "storefront" to JsonPrimitive(code),
+                        "chart" to JsonPrimitive("most-played"),
+                        "media" to JsonPrimitive("songs"),
+                        "toplist_type" to JsonPrimitive("chart"),
+                    ),
+                )
+            }
+        }.awaitAll()
+    }
+
+    /** 榜单第一名的封面；拿不到就返回空串。 */
+    private suspend fun chartCover(storefront: String): String {
+        val feed = fetchChartFeed(AppleChartRef("most-played", "songs", storefront))
+        val artwork = feed.feed.results.firstOrNull()?.artworkUrl100.orEmpty()
+        return artworkUpgrade(artwork, 600)
+    }
 
     override suspend fun topListSongs(cookie: String, id: String): List<Song> {
         val ref = parseChartId(id)
@@ -291,7 +340,9 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
                 if (result.isSuccess) return result.getOrThrow()
                 lastError = result.exceptionOrNull()
             }
-            if (attempt < 2) Thread.sleep((attempt + 1) * 400L)
+            // 用 delay 而不是 Thread.sleep：topLists 会为每个商店并发拉榜单封面，
+            // Thread.sleep 会把承载协程的线程全占住，互相拖死
+            if (attempt < 2) delay((attempt + 1) * 400L)
         }
         throw IllegalStateException("apple toplist ${ref.id} request failed: ${lastError?.message.orEmpty()}", lastError)
     }
@@ -470,10 +521,20 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
      * 入口包名从 `index-legacy~<hash>.js` 换成了 `index~<hash>.js`，token 前缀也从 `eyJh...`
      * 变成 `eyJ0eXAi...`，而且同一个包里会带多个 JWT，只有一个对 amp-api 的 catalog 接口有效。
      * 所以这里不写死包名和前缀：把首页引用的前端包里所有 JWT 取出来逐个试，缓存第一个能用的。
+     *
+     * 代价控制：`music.apple.com/` 的 HTML 有 2MB，而 `beta.music.apple.com/` 只有 2.7KB 且引用
+     * 同一个 JS 包，所以 HTML 走 beta；JS 包本身压缩后约 876KB，仍要下一次，因此把取到的 token
+     * 连同它自己的过期时间落盘，冷启动直接复用，只在快过期时才重新抓。
      */
     private suspend fun ensureToken(forceRefresh: Boolean = false): String {
-        if (!forceRefresh) cachedToken.takeIf { it.isNotBlank() }?.let { return it }
-        val home = NativeHttp.get(APPLE_HOME, userAgent = APPLE_WEB_UA)
+        if (!forceRefresh) {
+            cachedToken.takeIf { it.isNotBlank() }?.let { return it }
+            AppleTokenCache.read()?.let { cached ->
+                cachedToken = cached
+                return cached
+            }
+        }
+        val home = NativeHttp.get(APPLE_BETA_HOME, userAgent = APPLE_WEB_UA)
         val bundles = appleBundlePaths(home)
         if (bundles.isEmpty()) throw IllegalStateException("apple: index.js URI not found")
         var lastError: String = "apple: token not found in ${bundles.joinToString()}"
@@ -485,6 +546,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             val chosen = if (tokens.size == 1) tokens.first() else tokens.firstOrNull { tokenWorks(it) }
             chosen?.let {
                 cachedToken = it
+                AppleTokenCache.write(it)
                 return it
             }
             lastError = "apple: no usable token in $bundle (${tokens.size} candidates)"
@@ -505,8 +567,11 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     private fun Throwable.isUnauthorized(): Boolean = APPLE_UNAUTHORIZED.containsMatchIn(message.orEmpty())
 
     private fun storefront(cookie: String): String {
-        val value = parseCookieParts(cookie)["storefront"].orEmpty().trim().lowercase(Locale.ROOT)
-        return value.takeIf { it.matches(Regex("^[a-z]{2}$")) } ?: "us"
+        val declared = parseCookieParts(cookie)["storefront"].orEmpty().trim().lowercase(Locale.ROOT)
+        declared.takeIf { it.matches(Regex("^[a-z]{2}$")) }?.let { return it }
+        // 账号真实商店优先于写死的 us：中国区账号按美区目录检索和取歌词都不对
+        AppleAccount.storefront?.takeIf { it.matches(Regex("^[a-z]{2}$")) }?.let { return it }
+        return "us"
     }
 
     private fun mediaUserToken(cookie: String): String {
@@ -626,6 +691,8 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
 
     private companion object {
         const val APPLE_HOME = "https://music.apple.com"
+        /** 只为拿入口 JS 包名用的轻量首页，2.7KB；[APPLE_HOME] 的 HTML 有 2MB。 */
+        const val APPLE_BETA_HOME = "https://beta.music.apple.com/"
         const val AMP_API = "https://amp-api.music.apple.com"
         const val LOOKUP_API = "https://itunes.apple.com/lookup"
         const val APPLE_WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -709,6 +776,63 @@ internal fun appleTokens(js: String): List<String> =
     APPLE_JWT_REGEX.findAll(js).map { it.value }.distinct().toList()
 
 /**
+ * 从 `/v1/me/account` 读到的账号属性。Apple 只暴露订阅状态和所在商店，
+ * 昵称和头像拿不到（见 [AppleProvider.accountInfo]）。
+ */
+object AppleAccount {
+    /** 账号真实商店，例如 `cn`；由 [AppleProvider.accountInfo] 写入。 */
+    @Volatile
+    var storefront: String? = null
+}
+
+/**
+ * developer token 的落盘缓存。token 是 JWT，`exp` 声明里带过期时间（实测约 70 天），
+ * 所以不必每次冷启动都重新下 876KB 的前端包；只在快过期时才重新抓。
+ *
+ * [dir] 由 Application 启动时注入；没注入（测试等）就退回只走内存缓存。
+ */
+object AppleTokenCache {
+    /** 距过期还有这么久就当它还有效，留点余量免得边界上拿到刚过期的 token。 */
+    private const val FRESH_MARGIN_MS = 24 * 60 * 60 * 1000L
+    private const val FILE_NAME = "apple_developer_token"
+
+    @Volatile
+    var dir: File? = null
+
+    fun attach(context: Context) {
+        dir = context.cacheDir
+    }
+
+    fun read(): String? {
+        val file = file() ?: return null
+        val token = runCatching { file.readText().trim() }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
+        return token.takeIf { !isExpired(it) }
+    }
+
+    fun write(token: String) {
+        val file = file() ?: return
+        runCatching { file.writeText(token) }
+    }
+
+    private fun file(): File? = dir?.let { File(it, FILE_NAME) }
+
+    /** 读不出 `exp` 时按已过期处理——宁可多抓一次，也不要拿过期 token 去撞 401。 */
+    internal fun isExpired(token: String): Boolean {
+        val exp = jwtExpiry(token) ?: return true
+        return exp * 1000L - FRESH_MARGIN_MS <= System.currentTimeMillis()
+    }
+
+    /** JWT 第二段是 base64url 的 JSON，取 `exp`（Unix 秒）。解析不了就返回 null。 */
+    private fun jwtExpiry(token: String): Long? {
+        val payload = token.split('.').getOrNull(1) ?: return null
+        val json = runCatching {
+            String(Base64.getUrlDecoder().decode(payload), Charsets.UTF_8)
+        }.getOrNull() ?: return null
+        return Regex(""""exp"\s*:\s*(\d+)""").find(json)?.groupValues?.getOrNull(1)?.toLongOrNull()
+    }
+}
+
+/**
  * Apple Music 匿名歌词中转总开关。Apple 官方接口已不再向未登录用户返回歌词，
  * 关掉后 [AppleProvider.lyrics] 只试 Apple 自己的接口，等于没有歌词；
  * 好处是请求不再发给第三方服务（见 [APPLE_LYRIC_SOURCES]）。
@@ -790,6 +914,22 @@ private fun encodeId(id: String): String = URLEncoder.encode(id, "UTF-8")
 
 @Serializable
 private data class ZarzLyricsResponse(val ttmlContent: String = "")
+
+/** `/v1/me/account?meta=subscription`：订阅状态和账号所在商店。 */
+@Serializable
+internal data class AppleAccountResponse(
+    val meta: AppleAccountMeta = AppleAccountMeta(),
+)
+
+@Serializable
+internal data class AppleAccountMeta(val subscription: AppleSubscription = AppleSubscription())
+
+/** [active] 为 null 表示响应里没有这个字段，不要和 false 混为一谈。 */
+@Serializable
+internal data class AppleSubscription(
+    val active: Boolean? = null,
+    val storefront: String = "",
+)
 
 @Serializable
 private data class AmllLyricsResponse(val data: AmllSongItem = AmllSongItem())

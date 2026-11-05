@@ -3,6 +3,7 @@ package com.mytv.mymusic
 import com.mytv.mymusic.data.native.APPLE_BUNDLE_REGEXES
 import com.mytv.mymusic.data.native.appleBundlePaths
 import com.mytv.mymusic.data.native.appleTokens
+import com.mytv.mymusic.data.native.AppleTokenCache
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -80,5 +81,32 @@ class AppleTokenScrapeTest {
         assertEquals(2, APPLE_BUNDLE_REGEXES.size)
         val first = APPLE_BUNDLE_REGEXES.first().find(currentHome)?.groupValues?.get(1)
         assertEquals("assets/index~cc245af156.js", first)
+    }
+
+    // 真实的 developer token（2026-11 实测）：iat 1792780534 / exp 1798828534，约 70 天有效
+    private val realToken =
+        "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6IldlYlBsYXlLaWQifQ." +
+            "eyJpc3MiOiJBTVBXZWJQbGF5IiwiaWF0IjoxNzkyNzgwNTM0LCJleHAiOjE3OTg4Mjg1MzQs" +
+            "InJvb3RfaHR0cHNfb3JpZ2luIjpbImFwcGxlLmNvbSJdfQ.sig"
+
+    @Test
+    fun realTokenIsNotExpired() {
+        // 1798828534 = 2027-01 前后，只要没过那天就算有效
+        assertTrue(!AppleTokenCache.isExpired(realToken))
+    }
+
+    @Test
+    fun expiredTokenIsDetected() {
+        val stale = "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9." +
+            "eyJpc3MiOiJYIiwiZXhwIjoxMDAwMDAwMDAwfQ.sig"
+        assertTrue(AppleTokenCache.isExpired(stale))
+    }
+
+    @Test
+    fun unparseableTokenCountsAsExpired() {
+        // 读不出 exp 宁可多抓一次，也不要拿过期 token 撞 401
+        for (bad in listOf("", "not-a-jwt", "a.b", "a.b.c", "eyJhbGciOiJFUzI1NiJ9..sig")) {
+            assertTrue("should be expired: $bad", AppleTokenCache.isExpired(bad))
+        }
     }
 }
