@@ -109,9 +109,10 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         if (!master.isNullOrBlank()) {
             val variant = appleHlsVariant(master)
             if (variant != null) {
+                val url = appleLocalPlaylist(song, variant, workDir)
                 AppLog.i(TAG, "整曲就绪 ${song.name} ${variant.bitrate}kbps ${variant.playlistUrl.take(100)}")
                 return PlayableStream(
-                    url = variant.playlistUrl,
+                    url = url,
                     ext = "m4a",
                     bitrate = variant.bitrate,
                     extra = buildMap {
@@ -129,6 +130,22 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         val preview = song.url.ifBlank { parseSong(cookie, song.id).url }
         if (preview.isBlank()) throw IllegalStateException("apple music: 没有可播放的地址")
         return PlayableStream(url = preview, ext = "m4a", bitrate = 0, preview = true)
+    }
+
+    /**
+     * 把媒体清单重写后落到本地文件，播放器读这个文件（见 [AppleHlsRewrite] 的说明）。
+     * 写不了就退回原 URL，效果回到重写前的行为，不会更糟。
+     */
+    private fun appleLocalPlaylist(song: Song, variant: AppleHlsVariant, workDir: File): String {
+        val rewritten = AppleHlsRewrite.rewrite(variant.playlistBody, variant.playlistUrl)
+        return runCatching {
+            val file = File(workDir, "apple-${song.id}.m3u8")
+            file.writeText(rewritten)
+            android.net.Uri.fromFile(file).toString()
+        }.getOrElse {
+            AppLog.w(TAG, "本地清单写失败，用原地址: ${it.message}")
+            variant.playlistUrl
+        }
     }
 
     /** 从歌曲资源上取整曲主清单；拿不到（没登录 / 该曲没有 enhancedHls）返回空。 */
@@ -163,7 +180,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             val playlistUrl = runCatching { baseUri.resolve(variant.uri)?.toString() }.getOrNull() ?: continue
             val media = runCatching { NativeHttp.get(playlistUrl, userAgent = APPLE_WEB_UA) }.getOrNull() ?: continue
             val pssh = AppleHlsManifest.widevinePssh(media) ?: continue
-            return AppleHlsVariant(playlistUrl = playlistUrl, pssh = pssh, bitrate = variant.bitrateKbps)
+            return AppleHlsVariant(playlistUrl = playlistUrl, playlistBody = media, pssh = pssh, bitrate = variant.bitrateKbps)
         }
         // 全落空要留痕：老资产（HLSMusic211 一代）可能压根没有 Widevine key，或档位组名
         // 不在白名单里——没有这条只能对着"退回试听"四个字猜
@@ -173,6 +190,8 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
 
     private data class AppleHlsVariant(
         val playlistUrl: String,
+        /** 媒体清单正文，重写落本地用，省一次重复请求。 */
+        val playlistBody: String,
         val pssh: String,
         val bitrate: Int,
     )
