@@ -631,6 +631,11 @@ internal fun PlaybackSettingsScreen(
 
 // ======================= 音乐源 =======================
 
+internal fun orderedEnabledSources(providers: List<ProviderInfo>, enabledIds: List<String>): List<ProviderInfo> {
+    val byId = providers.associateBy { it.id }
+    return enabledIds.distinct().mapNotNull(byId::get)
+}
+
 /**
  * 音乐源：启用哪些平台、按什么顺序。顺序全应用只有这一份——聚合搜索、榜单和歌单的来源条、
  * 换源面板、播放换源都按它排。关掉的平台不参与这些；换源时碰上仍会排在最后试着用。
@@ -640,7 +645,7 @@ internal fun SourcesSettingsScreen(state: MusicUiState, actions: MusicActions, o
     val tv = LocalAppWindow.current.isTv
     val searchable = state.providers.filter { it.search }
     val enabledIds = state.aggregation.enabledOrDefault(searchable.map { it.id })
-    val enabled = searchable.filter { it.id in enabledIds }
+    val enabled = orderedEnabledSources(searchable, enabledIds)
     val disabled = searchable.filterNot { it.id in enabledIds }
     SettingsPage(SettingsSection.Sources, embedded, onBack) {
         item(key = "enabledHead", contentType = "sectionHeader") {
