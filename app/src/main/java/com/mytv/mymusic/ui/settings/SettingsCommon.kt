@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -51,7 +50,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -61,10 +59,10 @@ import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.PageScaffold
+import com.mytv.mymusic.ui.components.ProviderIcon
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
-import com.mytv.mymusic.ui.providerMark
 import kotlinx.coroutines.launch
 
 /** 设置分区。“开源许可 / 隐私说明”挂在“关于与更新”下面，双栏时左栏仍高亮“关于与更新”。 */
@@ -151,27 +149,10 @@ internal fun SettingsNote(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** 平台标记：圆形底上写平台简称，已登录 / 已启用时用 primary 标出。 */
+/** 平台头像：有平台图标就用图标，认不出才退回圆形底 + 简称。已登录 / 已启用时用 primary 描边标出。 */
 @Composable
-internal fun ProviderMark(name: String, size: Dp = 40.dp, active: Boolean = false) {
-    val mark = providerMark(name)
-    Box(
-        Modifier
-            .size(size)
-            .clip(CircleShape)
-            .background(if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            mark,
-            // 平台简称只是头像，行里另有全称，读屏不念
-            Modifier.clearAndSetSemantics {},
-            style = if (mark.length > 2) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.ExtraBold,
-            color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-        )
-    }
+internal fun ProviderMark(name: String, size: Dp = 40.dp, active: Boolean = false, id: String? = null) {
+    ProviderIcon(id = id, name = name, size = size, active = active)
 }
 
 /**

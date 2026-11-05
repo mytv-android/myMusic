@@ -74,6 +74,7 @@ import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.adaptive.modeLabel
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.Posture
+import com.mytv.mymusic.ui.components.ProviderIcon
 import com.mytv.mymusic.ui.components.tvFocusRing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -460,7 +461,7 @@ internal fun SourcePill(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Box(Modifier.size(7.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+            ProviderIcon(id = song.source, name = provider, size = 18.dp, corner = 5.dp)
             Text(provider, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
             if (sourceDetail.isNotBlank()) {
                 Text(

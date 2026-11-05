@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bilibili：天蓝底白电视机脸，两天线 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#00A1D6"
+        android:pathData="M12,0H36A12,12 0 0 1 48,12V36A12,12 0 0 1 36,48H12A12,12 0 0 1 0,36V12A12,12 0 0 1 12,0Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M18,11L22,16M30,11L26,16" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M17,16H31A5,5 0 0 1 36,21V33A5,5 0 0 1 31,38H17A5,5 0 0 1 12,33V21A5,5 0 0 1 17,16Z" />
+    <path
+        android:fillColor="#00A1D6"
+        android:pathData="M18,23h5v4h-5Z" />
+    <path
+        android:fillColor="#00A1D6"
+        android:pathData="M25,23h5v4h-5Z" />
+    <path
+        android:fillColor="#00A1D6"
+        android:pathData="M22,30h4v3.5h-4Z" />
+</vector>

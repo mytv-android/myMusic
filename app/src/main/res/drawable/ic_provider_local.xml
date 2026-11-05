@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 本地音乐：灰蓝底白耳机 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#607D8B"
+        android:pathData="M12,0H36A12,12 0 0 1 48,12V36A12,12 0 0 1 36,48H12A12,12 0 0 1 0,36V12A12,12 0 0 1 12,0Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M13,28V22A11,11 0 0 1 35,22v6" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M13,25m-4,0a4,4 0 1,0 8,0a4,4 0 1,0 -8,0Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M35,25m-4,0a4,4 0 1,0 8,0a4,4 0 1,0 -8,0Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M9,26h8v11h-6a2,2 0 0 1 -2,-2Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M31,26h8v9a2,2 0 0 1 -2,2h-6Z" />
+</vector>

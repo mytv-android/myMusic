@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- QQ 音乐：绿底白符，双八度音符 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#31C27C"
+        android:pathData="M12,0H36A12,12 0 0 1 48,12V36A12,12 0 0 1 36,48H12A12,12 0 0 1 0,36V12A12,12 0 0 1 12,0Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M13,34a5,5 0 1,0 10,0a5,5 0 1,0 -10,0Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M33,31a5,5 0 1,0 10,0a5,5 0 1,0 -10,0Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M18,10h4v24h-4Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,7h4v24h-4Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M18,10L42,7v6L18,16Z" />
+</vector>

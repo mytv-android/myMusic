@@ -3,7 +3,6 @@ package com.mytv.mymusic.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -44,7 +42,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -59,6 +56,7 @@ import com.mytv.mymusic.aggregate.TrackSource
 import com.mytv.mymusic.aggregate.availabilityOf
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.components.ProviderIcon
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.components.StatusGlyph
@@ -134,6 +132,7 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
                 ordered.forEachIndexed { index, providerId ->
                     val source = track.sources.find { it.providerId == providerId }
                     SourceRow(
+                        providerId = providerId,
                         providerName = providerName(state.providers, providerId),
                         source = source,
                         availability = availability(source),
@@ -225,9 +224,10 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
     }
 }
 
-/** 平台行：左侧平台标记（当前音源为 primary 实心），中间可用性 + 音质，右侧是对勾、标签或“播放”。 */
+/** 平台行：左侧平台图标（当前音源加 primary 描边），中间可用性 + 音质，右侧是对勾、标签或“播放”。 */
 @Composable
 private fun SourceRow(
+    providerId: String,
     providerName: String,
     source: TrackSource?,
     availability: Availability?,
@@ -277,23 +277,13 @@ private fun SourceRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Box(
-            Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                providerMark(providerName),
-                // 平台简称只是头像，后面紧跟全称
-                Modifier.clearAndSetSemantics {},
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = if (current) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-            )
-        }
+        ProviderIcon(
+            id = providerId,
+            name = providerName,
+            size = 40.dp,
+            // 当前音源用 primary 描边标出，和设置里的平台头像一致
+            active = current,
+        )
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(

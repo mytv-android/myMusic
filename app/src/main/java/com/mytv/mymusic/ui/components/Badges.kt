@@ -98,7 +98,7 @@ fun StatusGlyph(status: Availability, color: Color, glyph: Dp) {
 }
 
 /**
- * 音源 chip：显示当前平台和音质，右侧标出“自动 / 固定”。换源结果直接写在 chip 下方，不弹 Snackbar。
+ * 音源 chip：显示当前平台图标、音质，右侧标出“自动 / 固定”。换源结果直接写在 chip 下方，不弹 Snackbar。
  */
 @Composable
 fun SourceChip(
@@ -109,6 +109,7 @@ fun SourceChip(
     modifier: Modifier = Modifier,
     container: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.13f),
     content: Color = MaterialTheme.colorScheme.onSurface,
+    providerId: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -134,7 +135,7 @@ fun SourceChip(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+            ProviderIcon(id = providerId, name = providerName, size = 20.dp, corner = 6.dp)
             Text(
                 listOf(providerName, detail).filter { it.isNotBlank() }.joinToString(" · "),
                 style = MaterialTheme.typography.labelLarge,

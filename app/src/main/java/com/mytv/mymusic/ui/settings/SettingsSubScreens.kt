@@ -676,7 +676,7 @@ internal fun SourcesSettingsScreen(state: MusicUiState, actions: MusicActions, o
                                     role = Role.Switch
                                     stateDescription = "已关闭"
                                 },
-                                leading = { ProviderMark(provider.name, 36.dp) },
+                                leading = { ProviderMark(provider.name, 36.dp, id = provider.id) },
                                 summary = capabilities(provider),
                                 showChevron = false,
                                 trailing = { Switch(checked = false, onCheckedChange = null) },
@@ -803,7 +803,7 @@ private fun SourceRow(
             textAlign = TextAlign.Center,
             color = if (moving) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
         )
-        ProviderMark(name, 36.dp)
+        ProviderMark(name, 36.dp, id = provider.id)
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(
                 name,
@@ -863,7 +863,7 @@ internal fun SearchBrowseSettingsScreen(
                 index = 0,
                 count = 2,
                 onClick = { pickerOpen = true },
-                leading = { ProviderMark(currentName, 40.dp, active = true) },
+                leading = { ProviderMark(currentName, 40.dp, active = true, id = state.providerId) },
                 summary = "榜单、歌单页打开时的来源；不影响播放换源",
             )
         }
@@ -922,7 +922,7 @@ private fun BrowseSourceSheet(state: MusicUiState, actions: MusicActions, onDism
                         role = Role.RadioButton
                         this.selected = selected
                     },
-                    leading = { ProviderMark(provider.name, 36.dp, active = selected) },
+                    leading = { ProviderMark(provider.name, 36.dp, active = selected, id = provider.id) },
                     selected = selected,
                     showChevron = false,
                     trailing = if (selected) {
@@ -1096,7 +1096,7 @@ private fun AccountRow(
                     modifier = Modifier.size(40.dp).clip(CircleShape),
                 )
             } else {
-                ProviderMark(provider.name, 40.dp, active = loggedIn)
+                ProviderMark(provider.name, 40.dp, active = loggedIn, id = provider.id)
             }
         },
         summary = summary,

@@ -182,6 +182,7 @@ import com.mytv.mymusic.ui.components.PlatformBadges
 import com.mytv.mymusic.ui.components.PlayButtonSize
 import com.mytv.mymusic.ui.components.PlayPauseButton
 import com.mytv.mymusic.ui.components.SectionLabel
+import com.mytv.mymusic.ui.components.ProviderIcon
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SelectionBar
 import com.mytv.mymusic.ui.components.SelectionPredictiveBack
@@ -1432,7 +1433,7 @@ private fun LoadMore(ctx: SearchCtx) {
 
 /* ---------------- 平台状态 ---------------- */
 
-private class ProviderLine(val name: String, val state: ProviderSearchState?)
+private class ProviderLine(val name: String, val state: ProviderSearchState?, val id: String? = null)
 
 private class ProviderSummary(val lines: List<ProviderLine>) {
     val total get() = lines.size
@@ -1464,8 +1465,9 @@ private fun summarize(
     aggregation: AggregationSettings,
 ): ProviderSummary {
     val enabledProviders = kindProviders(providers, aggregation, kind)
-    val lines = enabledProviders.map { ProviderLine(it.name, states[it.id]) } +
-        states.values.filter { s -> enabledProviders.none { it.id == s.providerId } }.map { ProviderLine(it.providerName, it) }
+    val lines = enabledProviders.map { ProviderLine(it.name, states[it.id], it.id) } +
+        states.values.filter { s -> enabledProviders.none { it.id == s.providerId } }
+            .map { ProviderLine(it.providerName, it, it.providerId) }
     return ProviderSummary(lines)
 }
 
@@ -1579,6 +1581,7 @@ private fun ProviderStateChip(line: ProviderLine, kind: SearchKind) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        ProviderIcon(id = line.id, name = line.name, size = 18.dp, corner = 5.dp)
         val tint = if (failed) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.primary
         when (status) {
             null, ProviderStatus.Loading -> CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
@@ -1995,6 +1998,7 @@ private fun SourcePill(ctx: SearchCtx, source: CollectionSource, focusRequester:
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            ProviderIcon(id = source.providerId, name = source.providerName, size = 22.dp, corner = 6.dp)
             Text(providerMark(source.providerName), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             if (count > 0) {
                 Text("$count 首", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

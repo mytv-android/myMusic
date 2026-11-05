@@ -393,6 +393,7 @@ fun NowPlayingPane(
                 state.currentSource?.let { source ->
                     SourceChip(
                         providerName = source.providerName,
+                        providerId = source.providerId,
                         detail = source.qualityLabel.takeUnless { it == "音质未知" }.orEmpty(),
                         mode = modeLabel(state.aggregation.playbackMode),
                         onClick = {
