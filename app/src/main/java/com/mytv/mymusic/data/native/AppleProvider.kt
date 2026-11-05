@@ -48,7 +48,9 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             "/v1/catalog/${storefront(cookie)}/search",
             mapOf("term" to keyword, "types" to "songs", "limit" to "30"),
         )
-        return json.decodeFromString<AppleSearchResponse>(body).results.songs.data.map(::songFromCatalog)
+        val storefront = storefront(cookie)
+        return json.decodeFromString<AppleSearchResponse>(body).results.songs.data
+            .map { songFromCatalog(it, storefront) }
     }
 
     override suspend fun parseSong(cookie: String, link: String): Song {
@@ -60,7 +62,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         )
         val resource = json.decodeFromString<AppleResourceResponse>(body).data.firstOrNull()
             ?: throw IllegalStateException("apple song not found: $songId")
-        return songFromCatalog(resource)
+        return songFromCatalog(resource, storefront(cookie))
     }
 
     override suspend fun downloadUrl(cookie: String, song: Song): String {
@@ -74,9 +76,8 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
 
     override suspend fun lyrics(cookie: String, song: Song): String {
         if (song.id.isBlank()) throw IllegalArgumentException("song id is empty")
-        // Apple 自己的接口：以前 include=lyrics 直接回 TTML，现在匿名拿不到了；
-        // 仍先试一次，万一 Apple 把歌词关系还回来，就不必走第三方代理。
-        val native = runCatching { appleNativeLyrics(cookie, song.id) }.getOrDefault("")
+        // 登录用户：歌词在 /songs/{id}/lyrics 子资源上，要带 media-user-token 才能拿到
+        val native = runCatching { appleNativeLyrics(cookie, song) }.getOrDefault("")
         if (native.isNotBlank()) return native
         if (!AppleLyricsConfig.thirdPartyLyrics) return ""
         for (source in APPLE_LYRIC_SOURCES) {
@@ -87,15 +88,33 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         return ""
     }
 
-    /** amp-api 的 `/songs/{id}?include=lyrics`；匿名用户现在只会拿到空的歌词关系。 */
-    private suspend fun appleNativeLyrics(cookie: String, songId: String): String {
-        val body = ampGet(
-            cookie,
-            "/v1/catalog/${storefront(cookie)}/songs/$songId",
-            mapOf("include" to "lyrics", "extend" to "extendedAssetUrls"),
-        )
-        val resource = json.decodeFromString<AppleResourceResponse>(body).data.firstOrNull() ?: return ""
-        return convertTtmlToLrc(resource.relationships.lyrics.data.firstOrNull()?.attributes?.ttml.orEmpty())
+    /**
+     * Apple 自己的歌词接口。注意不是歌曲资源上的 `include=lyrics`——那个关系匿名和被登录
+     * 都已经不再返回；真正还有歌词的是 `/songs/{id}/lyrics` 和 `/syllable-lyrics` 两个子资源，
+     * 且必须同时带上 `media-user-token` 请求头和 Cookie，只发 Cookie 拿不到。
+     *
+     * 商店必须和歌曲所属的目录一致（adam ID 是分商店的），所以优先用搜索时记在 [Song.extra]
+     * 里的 storefront，其次才是 Cookie 里声明的那个，最后才退回默认的 us。
+     */
+    private suspend fun appleNativeLyrics(cookie: String, song: Song): String {
+        val storefront = song.extra["storefront"]?.takeIf { it.matches(Regex("^[a-z]{2}$")) }
+            ?: storefront(cookie)
+        for (endpoint in APPLE_LYRIC_ENDPOINTS) {
+            val body = runCatching {
+                ampGet(
+                    cookie,
+                    "/v1/catalog/$storefront/songs/${song.id}/$endpoint",
+                    mapOf("extend" to "ttmlLocalizations"),
+                    mediaTokenHeader = true,
+                )
+            }.getOrNull() ?: continue
+            val resource = runCatching {
+                json.decodeFromString<AppleResourceResponse>(body).data.firstOrNull()
+            }.getOrNull() ?: continue
+            val ttml = resource.attributes.ttml.ifBlank { resource.attributes.ttmlLocalizations }
+            if (ttml.isNotBlank()) return convertTtmlToLrc(ttml)
+        }
+        return ""
     }
 
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
@@ -139,7 +158,8 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         val resource = json.decodeFromString<AppleResourceResponse>(body).data.firstOrNull()
             ?: throw IllegalStateException("apple album not found: $albumId")
         val playlist = albumFromResource(resource)
-        val songs = resource.relationships.tracks.data.map(::songFromCatalog)
+        val storefront = storefront(cookie)
+        val songs = resource.relationships.tracks.data.map { songFromCatalog(it, storefront) }
         return CollectionResult(playlist, songs)
     }
 
@@ -216,7 +236,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             ?: throw IllegalStateException("apple playlist not found: $playlistId")
         val tracks = fetchAllTrackResources(cookie, resource.relationships.tracks)
         val playlist = playlistFromResource(resource)
-        val songs = tracks.map(::songFromCatalog)
+        val songs = tracks.map { songFromCatalog(it, storefront(cookie)) }
         return playlist.copy(trackCount = if (playlist.trackCount == 0 || songs.size > playlist.trackCount) songs.size else playlist.trackCount) to songs
     }
 
@@ -307,7 +327,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         return result
     }
 
-    private fun songFromCatalog(resource: AppleResource): Song {
+    private fun songFromCatalog(resource: AppleResource, storefront: String = ""): Song {
         val attr = resource.attributes
         val preview = attr.previews.firstOrNull()?.url.orEmpty()
         return Song(
@@ -323,6 +343,8 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             link = attr.url,
             extra = buildMap {
                 if (attr.isrc.isNotBlank()) put("isrc", attr.isrc)
+                // adam ID 是分商店的，取歌词子资源时要用同一个商店，否则 404
+                if (storefront.matches(Regex("^[a-z]{2}$"))) put("storefront", storefront)
             },
             isVip = false,
         )
@@ -391,32 +413,57 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         )
     }
 
-    private suspend fun ampGet(cookie: String, uri: String, params: Map<String, String>): String {
+    private suspend fun ampGet(
+        cookie: String,
+        uri: String,
+        params: Map<String, String>,
+        mediaTokenHeader: Boolean = false,
+    ): String {
         val query = if (params.isEmpty()) "" else "?" + encodeParams(params)
-        return ampGetRaw(cookie, if (uri.startsWith("/")) "$AMP_API$uri$query" else "$uri$query")
+        return ampGetRaw(
+            cookie,
+            if (uri.startsWith("/")) "$AMP_API$uri$query" else "$uri$query",
+            mediaTokenHeader,
+        )
     }
 
-    private suspend fun ampGetRaw(cookie: String, uri: String): String {
+    private suspend fun ampGetRaw(
+        cookie: String,
+        uri: String,
+        mediaTokenHeader: Boolean = false,
+    ): String {
         val full = if (uri.startsWith("/")) "$AMP_API$uri" else uri
-        val cookieHeader = mediaUserToken(cookie).takeIf { it.isNotBlank() }?.let { "media-user-token=$it" }.orEmpty()
+        val mediaToken = mediaUserToken(cookie)
+        val cookieHeader = mediaToken.takeIf { it.isNotBlank() }?.let { "media-user-token=$it" }.orEmpty()
         val userToken = parseCookieParts(cookie)["token"]?.takeIf { it.isNotBlank() }
         val token = userToken ?: ensureToken()
-        return runCatching { ampRequest(full, token, cookieHeader) }
+        // 歌词子资源要求 media-user-token 同时出现在请求头和 Cookie 里，只发 Cookie 拿不到
+        val headers = buildMap {
+            put("Authorization", "Bearer $token")
+            put("Origin", APPLE_HOME)
+            put("Referer", "$APPLE_HOME/")
+            if (mediaTokenHeader && mediaToken.isNotBlank()) put("media-user-token", mediaToken)
+        }
+        return runCatching { ampRequest(full, token, cookieHeader, headers) }
             .recoverCatching { error ->
                 // developer token 过期或被 Apple 换掉时，清掉缓存重新抓一个再试一次，避免整个源失效
                 if (userToken != null || !error.isUnauthorized()) throw error
-                ampRequest(full, ensureToken(forceRefresh = true), cookieHeader)
+                ampRequest(full, ensureToken(forceRefresh = true), cookieHeader, headers)
             }
             .getOrThrow()
     }
 
-    private suspend fun ampRequest(url: String, token: String, cookieHeader: String): String =
-        NativeHttp.get(
-            url,
-            headers = mapOf("Authorization" to "Bearer $token", "Origin" to APPLE_HOME),
-            cookie = cookieHeader,
-            userAgent = NativeHttp.DEFAULT_USER_AGENT,
-        )
+    private suspend fun ampRequest(
+        url: String,
+        token: String,
+        cookieHeader: String,
+        headers: Map<String, String>,
+    ): String = NativeHttp.get(
+        url,
+        headers = headers,
+        cookie = cookieHeader,
+        userAgent = NativeHttp.DEFAULT_USER_AGENT,
+    )
 
     /**
      * Apple Music 的 developer token 由 music.apple.com 的前端包分发，会随前端发版轮换：
@@ -583,6 +630,12 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         const val LOOKUP_API = "https://itunes.apple.com/lookup"
         const val APPLE_WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         val APPLE_UNAUTHORIZED = Regex("""HTTP 40[13]\b""")
+
+        /**
+         * 歌词子资源的两个端点。中文等语言 `syllable-lyrics` 给逐词歌词，
+         * 其他语言 `lyrics` 更全；两个都试，谁先给非空 TTML 用谁。
+         */
+        val APPLE_LYRIC_ENDPOINTS = listOf("syllable-lyrics", "lyrics")
         const val CHART_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         val CHART_HOSTS = listOf(
@@ -792,6 +845,9 @@ private data class AppleAttributes(
     val lastModifiedDate: String = "",
     val releaseDate: String = "",
     val recordLabel: String = "",
+    /** `/songs/{id}/lyrics` 子资源返回的 TTML；`extend=ttmlLocalizations` 时另有本地化版本。 */
+    val ttml: String = "",
+    val ttmlLocalizations: String = "",
 )
 
 @Serializable

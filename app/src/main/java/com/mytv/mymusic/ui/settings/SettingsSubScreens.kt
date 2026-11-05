@@ -1295,7 +1295,7 @@ private fun CookieDialog(provider: ProviderInfo, initial: String, onSave: (Strin
         text = {
             Column {
                 Text(
-                    "只保存在本机，换源与 VIP 检测会使用它。留空保存等于退出登录。",
+                    cookieHint(provider),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1311,6 +1311,15 @@ private fun CookieDialog(provider: ProviderInfo, initial: String, onSave: (Strin
         confirmButton = { TextButton(onClick = { onSave(value) }) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+}
+
+/** 个别平台的 Cookie 有固定格式，按平台给提示；没有特殊要求的用通用说明。 */
+private fun cookieHint(provider: ProviderInfo): String = when (provider.id) {
+    // Apple 的歌词在 /songs/{id}/lyrics 子资源上，只有带 media-user-token 才返回；
+    // 商店还要和歌曲所属目录一致，中国区账号需要显式声明 storefront。
+    "apple" -> "粘贴 Apple Music 网页版的 Cookie，必须包含 media-user-token，否则拿不到歌词。" +
+        "多个字段用分号隔开；账号是中国区的话再加 storefront=cn，否则按美区目录检索和取歌词。"
+    else -> "只保存在本机，换源与 VIP 检测会使用它。留空保存等于退出登录。"
 }
 
 /** 签名器行的副标题：默认连 SodaM 公共服务，自填地址或关掉都要说清楚。 */

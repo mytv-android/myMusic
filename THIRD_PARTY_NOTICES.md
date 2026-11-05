@@ -53,7 +53,7 @@ All of these channels are best-effort: they carry no user-identifying data beyon
 
 Apple Music no longer returns song lyrics to unauthenticated clients: `amp-api.music.apple.com`'s `include=lyrics` / `with=lyrics` / `extend=lyrics` no longer yields a `relationships.lyrics` resource, and the only remaining anonymous endpoint (`/v1/lyrics/{storefront}/snippet/songs/{id}`) requires a `tk` token that Apple's native apps mint server-side when sharing a lyrics snippet. Full lyrics require a `media-user-token`, i.e. a signed-in Apple Music account, which this app does not have.
 
-`data/native/AppleProvider.kt` therefore falls back to community-operated services that relay lyrics using their own signed-in Apple Music accounts. They return Apple's native word-by-word TTML (`itunes:timing="Word"`), which the existing `convertTtmlToLrc` in the same file turns into enhanced LRC — no third-party lyric text is stored or re-serialised by this app.
+`data/native/AppleProvider.kt` therefore has two paths. With a signed-in `media-user-token` it uses Apple's own lyrics sub-resource, `/v1/catalog/{storefront}/songs/{id}/syllable-lyrics` (then `/lyrics`), requested with `extend=ttmlLocalizations` and the `media-user-token` value sent **both** as a request header and as a `Cookie` — sending only the Cookie does not work. The storefront must match the catalogue the song's adam ID belongs to, so it is recorded on each `Song.extra["storefront"]` at search time, falling back to a `storefront=` field in the pasted Cookie and then to `us`. Without a usable token it falls back to community-operated services that relay lyrics using their own signed-in Apple Music accounts. Both paths return Apple's native word-by-word TTML (`itunes:timing="Word"`), which the existing `convertTtmlToLrc` in the same file turns into enhanced LRC — no third-party lyric text is stored or re-serialised by this app.
 
 | Source | Endpoint | Notes |
 | --- | --- | --- |
@@ -61,7 +61,7 @@ Apple Music no longer returns song lyrics to unauthenticated clients: `amp-api.m
 | paxsenix | `https://lyrics.paxsenix.org/apple-music/lyrics?id=<appleMusicId>&ttml=true` | Raw TTML text with `ttml=true`. Frequently returns `503`/`502`; falls through when it does. |
 | AMLL TTML DB | `https://api.amll.dev/v1/lyrics/get?appleMusicId=<appleMusicId>` | JSON; TTML in `data.lyrics`. Smallest catalogue (~3.4k entries) but the only one with published API docs and an OpenAPI schema. |
 
-- Usage: tried in the order above, first non-empty result wins. The user can switch all three off in `设置 › 播放页 › Apple Music 歌词 › 使用第三方歌词中转` (`AppleLyricsConfig` / the `third_party_lyrics` preference); with it off, only Apple's own endpoint is tried and unauthenticated users get no lyrics.
+- Usage: tried in the order above, first non-empty result wins; they are only reached when Apple's own endpoint yields nothing (no token, expired token, or that track has no lyrics in the user's catalogue). The user can switch all three off in `设置 › 播放页 › Apple Music 歌词 › 使用第三方歌词中转` (`AppleLyricsConfig` / the `third_party_lyrics` preference); with it off, only Apple's own endpoint is tried and unauthenticated users get no lyrics.
 - What leaves the device: the Apple Music song ID of the track currently being played, sent to whichever of the three services is tried. No username, cookie, media-user-token, playback URL or file content is sent.
 - Attribution: this relay approach, and the endpoint contracts above, follow the same pattern used by [Mornye](https://github.com/mornyeapp/Mornye) (`rust_backend/crates/providers/src/lyrics/builtin/apple.rs`) and [musicdl](https://github.com/CharlesPikachu/musicdl). No upstream source code is bundled in this repository.
 - Stability: these are volunteer-run public services with no SLA and may rate-limit or disappear; the app treats any failure as "no lyrics for this track" rather than surfacing an error.
@@ -118,6 +118,14 @@ SOFTWARE.
 - Version: 2.0.1
 - License: Apache License 2.0
 - Usage: blur behind the mini player, navigation bar and bottom player bar.
+
+## Music platform brand marks
+
+The platform icons in `app/src/main/res/drawable/ic_provider_*.xml` (NetEase Cloud Music, QQ Music, Kugou Music, Kuwo Music, Migu Music, Apple Music, Soda Music / 汽水音乐, Bilibili, JOOX, 5sing, Qianqian Music, Jamendo, and local files) are **my own simplified vector re-drawings**, written by hand for this app so each music source can be told apart at a glance in the source picker, the settings source lists and the player source pill. They are not the official logos: no upstream artwork, SVG or bitmap is copied or redistributed, and the marks are only approximations of the corresponding brand identities (in particular the word-like marks for Kugou, Kuwo and JOOX, and the generic music glyphs used where a brand has no single unambiguous symbol).
+
+Each icon is used only to identify the platform the audio comes from, next to the platform's full name. The names themselves are trademarks of their respective owners (网易云音乐 / QQ音乐 / 酷狗音乐 / 酷我音乐 / 咪咕音乐 / Apple Music / 汽水音乐 / 哔哩哔哩 / JOOX / 5sing / 千千音乐 / Jamendo) and are used descriptively, as the app's settings already do. myMusic is not affiliated with, endorsed by, or sponsored by any of these companies. The one exception is SodaM: its logo (`drawable-*/ic_sodam_logo.png`) is the upstream asset, covered above.
+
+Where a platform cannot be identified — for example a provider id or name added upstream after this file was written — `ui/components/ProviderIcon.kt` falls back to the original circular badge with the platform's short name, so no platform ever renders as a blank space.
 
 ## NanoHTTPD
 

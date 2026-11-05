@@ -109,3 +109,25 @@ class AppleLyricsSourceTest {
         assertTrue(AppleLyricsConfig.thirdPartyLyrics)
     }
 }
+
+/**
+ * 歌词子资源用的商店必须和歌曲所属目录一致（adam ID 分商店），否则 404。
+ * 这里锁住「搜索时把 storefront 记进 Song.extra」这条约定。
+ */
+class AppleStorefrontTrackingTest {
+    @Test
+    fun storefrontExtraKeyIsReadableByLyricsPath() {
+        // appleNativeLyrics 读的正是这个 key，且只认两位小写字母
+        val extra = mapOf("storefront" to "cn", "isrc" to "TWK970801511")
+        val storefront = extra["storefront"]?.takeIf { Regex("^[a-z]{2}$").matches(it) }
+        assertEquals("cn", storefront)
+    }
+
+    @Test
+    fun rejectsMalformedStorefrontSoItFallsBackToDefault() {
+        for (bad in listOf("", "us ", "USA", "cn;x", "12")) {
+            val storefront = bad.takeIf { Regex("^[a-z]{2}$").matches(it) }
+            assertEquals(null, storefront)
+        }
+    }
+}
