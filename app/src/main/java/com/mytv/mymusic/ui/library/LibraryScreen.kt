@@ -112,6 +112,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.DownloadRecord
+import com.mytv.mymusic.data.ListenTaskState
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
@@ -164,6 +165,7 @@ class LibraryNav(
     val openHistory: () -> Unit,
     val openDownloads: () -> Unit,
     val openCharts: () -> Unit,
+    val openWelfare: () -> Unit,
 )
 
 /** 新建菜单的三项：新建歌单、导入歌单链接、从文件导入。三端只是外形不同。 */
@@ -178,6 +180,7 @@ fun LibraryScreen(
     playlists: List<LocalPlaylistSummary>,
     covers: Map<String, List<String>>,
     sync: SyncUiState,
+    listen: ListenTaskState,
     actions: MusicActions,
     nav: LibraryNav,
     detailPane: @Composable (playlistId: String, onClosed: () -> Unit) -> Unit,
@@ -194,9 +197,9 @@ fun LibraryScreen(
     }
 
     when {
-        window.isTv -> TvLibrary(state, history, playlists, covers, sync, stats, actions, nav, menu)
-        window.isTablet && window.twoPane -> TabletLibrary(playlists, covers, sync, stats, favorites, actions, nav, menu, detailPane, state.providers)
-        else -> PhoneLibrary(playlists, covers, sync, stats, favorites, actions, nav, menu, state.providers)
+        window.isTv -> TvLibrary(state, history, playlists, covers, sync, stats, listen, actions, nav, menu)
+        window.isTablet && window.twoPane -> TabletLibrary(playlists, covers, sync, stats, favorites, listen, actions, nav, menu, detailPane, state.providers)
+        else -> PhoneLibrary(playlists, covers, sync, stats, favorites, listen, actions, nav, menu, state.providers)
     }
 
     if (createOpen) {
@@ -226,6 +229,7 @@ private fun PhoneLibrary(
     sync: SyncUiState,
     stats: LibraryStats,
     favorites: List<SavedSong>,
+    listen: ListenTaskState,
     actions: MusicActions,
     nav: LibraryNav,
     menu: NewMenu,
@@ -269,6 +273,7 @@ private fun PhoneLibrary(
                         tileHeight = if (phone) 100.dp else 112.dp,
                     )
                 }
+                item(key = "welfare", contentType = "card") { WelfareEntryCard(listen, nav.openWelfare) }
                 item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
                     SectionLabel("自建歌单", trailing = { CountTag("${playlists.size} 个") })
@@ -351,6 +356,7 @@ private fun TabletLibrary(
     sync: SyncUiState,
     stats: LibraryStats,
     favorites: List<SavedSong>,
+    listen: ListenTaskState,
     actions: MusicActions,
     nav: LibraryNav,
     menu: NewMenu,
@@ -417,6 +423,7 @@ private fun TabletLibrary(
                         }
                     }
                 }
+                item(key = "welfare", contentType = "card") { WelfareEntryCard(listen, nav.openWelfare) }
                 item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
                     SectionLabel("自建歌单", trailing = { NewPlaylistSplitButton(menu) })
@@ -465,6 +472,7 @@ private fun TvLibrary(
     covers: Map<String, List<String>>,
     sync: SyncUiState,
     stats: LibraryStats,
+    listen: ListenTaskState,
     actions: MusicActions,
     nav: LibraryNav,
     menu: NewMenu,
@@ -507,6 +515,15 @@ private fun TvLibrary(
                                 Text("首喜欢的歌", style = MaterialTheme.typography.bodyMedium)
                             }
                         }
+                    }
+                    TvTile(
+                        modifier = Modifier.width(220.dp),
+                        container = MaterialTheme.colorScheme.primaryContainer,
+                        content = MaterialTheme.colorScheme.onPrimaryContainer,
+                        onClick = nav.openWelfare,
+                    ) {
+                        Text("福利中心", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(welfareHeadline(listen), style = MaterialTheme.typography.bodyMedium)
                     }
                     TvTile(
                         modifier = Modifier.width(200.dp),

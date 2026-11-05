@@ -59,6 +59,18 @@ data class TrackSource(
         song.bitrate.takeIf { it > 0 }?.let { "$it kbps" },
         song.ext.takeIf { it.isNotBlank() }?.uppercase(Locale.ROOT),
     ).joinToString(" · ").ifBlank { "音质未知" }
+
+    /**
+     * 无损 / 高码率源，VIP「无损优先」按它排：扩展名认无损格式，
+     * 只报码率的平台（网易云式 999）按阈值猜。
+     */
+    val isLossless: Boolean
+        get() = song.ext.lowercase(Locale.ROOT) in LOSSLESS_EXTS || song.bitrate >= LOSSLESS_BITRATE_KBPS
+
+    private companion object {
+        val LOSSLESS_EXTS = setOf("flac", "wav", "ape", "dsf", "dff", "alac", "aiff")
+        const val LOSSLESS_BITRATE_KBPS = 900
+    }
 }
 
 data class SourcePolicy(
@@ -66,6 +78,8 @@ data class SourcePolicy(
     val priority: List<String> = emptyList(),
     val pinnedProvider: String? = null,
     val allowPreview: Boolean = false,
+    /** 福利中心 VIP 生效中：跨平台优先选无损 / 高码率音源。 */
+    val qualityFirst: Boolean = false,
 )
 
 data class Attempt(val source: TrackSource, val reason: String)

@@ -41,6 +41,7 @@ import com.mytv.mymusic.data.CachedAccountProfile
 import com.mytv.mymusic.data.CanonicalSourceEntity
 import com.mytv.mymusic.data.CanonicalTrackEntity
 import com.mytv.mymusic.data.DownloadRecord
+import com.mytv.mymusic.data.ListenTaskState
 import com.mytv.mymusic.data.bindingTarget
 import com.mytv.mymusic.data.boundDiff
 import com.mytv.mymusic.data.CollectionView
@@ -370,6 +371,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val equalizerState = app.equalizer.state
     val sleepTimer = app.sleepTimer.state
 
+    /** 「天天听歌」福利中心的账本：任务进度、VIP 天数和到期时间。 */
+    val listenTaskState: StateFlow<ListenTaskState> = app.listenTasks.state
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ListenTaskState())
+    /** VIP 是否生效中：选源的无损优先、外观的 VIP 色板都看它。 */
+    val vipActive: StateFlow<Boolean> = listenTaskState
+        .map { it.vipActive }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     private val _recognition = MutableStateFlow(RecognitionUiState())
     val recognitionState: StateFlow<RecognitionUiState> = _recognition
     private var recognitionJob: Job? = null
@@ -482,6 +492,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         cookies = { settingsState.value.cookies },
         settings = { settingsState.value.aggregation },
         workDir = { app.cacheDir },
+        vipQualityFirst = { vipActive.value },
     )
     private val matchJob = MatchJob(
         repository = app.repository,
@@ -3461,10 +3472,49 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             ),
                         )
                     }
+                    // 听歌时长喂给福利中心：只算真正播出来的部分
+                    accumulateListenTime(it.isPlaying, base.value.current?.key.orEmpty(), bounded)
                 }
                 delay(PROGRESS_TICK_MS)
             }
         }
+    }
+
+    /** 听歌计时的锚点：歌曲 key 到上次的进度；暂停、切歌时清空，停着的时间不算。 */
+    private var listenAnchor: Pair<String, Long>? = null
+    private var pendingListenMs = 0L
+
+    private suspend fun accumulateListenTime(playing: Boolean, key: String, positionMs: Long) {
+        if (!playing || key.isEmpty()) {
+            listenAnchor = null
+            flushListenTime()
+            return
+        }
+        val anchor = listenAnchor
+        // 单个 tick 最多认一会儿：往前拖进度条不会变成“听了很多”
+        if (anchor != null && anchor.first == key) {
+            val delta = positionMs - anchor.second
+            if (delta in 1..LISTEN_DELTA_CAP_MS) pendingListenMs += delta
+        }
+        listenAnchor = key to positionMs
+        if (pendingListenMs >= LISTEN_FLUSH_MS) flushListenTime()
+    }
+
+    private suspend fun flushListenTime() {
+        val ms = pendingListenMs
+        if (ms <= 0) return
+        pendingListenMs = 0
+        app.listenTasks.addListening(ms)
+    }
+
+    /** 领取「天天听歌」任务奖励，[onResult] 收到领到的 VIP 天数（0 = 没领成）。 */
+    fun claimListenTask(taskId: String, onResult: (Int) -> Unit = {}) {
+        viewModelScope.launch { onResult(app.listenTasks.claim(taskId)) }
+    }
+
+    /** 把领到的 VIP 天数全部激活续期；[onResult] 为是否成功激活。 */
+    fun activateVip(onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch { onResult(app.listenTasks.activateVip()) }
     }
 
     /** 播放进度的本地时钟；[positionAt] 按 elapsedRealtime 外推，不跟着会话推送的节奏跳。 */
@@ -4488,6 +4538,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         /** 进度循环 100ms 一圈：歌词换行、系统媒体条和进度条都靠它，越密跟得越紧。100 圈（10 秒）存一次位置。 */
         const val PROGRESS_TICK_MS = 100L
         const val CURSOR_SAVE_TICKS = 100
+        /** 听歌计时累计这么久才落一次盘（福利中心任务用）。 */
+        const val LISTEN_FLUSH_MS = 10_000L
+        /** 单个 tick 最多认这么多时长：拖进度条刷不出任务进度。 */
+        const val LISTEN_DELTA_CAP_MS = 500L
 
         /**
          * 账号资料最多试几次、每次隔多久：各平台的用户信息接口偶发超时/风控，

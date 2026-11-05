@@ -26,7 +26,7 @@ class SourceResolverTest {
         workDir = { java.io.File(".") },
     )
 
-    private fun song(id: String, provider: String, vip: Boolean = false, url: String = "") = Song(
+    private fun song(id: String, provider: String, vip: Boolean = false, url: String = "", bitrate: Int = 320, ext: String = "") = Song(
         id = id,
         name = "晴天",
         artist = "周杰伦",
@@ -34,7 +34,8 @@ class SourceResolverTest {
         duration = 269,
         source = provider,
         url = url,
-        bitrate = 320,
+        bitrate = bitrate,
+        ext = ext,
         isVip = vip,
     )
 
@@ -99,6 +100,59 @@ class SourceResolverTest {
         )
         assertFalse(candidates.any { it.providerId == "qq" })
         assertTrue(candidates.any { it.providerId == "netease" })
+    }
+
+    @Test
+    fun qualityFirstPutsLosslessSourceAheadOfPlatformPriority() {
+        // 平台顺序把网易云排在前面，但它的源只有 320k；酷狗是 FLAC
+        val netease = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/a.mp3", bitrate = 320, ext = "mp3"))
+        val kugou = TrackSource("kugou", "酷狗音乐", song("k1", "kugou", url = "https://example.com/b.flac", bitrate = 999, ext = "flac"))
+        val sources = listOf(netease, kugou)
+        val priority = SourcePolicy(priority = listOf("netease", "kugou"))
+
+        val normal = resolver.orderCandidates(
+            track(sources),
+            pinnedProvider = null,
+            excludeProviders = emptySet(),
+            policy = priority,
+        )
+        assertEquals(listOf("netease", "kugou"), normal.map { it.providerId })
+
+        // VIP「无损优先」：FLAC 排到 320k 前面
+        val vip = resolver.orderCandidates(
+            track(sources),
+            pinnedProvider = null,
+            excludeProviders = emptySet(),
+            policy = priority.copy(qualityFirst = true),
+        )
+        assertEquals(listOf("kugou", "netease"), vip.map { it.providerId })
+    }
+
+    @Test
+    fun qualityFirstKeepsPlatformOrderWhenBothLossless() {
+        val netease = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/a.flac", bitrate = 999, ext = "flac"))
+        val kugou = TrackSource("kugou", "酷狗音乐", song("k1", "kugou", url = "https://example.com/b.flac", bitrate = 999, ext = "flac"))
+        val candidates = resolver.orderCandidates(
+            track(listOf(kugou, netease)),
+            pinnedProvider = null,
+            excludeProviders = emptySet(),
+            policy = SourcePolicy(priority = listOf("netease", "kugou"), qualityFirst = true),
+        )
+        assertEquals(listOf("netease", "kugou"), candidates.map { it.providerId })
+    }
+
+    @Test
+    fun priorityModeIgnoresBitrateWithoutVip() {
+        // 「优先级」播放模式下码率不参与排序，同平台优先级按匹配度来
+        val netease = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/a.mp3", bitrate = 128), matchScore = 0.9f)
+        val kugou = TrackSource("kugou", "酷狗音乐", song("k1", "kugou", url = "https://example.com/b.mp3", bitrate = 320), matchScore = 0.8f)
+        val candidates = resolver.orderCandidates(
+            track(listOf(netease, kugou)),
+            pinnedProvider = null,
+            excludeProviders = emptySet(),
+            policy = SourcePolicy(mode = com.mytv.mymusic.aggregate.PlaybackMode.Priority, priority = listOf("netease", "kugou")),
+        )
+        assertEquals(listOf("netease", "kugou"), candidates.map { it.providerId })
     }
 
     // ---------- resolve()：取流后才知道是试听（汽水会员曲）的换源行为 ----------

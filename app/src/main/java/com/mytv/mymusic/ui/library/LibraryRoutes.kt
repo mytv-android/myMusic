@@ -26,6 +26,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
         val localPlaylists by app.model.localPlaylists.collectAsState()
         val covers by app.model.localPlaylistCovers.collectAsState()
         val sync by app.model.syncState.collectAsState()
+        val listen by app.model.listenTaskState.collectAsState()
         val nav = remember(app) {
             LibraryNav(
                 openSettings = { app.openSettings("settings") },
@@ -35,6 +36,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
                 openHistory = { app.nav.navigate("history") },
                 openDownloads = { app.nav.navigate("downloads") },
                 openCharts = { app.openTab("charts") },
+                openWelfare = { app.nav.navigate("welfare") },
             )
         }
         LibraryScreen(
@@ -45,6 +47,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
             playlists = localPlaylists,
             covers = covers,
             sync = sync,
+            listen = listen,
             actions = app.actions,
             nav = nav,
             // ≥840dp 平板：选中的歌单直接显示在右栏，不跳页
@@ -99,6 +102,16 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
             downloads = downloads,
             cacheBytes = cacheBytes,
             actions = app.actions,
+            onBack = app::back,
+        )
+    }
+    composable("welfare") {
+        TvExitBackHandler()
+        val listen by app.model.listenTaskState.collectAsState()
+        WelfareScreen(
+            listen = listen,
+            onClaim = { task, onResult -> app.model.claimListenTask(task, onResult) },
+            onActivate = { app.model.activateVip() },
             onBack = app::back,
         )
     }

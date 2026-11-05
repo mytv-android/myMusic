@@ -79,7 +79,8 @@ private fun SectionContent(
     when (section) {
         SettingsSection.Appearance -> {
             val state by app.model.state.collectAsState()
-            AppearanceSettingsScreen(state, actions, onBack, embedded)
+            val vipActive by app.model.vipActive.collectAsState()
+            AppearanceSettingsScreen(state, actions, onBack, embedded, vipActive)
         }
         SettingsSection.Lyrics -> {
             val state by app.model.state.collectAsState()
