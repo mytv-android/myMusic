@@ -1,18 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 本地音乐：Material Icons 的 library_music，中性深灰底。 -->
+<!-- 本地音乐：Material Icons 的 library_music 轮廓，颜色由 ProviderIcon 统一着色。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="48dp"
-    android:height="48dp"
-    android:viewportWidth="48"
-    android:viewportHeight="48">
-    <path
-        android:fillColor="#455A64"
-        android:pathData="M12,0H36A12,12 0 0 1 48,12V36A12,12 0 0 1 36,48H12A12,12 0 0 1 0,36V12A12,12 0 0 1 12,0Z" />
-    <group
-        android:translateX="12"
-        android:translateY="12">
-        <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M20,2H8C6.9,2 6,2.9 6,4v12c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM18,7h-3v5.55c0,1.24 -1.01,2.25 -2.25,2.25S10.5,13.79 10.5,12.55s1.01,-2.25 2.25,-2.25c0.61,0 1.18,0.25 1.58,0.66c0.12,0.12 0.29,0.16 0.43,0.08C14.91,10.93 15,10.72 15,10.5V5h3v2zM4,6H2v14c0,1.1 0.9,2 2,2h14v-2H4V6z" />
-    </group>
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M20,2H8C6.9,2 6,2.9 6,4V16C6,17.1 6.9,18 8,18H20C21.1,18 22,17.1 22,16V4C22,2.9 21.1,2 20,2Z M18,7H15V12.55C15,13.79 13.99,14.8 12.75,14.8S10.5,13.79 10.5,12.55S11.51,10.3 12.75,10.3C13.36,10.3 13.93,10.55 14.33,10.96C14.45,11.08 14.62,11.12 14.76,11.04C14.91,10.93 15,10.72 15,10.5V5H18V7Z M4,6H2V20C2,21.1 2.9,22 4,22H18V20H4V6Z" />
 </vector>

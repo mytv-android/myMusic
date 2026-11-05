@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 千千音乐：粗圆环 Q 与外伸的短尾巴。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3.4" android:strokeLineCap="round"
+        android:pathData="M18.9,15.6A8,8 0 1 1 18.2,7.4M15.2,15.2L21,21" />
+</vector>

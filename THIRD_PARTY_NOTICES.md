@@ -121,29 +121,13 @@ SOFTWARE.
 
 ## Music platform brand marks
 
-The platform icons in `app/src/main/res/drawable-nodpi/ic_provider_*.webp` are the **official application icons** published by each platform's developer, replacing the project's earlier hand-drawn approximations. They are used to identify the audio source in the source picker, settings, search status and player source controls. The App Store originals are 512 × 512 images; myMusic only resamples them to 256 × 256 WebP and applies a rounded-corner mask at display time. No logo is redrawn, recolored or combined with another mark.
+The platform icons in `app/src/main/res/drawable/ic_provider_*.xml` are **original monochrome vector marks drawn for myMusic**, using the corresponding service's familiar silhouette only as a visual reference. They are not copies of the official application icons or upstream SVG artwork. All marks use the same 24 × 24 canvas, consistent stroke weights and optical sizing; `ui/components/ProviderIcon.kt` supplies a shared rounded container and tints each mark with Material theme roles, so they follow light/dark themes and dynamic color instead of carrying unrelated brand backgrounds.
 
-The images were obtained on 2026-11-05 through Apple's public App Store Search API (`https://itunes.apple.com/search`), from the `artworkUrl512` of the matching official app, and downloaded from Apple's `is1-ssl.mzstatic.com` image CDN. The app and developer pairs used are:
+The set includes NetEase Cloud Music, QQ Music, Kugou Music, Kuwo Music, Migu Music, Apple Music, Soda Music / 汽水音乐, Bilibili, JOOX, 5sing, Qianqian Music and Jamendo. The local-files mark is adapted from Google's Material Icons `library_music` (Apache License 2.0).
 
-| Icon | Official app / developer |
-| --- | --- |
-| NetEase Cloud Music | 网易云音乐 / Hangzhou Netease Cloud Music Technology Co., Ltd. |
-| QQ Music | QQ音乐 / Tencent Technology (Shenzhen) Company Limited |
-| Kugou Music | 酷狗音乐 / Guangzhou KuGou Technology Co., Ltd. |
-| Kuwo Music | 酷我音乐 / Kuwo Tianjin Co., Ltd. |
-| Migu Music | 咪咕音乐 / Migu Music Co., Ltd. |
-| Apple Music | Apple Music / Apple Distribution International |
-| Soda Music | 汽水音乐 / Beijing Douyin Technology Co., Ltd. |
-| Bilibili | 哔哩哔哩 / Shanghai Bilibili Animation Co., Ltd. |
-| JOOX | JOOX音乐 / Tencent Mobility Limited |
-| 5sing | 5sing音乐 / Guangzhou KuGou Technology Co., Ltd. |
-| Qianqian Music | 千千音乐 / Shenzhen Taile Culture Technology Co., Ltd. |
+The platform names and referenced brand identities remain trademarks of their respective owners (网易云音乐 / QQ音乐 / 酷狗音乐 / 酷我音乐 / 咪咕音乐 / Apple Music / 汽水音乐 / 哔哩哔哩 / JOOX / 5sing / 千千音乐 / Jamendo) and are used solely to identify the corresponding services. myMusic is not affiliated with, endorsed by, or sponsored by any of these companies. SodaM is a separate project: its logo (`drawable-*/ic_sodam_logo.png`) is covered above.
 
-Jamendo has no matching current App Store listing in the region queried, so its icon is the official 192 × 192 Android icon served by `https://www.jamendo.com/` (`Client/assets/toolkit/images/icon/android-chrome-192x192.994137531.png`). The local-files icon remains an in-app vector resource based on Google's Material Icons `library_music` (Apache License 2.0).
-
-The icons and platform names are trademarks and copyrighted artwork of their respective owners (网易云音乐 / QQ音乐 / 酷狗音乐 / 酷我音乐 / 咪咕音乐 / Apple Music / 汽水音乐 / 哔哩哔哩 / JOOX / 5sing / 千千音乐 / Jamendo) and are included solely to identify the corresponding services. myMusic is not affiliated with, endorsed by, or sponsored by any of these companies. SodaM is a separate project: its logo (`drawable-*/ic_sodam_logo.png`) is covered above.
-
-Where a platform cannot be identified — for example a provider id or name added upstream after this file was written — `ui/components/ProviderIcon.kt` falls back to the circular badge with the platform's short name, so no platform ever renders as a blank space.
+Where a platform cannot be identified — for example a provider id or name added upstream after this file was written — `ProviderIcon` falls back to a matching tonal badge with the platform's short name, so no platform ever renders as a blank space.
 
 ## NanoHTTPD
 

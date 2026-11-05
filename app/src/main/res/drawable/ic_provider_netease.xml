@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 网易云音乐：开放圆环与音符组成的旋涡轮廓。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8" android:strokeLineCap="round"
+        android:pathData="M19.6,17.1A8.7,8.7 0 1 1 19.8,7.2" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M4.8,15.4a3.3,3.1 0 1,0 6.6,0a3.3,3.1 0 1,0 -6.6,0Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.9" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M10.2,15.2V7.1c2.8,-0.5 5,0.4 5.8,2.8M13.1,5.3c2.7,-0.1 4.8,1.1 5.7,3.5" />
+</vector>

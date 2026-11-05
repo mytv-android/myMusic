@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -14,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
@@ -23,8 +23,9 @@ import com.mytv.mymusic.R
 import com.mytv.mymusic.ui.providerMark
 
 /**
- * 平台图标：优先用平台自己的标志，认不出来时才退回圆形底 + 简称。
- * 图标自带品牌色和圆角，所以不再套底色；[active] 只用一圈 primary 描边表示选中 / 已登录。
+ * 平台图标：24dp 画板上的单色轮廓，统一放在圆角色块里。
+ * 普通状态跟随 surfaceContainerHighest / onSurfaceVariant，[active] 跟随 primaryContainer；
+ * 不使用各平台 App 图标的渐变和材质，避免与动态配色打架。
  */
 
 @DrawableRes
@@ -81,37 +82,36 @@ fun ProviderIcon(
     active: Boolean = false,
     corner: Dp = size * 0.28f,
 ) {
+    val shape = RoundedCornerShape(corner)
+    val container = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest
+    val foreground = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
     val icon = providerIconFor(id, name)
-    if (icon != null) {
-        Image(
-            painter = painterResource(icon),
-            // 图标只是头像，行里另有平台全称，读屏不念
-            contentDescription = null,
-            modifier = modifier
-                .size(size)
-                .clip(RoundedCornerShape(corner))
-                .then(
-                    if (active) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(corner)) else Modifier,
-                )
-                .clearAndSetSemantics {},
-        )
-        return
-    }
-    val mark = providerMark(name.ifBlank { id.orEmpty() })
     Box(
         modifier
             .size(size)
-            .clip(CircleShape)
-            .background(if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest),
+            .clip(shape)
+            .background(container)
+            .then(if (active) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
+            // 图标只是头像，行里另有平台全称，读屏不念
+            .clearAndSetSemantics {},
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            mark,
-            Modifier.clearAndSetSemantics {},
-            style = if (mark.length > 2) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.ExtraBold,
-            color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-        )
+        if (icon != null) {
+            Image(
+                painter = painterResource(icon),
+                contentDescription = null,
+                modifier = Modifier.size(size * 0.66f),
+                colorFilter = ColorFilter.tint(foreground),
+            )
+        } else {
+            val mark = providerMark(name.ifBlank { id.orEmpty() })
+            Text(
+                mark,
+                style = if (mark.length > 2) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = foreground,
+                maxLines = 1,
+            )
+        }
     }
 }
