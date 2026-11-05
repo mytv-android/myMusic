@@ -5,7 +5,9 @@ import androidx.media3.common.C
 import com.mytv.mymusic.AppLog
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.drm.ExoMediaDrm
+import androidx.media3.exoplayer.drm.HttpMediaDrmCallback
 import androidx.media3.exoplayer.drm.MediaDrmCallback
 import androidx.media3.exoplayer.drm.MediaDrmCallbackException
 import com.mytv.mymusic.data.native.AppleTokenCache
@@ -134,11 +136,22 @@ class AppleWidevineDrmCallback(
     }
 
     /**
-     * Widevine 在安卓上出厂就是已 provisioning 的，走不到这儿；真走到了说明设备异常，
-     * 直接报错比静默重试好。
+     * 新系统的 Widevine 走远程 provisioning：CDM 会先要一份设备证书才肯发起授权。
+     * Pixel 8 Pro / Android 17 实测授权回调一次都不触发——之前这里直接抛
+     * UnsupportedOperationException（"出厂就 provisioning 好"的假设在新系统上不成立），
+     * 症状恰好是：session manager 建了、授权请求永不发出、播放错误被吞。
+     * 证书流程跟 Apple 无关（是 Google 自己的），转交给 Media3 的 Http 实现，
+     * 它会把 signedRequest 发给 CDM 在请求里自带的地址。
      */
-    override fun executeProvisionRequest(uuid: UUID, request: ExoMediaDrm.ProvisionRequest): MediaDrmCallback.Response =
-        throw failure(uuid, UnsupportedOperationException("Apple Music 的 Widevine 不需要 provisioning"))
+    override fun executeProvisionRequest(uuid: UUID, request: ExoMediaDrm.ProvisionRequest): MediaDrmCallback.Response {
+        AppLog.w(TAG, "CDM 要求设备证书 provisioning: defaultUrl=${request.defaultUrl.orEmpty().take(80)} ${request.data?.size ?: 0}B")
+        return provisionDelegate.executeProvisionRequest(uuid, request)
+    }
+
+    /** 只借用它的 provisioning 分发（Google 的证书端点）；授权请求仍走上面自己的 Apple 信封。 */
+    private val provisionDelegate by lazy {
+        HttpMediaDrmCallback(LICENSE_ENDPOINT, DefaultHttpDataSource.Factory())
+    }
 
     private fun failure(uuid: UUID, cause: Throwable): MediaDrmCallbackException {
         val dataSpec = DataSpec.Builder().setUri(LICENSE_ENDPOINT).build()

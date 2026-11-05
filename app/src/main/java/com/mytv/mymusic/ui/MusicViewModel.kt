@@ -3344,6 +3344,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
          * [MAX_UNPLAYABLE_SKIPS] 首（多半是断网或账号问题，再跳也是白跑），就暂停只留提示。用户已经切走时只提示，不再动播放器。
          */
         private fun skipUnplayable(index: Int, title: String, message: String) {
+            AppLog.w("Player", "跳过《$title》：$message")
             val player = controller
             if (player == null || player.currentMediaItemIndex != index) {
                 base.value = base.value.copy(playbackNotice = message)
@@ -3366,6 +3367,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            // 失败原因必须进日志：DRM 会话这类错误只在 onPlayerError 里露头，UI 提示之外没人看得见。
+            // 之前这里一条不打，整曲播放失败时只能看到"整曲就绪"然后每隔 11 秒自动跳下一首。
+            val errorIndex = controller?.currentMediaItemIndex ?: -1
+            AppLog.e(
+                "Player",
+                "播放错误 ${error.errorCodeName}(${error.errorCode}) 《${base.value.queue.getOrNull(errorIndex)?.name.orEmpty()}》: " +
+                    "${error.message?.take(160)} ← ${error.cause?.javaClass?.simpleName}: ${error.cause?.message?.take(120)}",
+            )
             if (failoverInProgress) return
             val index = controller?.currentMediaItemIndex ?: return
             val track = base.value.canonicalQueue.getOrNull(index) ?: return
@@ -3409,6 +3418,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 failedSource?.let { resolver.invalidate(it) }
                 val exclude = setOfNotNull(failedSource?.providerId)
+                AppLog.w("Player", "换源重试《${track.title}》：排除 ${failedSource?.providerId ?: "无"}")
                 val result = resolvePlayable(track, null, exclude)
                 val resolution = result.resolution as? Resolution.Ready
                 if (resolution != null) {

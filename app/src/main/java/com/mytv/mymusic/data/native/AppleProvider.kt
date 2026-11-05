@@ -158,12 +158,16 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     private suspend fun appleHlsVariant(masterUrl: String): AppleHlsVariant? {
         val master = runCatching { NativeHttp.get(masterUrl, userAgent = APPLE_WEB_UA) }.getOrNull() ?: return null
         val baseUri = runCatching { java.net.URI(masterUrl) }.getOrNull() ?: return null
-        for (variant in AppleHlsManifest.variants(master).sortedBy { AppleHlsManifest.AUDIO_GROUPS.indexOf(it.group) }) {
+        val variants = AppleHlsManifest.variants(master).sortedBy { AppleHlsManifest.AUDIO_GROUPS.indexOf(it.group) }
+        for (variant in variants) {
             val playlistUrl = runCatching { baseUri.resolve(variant.uri)?.toString() }.getOrNull() ?: continue
             val media = runCatching { NativeHttp.get(playlistUrl, userAgent = APPLE_WEB_UA) }.getOrNull() ?: continue
             val pssh = AppleHlsManifest.widevinePssh(media) ?: continue
             return AppleHlsVariant(playlistUrl = playlistUrl, pssh = pssh, bitrate = variant.bitrateKbps)
         }
+        // 全落空要留痕：老资产（HLSMusic211 一代）可能压根没有 Widevine key，或档位组名
+        // 不在白名单里——没有这条只能对着"退回试听"四个字猜
+        AppLog.w(TAG, "整曲档位全试完没拿到 PSSH: groups=${variants.joinToString { it.group }}")
         return null
     }
 
