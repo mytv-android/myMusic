@@ -1,0 +1,203 @@
+{
+ "results": {
+  "songs": [
+   {
+    "chart": "most-played",
+    "name": "热门歌曲排行",
+    "shortName": "热门歌曲排行",
+    "href": "/v1/catalog/cn/charts?chart=most-played&limit=100&types=songs",
+    "next": "/v1/catalog/cn/charts?chart=most-played&limit=100&offset=100&types=songs",
+    "orderId": "most-played:songs",
+    "data": [
+     {
+      "id": "6829122414",
+      "type": "songs",
+      "href": "/v1/catalog/cn/songs/6829122414",
+      "attributes": {
+       "albumArtistName": "The Weeknd",
+       "albumName": "Hong Kong (feat. 王菲季候風) - Single",
+       "artistName": "The Weeknd",
+       "artwork": {
+        "bgColor": "c6a848",
+        "hasP3": false,
+        "height": 3000,
+        "textColor1": "160903",
+        "textColor2": "181817",
+        "textColor3": "392911",
+        "textColor4": "3b3521",
+        "url": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/0b/b2/81/0bb281a4-14af-a403-4af4-c39aa3f0d872/ticket.kusbehtm.jpg/{w}x{h}bb.jpg",
+        "width": 3000
+       },
+       "audioLocale": "zh-Hant-HK",
+       "audioTraits": [
+        "hi-res-lossless",
+        "lossless",
+        "lossy-stereo"
+       ],
+       "composerName": "The Weeknd, Chen Xiaoxia, Yang Lide & Poon Yuen-Leung",
+       "discNumber": 1,
+       "durationInMillis": 216993,
+       "extendedAssetUrls": {
+        "enhancedHls": "https://aod.itunes.apple.com/itunes-assets/HLSMusic221/v4/fb/d8/2a/fbd82a89-a5da-67d1-28e6-fe886713a453/P1539035731_lossless.m3u8",
+        "lightweight": "https://streamingaudio.itunes.apple.com/itunes-assets/Music221/v4/86/4b/77/864b773c-4e85-5b32-99a2-bd1f4a07e61e/mzaf_177662782102963983.lw.aac.a.m4p?accessKey=TRUNCATED",
+        "lightweightPlus": "https://streamingaudio.itunes.apple.com/itunes-assets/Music221/v4/86/4b/77/864b773c-4e85-5b32-99a2-bd1f4a07e61e/mzaf_11896530201606723591.lwhq.aac.a.m4p?accessKey=TRUNCATED",
+        "plus": "https://streamingaudio.itunes.apple.com/itunes-assets/Music221/v4/86/4b/77/864b773c-4e85-5b32-99a2-bd1f4a07e61e/mzaf_11032805174525849860.plus.aac.a.m4p?accessKey=TRUNCATED",
+        "superLightweight": "https://streamingaudio.itunes.apple.com/itunes-assets/Music221/v4/86/4b/77/864b773c-4e85-5b32-99a2-bd1f4a07e61e/mzaf_16548201690844563109.slw.aac.a.m4p?accessKey=TRUNCATED"
+       },
+       "genreNames": [
+        "R&B/灵魂乐",
+        "音乐"
+       ],
+       "hasLyrics": true,
+       "hasTimeSyncedLyrics": true,
+       "isAppleDigitalMaster": true,
+       "isMasteredForItunes": true,
+       "isVocalAttenuationAllowed": true,
+       "isrc": "USUG12611250",
+       "name": "Hong Kong (feat. 王菲季候風)",
+       "playParams": {
+        "id": "6829122414",
+        "kind": "song"
+       },
+       "previews": [
+        {
+         "url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/f3/ec/78/f3ec7819-5efb-ce62-6b5a-158212d67d85/mzaf_1111426183661643149.plus.aac.p.m4a"
+        }
+       ],
+       "releaseDate": "2026-10-31",
+       "trackNumber": 1,
+       "url": "https://music.apple.com/cn/album/hong-kong-feat-%E7%8E%8B%E8%8F%B2%E5%AD%A3%E5%80%99%E9%A2%A8/6829122413?i=6829122414"
+      }
+     },
+     {
+      "id": "255921025",
+      "type": "songs",
+      "href": "/v1/catalog/cn/songs/255921025",
+      "attributes": {
+       "albumArtistName": "孙燕姿",
+       "albumName": "未完成",
+       "artistName": "孙燕姿",
+       "artwork": {
+        "bgColor": "000000",
+        "hasP3": false,
+        "height": 1425,
+        "textColor1": "e3a56b",
+        "textColor2": "dc8245",
+        "textColor3": "b58455",
+        "textColor4": "b06837",
+        "url": "https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/24/fc/1d/24fc1d3e-b37f-968f-3d21-880edc8f8d79/mzi.ybwydvjn.jpg/{w}x{h}bb.jpg",
+        "width": 1425
+       },
+       "audioLocale": "zh-Hans-CN",
+       "audioTraits": [
+        "lossless",
+        "lossy-stereo"
+       ],
+       "composerName": "李偲菘",
+       "discNumber": 1,
+       "durationInMillis": 320400,
+       "extendedAssetUrls": {
+        "enhancedHls": "https://aod.itunes.apple.com/itunes-assets/HLSMusic211/v4/5d/97/a8/5d97a886-67cd-786d-897b-107bc42088c5/P1479396436_lossless.m3u8",
+        "lightweight": "https://streamingaudio.itunes.apple.com/itunes-assets/Music211/v4/9f/7a/f2/9f7af2b3-a900-8759-9425-45fe1695f26d/mzaf_14578092701637614288.lw.aac.a.m4p?accessKey=TRUNCATED",
+        "lightweightPlus": "https://streamingaudio.itunes.apple.com/itunes-assets/Music211/v4/9f/7a/f2/9f7af2b3-a900-8759-9425-45fe1695f26d/mzaf_6934334103773998962.lwhq.aac.a.m4p?accessKey=TRUNCATED",
+        "plus": "https://streamingaudio.itunes.apple.com/itunes-assets/Music211/v4/9f/7a/f2/9f7af2b3-a900-8759-9425-45fe1695f26d/mzaf_18194530144501570686.plus.aac.a.m4p?accessKey=TRUNCATED",
+        "superLightweight": "https://streamingaudio.itunes.apple.com/itunes-assets/Music211/v4/9f/7a/f2/9f7af2b3-a900-8759-9425-45fe1695f26d/mzaf_16159870585876313235.slw.aac.a.m4p?accessKey=TRUNCATED"
+       },
+       "genreNames": [
+        "国语流行",
+        "音乐",
+        "国际流行"
+       ],
+       "hasLyrics": true,
+       "hasTimeSyncedLyrics": true,
+       "isAppleDigitalMaster": false,
+       "isMasteredForItunes": false,
+       "isVocalAttenuationAllowed": true,
+       "isrc": "TWA530367802",
+       "name": "我不难过",
+       "playParams": {
+        "id": "255921025",
+        "kind": "song"
+       },
+       "previews": [
+        {
+         "url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/6d/b0/40/6db040c5-34fb-0873-a766-be6a4647a36e/mzaf_2285663894330283624.plus.aac.p.m4a"
+        }
+       ],
+       "releaseDate": "2003-01-10",
+       "trackNumber": 2,
+       "url": "https://music.apple.com/cn/album/%E6%88%91%E4%B8%8D%E9%9A%BE%E8%BF%87/255920420?i=255921025"
+      }
+     },
+     {
+      "id": "6820428730",
+      "type": "songs",
+      "href": "/v1/catalog/cn/songs/6820428730",
+      "attributes": {
+       "albumArtistName": "A2O & A2O LITE",
+       "albumName": "NEON - Single",
+       "artistName": "A2O & A2O LITE",
+       "artwork": {
+        "bgColor": "fafafa",
+        "hasP3": false,
+        "height": 1400,
+        "textColor1": "090f03",
+        "textColor2": "090f05",
+        "textColor3": "393e35",
+        "textColor4": "393e36",
+        "url": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/47/9c/af/479caf36-9941-3b8e-51f5-98e761463502/888272190403_Cover.jpg/{w}x{h}bb.jpg",
+        "width": 1400
+       },
+       "audioLocale": "ko",
+       "audioTraits": [
+        "lossless",
+        "lossy-stereo"
+       ],
+       "composerName": "Dem Jointz & 刘英振",
+       "discNumber": 1,
+       "durationInMillis": 208000,
+       "extendedAssetUrls": {
+        "enhancedHls": "https://aod.itunes.apple.com/itunes-assets/HLSMusic221/v4/7c/b3/62/7cb36273-983b-d8ac-9646-054b481083aa/P1516389482_lossless.m3u8",
+        "lightweight": "https://streamingaudio.itunes.apple.com/itunes-assets/Music221/v4/49/15/7f/49157f50-d2c5-54b4-a4c5-58bb2f632057/mzaf_3644606457882169721.lw.aac.a.m4p?accessKey=TRUNCATED",
+        "lightweightPlus": "https://streamingaudio.itunes.apple.com/itunes-assets/Music221/v4/49/15/7f/49157f50-d2c5-54b4-a4c5-58bb2f632057/mzaf_6868678049885452606.lwhq.aac.a.m4p?accessKey=TRUNCATED",
+        "plus": "https://streamingaudio.itunes.apple.com/itunes-assets/Music221/v4/49/15/7f/49157f50-d2c5-54b4-a4c5-58bb2f632057/mzaf_6763348207492662977.plus.aac.a.m4p?accessKey=TRUNCATED",
+        "superLightweight": "https://streamingaudio.itunes.apple.com/itunes-assets/Music221/v4/49/15/7f/49157f50-d2c5-54b4-a4c5-58bb2f632057/mzaf_13155835397360941755.slw.aac.a.m4p?accessKey=TRUNCATED"
+       },
+       "genreNames": [
+        "K-Pop",
+        "音乐",
+        "国际流行"
+       ],
+       "hasLyrics": true,
+       "hasTimeSyncedLyrics": true,
+       "isAppleDigitalMaster": false,
+       "isMasteredForItunes": false,
+       "isVocalAttenuationAllowed": true,
+       "isrc": "KRMIM2655904",
+       "name": "NEON",
+       "playParams": {
+        "id": "6820428730",
+        "kind": "song"
+       },
+       "previews": [
+        {
+         "url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/40/43/b8/4043b833-ec96-7807-fd8c-f74a62e777f3/mzaf_2462934578689260207.plus.aac.p.m4a"
+        }
+       ],
+       "releaseDate": "2026-10-13",
+       "trackNumber": 1,
+       "url": "https://music.apple.com/cn/album/neon/6820428726?i=6820428730"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "meta": {
+  "results": {
+   "order": [
+    "most-played:songs"
+   ]
+  }
+ }
+}

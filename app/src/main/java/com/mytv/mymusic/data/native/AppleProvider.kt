@@ -15,7 +15,8 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonPrimitive
 import java.net.URI
 import java.net.URLDecoder
@@ -50,6 +51,16 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
 
     @Volatile
     private var cachedToken: String = ""
+
+    /**
+     * 榜单 feed 的短期内存缓存。榜单页一次加载会为同一个商店拉三遍：8 个商店的封面、
+     * 热歌、还有"前三首"试听——其实是同一个 `/charts` 响应，缓存住就只请求一次。
+     * 数据一天才更新一次，几分钟的 TTL 没有体感代价。
+     */
+    private val chartCache = mutableMapOf<String, CachedChart>()
+    private val chartCacheLock = Any()
+
+    private data class CachedChart(val at: Long, val entries: List<AppleChartFeed.Entry>)
 
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         val body = ampGet(
@@ -372,14 +383,14 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     }
 
     /**
-     * Apple 的榜单没有自己的封面图，RSS 里的 `icon` 只是 Apple favicon。
-     * 用榜单第一名歌曲的封面顶替：并发拉各商店的 feed，失败就留空（和其他平台一样有兜底）。
+     * Apple 的榜单没有自己的封面图。用榜单第一名歌曲的封面顶替：并发拉各商店的 feed，
+     * 失败就留空（和其他平台一样有兜底）。
      */
     override suspend fun topLists(cookie: String): List<TopList> = coroutineScope {
         APPLE_STOREFRONTS.map { (code, name) ->
             async {
                 val id = "most-played:songs:$code"
-                val cover = runCatching { chartCover(code) }.getOrDefault("")
+                val cover = runCatching { chartCover(cookie, code) }.getOrDefault("")
                 TopList(
                     id = id,
                     name = "$name Top 100",
@@ -401,15 +412,14 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     }
 
     /** 榜单第一名的封面；拿不到就返回空串。 */
-    private suspend fun chartCover(storefront: String): String {
-        val feed = fetchChartFeed(AppleChartRef("most-played", "songs", storefront))
-        val artwork = feed.feed.results.firstOrNull()?.artworkUrl100.orEmpty()
-        return artworkUpgrade(artwork, 600)
+    private suspend fun chartCover(cookie: String, storefront: String): String {
+        val feed = chartResources(cookie, AppleChartRef("most-played", "songs", storefront))
+        return artworkUrl(feed.firstOrNull()?.attributes?.artwork?.url.orEmpty(), 600)
     }
 
     override suspend fun topListSongs(cookie: String, id: String): List<Song> {
         val ref = parseChartId(id)
-        return fetchChartSongs(ref, 100)
+        return fetchChartSongs(cookie, ref, 100)
     }
 
     override suspend fun hotSongs(cookie: String, limit: Int): List<Song> {
@@ -419,7 +429,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             limit > 100 -> 100
             else -> limit
         }
-        return fetchChartSongs(ref, safeLimit)
+        return fetchChartSongs(cookie, ref, safeLimit)
     }
 
     private suspend fun fetchPlaylistDetail(cookie: String, playlistId: String): Pair<Playlist, List<Song>> {
@@ -479,15 +489,14 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         return all
     }
 
-    private suspend fun fetchChartSongs(ref: AppleChartRef, limit: Int): List<Song> {
-        val feed = fetchChartFeed(ref)
-        val items = feed.feed.results.take(limit)
-        if (items.isEmpty()) throw IllegalStateException("apple toplist ${ref.id} is empty")
-        val details = fetchLookupDetails(ref.storefront, items)
-        return items.mapIndexed { index, item ->
-            val detail = details[item.id.trim()]
-            chartSong(item, detail, ref).copy(
-                extra = chartSong(item, detail, ref).extra + mapOf(
+    private suspend fun fetchChartSongs(cookie: String, ref: AppleChartRef, limit: Int): List<Song> {
+        val entries = chartResources(cookie, ref).take(limit)
+        if (entries.isEmpty()) throw IllegalStateException("apple toplist ${ref.id} is empty")
+        return entries.mapIndexed { index, entry ->
+            val song = songFromChart(entry, ref.storefront)
+            song.copy(
+                extra = song.extra + mapOf(
+                    "chart" to ref.feed,
                     "rank" to (index + 1).toString(),
                     "toplist_id" to ref.id,
                 )
@@ -495,60 +504,58 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         }
     }
 
-    private suspend fun fetchChartFeed(ref: AppleChartRef): AppleChartResponse {
-        var lastError: Throwable? = null
-        repeat(3) { attempt ->
-            for (host in CHART_HOSTS) {
-                val url = "${host.trimEnd('/')}/${ref.storefront}/music/${ref.feed}/100/${ref.media}.json"
-                val result = runCatching {
-                    val body = NativeHttp.get(
-                        url,
-                        headers = mapOf("Accept" to "application/json", "Referer" to "$APPLE_HOME/"),
-                        userAgent = CHART_UA,
-                    )
-                    val response = json.decodeFromString<AppleChartResponse>(body)
-                    if (response.feed.results.isEmpty()) error("apple chart feed is empty")
-                    response
-                }
-                if (result.isSuccess) return result.getOrThrow()
-                lastError = result.exceptionOrNull()
-            }
-            // 用 delay 而不是 Thread.sleep：topLists 会为每个商店并发拉榜单封面，
-            // Thread.sleep 会把承载协程的线程全占住，互相拖死
-            if (attempt < 2) delay((attempt + 1) * 400L)
+    /**
+     * 榜单曲目。走 catalog 的 `/charts`，不是 marketingtools 的 RSS——两者数据同源，但
+     * RSS 实测能拖到 30s 才回（us/jp/kr），甚至直接 502/504，而 catalog 同一批商店都在 2s 内。
+     * 而且这一个请求就带全了：封面、试听、`extendedAssetUrls` 的整曲主清单，不必再补一次
+     * `itunes.apple.com/lookup`。
+     *
+     * [limit] 上限 100，Apple 的 charts 接口一页就这么多。
+     */
+    private suspend fun chartResources(cookie: String, ref: AppleChartRef): List<AppleChartFeed.Entry> {
+        synchronized(chartCacheLock) {
+            chartCache[ref.id]?.takeIf { it.entries.isNotEmpty() && System.currentTimeMillis() - it.at < CHART_CACHE_MS }
+                ?.let { return it.entries }
         }
-        throw IllegalStateException("apple toplist ${ref.id} request failed: ${lastError?.message.orEmpty()}", lastError)
+        val started = System.currentTimeMillis()
+        val body = ampGet(
+            cookie,
+            "/v1/catalog/${ref.storefront}/charts",
+            mapOf("types" to ref.media, "limit" to "100", "extend" to "extendedAssetUrls"),
+        )
+        val entries = AppleChartFeed.parse(body, ref.media)?.data
+            ?: throw IllegalStateException("apple chart ${ref.id} is empty")
+        AppLog.d(TAG, "charts ${ref.id} ${entries.size} 首 ${System.currentTimeMillis() - started}ms")
+        synchronized(chartCacheLock) {
+            chartCache[ref.id] = CachedChart(at = System.currentTimeMillis(), entries = entries)
+        }
+        return entries
     }
 
-    private suspend fun fetchLookupDetails(
-        storefront: String,
-        items: List<AppleChartItem>,
-    ): Map<String, AppleLookupItem> {
-        val ids = items.map { it.id.trim() }.filter { it.isNotBlank() }
-        if (ids.isEmpty()) return emptyMap()
-        val result = mutableMapOf<String, AppleLookupItem>()
-        ids.chunked(100).forEach { chunk ->
-            val query = chunk.joinToString(",")
-            val url = "$LOOKUP_API?" + encodeParams(
-                mapOf(
-                    "id" to query,
-                    "country" to storefront,
-                    "entity" to "song",
-                    "limit" to "200",
-                )
-            )
-            runCatching {
-                val body = NativeHttp.get(
-                    url,
-                    headers = mapOf("Accept" to "application/json", "Referer" to "$APPLE_HOME/"),
-                    userAgent = CHART_UA,
-                )
-                json.decodeFromString<AppleLookupResponse>(body).results.forEach { item ->
-                    if (item.trackId > 0) result[item.trackId.toString()] = item
-                }
-            }
-        }
-        return result
+    /** 榜单条目和普通 catalog 资源的字段一致，单独映射一份是为了不把两套响应结构搅在一起。 */
+    private fun songFromChart(entry: AppleChartFeed.Entry, storefront: String): Song {
+        val attr = entry.attributes
+        return Song(
+            id = entry.id,
+            name = attr.name,
+            artist = attr.artistName,
+            album = attr.albumName,
+            duration = attr.durationInMillis / 1000,
+            source = "apple",
+            cover = artworkUrl(attr.artwork.url, 600),
+            url = attr.previews.firstOrNull()?.url.orEmpty(),
+            ext = "m4a",
+            link = attr.url,
+            extra = buildMap {
+                if (attr.isrc.isNotBlank()) put("isrc", attr.isrc)
+                // adam ID 是分商店的，取歌词子资源时要用同一个商店，否则 404
+                if (storefront.matches(Regex("^[a-z]{2}$"))) put("storefront", storefront)
+                // 整曲主清单；请求时带 extend=extendedAssetUrls 才有。encrypted，见 playableStream
+                val hls = attr.extendedAssetUrls.enhancedHls
+                if (hls.isNotBlank()) put(EXTRA_APPLE_HLS, hls)
+            },
+            isVip = false,
+        )
     }
 
     private fun songFromCatalog(resource: AppleResource, storefront: String = ""): Song {
@@ -613,33 +620,6 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         )
     }
 
-    private fun chartSong(item: AppleChartItem, detail: AppleLookupItem?, ref: AppleChartRef): Song {
-        val cover = artworkUpgrade(
-            detail?.artworkUrl100?.takeIf { it.isNotBlank() } ?: item.artworkUrl100,
-            600,
-        )
-        val extra = buildMap {
-            put("storefront", ref.storefront)
-            put("chart", ref.feed)
-            if (item.releaseDate.isNotBlank()) put("release_date", item.releaseDate)
-            if (!detail?.primaryGenreName.isNullOrBlank()) put("genre", detail.primaryGenreName)
-        }
-        return Song(
-            id = item.id.trim(),
-            name = item.name.ifBlank { detail?.trackName.orEmpty() },
-            artist = item.artistName.ifBlank { detail?.artistName.orEmpty() },
-            album = detail?.collectionName.orEmpty(),
-            duration = (detail?.trackTimeMillis ?: 0) / 1000,
-            source = "apple",
-            cover = cover,
-            url = detail?.previewUrl.orEmpty(),
-            ext = "m4a",
-            link = stripLookupParam(detail?.trackViewUrl.orEmpty()).ifBlank { item.url },
-            extra = extra,
-            isVip = false,
-        )
-    }
-
     private suspend fun ampGet(
         cookie: String,
         uri: String,
@@ -701,7 +681,12 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
      * 代价控制：`music.apple.com/` 的 HTML 有 2MB，而 `beta.music.apple.com/` 只有 2.7KB 且引用
      * 同一个 JS 包，所以 HTML 走 beta；JS 包本身压缩后约 876KB，仍要下一次，因此把取到的 token
      * 连同它自己的过期时间落盘，冷启动直接复用，只在快过期时才重新抓。
+     *
+     * 抓取要串行化：榜单页一进来就为 8 个商店并发拉封面，冷启动时它们会同时发现没有 token，
+     * 于是每人下一次 3.3MB 的前端包。加锁让第一个去抓，后来的等它写完缓存就能直接读到。
      */
+    private val tokenLock = Mutex()
+
     private suspend fun ensureToken(forceRefresh: Boolean = false): String {
         if (!forceRefresh) {
             cachedToken.takeIf { it.isNotBlank() }?.let { return it }
@@ -710,24 +695,33 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
                 return cached
             }
         }
-        val home = NativeHttp.get(APPLE_BETA_HOME, userAgent = APPLE_WEB_UA)
-        val bundles = appleBundlePaths(home)
-        if (bundles.isEmpty()) throw IllegalStateException("apple: index.js URI not found")
-        var lastError: String = "apple: token not found in ${bundles.joinToString()}"
-        for (bundle in bundles) {
-            val js = NativeHttp.get("$APPLE_HOME/$bundle", userAgent = APPLE_WEB_UA)
-            val tokens = appleTokens(js)
-            if (tokens.isEmpty()) continue
-            // 只有一个候选时不必试探，直接用；真出了问题由真实请求把错误抛出来
-            val chosen = if (tokens.size == 1) tokens.first() else tokens.firstOrNull { tokenWorks(it) }
-            chosen?.let {
-                cachedToken = it
-                AppleTokenCache.write(it)
-                return it
+        return tokenLock.withLock {
+            if (!forceRefresh) {
+                cachedToken.takeIf { it.isNotBlank() }?.let { return it }
+                AppleTokenCache.read()?.let { cached ->
+                    cachedToken = cached
+                    return cached
+                }
             }
-            lastError = "apple: no usable token in $bundle (${tokens.size} candidates)"
+            val home = NativeHttp.get(APPLE_BETA_HOME, userAgent = APPLE_WEB_UA)
+            val bundles = appleBundlePaths(home)
+            if (bundles.isEmpty()) throw IllegalStateException("apple: index.js URI not found")
+            var lastError: String = "apple: token not found in ${bundles.joinToString()}"
+            for (bundle in bundles) {
+                val js = NativeHttp.get("$APPLE_HOME/$bundle", userAgent = APPLE_WEB_UA)
+                val tokens = appleTokens(js)
+                if (tokens.isEmpty()) continue
+                // 只有一个候选时不必试探，直接用；真出了问题由真实请求把错误抛出来
+                val chosen = if (tokens.size == 1) tokens.first() else tokens.firstOrNull { tokenWorks(it) }
+                chosen?.let {
+                    cachedToken = it
+                    AppleTokenCache.write(it)
+                    return it
+                }
+                lastError = "apple: no usable token in $bundle (${tokens.size} candidates)"
+            }
+            throw IllegalStateException(lastError)
         }
-        throw IllegalStateException(lastError)
     }
 
     private suspend fun tokenWorks(token: String): Boolean = runCatching {
@@ -843,19 +837,6 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         return raw.replace("{w}", size.toString()).replace("{h}", size.toString())
     }
 
-    private fun artworkUpgrade(raw: String, size: Int): String {
-        if (raw.isBlank()) return ""
-        val value = if (size <= 0) 600 else size
-        return raw.replace(Regex("""/(\d+)x(\d+)bb\.(jpg|png|webp)"""), "/${value}x${value}bb.$3")
-    }
-
-    private fun stripLookupParam(link: String): String {
-        if (link.isBlank()) return ""
-        return link.replace(Regex("""[?&]uo=\d+"""), "")
-            .replace("?&", "?")
-            .trimEnd('?', '&')
-    }
-
     private fun encodeParams(params: Map<String, String>): String =
         params.entries.joinToString("&") { (key, value) ->
             "${URLEncoder.encode(key, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
@@ -874,7 +855,6 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         /** 只为拿入口 JS 包名用的轻量首页，2.7KB；[APPLE_HOME] 的 HTML 有 2MB。 */
         const val APPLE_BETA_HOME = "https://beta.music.apple.com/"
         const val AMP_API = "https://amp-api.music.apple.com"
-        const val LOOKUP_API = "https://itunes.apple.com/lookup"
         const val APPLE_WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         val APPLE_UNAUTHORIZED = Regex("""HTTP 40[13]\b""")
 
@@ -883,12 +863,9 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
          * 其他语言 `lyrics` 更全；两个都试，谁先给非空 TTML 用谁。
          */
         val APPLE_LYRIC_ENDPOINTS = listOf("syllable-lyrics", "lyrics")
-        const val CHART_UA =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        val CHART_HOSTS = listOf(
-            "https://rss.marketingtools.apple.com/api/v2",
-            "https://rss.applemarketingtools.com/api/v2",
-        )
+
+        /** 榜单 feed 的缓存时长。榜单一天一更，这个粒度看不出差别，但能省掉同页三次重复请求。 */
+        const val CHART_CACHE_MS = 5 * 60 * 1000L
         val APPLE_STOREFRONTS = listOf(
             "cn" to "中国内地",
             "hk" to "中国香港",
@@ -1336,37 +1313,3 @@ private data class AppleLyricData(val attributes: AppleLyricAttributes = AppleLy
 
 @Serializable
 private data class AppleLyricAttributes(val ttml: String = "")
-
-@Serializable
-private data class AppleChartResponse(val feed: AppleChartFeed = AppleChartFeed())
-
-@Serializable
-private data class AppleChartFeed(val results: List<AppleChartItem> = emptyList())
-
-@Serializable
-private data class AppleChartItem(
-    val id: String = "",
-    val name: String = "",
-    val artistName: String = "",
-    val releaseDate: String = "",
-    val artworkUrl100: String = "",
-    val url: String = "",
-)
-
-@Serializable
-private data class AppleLookupResponse(val results: List<AppleLookupItem> = emptyList())
-
-@Serializable
-private data class AppleLookupItem(
-    val trackId: Long = 0,
-    val trackName: String = "",
-    val artistName: String = "",
-    val collectionId: Long = 0,
-    val collectionName: String = "",
-    val trackTimeMillis: Int = 0,
-    val previewUrl: String = "",
-    val artworkUrl100: String = "",
-    val trackViewUrl: String = "",
-    val primaryGenreName: String = "",
-    val releaseDate: String = "",
-)
