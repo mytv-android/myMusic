@@ -1261,13 +1261,29 @@ internal fun convertTtmlToLrc(ttml: String): String {
         }
         builder.append('[').append(formatTtmlTime(lineStart)).append(']')
         var words = 0
-        for (wordMatch in wordMatches) {
+        for ((index, wordMatch) in wordMatches.withIndex()) {
             val attrs = wordMatch.groupValues[1]
             val wordText = decodeTtmlEntities(wordMatch.groupValues[2]).trim()
             if (wordText.isEmpty()) continue
             var wordStart = parseTtmlTime(TTML_BEGIN.find(attrs)?.groupValues?.getOrNull(1).orEmpty())
             if (wordStart < 0) wordStart = lineStart
             builder.append('<').append(formatTtmlTime(wordStart)).append('>').append(wordText)
+            // 词间空白：Apple 把空格放在 span **之间**当文本节点，只取 span 内容会把英文
+            // 连成一片（Theclubisn't）。但有些词被拆成多个 span（conver+sation、mail+box、
+            // mm-+hmm-），那种本来就没空格，补了就错——所以按原始有没有空白决定，不无条件加。
+            //
+            // 而且这个空格必须贴在词文本后面、`</止>` 前面：解析器遇到 </止> 就把 wordStart
+            // 置 -1，放在结束标签之后的文本没人认领，照样丢。
+            //
+            // 判空用的是 isNotEmpty 不是 isNotBlank：缝隙里恰恰就该是纯空白，
+            // `" ".isNotBlank()` 是 false，用错了一辈子进不了这个分支。
+            val next = wordMatches.getOrNull(index + 1)
+            if (next != null) {
+                val gap = content.substring(wordMatch.range.last + 1, next.range.first)
+                if (gap.isNotEmpty()) {
+                    builder.append(if (gap.isBlank()) " " else decodeTtmlEntities(gap).trim())
+                }
+            }
             val wordEnd = parseTtmlTime(TTML_END.find(attrs)?.groupValues?.getOrNull(1).orEmpty())
             if (wordEnd > wordStart) builder.append("</").append(formatTtmlTime(wordEnd)).append('>')
             words++
