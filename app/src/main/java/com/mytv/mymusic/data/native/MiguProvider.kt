@@ -194,13 +194,37 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
             ?: throw IllegalStateException("resource info not found")
         val lyricUrl = resource.lrcUrl.ifBlank { resource.lyricUrl }
         if (lyricUrl.isBlank()) throw IllegalStateException("lyric url not found")
-        return NativeHttp.get(
+        val lrc = NativeHttp.get(
             lyricUrl.replaceFirst("http://", "https://"),
             headers = mapOf("Referer" to "https://y.migu.cn/"),
             cookie = cookie,
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+            userAgent = MIGU_LYRIC_USER_AGENT,
         )
+        // 翻译是单独一份同时间轴的 LRC（trcUrl），咪咕不会把它并进 lrcUrl
+        if (resource.trcUrl.isBlank()) return lrc
+        val trc = runCatching {
+            NativeHttp.get(
+                resource.trcUrl.replaceFirst("http://", "https://"),
+                headers = mapOf("Referer" to "https://y.migu.cn/"),
+                cookie = cookie,
+                userAgent = MIGU_LYRIC_USER_AGENT,
+            )
+        }.getOrNull().orEmpty()
+        if (trc.isBlank()) return lrc
+        return mergeLyricLayers(original = lrc, translation = dropMiguLyricMeta(trc))
     }
+
+    /**
+     * 咪咕的译文文件开头也有一份「歌曲名 / 歌手名 / 作词 / 作曲」，时间挤在 00:00.00，
+     * 和原词那几行（00:00.03~08）错位，合并后会把这几个标题行对到一起。
+     * 译文只留正文。
+     */
+    internal fun dropMiguLyricMeta(lrc: String): String =
+        lrc.lineSequence()
+            .filterNot { line ->
+                MIGU_LYRIC_META_PREFIXES.any { prefix -> line.substringAfter(']').trim().startsWith(prefix) }
+            }
+            .joinToString("\n")
 
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> =
         searchMiguPlaylists(cookie, keyword, 1, 10)
@@ -963,6 +987,8 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
         const val USER_AGENT =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 9_1 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13B143 Safari/601.1"
         const val ANDROID_UA = "Android_migu/7.41.13 okhttp/3.12.13"
+        const val MIGU_LYRIC_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
         const val ANDROID_CHANNEL = "0146832"
         const val ANDROID_VERSION = "7.41.13"
         const val REFERER = "http://music.migu.cn/"
@@ -981,6 +1007,8 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
         )
         val TONE_EXTENSIONS = setOf("LQ", "PQ", "HQ", "SQ", "ZQ", "ZQ24", "ZQ32", "Z3D", "I3D", "3D60")
         val SONG_LINK = Regex("""music\.migu\.cn/v3/music/song/(\d+)""")
+        /** 咪咕译文文件里的歌曲信息行，合并翻译时丢掉。 */
+        val MIGU_LYRIC_META_PREFIXES = listOf("歌曲名", "歌手名", "作词", "作曲", "编曲", "制作人")
         val PLAYLIST_PATTERNS = listOf(
             Regex("""playlistId=(\d+)"""),
             Regex("""musicListId=(\d+)"""),
@@ -1223,7 +1251,12 @@ private data class MiguSongDetailResponse(val resource: List<MiguSongItem> = emp
 private data class MiguLyricResponse(val resource: List<MiguLyricResource> = emptyList())
 
 @Serializable
-private data class MiguLyricResource(val lrcUrl: String = "", val lyricUrl: String = "")
+private data class MiguLyricResource(
+    val lrcUrl: String = "",
+    val lyricUrl: String = "",
+    /** 译文 LRC，和 lrcUrl 同一时间轴；没有翻译时为空。 */
+    val trcUrl: String = "",
+)
 
 @Serializable
 private data class MiguListenResponse(

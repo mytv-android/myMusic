@@ -390,6 +390,9 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             "ts" to parsed.request.data.trans,
             "roma" to parsed.request.data.roma,
         )
+        // 翻译层有时不是 QRC，而是一份普通 LRC（`[00:06.34]你好吗 是我`）；
+        // 直接丢给 parseQrc 一行都解析不出来，整层翻译就没了，这种单独按时间并回去
+        var plainTranslation = ""
         for ((key, raw) in sources) {
             if (raw.isBlank()) continue
             val decrypted = runCatching { decryptQrcHex(raw) }.getOrNull() ?: continue
@@ -399,10 +402,16 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                     if (tags[tag].isNullOrBlank()) tags[tag] = value
                 }
             }
+            if (qrcData.isEmpty()) {
+                if (key == "ts") plainTranslation = decrypted
+                continue
+            }
             data[key] = qrcData
         }
         if (data["orig"].isNullOrEmpty()) throw IllegalStateException("lyric is empty or qrc decrypt failed")
-        return convertVerbatimLrc(tags, data, listOf("orig", "roma", "ts"))
+        val lrc = convertVerbatimLrc(tags, data, listOf("orig", "roma", "ts"))
+        if (plainTranslation.isBlank()) return lrc
+        return mergeLyricLayers(original = lrc, translation = dropPlaceholderTranslation(plainTranslation))
     }
 
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
@@ -3647,6 +3656,15 @@ private fun lineToLrc(line: QQrcLine, forcedStart: QQrcTime): String {
     }
     return builder.toString()
 }
+
+/** 翻译里的 `//` 是间奏占位，不是译文；留着会被当成一行翻译贴到原文下面。 */
+internal fun dropPlaceholderTranslation(lrc: String): String =
+    lrc.lineSequence()
+        .filterNot { line ->
+            val text = line.trim().substringAfter(']', "").trim()
+            text.isEmpty() || text.all { it == '/' }
+        }
+        .joinToString("\n")
 
 private fun mappedQrcIndex(lines: List<QQrcLine>, index: Int, original: QQrcLine): Int {
     if (original.start.ok) {

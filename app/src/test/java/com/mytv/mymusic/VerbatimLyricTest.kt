@@ -1,9 +1,11 @@
 package com.mytv.mymusic
 
 import com.mytv.mymusic.data.native.KuwoProvider
+import com.mytv.mymusic.data.native.MiguProvider
 import com.mytv.mymusic.data.native.SodaProvider
 import com.mytv.mymusic.data.native.convertTtmlToLrc
 import com.mytv.mymusic.data.native.convertYrcToLrc
+import com.mytv.mymusic.data.native.dropPlaceholderTranslation
 import com.mytv.mymusic.data.native.mergeLyricLayers
 import com.mytv.mymusic.ui.LyricsParser
 import org.junit.Assert.assertEquals
@@ -14,6 +16,7 @@ import org.junit.Test
 class VerbatimLyricTest {
     private val kuwo = KuwoProvider()
     private val soda = SodaProvider()
+    private val migu = MiguProvider()
 
     @Test
     fun neteaseYrcConvertsToVerbatimLrc() {
@@ -229,6 +232,35 @@ class VerbatimLyricTest {
         val raw = "[1000,1000]one\n[2000,1000]two\n[9000,1000]three"
         val translation = "[00:01.00]一\n[00:09.00]三"
         assertEquals("[00:01.00]one\n[00:01.00]一\n[00:02.00]two\n[00:09.00]three\n[00:09.00]三\n", soda.parseSodaLyric(raw, translation))
+    }
+
+    @Test
+    fun qqPlainTranslationDropsInstrumentalPlaceholders() {
+        // QQ 的 trans 是普通 LRC，间奏写成 `//`
+        val raw = "[ti:Hello]\n[00:00.00]//\n[00:06.34]你好吗 是我\n[00:11.86]我犹豫着要不要给你来电"
+        val merged = mergeLyricLayers(
+            original = "[00:06.34]<00:06.34>Hello</00:09.00>\n[00:11.86]<00:11.86>I</00:12.02>",
+            translation = dropPlaceholderTranslation(raw),
+        )
+        assertEquals(
+            "[00:06.340]<00:06.34>Hello</00:09.00>\n[00:06.340]你好吗 是我\n" +
+                "[00:11.860]<00:11.86>I</00:12.02>\n[00:11.860]我犹豫着要不要给你来电",
+            merged,
+        )
+    }
+
+    @Test
+    fun miguTranslationDropsSongInfoHeader() {
+        // 咪咕译文开头那几行歌曲信息挤在 00:00.00，和原文 00:00.03~08 错位，合并前丢掉
+        val trc = "[00:00.00]歌曲名 NANIMONO\n[00:00.00]作曲：Yasutaka Nakata\n[00:16.07]透过楼梯旁的窗户\n[00:19.45]眺望人群"
+        val original = "[00:00.03]歌曲名 NANIMONO\n[00:16.07]踊り 場の 窓か ら\n[00:19.45]人並み を 眺め て い た"
+        val merged = mergeLyricLayers(original = original, translation = migu.dropMiguLyricMeta(trc))
+        assertEquals(
+            "[00:00.030]歌曲名 NANIMONO\n" +
+                "[00:16.070]踊り 場の 窓か ら\n[00:16.070]透过楼梯旁的窗户\n" +
+                "[00:19.450]人並み を 眺め て い た\n[00:19.450]眺望人群",
+            merged,
+        )
     }
 
     @Test
