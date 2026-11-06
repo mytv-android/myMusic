@@ -3,12 +3,14 @@ package com.mytv.mymusic.ui.player.stage
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.mytv.mymusic.ui.player.stage.modes.AuroraVisualizer
+import com.mytv.mymusic.ui.player.stage.modes.Rings52HzVisualizer
 
 /** 编进 APK 的全部歌词动画模式，按 [LyricVisualizer.order] 排。 */
 object LyricVisualizers {
     val all: List<LyricVisualizer> = listOf(
         ClassicVisualizer,
         AuroraVisualizer,
+        Rings52HzVisualizer,
     ).sortedBy { it.order }
 
     /** 认不出的 id（比如以后删掉的模式）按经典。 */
