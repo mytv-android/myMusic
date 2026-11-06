@@ -123,6 +123,8 @@ fun PlayerScreen(
     val wideLayout = book || (window.widthDp >= 600 && window.widthDp > window.heightDp)
     // 暂停时也照样计时：控制栏几秒后淡出，按确认键或点按唤醒。桌面姿态下半屏是平放着用手点的那一面，不进入空闲
     val idle = rememberIdleState(holdAwake = sheetOpen || state.sourcePickerTrack != null || tabletop)
+    // 电视环境模式下按住左右键切歌的按键状态，跨重组保留到松开
+    val holdSkip = remember { HoldSkip() }
     PredictiveBackHandler { events ->
         // 电视上控制栏亮着时，返回键先收起控制栏；已经在环境模式下才退出播放页，和常见视频播放器一致
         val hideControls = window.isTv && !lyricsMode && idle.canAutoHide &&
@@ -189,7 +191,7 @@ fun PlayerScreen(
             .background(MaterialTheme.colorScheme.surface)
             // 电视上焦点不能跑到播放页下面的页面里
             .then(if (window.isTv) Modifier.focusProperties { onExit = { cancelFocusChange() } }.focusGroup() else Modifier)
-            .wakeOnInput(idle, consumeKeyWhenIdle = window.isTv),
+            .wakeOnInput(idle, consumeKeyWhenIdle = window.isTv, holdSkip = holdSkip.takeIf { window.isTv }, onSkip = onSkip),
     ) {
         val wideBackdrop = !tabletop && (window.isTv || wideLayout)
         // 桌面姿态上半屏此刻放什么：设置里选的，或者工具栏、更多菜单临时换成的歌词

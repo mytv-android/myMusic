@@ -66,8 +66,10 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -172,7 +174,48 @@ fun rememberScreenReaderOn(): Boolean {
     return on
 }
 
-fun Modifier.wakeOnInput(idle: IdleState, consumeKeyWhenIdle: Boolean): Modifier = this
+/**
+ * 电视上菜单收起（环境模式）时按住左右方向键切歌：按下第一下照旧立即唤醒控制栏，
+ * 同一次按住到了长按再切一首（左上一首、右下一首），之后直到松开的事件都吃掉，
+ * 免得唤醒后焦点被方向键带走、或被进度条当成快进。单击仍然只是唤出菜单。
+ */
+@Stable
+class HoldSkip {
+    private var key: Key? = null
+    private var fired = false
+
+    fun begin(key: Key) {
+        this.key = key
+        fired = false
+    }
+
+    /** 这次事件是否属于正在接管的那次按住。 */
+    fun tracking(key: Key): Boolean = this.key == key
+
+    /** 到长按返回切歌方向（+1 下一首，-1 上一首），同一次按住只返回一次。 */
+    fun progress(repeatCount: Int, longPress: Boolean): Int? {
+        val held = key ?: return null
+        if (fired || !(longPress || repeatCount > 0)) return null
+        fired = true
+        return if (held == Key.DirectionRight) 1 else -1
+    }
+
+    fun end() {
+        key = null
+        fired = false
+    }
+}
+
+/**
+ * 任意按键唤醒控件。电视上额外接管环境模式里的左右键长按（[holdSkip]，见 [HoldSkip]）；
+ * 非空时 [onSkip] 收到 ±1 通知切歌。
+ */
+fun Modifier.wakeOnInput(
+    idle: IdleState,
+    consumeKeyWhenIdle: Boolean,
+    holdSkip: HoldSkip? = null,
+    onSkip: (Int) -> Unit = {},
+): Modifier = this
     .pointerInput(idle) {
         awaitPointerEventScope {
             while (true) {
@@ -184,6 +227,19 @@ fun Modifier.wakeOnInput(idle: IdleState, consumeKeyWhenIdle: Boolean): Modifier
     .onPreviewKeyEvent { event ->
         // 返回键留给播放页的返回处理：控制栏亮着时先收起，环境模式下才退出播放页
         if (event.key == Key.Back) return@onPreviewKeyEvent false
+        val down = event.type == KeyEventType.KeyDown
+        if (holdSkip != null) {
+            if (idle.idle && down && (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)) {
+                idle.poke()
+                holdSkip.begin(event.key)
+                return@onPreviewKeyEvent true
+            }
+            if (holdSkip.tracking(event.key)) {
+                if (down) holdSkip.progress(event.nativeKeyEvent.repeatCount, event.nativeKeyEvent.isLongPress)?.let(onSkip)
+                else holdSkip.end()
+                return@onPreviewKeyEvent true
+            }
+        }
         val wasIdle = idle.idle
         idle.poke()
         consumeKeyWhenIdle && wasIdle
