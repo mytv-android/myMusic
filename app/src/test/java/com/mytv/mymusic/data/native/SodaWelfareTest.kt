@@ -15,7 +15,8 @@ class SodaWelfareTest {
 
     @Test
     fun parsesRealResponse() {
-        val info = SodaWelfare.parseCommerceInfo(REAL_RESPONSE)
+        // fixture 是 2026-11-05 抓的，把"今天"钉在那一天，测试才不随日历漂移
+        val info = SodaWelfare.parseCommerceInfo(REAL_RESPONSE, todayDate = "2026-11-05")
         assertTrue(info.ok)
         assertFalse(info.notLoggedIn)
         // 会员：天天送送的 free_vip 正在生效

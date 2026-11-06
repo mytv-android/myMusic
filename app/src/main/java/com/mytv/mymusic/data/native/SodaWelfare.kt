@@ -68,7 +68,7 @@ object SodaWelfare {
         return parseApplyResult(response.body)
     }
 
-    fun parseCommerceInfo(raw: String): SodaWelfareInfo {
+    fun parseCommerceInfo(raw: String, todayDate: String = todayDate()): SodaWelfareInfo {
         val root = runCatching { json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
             ?: return SodaWelfareInfo()
         val statusCode = root.int("status_code") ?: 0
@@ -86,7 +86,7 @@ object SodaWelfare {
         val startSec = activity?.long("start_time_sec") ?: 0L
         val endSec = activity?.long("end_time_sec") ?: 0L
         val calendar = activity?.arrayObj("calendar_dates").orEmpty()
-        val claimedToday = activity?.string("latest_apply_date") == todayDate() ||
+        val claimedToday = activity?.string("latest_apply_date") == todayDate ||
             calendar.any { it.int("status") == CALENDAR_TODAY_CLAIMED }
         return SodaWelfareInfo(
             statusCode = statusCode,

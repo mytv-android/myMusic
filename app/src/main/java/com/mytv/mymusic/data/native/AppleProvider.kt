@@ -133,14 +133,26 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     }
 
     /**
-     * 把媒体清单重写后落到本地文件，播放器读这个文件（见 [AppleHlsRewrite] 的说明）。
+     * 把媒体清单重写后落到本地文件，播放器读这个文件（见 [AppleHlsRewrite] 的说明：
+     * 剔默认 key 让 initData 落到轮换 key 上，再丢掉默认 key 保的静音前导段）。
      * 写不了就退回原 URL，效果回到重写前的行为，不会更糟。
      */
-    private fun appleLocalPlaylist(song: Song, variant: AppleHlsVariant, workDir: File): String {
+    private suspend fun appleLocalPlaylist(song: Song, variant: AppleHlsVariant, workDir: File): String {
         val rewritten = AppleHlsRewrite.rewrite(variant.playlistBody, variant.playlistUrl)
+        val trimmed = AppleHlsRewrite.trimPrefetchSegments(rewritten) { url, offset, length ->
+            runCatching {
+                NativeHttp.getResponse(
+                    url,
+                    headers = mapOf("Range" to "bytes=$offset-${offset + length - 1}"),
+                    userAgent = APPLE_WEB_UA,
+                    binary = true,
+                ).bytes
+            }.getOrNull()
+        }
+        if (trimmed !== rewritten) AppLog.i(TAG, "已丢静音前导段: ${song.name}")
         return runCatching {
             val file = File(workDir, "apple-${song.id}.m3u8")
-            file.writeText(rewritten)
+            file.writeText(trimmed)
             android.net.Uri.fromFile(file).toString()
         }.getOrElse {
             AppLog.w(TAG, "本地清单写失败，用原地址: ${it.message}")

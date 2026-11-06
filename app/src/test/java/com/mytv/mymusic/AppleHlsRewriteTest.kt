@@ -2,8 +2,10 @@ package com.mytv.mymusic
 
 import com.mytv.mymusic.data.native.AppleHlsManifest
 import com.mytv.mymusic.data.native.AppleHlsRewrite
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -91,5 +93,61 @@ class AppleHlsRewriteTest {
         assertFalse("默认 key 行没删掉:\n$out", out.contains("edef8ba9"))
         assertTrue("MAP 没绝对化:\n$out", out.contains("https://example.com/a/init.mp4"))
         assertTrue("段没绝对化:\n$out", out.contains("https://example.com/a/seg1.mp4"))
+    }
+
+    // ---- 静音前导段识别（tfhd 探测）----
+
+    /** 真机样例：预取段的 tfhd（flags=0x020008，不标 sample_description_index）。 */
+    private val TFHD_PREFETCH = byteArrayOf(
+        0, 0, 1, 8, 't'.code.toByte(), 'f'.code.toByte(), 'h'.code.toByte(), 'd'.code.toByte(),
+        0x00, 0x02, 0x00, 0x08, // version=0 flags=0x020008（无 sdi 位）
+        0, 0, 0, 1,             // track_id=1
+        0, 0, 4, 0,             // default_duration
+    )
+
+    /** 真机样例：正片段的 tfhd（flags=0x02000A，sample_description_index=2）。 */
+    private val TFHD_REAL = byteArrayOf(
+        0, 0, 1, 12, 't'.code.toByte(), 'f'.code.toByte(), 'h'.code.toByte(), 'd'.code.toByte(),
+        0x00, 0x02, 0x00, 0x0A, // version=0 flags=0x02000A（带 sdi）
+        0, 0, 0, 1,             // track_id=1
+        0, 0, 0, 2,             // sample_description_index=2 → 正片条目
+    )
+
+    @Test
+    fun `tfhd probe distinguishes prefetch from real fragments`() {
+        assertEquals("没标 sdi 的应是预取段", true, AppleHlsRewrite.isPrefetchFragment(TFHD_PREFETCH))
+        assertEquals("sdi=2 应是正片段", false, AppleHlsRewrite.isPrefetchFragment(TFHD_REAL))
+        assertNull("没有 tfhd 应返回 null（看不懂）", AppleHlsRewrite.isPrefetchFragment(ByteArray(64)))
+        assertNull("太短应返回 null", AppleHlsRewrite.isPrefetchFragment(TFHD_PREFETCH.copyOf(10)))
+    }
+
+    @Test
+    fun `trim drops leading prefetch segments and keeps the rest`() = runBlocking {
+        val rewritten = AppleHlsRewrite.rewrite(media, playlistUrl)
+        val originalSegments = rewritten.split("\n").count { it.startsWith("https://") }
+        // 第 1 段是预取静音（NEON 实测），其余是正片
+        var calls = 0
+        val trimmed = AppleHlsRewrite.trimPrefetchSegments(rewritten) { _, _, _ ->
+            calls++
+            if (calls == 1) TFHD_PREFETCH else TFHD_REAL
+        }
+        val kept = trimmed.split("\n").count { it.startsWith("https://") }
+        assertEquals("应丢 1 段", originalSegments - 1, kept)
+        assertFalse("丢的应是第一个段", trimmed.contains("485745@1127"))
+        assertTrue("EXT-X-MAP 必须保留", trimmed.contains("#EXT-X-MAP"))
+        assertTrue("ENDLIST 必须保留", trimmed.contains("#EXT-X-ENDLIST"))
+        assertEquals("探测次数应止于第一个正片段", 2, calls)
+    }
+
+    @Test
+    fun `trim keeps everything when probe fails or all real`() = runBlocking {
+        val rewritten = AppleHlsRewrite.rewrite(media, playlistUrl)
+        // 探测失败 → 原样
+        assertEquals(rewritten, AppleHlsRewrite.trimPrefetchSegments(rewritten) { _, _, _ -> null })
+        // 第一个就是正片 → 原样
+        assertEquals(rewritten, AppleHlsRewrite.trimPrefetchSegments(rewritten) { _, _, _ -> TFHD_REAL })
+        // 没有 byterange 的清单不动
+        val plain = "#EXTM3U\n#EXTINF:15.0,\nhttps://example.com/whole.mp4\n#EXT-X-ENDLIST\n"
+        assertEquals(plain, AppleHlsRewrite.trimPrefetchSegments(plain) { _, _, _ -> TFHD_PREFETCH })
     }
 }
