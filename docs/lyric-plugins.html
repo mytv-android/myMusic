@@ -1,0 +1,1633 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全屏歌词动画方案</title>
+<meta name="description" content="把 Folia（Folium v1.x）里和全屏歌词相关的模组原生移植到 myMusic：不套 WebView、不内嵌 JS 引擎、零新依赖。">
+<style>
+:root{
+  --md-primary:#206a5f;--md-on-primary:#e2fff8;--md-primary-container:#a9f0e2;--md-on-primary-container:#095c52;
+  --md-secondary:#4b645f;--md-on-secondary:#e3fff8;--md-secondary-container:#cde8e1;--md-on-secondary-container:#3e5751;
+  --md-tertiary:#336577;--md-tertiary-container:#afe2f6;--md-on-tertiary-container:#1d5364;
+  --md-surface:#f6faf8;--md-surface-container-lowest:#fff;--md-surface-container-low:#eef5f2;--md-surface-container:#e7f0ec;
+  --md-surface-container-high:#e1eae7;--md-surface-container-highest:#dae5e1;--md-on-surface:#2a3532;--md-on-surface-variant:#56615e;
+  --md-outline:#727d7a;--md-outline-variant:#a9b4b1;--md-error:#a83836;--md-error-container:#fa746f;
+  /* 播放页固定深色 Vibrant（PlayerTheme），取自 expressive-redesign 的 --pl 深色令牌 */
+  --pl-primary:#b5fff0;--pl-on-primary:#00665a;--pl-primary-container:#00fee3;--pl-on-primary-container:#005d52;
+  --pl-secondary-container:#006a67;--pl-on-secondary-container:#dafffc;--pl-tertiary:#66ccff;
+  --pl-surface:#001110;--pl-surface-container-low:#001716;--pl-surface-container:#001e1d;--pl-surface-container-high:#002423;--pl-surface-container-highest:#002b2a;
+  --pl-on-surface:#b8f3f0;--pl-on-surface-variant:#7bb5b2;--pl-outline:#457f7c;--pl-outline-variant:#0e504e;
+  --bg:var(--md-surface);--panel:var(--md-surface-container-lowest);--fg:var(--md-on-surface);--muted:var(--md-on-surface-variant);--line:var(--md-outline-variant);
+  --bezel:#080b0b;
+  --font:"Roboto Flex","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  --spring:cubic-bezier(.3,1.35,.4,1);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --md-primary:#9cd1c6;--md-on-primary:#114840;--md-primary-container:#275b52;--md-on-primary-container:#b9eee3;
+  --md-secondary:#b1ccc6;--md-on-secondary:#2c4540;--md-secondary-container:#27403b;--md-on-secondary-container:#aac5be;
+  --md-tertiary:#c7eeff;--md-tertiary-container:#1d5364;--md-on-tertiary-container:#cdeffc;
+  --md-surface:#0a0f0e;--md-surface-container-lowest:#000;--md-surface-container-low:#0e1513;--md-surface-container:#131b19;
+  --md-surface-container-high:#19211f;--md-surface-container-highest:#1e2826;--md-on-surface:#dde8e4;--md-on-surface-variant:#a2adaa;
+  --md-outline:#6d7875;--md-outline-variant:#3f4a47;--md-error:#fa746f;--md-error-container:#871f21;
+  --bezel:#050606;color-scheme:dark}}
+:root[data-theme="dark"]{--md-primary:#9cd1c6;--md-on-primary:#114840;--md-primary-container:#275b52;--md-on-primary-container:#b9eee3;--md-secondary:#b1ccc6;--md-on-secondary:#2c4540;--md-secondary-container:#27403b;--md-on-secondary-container:#aac5be;--md-tertiary:#c7eeff;--md-tertiary-container:#1d5364;--md-on-tertiary-container:#cdeffc;--md-surface:#0a0f0e;--md-surface-container-lowest:#000;--md-surface-container-low:#0e1513;--md-surface-container:#131b19;--md-surface-container-high:#19211f;--md-surface-container-highest:#1e2826;--md-on-surface:#dde8e4;--md-on-surface-variant:#a2adaa;--md-outline:#6d7875;--md-outline-variant:#3f4a47;--md-error:#fa746f;--md-error-container:#871f21;--bezel:#050606;color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 var(--font);-webkit-font-smoothing:antialiased}
+a{color:var(--md-primary)}
+code{font-family:var(--mono);font-size:.9em}
+:not(pre)>code{background:var(--md-surface-container);border:1px solid var(--line);border-radius:6px;padding:0 5px}
+.wrap{max-width:1240px;margin:0 auto;padding:0 28px}
+.hero{padding:60px 0 36px;border-bottom:1px solid var(--line)}
+.kicker{font:700 12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--md-primary)}
+h1{font-size:clamp(32px,4.4vw,54px);line-height:1.08;letter-spacing:-.02em;margin:16px 0 12px;font-weight:800}
+.lede{font-size:18px;line-height:1.65;color:var(--muted);max-width:50em;margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.chip{display:inline-flex;align-items:center;height:30px;padding:0 12px;border-radius:999px;background:var(--md-secondary-container);color:var(--md-on-secondary-container);font-size:12.5px;font-weight:650}
+.chip.p{background:var(--md-primary-container);color:var(--md-on-primary-container)}
+.layout{display:grid;grid-template-columns:200px minmax(0,1fr);gap:48px;align-items:start}
+.toc{position:sticky;top:20px;padding:24px 0 60px;font-size:13.5px}
+.toc b{display:block;font:700 11px/1 var(--mono);letter-spacing:.14em;color:var(--muted);margin-bottom:12px}
+.toc a{display:block;color:var(--muted);padding:6px 10px;border-radius:8px;text-decoration:none}
+.toc a:hover{background:var(--md-surface-container);color:var(--fg)}
+main{padding:36px 0 100px;min-width:0}
+section{scroll-margin-top:20px;margin:0 0 72px}
+h2{font-size:28px;line-height:1.2;margin:0 0 8px;font-weight:800}
+h2 .num{font:700 13px/1 var(--mono);color:var(--md-primary);display:block;margin-bottom:8px}
+h3{font-size:19px;margin:32px 0 10px;font-weight:750}
+h4{font-size:15.5px;margin:22px 0 6px;font-weight:700}
+p{margin:10px 0 14px;max-width:56em}
+ul,ol{margin:8px 0 16px;padding-left:22px;max-width:56em}
+li{margin:5px 0}
+.muted{color:var(--muted)}
+.small{font-size:13px;color:var(--muted)}
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:20px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:18px 20px}
+.card h4{margin:0 0 6px}
+.card p{margin:0;font-size:13.5px;line-height:1.6;color:var(--muted)}
+.card .tag{display:inline-block;font:700 10.5px/1 var(--mono);letter-spacing:.1em;margin-bottom:10px;color:var(--md-primary)}
+.card.no .tag{color:var(--md-error)}
+.callout{margin:20px 0;padding:16px 20px;border-radius:18px;background:var(--md-tertiary-container);color:var(--md-on-tertiary-container);max-width:60em}
+.callout.note{background:var(--md-surface-container);color:var(--fg);border:1px solid var(--line)}
+.callout p{margin:6px 0}
+.tbl{overflow-x:auto;margin:16px 0 24px;border:1px solid var(--line);border-radius:16px;background:var(--panel)}
+table{width:100%;border-collapse:collapse;font-size:13.5px;line-height:1.55}
+th{text-align:left;font-weight:750;background:var(--md-surface-container);padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.k{white-space:nowrap;font-weight:650}
+.pill{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.pill.do{background:var(--md-primary-container);color:var(--md-on-primary-container)}
+.pill.has{background:var(--md-secondary-container);color:var(--md-on-secondary-container)}
+.pill.no{background:color-mix(in srgb,var(--md-error-container) 40%,transparent);color:var(--md-error)}
+.pill.later{background:var(--md-tertiary-container);color:var(--md-on-tertiary-container)}
+pre{margin:14px 0 22px;padding:16px 18px;border-radius:16px;background:var(--md-surface-container-highest);overflow-x:auto;font:12.6px/1.6 var(--mono);border:1px solid var(--line)}
+.kw{color:var(--md-primary);font-weight:700}.cm{color:var(--muted);font-style:italic}.st{color:var(--md-tertiary)}
+.layers{display:grid;gap:6px;margin:18px 0 26px;max-width:640px}
+.layers div{display:flex;gap:12px;align-items:center;padding:10px 14px;border-radius:12px;background:var(--md-surface-container);font-size:13.5px}
+.layers b{font:700 11px/1 var(--mono);color:var(--md-primary);width:22px;flex:none}
+.layers span{color:var(--muted);margin-left:auto;font-size:12px;text-align:right}
+.layers .acc{background:var(--md-primary-container);color:var(--md-on-primary-container)}
+.layers .acc span{color:var(--md-on-primary-container)}
+
+/* ---------- 交互稿 ---------- */
+.demo{display:flex;gap:30px;align-items:flex-start;flex-wrap:wrap;margin:22px 0}
+.demo-side{flex:1 1 320px;min-width:280px}
+.modebar{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.modebar button{height:34px;padding:0 13px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:600 13px/1 var(--font);cursor:pointer}
+.modebar button.on{background:var(--md-secondary-container);color:var(--md-on-secondary-container);border-color:transparent;border-radius:17px}
+.ctl{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.ctl button{height:32px;padding:0 12px;border-radius:16px;border:0;background:var(--md-surface-container-high);color:var(--fg);font:600 12.5px/1 var(--font);cursor:pointer}
+.ctl button.on{background:var(--md-primary);color:var(--md-on-primary)}
+.facts{font-size:13px;line-height:1.6;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;margin-top:6px}
+.facts b{color:var(--fg)}
+.facts dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:8px 0}
+.facts dt{font-weight:700;color:var(--fg);white-space:nowrap}
+.facts dd{margin:0}
+.phone{position:relative;width:380px;height:800px;padding:10px;border-radius:52px;background:var(--bezel);box-shadow:0 30px 70px -36px rgb(0 0 0/.6);flex:none}
+.scr{position:relative;width:360px;height:780px;border-radius:43px;overflow:hidden;background:#041210;color:var(--pl-on-surface);font-family:var(--font)}
+.scr canvas{position:absolute;display:block}
+.status{position:absolute;left:0;right:0;top:0;height:28px;display:flex;justify-content:space-between;align-items:center;padding:0 26px;font:600 12px/1 var(--font);color:#dfeeea;z-index:6}
+.p-head{position:absolute;left:86px;right:8px;top:40px;height:52px;display:flex;align-items:center;gap:0;z-index:5}
+.p-cover{width:52px;height:52px;border-radius:50%;flex:none;background-size:cover;box-shadow:0 4px 16px rgb(0 0 0/.35)}
+.p-titles{flex:1;min-width:0}
+.p-title{font-size:17px;font-weight:700;line-height:22px;color:var(--pl-on-surface)}
+.p-artist{font-size:14px;font-weight:500;line-height:19px;color:var(--pl-primary)}
+.ib{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;color:var(--pl-on-surface);flex:none;border:0;background:transparent;cursor:pointer;position:relative}
+.ib svg,.tb svg{width:24px;height:24px;fill:currentColor}
+.p-bottom{position:absolute;left:20px;right:16px;bottom:32px;z-index:5;transition:opacity .4s}
+.p-bottom.idle{opacity:0}
+.wave{height:28px;margin:0 8px 0 4px}
+.wave svg{display:block;width:100%;height:28px;overflow:visible}
+.p-row{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
+.tgroup{display:flex;align-items:center;gap:4px;height:56px;transition:gap .35s var(--spring)}
+.tgroup.playing{gap:8px}
+.tgroup .side{width:52px;height:56px;display:grid;place-items:center;background:var(--pl-secondary-container);color:var(--pl-on-secondary-container);transition:width .35s var(--spring)}
+.tgroup.playing .side{width:50px}
+.tgroup .side.l{border-radius:28px 14px 14px 28px}
+.tgroup .side.r{border-radius:14px 28px 28px 14px}
+.tgroup .side svg{width:26px;height:26px;fill:currentColor}
+.cookie{position:relative;width:56px;height:56px;border:0;padding:0;background:none;cursor:pointer;flex:none}
+.cookie>svg{position:absolute;inset:0;width:56px;height:56px;fill:var(--pl-primary)}
+.cookie i{position:absolute;inset:0;display:grid;place-items:center;color:var(--pl-on-primary)}
+.cookie i svg{width:32px;height:32px;fill:currentColor}
+.navpill{position:absolute;left:50%;bottom:9px;width:108px;height:4px;margin-left:-54px;border-radius:2px;background:rgb(223 247 243/.5);z-index:6}
+.toolbar{height:60px;display:flex;align-items:center;gap:0;padding:0 6px;border-radius:30px;background:color-mix(in srgb,var(--pl-surface-container-high) 84%,transparent);box-shadow:0 6px 18px rgb(0 0 0/.3)}
+.tb{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;color:var(--pl-on-surface);border:0;background:transparent;cursor:pointer;position:relative}
+.tb.sel{border-radius:16px;background:var(--pl-primary-container);color:var(--pl-on-primary-container)}
+.ib.new::after{content:"";position:absolute;inset:3px;border-radius:50%;box-shadow:0 0 0 2px var(--pl-tertiary);animation:hint 2.4s ease-in-out infinite}
+@keyframes hint{0%,100%{opacity:.2}50%{opacity:1}}
+.subtitle{position:absolute;left:24px;right:24px;text-align:center;font-size:15px;font-weight:500;line-height:1.4;color:var(--pl-on-surface-variant);z-index:4;transition:opacity .3s}
+.subtitle.off{opacity:0}
+
+/* 动画面板：AdaptiveSheet 手机底部面板，PlayerTheme 深色 */
+.sheet{position:absolute;left:0;right:0;bottom:0;height:640px;z-index:20;background:var(--pl-surface-container-low);color:var(--pl-on-surface);border-radius:28px 28px 0 0;transform:translateY(102%);transition:transform .45s cubic-bezier(.2,.9,.25,1);display:flex;flex-direction:column}
+.sheet.open{transform:none}
+.scrim{position:absolute;inset:0;background:rgb(0 0 0/.32);opacity:0;pointer-events:none;transition:opacity .3s;z-index:19}
+.scrim.open{opacity:1;pointer-events:auto}
+.grab{width:32px;height:4px;border-radius:2px;background:var(--pl-on-surface-variant);opacity:.6;margin:12px auto 4px;flex:none}
+.sh-head{padding:6px 24px 6px;flex:none}
+.sh-head h5{margin:0;font-size:22px;font-weight:600;line-height:28px}
+.sh-head p{margin:2px 0 0;font-size:14px;color:var(--pl-on-surface-variant)}
+.sh-body{overflow-y:auto;padding:0 16px 24px;flex:1;scrollbar-width:thin}
+.lbl{font-size:16px;font-weight:700;line-height:24px;padding:18px 4px 8px;color:var(--pl-on-surface)}
+.ctg{display:flex;gap:2px}
+.ctg button{flex:1;height:48px;border:0;background:var(--pl-surface-container-highest);color:var(--pl-on-surface-variant);font:600 14px/1 var(--font);border-radius:8px;cursor:pointer;transition:border-radius .35s var(--spring),background .2s}
+.ctg button:first-child{border-radius:24px 8px 8px 24px}
+.ctg button:last-child{border-radius:8px 24px 24px 8px}
+.ctg button.on{background:var(--pl-primary-container);color:var(--pl-on-primary-container);border-radius:24px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mcard{position:relative;border:0;padding:0;border-radius:16px;overflow:hidden;background:var(--pl-surface-container-high);color:var(--pl-on-surface);text-align:left;cursor:pointer;outline:2px solid transparent;outline-offset:-2px;transition:outline-color .2s,border-radius .35s var(--spring)}
+.mcard.on{outline-color:var(--pl-primary);border-radius:24px}
+.mcard canvas{position:static;display:block;width:100%;height:84px}
+.mcard .nm{display:flex;align-items:center;gap:6px;padding:7px 10px 9px;font-size:13.5px;font-weight:650}
+.mcard .nm i{font-style:normal;margin-left:auto;font-size:10.5px;font-weight:600;color:var(--pl-on-surface-variant)}
+.mcard .ck{position:absolute;top:7px;right:7px;width:22px;height:22px;border-radius:50%;background:var(--pl-primary);color:var(--pl-on-primary);display:none;place-items:center;font-size:13px;font-weight:900}
+.mcard.on .ck{display:grid}
+.seg{display:flex;flex-direction:column;gap:2px}
+.row{display:flex;align-items:center;gap:14px;min-height:64px;padding:10px 12px 10px 16px;background:var(--pl-surface-container);border-radius:4px}
+.row.click{cursor:pointer}
+.row .val{font-size:14px;color:var(--pl-on-surface-variant);white-space:nowrap}
+.row .chev{color:var(--pl-on-surface-variant);font-size:24px;line-height:1;margin-left:-6px}
+.seg .row:first-child{border-top-left-radius:16px;border-top-right-radius:16px}
+.seg .row:last-child{border-bottom-left-radius:16px;border-bottom-right-radius:16px}
+.row .t{flex:1;min-width:0;font-size:16px;font-weight:500;line-height:22px}
+.row .t small{display:block;font-size:14px;font-weight:400;line-height:20px;color:var(--pl-on-surface-variant)}
+.seg+.seg,.seg.gap{margin-top:8px}
+.cap{font-size:14px;color:var(--pl-on-surface-variant);padding:14px 4px 8px}
+.cap small{display:block;font-size:12.5px}
+.lblrow{display:flex;align-items:center;justify-content:space-between}
+.txtbtn{border:0;background:none;color:var(--pl-primary);font:600 14px/1 var(--font);height:40px;padding:0 12px;border-radius:20px;cursor:pointer}
+.txtbtn:hover{background:rgb(181 255 240/.08)}
+.sw{width:52px;height:32px;border-radius:16px;flex:none;position:relative;background:var(--pl-surface-container-highest);box-shadow:inset 0 0 0 2px var(--pl-outline);cursor:pointer;transition:background .2s}
+.sw::after{content:"";position:absolute;left:8px;top:8px;width:16px;height:16px;border-radius:50%;background:var(--pl-outline);transition:all .25s var(--spring)}
+.sw.on{background:var(--pl-primary);box-shadow:none}
+.sw.on::after{left:24px;top:4px;width:24px;height:24px;background:var(--pl-on-primary)}
+.step{display:flex;align-items:center;gap:6px}
+.step button{width:40px;height:40px;border-radius:50%;border:0;background:var(--pl-secondary-container);color:var(--pl-on-secondary-container);font:700 20px/1 var(--font);cursor:pointer}
+.step b{min-width:58px;text-align:center;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.step .reset{width:auto;padding:0 8px;background:transparent;color:var(--pl-primary);font-size:13px;border-radius:20px}
+.chg{display:flex;gap:2px;flex:none}
+.chg button{height:36px;padding:0 11px;border:0;background:var(--pl-surface-container-highest);color:var(--pl-on-surface-variant);font:600 12.5px/1 var(--font);border-radius:6px;cursor:pointer}
+.chg button:first-child{border-radius:18px 6px 6px 18px}
+.chg button:last-child{border-radius:6px 18px 18px 6px}
+.chg button.on{background:var(--pl-primary-container);color:var(--pl-on-primary-container);border-radius:18px}
+.note{font-size:13.5px;line-height:1.55;color:var(--pl-on-surface-variant);padding:8px 4px 0}
+
+/* 电视 */
+.tv{position:relative;width:660px;max-width:100%;aspect-ratio:16/9;padding:10px;border-radius:14px;background:var(--bezel);box-shadow:0 26px 60px -34px rgb(0 0 0/.6)}
+.tv .scr{width:100%;height:100%;border-radius:6px}
+.tv .subtitle{font-size:16px;bottom:22px}
+.tv .clock{position:absolute;right:22px;top:16px;font:600 20px/1 var(--font);color:rgb(223 247 243/.8);z-index:5;font-variant-numeric:tabular-nums}
+
+/* 设置页（App 主题，浅色/深色跟随） */
+.set{background:var(--md-surface);color:var(--md-on-surface)}
+.set .status{color:var(--md-on-surface)}
+.set .bar{position:absolute;top:28px;left:4px;height:56px;display:flex;align-items:center}
+.set .bar .ib{color:var(--md-on-surface)}
+.set .bar svg{width:24px;height:24px;fill:currentColor}
+.set .big{position:absolute;top:84px;left:16px;font-size:32px;line-height:40px;font-weight:400}
+.set .body{position:absolute;top:136px;left:0;right:0;bottom:0;padding:0 16px 32px;overflow-y:auto;scrollbar-width:thin}
+.set .cap{color:var(--md-on-surface-variant)}
+.set .row .val,.set .row .chev{color:var(--md-on-surface-variant)}
+.set .row .t{color:var(--md-on-surface)}
+.set .lbl{color:var(--md-on-surface)}
+.set .row{background:var(--md-surface-container-low)}
+.set .row .t small,.set .note{color:var(--md-on-surface-variant)}
+.set .ctg button{background:var(--md-surface-container);color:var(--md-on-surface-variant)}
+.set .ctg button.on{background:var(--md-primary);color:var(--md-on-primary)}
+.set .sw{background:var(--md-surface-container-highest);box-shadow:inset 0 0 0 2px var(--md-outline)}
+.set .sw::after{background:var(--md-outline)}
+.set .sw.on{background:var(--md-primary);box-shadow:none}
+.set .sw.on::after{background:var(--md-on-primary)}
+.set .dim{opacity:.38}
+.set .chev{color:var(--md-on-surface-variant);font-size:20px}
+.set .newmark{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:6px;background:var(--md-tertiary-container);color:var(--md-on-tertiary-container);vertical-align:2px}
+@media (max-width:960px){.layout{grid-template-columns:1fr}.toc{display:none}.cards{grid-template-columns:1fr}}
+@media (max-width:440px){.wrap{padding:0 16px}.phone{transform:scale(.86);transform-origin:top left;margin-bottom:-110px}}
+
+#modeTable td:nth-child(1){min-width:150px;white-space:normal}
+#modeTable td:nth-child(2),#modeTable td:nth-child(5){min-width:220px}
+#modeTable td:nth-child(3){min-width:120px}
+#modeTable td:nth-child(4),#modeTable td:nth-child(6){white-space:nowrap}
+#modeTable .small{font-weight:400}
+
+</style>
+</head>
+<body>
+<header class="hero"><div class="wrap">
+  <div class="kicker">myMusic · 设计方案 · 2026-11-06</div>
+  <h1>全屏歌词动画：原生移植 Folia 的歌词模组</h1>
+  <p class="lede">Folia 的模组是跑在桌面版网页环境里的 JavaScript。myMusic 不套 WebView、不内嵌 JS 引擎、不加任何新依赖，所以不做“模组加载器”，而是把市场里和全屏歌词有关的模组逐个用 Compose 重写进 APK，接口形状照搬 Folium，以后移植新模组时一一对得上。</p>
+  <div class="chips">
+    <span class="chip p">46 个市场模组 → 21 个相关</span>
+    <span class="chip p">8 个歌词动画 + 现有经典</span>
+    <span class="chip">3 个歌词变换</span><span class="chip">1 个播放页图层</span><span class="chip">2 种自动切换</span>
+    <span class="chip">零新依赖 · 无 WebView · 无 JS 引擎</span>
+  </div>
+</div></header>
+
+<div class="wrap layout">
+<nav class="toc" aria-label="目录">
+  <b>目录</b>
+  <a href="#conclusion">1 结论</a>
+  <a href="#scope">2 范围</a>
+  <a href="#mapping">3 接口对照</a>
+  <a href="#phone">4 交互稿：全屏歌词页</a>
+  <a href="#panel">5 动画面板与设置页</a>
+  <a href="#tv">6 电视</a>
+  <a href="#modes">7 各模式移植</a>
+  <a href="#arch">8 架构与接口</a>
+  <a href="#transform">9 歌词变换</a>
+  <a href="#director">10 自动切换</a>
+  <a href="#perf">11 性能与边界</a>
+  <a href="#license">12 许可</a>
+  <a href="#phases">13 分期</a>
+  <a href="#open">14 待定</a>
+</nav>
+<main>
+
+<section id="conclusion">
+  <h2><span class="num">01</span>结论：不加载模组，把相关的部分原生重写</h2>
+  <p>Folium v1.x 的模组是 ES 模块，靠 DOM、Canvas 2D、WebGL 画画面。Android 上想原样运行只有两条路：套 WebView，或者内嵌 QuickJS 一类的 JS 引擎再自己实现一遍 DOM 和 Canvas。前者已经排除；后者也是新增组件，而且要补的浏览器 API 比重写这几个模组还多。所以这里不做加载器，只移植效果，同时把 Folium 的几个接口（歌词动画模式、设置表、宿主图层开关、歌词变换、播放页图层）照搬成 Kotlin 接口。</p>
+  <div class="cards">
+    <div class="card"><span class="tag">零新依赖</span><h4>只用系统和现有库</h4><p>画面用 Compose Canvas、TextMeasurer、RenderEffect（Android 12+）、RuntimeShader（Android 13+）；简繁转换和罗马音转写用系统自带的 ICU（Android 10+）。不加库、不加数据文件、不联网。</p></div>
+    <div class="card"><span class="tag">不动态加载</span><h4>每个模式就是一个 Kotlin 类</h4><p>不下载代码、不用 DexClassLoader，模式跟版本一起发布。来源模组、版本、作者和许可写进 THIRD_PARTY_NOTICES。</p></div>
+    <div class="card"><span class="tag">默认不变</span><h4>不打开就和现在一样</h4><p>全屏歌词页默认还是“经典”，也就是现在的 LyricsList。歌词文字的几项转换都默认关，通知栏和桌面小组件的歌词照旧。</p></div>
+  </div>
+  <div class="callout">
+    <p><b>系统 ICU 实测</b>（模拟器上用 app_process 跑 dex 探针）：一共 791 个转写器，Hans-Hant、Han-Latin、Hiragana-Latin、Katakana-Latin、Hangul-Latin、Cyrillic-Latin 都有。</p>
+    <p>「我们头发里的风，后来干了」→「我們頭髮里的風，後來乾了」：逐字转换，大部分对，但「里」没有变成「裡」。系统 ICU 没有 OpenCC 那样的词组表，所以设置里要写明“个别字转不准”。</p>
+    <p>韩文「사랑해요」→ salanghaeyo，俄文「Катюша」→ Katûša，都不是常用拼法。日文汉字会被当成汉语拼音读（「風の中で」→ fēngno zhōngde），所以自动转写只处理不含汉字的行。</p>
+  </div>
+</section>
+
+<section id="scope">
+  <h2><span class="num">02</span>范围：46 个模组筛下来 21 个相关</h2>
+  <p>插件市场目录（2026-11-06 抓取）共 46 个模组。筛选标准只有一条：会不会改变全屏歌词页的画面或歌词文字。相关的 21 个如下，结论分四类：<span class="pill do">移植</span> <span class="pill has">已支持</span> <span class="pill no">不做</span> <span class="pill later">不适用</span>。</p>
+  <div class="tbl"><table>
+    <thead><tr><th>模组</th><th>类型</th><th>做什么</th><th>结论</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td class="k">sample-aurora-visualizer 1.0.1</td><td>歌词动画</td><td>虹光逐字</td><td><span class="pill do">移植</span></td><td>官方样例，纯渲染</td></tr>
+      <tr><td class="k">visualizer52hz 1.0.1</td><td>歌词动画</td><td>拍点年轮</td><td><span class="pill do">移植</span></td><td>音频改用现有的 RhythmAnalyzer 和 BeatTracker</td></tr>
+      <tr><td class="k">miside-drop 2.5.3</td><td>歌词动画</td><td>立体字掉落</td><td><span class="pill do">移植</span></td><td>纯渲染，自带简单物理</td></tr>
+      <tr><td class="k">wave-light 1.5.1</td><td>歌词动画</td><td>两侧声波 + 水印</td><td><span class="pill do">移植</span></td><td>自己画背景，对应 hostBackground = false</td></tr>
+      <tr><td class="k">vinyl-disc 1.7.10</td><td>歌词动画</td><td>黑胶唱片</td><td><span class="pill do">移植</span></td><td>纯渲染</td></tr>
+      <tr><td class="k">stardrift 1.38.0</td><td>歌词动画</td><td>星海随机字</td><td><span class="pill do">移植</span></td><td>只用到响度</td></tr>
+      <tr><td class="k">cinerama 1.0.0</td><td>歌词动画</td><td>LED 巨幕</td><td><span class="pill do">移植</span>（待授权）</td><td>包里没有许可文件，见第 12 节</td></tr>
+      <tr><td class="k">visualizer-jump 1.2.0</td><td>歌词动画</td><td>跳一跳</td><td><span class="pill do">移植</span>（待授权）</td><td>同上</td></tr>
+      <tr><td class="k">lyric-split-translation 1.2.0</td><td>歌词变换</td><td>拆单行双语</td><td><span class="pill do">移植</span></td><td>没有许可文件，按 README 写的规则自己实现</td></tr>
+      <tr><td class="k">opencc-traditional-lyrics 1.1.6</td><td>歌词变换</td><td>简转繁；自动补中文字幕</td><td><span class="pill do">简转繁</span> <span class="pill later">补字幕待定</span></td><td>简转繁用系统 ICU，代替 1 MB 的 OpenCC 词典；补字幕要联网搜别的平台，见第 14 节</td></tr>
+      <tr><td class="k">bilingual-ruby-lyrics 1.6.1</td><td>歌词变换 + 动画</td><td>原文译文配对、注音、罗马音</td><td><span class="pill do">部分</span></td><td>配对现在的 mergeLayers 已经在做；罗马音层改成保留下来。注音读的是本地音频文件内嵌的标签，myMusic 是在线曲库，用不上，它的“阅读”模式也就不做</td></tr>
+      <tr><td class="k">spectrum-visualizer 0.4.0</td><td>播放页图层</td><td>48 段频谱</td><td><span class="pill do">移植</span></td><td>没有许可文件，柱状图自己画</td></tr>
+      <tr><td class="k">lyrics-list 1.0.0</td><td>播放页图层</td><td>完整歌词列表</td><td><span class="pill has">已支持</span></td><td>就是现在的全屏歌词页（经典）</td></tr>
+      <tr><td class="k">clock-perf-widget 2.3.0</td><td>播放页图层</td><td>时钟、FPS、性能</td><td><span class="pill no">不做</span></td><td>电视环境模式已经有时钟；FPS、CPU、GPU 是桌面调试用的</td></tr>
+      <tr><td class="k">sample-rickroll 1.0.1</td><td>播放页图层</td><td>外挂视频窗口</td><td><span class="pill no">不做</span></td><td>要嵌网页，也就是 WebView</td></tr>
+      <tr><td class="k">lyric-style-switcher 1.2.1</td><td>自动切换</td><td>每首歌随机</td><td><span class="pill do">移植</span></td><td>没有许可文件，功能简单，自己写</td></tr>
+      <tr><td class="k">bpm-style-director 1.0.0</td><td>自动切换</td><td>按 BPM 区间选模式</td><td><span class="pill do">移植</span></td><td>BPM 直接用 BeatTracker，不另做检测</td></tr>
+      <tr><td class="k">lyric-ai-director 1.4.1</td><td>自动切换</td><td>大模型挑模式</td><td><span class="pill no">不做</span></td><td>要用户自己的大模型密钥，还要把歌词发给第三方</td></tr>
+      <tr><td class="k">lyric-ai-director-plus 1.0.3</td><td>自动切换</td><td>同上，加口味学习</td><td><span class="pill no">不做</span></td><td>同上</td></tr>
+      <tr><td class="k">k3panel 1.0.1</td><td>精调</td><td>商籁动画参数</td><td><span class="pill later">不适用</span></td><td>只调 Folia 内置的“商籁”动画，myMusic 没有这个模式</td></tr>
+      <tr><td class="k">antialias-ssaa-msaa 1.1.9</td><td>渲染</td><td>超采样抗锯齿</td><td><span class="pill later">不适用</span></td><td>Android Canvas 画字本来就抗锯齿</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">不相关的 25 个，不看：more-progress-buttons、sample-progress-bar、transparent-mov-export、emofx、auto-skip、halo-lyric、lx-favorites-sync、taskbar-lyrics、listening-archive、enhanced-remote-widget、song-comments、song-info、menubar-lyrics、ai-eq、lx-source、folia-lx-music-mod、taskbar-lyrics-compact、taskbar-player、global-hotkeys、remote-window-edge、listening-stats、desktop-lyric、amll-desktop-lyric、daily-30、soda-music。</p>
+</section>
+
+<section id="mapping">
+  <h2><span class="num">03</span>Folium 扩展点和 myMusic 的对应</h2>
+  <p>只取全屏歌词用得到的部分。模组系统本身（权限、签名、市场、main 进程 RPC）都不需要，因为代码随 APK 发布。</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Folium</th><th>含义</th><th>myMusic</th></tr></thead>
+    <tbody>
+      <tr><td class="k">visualizers</td><td>一个歌词动画模式：mount、order、settings、hostLayers</td><td><code>LyricVisualizer</code> 接口；mount 对应 Composable 进出组合，order 决定面板里的顺序</td></tr>
+      <tr><td class="k">hostLayers</td><td>宿主要不要画背景、字幕（默认都画）</td><td><code>hostBackground</code> 为 false 时不画 LyricsBackdrop，改画模式自己的 Background；<code>hostSubtitles</code> 控制宿主副行（翻译或罗马音）</td></tr>
+      <tr><td class="k">settings</td><td>设置表，宿主据此生成面板</td><td><code>LyricSetting</code>：数字 → 步进行，选项 → 连接按钮组，开关 → 开关行。要移植的模组没用到 text、color、secret，这三种不做。读时合并默认值，写时夹紧数值、丢掉未知键，规则和 Folium 一样</td></tr>
+      <tr><td class="k">FoliumLine</td><td>一句歌词：起止、逐字、翻译、罗马音、和声</td><td><code>StageLine</code>：现有 LyricLine 加句末时间（取下一句开始）和罗马音</td></tr>
+      <tr><td class="k">lyricTime / getLineIndex</td><td>歌词时间（含用户偏移）、当前句（句间为 -1）</td><td><code>StageClock</code>：100ms 的播放位置加帧外推，KaraokeLine 已经这么做；当前句在两句之间给 -1，现在的 activeLineIndex 在第一句前返回 0，要区分开</td></tr>
+      <tr><td class="k">getTheme / getCoverUrl</td><td>主题色、封面</td><td>PlayerTheme 的颜色，加 coverBlobColors 算出的封面主色</td></tr>
+      <tr><td class="k">getDisplay</td><td>字号倍率、控件是否隐藏、透明度</td><td><code>StageDisplay</code>：字号档（LyricsSizing）、控件空闲（已有 IdleGuard）、减少动态效果、是否电视、安全区内边距</td></tr>
+      <tr><td class="k">ctx.audio</td><td>响度、五段频带、0–255 频谱</td><td>RhythmAnalyzer（已有，按引用计数开关）；RhythmFrame 补上 48 段频带和 power</td></tr>
+      <tr><td class="k">onFrame / every</td><td>每帧回调</td><td><code>withFrameNanos</code>；电视用 TvFrameGate 限 30 帧</td></tr>
+      <tr><td class="k">lyrics.transform</td><td>同步改写歌词，输入永远是原始歌词</td><td><code>LyricPipeline.prepare</code>：解析后依次做拆双语、简转繁、罗马音</td></tr>
+      <tr><td class="k">stageLayers</td><td>播放页叠加图层：stage.back、stage.front、app.overlay</td><td><code>LyricStageLayer</code>，只做 back 和 front 两层，频谱放 front</td></tr>
+      <tr><td class="k">folium.visualizer.setMode</td><td>模组切换当前模式</td><td><code>LyricDirector</code>：随机、按速度</td></tr>
+      <tr><td class="k">tunings</td><td>给内置“商籁”加参数</td><td>不适用</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="phone">
+  <h2><span class="num">04</span>交互稿：全屏歌词页</h2>
+  <p>手机的全屏歌词页。歌词和节拍都是模拟的（自拟歌词、112 BPM）。上面一排切模式，右上角 ✦ 打开动画面板。配色用播放页的深色 Vibrant（PlayerTheme），控件照现有组件画：顶栏小圆封面 + 标题 + 收藏、WavySeekBar、Compact 按钮组、浮动工具栏。舞台铺满整页，文字排在顶栏和控件之间的安全区里，背景类的效果可以铺到安全区外面。</p>
+  <div class="demo">
+    <div class="phone"><div class="scr" id="ph"></div></div>
+    <div class="demo-side">
+      <div class="modebar" aria-label="切换模式"></div>
+      <div class="ctl">
+        <button data-c="play">暂停</button>
+        <button data-c="sheet">动画面板</button>
+        <button data-c="spec">频谱</button>
+        <button data-c="idle">控件空闲淡出</button>
+        <button data-c="reduce">减少动态效果</button>
+        <button data-c="jump" data-t="16.3">跳到英文句</button>
+      </div>
+      <div class="facts" id="facts"></div>
+    </div>
+  </div>
+  <h3>入口放在哪</h3>
+  <ul>
+    <li><b>手机</b>：全屏歌词页顶栏，收藏左边加一个 ✦ 图标按钮（48dp，和收藏同款）。底部工具栏现在是“歌词、队列”两项，再加一项总宽是 168 + 156 = 324dp，正好等于 360dp 宽手机的可用宽度，更窄的屏放不下，所以不放那里。</li>
+    <li><b>平板、横屏</b>：工具栏空间够，在“歌词”后面加一项 ToolbarIconButton。</li>
+    <li><b>电视</b>：更多菜单加“歌词动画…”，打开右侧 360dp 的面板。</li>
+    <li><b>所有设备</b>：设置 → 播放页里也有同一个入口。</li>
+  </ul>
+  <p>点舞台：经典模式和现在一样，点一句跳过去；别的模式没有逐句列表，点一下只唤醒控件。首次进入时 ✦ 外面有一圈呼吸提示，打开过一次就不再显示。</p>
+</section>
+
+<section id="panel">
+  <h2><span class="num">05</span>动画面板与设置页</h2>
+  <p>面板用现有的 AdaptiveSheet（手机底部面板，平板右侧 400dp，电视右侧 360dp），套 PlayerTheme 深色。从上到下：</p>
+  <ol>
+    <li><b>模式</b>：两列卡片，每张是该模式的一张静帧缩略图，选中的描边、圆角变大、右上角打勾。</li>
+    <li><b>每首歌换动画</b>：连接按钮组“固定、随机、按速度”。按速度时下面列四档速度，每档点进去选模式；不是固定时多一行“这首歌固定用它”。</li>
+    <li><b>叠加</b>：频谱开关。</li>
+    <li><b>当前模式的设置</b>：由设置表生成，数字用步进行（和“跟拍校准”同款的 −/+），选项用连接按钮组，开关用开关行，右上角“恢复默认”。App 里没有横向滑杆，所以不引入。参数多的模组只放常用几项，其余保持原模组默认值，面板底部写明。</li>
+  </ol>
+  <div class="demo">
+    <div class="phone"><div class="scr set">
+      <div class="status"><span>9:41</span><span>5G ▮▮▮ 86%</span></div>
+      <div class="bar"><span class="ib"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></span></div>
+      <div class="big">播放页</div>
+      <div class="body">
+        <div class="dim">
+          <div class="lbl">显示歌词背景</div>
+          <div class="ctg"><button>关闭</button><button class="on">动态</button><button>律动</button></div>
+        </div>
+        <div class="lbl">歌词动画<span class="newmark">新</span></div>
+        <div class="seg">
+          <div class="row click" data-open-sheet><div class="t">全屏歌词动画<small>只在全屏歌词页生效</small></div><span class="val" data-curmode>经典</span><span class="chev">›</span></div>
+          <div class="row click" data-open-sheet><div class="t">每首歌换动画</div><span class="val" data-autoval>固定</span><span class="chev">›</span></div>
+          <div class="row"><div class="t">频谱<small>全屏歌词页左下角</small></div><div class="sw" data-spec role="switch" aria-checked="false"></div></div>
+        </div>
+        <div class="note">全屏歌词页右上角的 ✦ 打开的是同一个面板。</div>
+        <div class="lbl">歌词文字<span class="newmark">新</span></div>
+        <div class="seg">
+          <div class="row"><div class="t">拆分单行双语<small>“原文 / 译文”写在同一行的歌词，拆成原文和翻译</small></div><div class="sw" role="switch"></div></div>
+          <div class="row"><div class="t">简体转繁体<small>逐字转换，个别字转不准；需要 Android 10 及以上</small></div><div class="sw" role="switch"></div></div>
+          <div class="row"><div class="t">没有罗马音时自动转写<small>只转韩文、假名和西里尔字母，汉字不转</small></div><div class="sw" role="switch"></div></div>
+        </div>
+        <div class="cap">歌词下面那一行</div>
+        <div class="ctg"><button class="on">翻译</button><button>罗马音</button><button>都显示</button></div>
+        <div class="note">前三项对全屏歌词页、系统媒体播放条和桌面小组件都生效；最后一项只影响播放页。</div>
+        <div class="dim"><div class="lbl">系统媒体播放条</div><div class="seg"><div class="row"><div class="t">显示当前歌词</div><div class="sw on"></div></div></div></div>
+      </div>
+    </div></div>
+    <div class="demo-side">
+      <h4 style="margin-top:0">设置 → 播放页</h4>
+      <p>现有页面加两组，位置在“显示歌词背景”和“系统媒体播放条”之间，灰掉的是现有内容。页面跟随 App 主题（浅色、深色都对），组件全部是现有的：SectionLabel、ListRow（带值和箭头）、SwitchRow、ConnectedToggleGroup、SettingsNote。</p>
+      <ul>
+        <li>“全屏歌词动画”和“每首歌换动画”两行点进去打开上面那个面板，不另做一页。</li>
+        <li>“简体转繁体”在 Android 9 及以下灰掉，说明改成“需要 Android 10 及以上”。</li>
+        <li>“歌词下面那一行”同时作用于经典列表的第二行和其他模式的宿主副行。歌词没有罗马音时，选“罗马音”就回退显示翻译。</li>
+        <li>设置页入口的说明文字从“封面形状、歌词背景、律动与跟拍校准”改成“封面形状、歌词背景与动画、律动与跟拍校准”。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="tv">
+  <h2><span class="num">06</span>电视</h2>
+  <p>电视的全屏歌词（环境模式）整屏给舞台，右上角保留时钟。和手机同一套模式、同一份设置，区别只在这几处：画面限 30 帧（现有 TvFrameGate）；没有触摸，点不了舞台；星星数量、同时存在的年轮数按六成算；面板是右侧 360dp，遥控器上下键在面板里移动焦点。</p>
+  <div class="modebar" aria-label="切换模式"></div>
+  <div class="tv"><div class="scr" id="tvScr"></div></div>
+  <p class="small">电视画面和手机共用同一个模拟时钟，这里每两帧画一次，模拟 30 帧。</p>
+</section>
+
+<section id="modes">
+  <h2><span class="num">07</span>各模式移植说明</h2>
+  <p>效果描述和数值来自各模组源码。“面板”一列是放进动画面板的设置项数，其余保持原默认值。工作量按“小 ≈ 1 天、中 ≈ 2–3 天、大 ≈ 4 天以上”估，含手机、平板、电视三处检查。</p>
+  <div class="tbl"><table id="modeTable"></table></div>
+</section>
+
+<section id="arch">
+  <h2><span class="num">08</span>架构与接口</h2>
+  <h3>分层</h3>
+  <div class="layers">
+    <div><b>1</b>宿主背景：LyricsBackdrop，或模式自己的 Background<span>hostBackground</span></div>
+    <div><b>2</b>播放页图层 · 后（stage.back）<span>目前没有</span></div>
+    <div class="acc"><b>3</b>歌词动画 Stage（经典 = 现在的 LyricsList）<span>铺满，文字在安全区</span></div>
+    <div><b>4</b>宿主副行：翻译或罗马音<span>hostSubtitles</span></div>
+    <div><b>5</b>播放页图层 · 前（stage.front）：频谱<span>左下角，副行自动上移让位</span></div>
+    <div><b>6</b>页面控件：顶栏、进度、按钮<span>空闲淡出（已有 IdleGuard）</span></div>
+  </div>
+  <p>现在有 4 处调用 LyricsList：PhonePlayer、TabletopPlayer、TvPlayer、WidePlayer。全部换成 <code>LyricStage</code>，经典模式内部就是 LyricsList，参数原样传进去，所以默认情况下画面一个像素都不变。模式切换时只重建舞台，背景和控件不动。</p>
+  <h3>接口</h3>
+<pre><code><span class="cm">/** 一个歌词动画模式。编进 APK，不动态加载。 */</span>
+<span class="kw">interface</span> LyricVisualizer {
+    <span class="kw">val</span> id: String                     <span class="cm">// "rings"，存进设置</span>
+    <span class="kw">val</span> label: String                  <span class="cm">// "52Hz"</span>
+    <span class="kw">val</span> origin: ModOrigin?             <span class="cm">// 来源模组、版本、作者、许可；经典为 null</span>
+    <span class="kw">val</span> order: Int
+    <span class="kw">val</span> settings: List&lt;LyricSetting&gt;
+    <span class="kw">val</span> hostBackground: Boolean <span class="kw">get</span>() = <span class="kw">true</span>   <span class="cm">// false：画自己的 Background</span>
+    <span class="kw">val</span> hostSubtitles: Boolean <span class="kw">get</span>() = <span class="kw">true</span>    <span class="cm">// false：模式自己排翻译，宿主副行让位</span>
+    <span class="kw">val</span> wantsAudio: Boolean <span class="kw">get</span>() = <span class="kw">false</span>      <span class="cm">// true 才去开 RhythmAnalyzer</span>
+
+    <span class="kw">fun</span> subtitleInset(ctx: LyricStageContext): Dp = 0.dp   <span class="cm">// 模式占了底部（巨幕的跑马灯带）时副行往上让</span>
+
+    @Composable <span class="kw">fun</span> Background(ctx: LyricStageContext) {}
+    @Composable <span class="kw">fun</span> Stage(ctx: LyricStageContext, modifier: Modifier)
+}
+
+<span class="kw">sealed interface</span> LyricSetting {
+    <span class="kw">val</span> key: String; <span class="kw">val</span> label: String; <span class="kw">val</span> summary: String?
+    <span class="kw">data class</span> Number(..., <span class="kw">val</span> min: Float, <span class="kw">val</span> max: Float, <span class="kw">val</span> step: Float,
+                      <span class="kw">val</span> default: Float, <span class="kw">val</span> format: (Float) -&gt; String) : LyricSetting
+    <span class="kw">data class</span> Choice(..., <span class="kw">val</span> options: List&lt;Pair&lt;String, String&gt;&gt;, <span class="kw">val</span> default: String) : LyricSetting
+    <span class="kw">data class</span> Toggle(..., <span class="kw">val</span> default: Boolean) : LyricSetting
+}
+
+@Stable
+<span class="kw">class</span> LyricStageContext(
+    <span class="kw">val</span> lines: List&lt;StageLine&gt;,       <span class="cm">// 带句末时间；没有逐字时间的按句长均分</span>
+    <span class="kw">val</span> song: Song,
+    <span class="kw">val</span> seed: Long,                    <span class="cm">// 由歌曲 key 算出，随机效果可复现</span>
+    <span class="kw">val</span> clock: StageClock,             <span class="cm">// 帧精度歌词时间，含用户偏移</span>
+    <span class="kw">val</span> lineIndex: State&lt;Int&gt;,         <span class="cm">// 句间为 -1</span>
+    <span class="kw">val</span> paused: State&lt;Boolean&gt;,
+    <span class="kw">val</span> colors: StageColors,           <span class="cm">// PlayerTheme 颜色 + 封面主色</span>
+    <span class="kw">val</span> display: StageDisplay,         <span class="cm">// 字号档、控件空闲、减少动态效果、电视、安全区</span>
+    <span class="kw">val</span> settings: SettingValues,       <span class="cm">// 已合并默认值、已夹紧</span>
+    <span class="kw">val</span> audio: StageAudio?,            <span class="cm">// wantsAudio 才有：power、bass、mid、treble、kick、beat、bands(48)</span>
+)
+
+<span class="kw">interface</span> LyricStageLayer {               <span class="cm">// 频谱</span>
+    <span class="kw">val</span> slot: StageSlot                  <span class="cm">// Back / Front</span>
+    @Composable <span class="kw">fun</span> Layer(ctx: LyricStageContext, modifier: Modifier)
+}</code></pre>
+  <h3>文件</h3>
+  <div class="tbl"><table>
+    <thead><tr><th></th><th>文件</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td>新</td><td class="k">ui/player/stage/LyricStage.kt</td><td>宿主：分层、时钟、上下文、按设置选模式、音频按需开关</td></tr>
+      <tr><td>新</td><td class="k">ui/player/stage/LyricVisualizer.kt</td><td>接口、LyricSetting、上下文类型、模式注册表</td></tr>
+      <tr><td>新</td><td class="k">ui/player/stage/modes/*.kt</td><td>每个模式一个文件：Aurora、Rings52Hz、MisideDrop、WaveLight、VinylDisc、Stardrift、Cinerama、Jump</td></tr>
+      <tr><td>新</td><td class="k">ui/player/stage/SpectrumLayer.kt</td><td>频谱图层</td></tr>
+      <tr><td>新</td><td class="k">ui/player/stage/LyricDirector.kt</td><td>随机、按速度、换模式的时机、每首歌的记忆</td></tr>
+      <tr><td>新</td><td class="k">ui/player/stage/AnimationSheet.kt</td><td>动画面板，表单由设置表生成</td></tr>
+      <tr><td>新</td><td class="k">ui/LyricPipeline.kt</td><td>拆单行双语、简转繁、罗马音</td></tr>
+      <tr><td>改</td><td class="k">ui/LyricsParser.kt</td><td>LyricLine 加 romanization；mergeLayers 保留中间那层</td></tr>
+      <tr><td>改</td><td class="k">PhonePlayer、WidePlayer、TabletopPlayer、TvPlayer</td><td>LyricsList 换成 LyricStage；手机顶栏加 ✦，平板工具栏加一项</td></tr>
+      <tr><td>改</td><td class="k">PlayerScreen.kt</td><td>模式不要宿主背景时不画 LyricsBackdrop；歌词改走 LyricPipeline；更多菜单加一项</td></tr>
+      <tr><td>改</td><td class="k">RhythmAnalyzer.kt</td><td>RhythmFrame 补 48 段频带和 power</td></tr>
+      <tr><td>改</td><td class="k">MusicViewModel、widget/WidgetLyrics.kt</td><td>通知栏、小组件的歌词也走 LyricPipeline</td></tr>
+      <tr><td>改</td><td class="k">LyricsSettingsScreen.kt</td><td>两组新设置</td></tr>
+      <tr><td>改</td><td class="k">THIRD_PARTY_NOTICES.md</td><td>补移植模组的来源和许可</td></tr>
+    </tbody>
+  </table></div>
+  <h3>存储</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>键</th><th>值</th><th>默认</th></tr></thead>
+    <tbody>
+      <tr><td class="k">lyric_visualizer</td><td>模式 id</td><td>classic</td></tr>
+      <tr><td class="k">lyric_visualizer_auto</td><td>fixed / random / tempo</td><td>fixed</td></tr>
+      <tr><td class="k">lyric_tempo_rules</td><td>JSON：四档速度上限和对应模式</td><td>90 / 120 / 150</td></tr>
+      <tr><td class="k">lyric_visualizer_pins</td><td>JSON：歌曲 key → 固定的模式</td><td>空</td></tr>
+      <tr><td class="k">lyric_visualizer_memory</td><td>JSON：歌曲 key → 随机抽到的模式、测到的 BPM，最近 2000 首</td><td>空</td></tr>
+      <tr><td class="k">lyric_plugin_settings</td><td>JSON：模式 id → { 键: 值 }，只存改过的</td><td>空</td></tr>
+      <tr><td class="k">lyric_spectrum</td><td>Boolean</td><td>false</td></tr>
+      <tr><td class="k">lyric_split_bilingual</td><td>Boolean</td><td>false</td></tr>
+      <tr><td class="k">lyric_traditional</td><td>Boolean</td><td>false</td></tr>
+      <tr><td class="k">lyric_auto_romanize</td><td>Boolean</td><td>false</td></tr>
+      <tr><td class="k">lyric_subline</td><td>translation / romanization / both</td><td>translation</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="transform">
+  <h2><span class="num">09</span>歌词变换</h2>
+  <p>现在 <code>LyricsParser.parse</code> 有 3 个调用处：播放页、通知栏歌词（MusicViewModel）、桌面小组件（WidgetLyrics）。统一换成 <code>LyricPipeline.prepare(raw, prefs)</code>，三处看到的歌词一致。和 Folium 一样，每次都从原始歌词重新算，关掉开关就回到原样，不存改写后的结果。顺序：</p>
+  <ol>
+    <li><b>解析</b>：现有逻辑，只改一处：同一时间戳有三层时，中间那层存成 romanization。现在 mergeLayers 取最后一层当翻译，注释写的顺序是“原文、罗马音、翻译”，罗马音就被丢掉了。</li>
+    <li><b>拆单行双语</b>（lyric-split-translation 的规则）
+      <ul>
+        <li>分隔符：<code>/ ／ ｜ | //</code>，先统计全曲出现最多的那个，只用它。</li>
+        <li>先整首评估：系数 =（能拆的行 + 4）/（总行数 − 剔除行），大于 0.8 才动手。剔除空行、只有分隔符的行、间奏标记。</li>
+        <li>逐行：分隔符在行首或行尾的不拆，拆出来两段都要非空；已经有翻译的行不覆盖。</li>
+        <li>整首判定这一步是为了不误伤歌词本身里的斜杠，比如“AC/DC”。</li>
+      </ul>
+    </li>
+    <li><b>简转繁</b>：<code>Transliterator.getInstance("Hans-Hant")</code>，原文和翻译都转。含假名的行跳过，避免把日文汉字转坏（opencc 模组的 protectJapanese 也是这个意思）。Android 9 及以下没有这个类，开关灰掉。</li>
+    <li><b>罗马音</b>：优先用歌词自带的那层。打开“自动转写”且该行没有罗马音时，只处理不含汉字的行：韩文 Hangul-Latin、假名 Hiragana/Katakana-Latin、西里尔 Cyrillic-Latin。拼法和常见写法不同，所以默认关。</li>
+  </ol>
+  <p>每一步都是纯函数，单元测试直接喂字符串：拆分的系数边界、分隔符在行首行尾、三层时间戳、含假名跳过繁体转换。</p>
+</section>
+
+<section id="director">
+  <h2><span class="num">10</span>自动切换</h2>
+  <div class="cards">
+    <div class="card"><span class="tag">固定</span><h4>默认</h4><p>所有歌都用面板里选中的模式。</p></div>
+    <div class="card"><span class="tag">随机</span><h4>lyric-style-switcher</h4><p>每首歌随机换一个，不和上一首重复；记住每首歌抽到的，再听时一样（最近 2000 首）。</p></div>
+    <div class="card"><span class="tag">按速度</span><h4>bpm-style-director</h4><p>四档速度各对应一个模式，左闭右开。BPM 用 BeatTracker 的结果，置信度到 0.5 才算锁定；没锁定前保持当前模式。测到的 BPM 记下来，下次这首歌一开始就能换。</p></div>
+  </div>
+  <ul>
+    <li><b>什么时候换</b>：第一句之前还剩 0.4 秒以上，或者两句之间空当至少 1.5 秒、离下一句还有 0.8 秒以上。都不满足就等到下一首，绝不在一句唱到一半时换。</li>
+    <li><b>手动优先</b>：自动模式下用户在面板里点了某个模式，这首歌就不再自动换。“这首歌固定用它”开关写进 pins，以后每次都用。</li>
+    <li><b>AI 导演不做</b>：要用户填自己的大模型地址和密钥，还要把歌名、歌词发出去。</li>
+  </ul>
+</section>
+
+<section id="perf">
+  <h2><span class="num">11</span>性能与边界</h2>
+  <ul>
+    <li><b>一个帧循环</b>：舞台里只有一个 <code>withFrameNanos</code>，时钟只在绘制阶段读，不触发重组（KaraokeLine 现在就是这样）。页面不可见、App 退到后台时循环停。</li>
+    <li><b>音频按需</b>：只有 <code>wantsAudio</code> 的模式（52Hz、星潮）和频谱图层打开时才调 <code>RhythmAnalyzer.capture</code>，离开页面就释放。“律动”背景本来就在采集时共用同一路。</li>
+    <li><b>文字量一次</b>：每句的排版按“句子 + 字号 + 宽度”缓存，逐字位置只在换句或旋转屏幕时重算。</li>
+    <li><b>版本兜底</b>：模糊只在 Android 12+ 用 RenderEffect，以下改成透明度过渡；AGSL 只在 13+，以下走 Path 版本。minSdk 23 的设备所有模式都能用，只是少些效果。</li>
+    <li><b>电视</b>：30 帧，星星和年轮按六成数量画。</li>
+    <li><b>减少动态效果</b>：系统关了动画（动画时长缩放为 0）时，每个模式每句只画一张静帧。</li>
+    <li><b>读屏</b>：舞台对外是一个文本节点，内容是当前整句加翻译，不逐字播报。</li>
+    <li><b>没有歌词</b>：纯音乐、电台直播。52Hz 照原版从随机髓心长年轮，黑胶只转唱片，星潮只有星空；其余模式显示和经典一样的“暂无歌词”。</li>
+    <li><b>没有逐字时间</b>：按 52Hz 的规则，句长的 85% 均分给每个字。</li>
+    <li><b>长句</b>：最多 3 行，放不下就把字号乘 0.88 再试，最多 6 次。</li>
+    <li><b>折叠屏</b>：桌面姿态上半屏是歌词时同样用 LyricStage，安全区换成上半屏；铰链分栏时舞台只在歌词那一栏。</li>
+    <li><b>小窗</b>：高度不到 320dp 时自动退回经典，不保存这次退回。</li>
+  </ul>
+</section>
+
+<section id="license">
+  <h2><span class="num">12</span>许可</h2>
+  <p>myMusic 是 AGPL-3.0。</p>
+  <div class="tbl"><table>
+    <thead><tr><th>模组</th><th>许可</th><th>做法</th></tr></thead>
+    <tbody>
+      <tr><td class="k">虹光、52Hz</td><td>AGPL-3.0（folia-major 仓库）</td><td>许可相同，可以照逻辑移植。THIRD_PARTY_NOTICES 里已经有 folia-major 一节（海报墙），在那一节补上</td></tr>
+      <tr><td class="k">MiSide、动感波光、黑胶、星潮、bpm-style-director</td><td>MIT</td><td>保留版权声明，各写一节</td></tr>
+      <tr><td class="k">bilingual-ruby-lyrics</td><td>GPL-3.0</td><td>只借“三层同时间戳配对、假名和西里尔转写”的思路，转写用 ICU，不搬代码</td></tr>
+      <tr><td class="k">巨幕、跳一跳</td><td>包里没有许可文件</td><td>目录里填的源码地址（cnb.cool 上的 Folia 分叉）根目录是 AGPL-3.0，但看不到模组目录，不能算数。先问作者 tumuyan；不同意就只按效果描述重写，不看代码</td></tr>
+      <tr><td class="k">拆单行双语、频谱、智能歌词样式切换</td><td>包里没有许可文件</td><td>功能简单，按 README 描述自己实现</td></tr>
+      <tr><td class="k">opencc-traditional-lyrics</td><td>MIT（词典 Apache-2.0）</td><td>不用它的代码和词典，改用系统 ICU</td></tr>
+    </tbody>
+  </table></div>
+  <p>README 只在现有的“来源与许可”那一行里加链接，不写细节。</p>
+</section>
+
+<section id="phases">
+  <h2><span class="num">13</span>分期</h2>
+  <ol>
+    <li><b>地基</b>：LyricStage、接口、上下文、动画面板和设置页；LyricLine 加罗马音和句末时间；经典、虹光、52Hz。</li>
+    <li><b>MIT 组</b>：黑胶、动感波光、MiSide、星潮，加频谱图层。</li>
+    <li><b>歌词文字</b>：拆单行双语、简转繁、罗马音副行。</li>
+    <li><b>自动切换</b>：随机、按速度。</li>
+    <li><b>巨幕、跳一跳</b>：拿到授权或重写完成后。</li>
+  </ol>
+  <p>每期单独提交。单元测试覆盖歌词变换、逐字时间、设置值夹紧；每期都在手机、平板、折叠屏、电视模拟器上过一遍。</p>
+</section>
+
+<section id="open">
+  <h2><span class="num">14</span>待定</h2>
+  <ol>
+    <li><b>第一批做哪些模式？</b>建议第 1、2 期一起做：虹光、52Hz、黑胶、动感波光、MiSide、星潮。</li>
+    <li><b>巨幕和跳一跳</b>：先找作者要授权，还是直接按效果重写？建议先问。</li>
+    <li><b>自动补中文字幕要不要做？</b>这是 opencc 模组的另一半：这首歌没有翻译时，按歌名和歌手去别的平台找带翻译的歌词，按时间轴对齐后补上。要联网、要多平台搜索，建议另起一份设计。</li>
+    <li><b>AI 导演</b>：建议不做。</li>
+    <li><b>自动转写罗马音</b>：建议默认关。</li>
+    <li><b>手机入口</b>：放在全屏歌词页顶栏可以吗？</li>
+  </ol>
+</section>
+
+</main>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+const FONT = '"Roboto Flex","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+const TAU = Math.PI * 2;
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, k) => a + (b - a) * k;
+const easeOutCubic = p => 1 - Math.pow(1 - clamp(p), 3);
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+
+/* ---------- 示例歌曲（歌词为本稿自拟） ---------- */
+const RAW = [
+  [0.6, '把夜色调成静音', 'Turn the night down to silence'],
+  [4.6, '只留下海浪的呼吸', 'Leave only the breathing of the waves'],
+  [8.6, '我在灯塔下等你', 'I wait for you beneath the lighthouse'],
+  [12.6, '像潮汐认得月亮', 'The way the tide knows the moon'],
+  [16.6, 'Signal in the tide', '潮汐里的信号'],
+  [20.6, '每一次靠近', 'Every time I draw near'],
+  [24.6, '都是远方的回音', 'An echo from far away'],
+  [28.6, '别让风吹散我们', "Don't let the wind scatter us"],
+];
+const DUR = 32.6;
+const SONG = { title: '潮汐信号', artist: '示例歌手', key: 'demo:tide-signal' };
+const LINES = RAW.map(([t, text, tr], i) => {
+  const next = i + 1 < RAW.length ? RAW[i + 1][0] : DUR + 0.6;
+  const e = next - 0.4;
+  const cs = [...text];
+  const sing = (e - t) * 0.82;
+  return { t, e, text, tr, chars: cs.map((c, k) => ({ c, s: t + sing * k / cs.length, e: t + sing * (k + 1) / cs.length })) };
+});
+const lineIndex = t => { let k = -1; for (let i = 0; i < LINES.length; i++) if (LINES[i].t <= t) k = i; return k; };
+
+/* ---------- 时钟与模拟音频（112 BPM） ---------- */
+const Clock = { t: 3.2, wall: 0, dt: 0, paused: false, last: performance.now() };
+function tick(now) {
+  const d = Math.min(0.05, Math.max(0, (now - Clock.last) / 1000));
+  Clock.last = now; Clock.dt = d; Clock.wall += d;
+  if (!Clock.paused) { Clock.t += d; if (Clock.t >= DUR) Clock.t -= DUR; }
+}
+const BEAT = 60 / 112;
+function audioAt(t, paused) {
+  const bands = new Float32Array(48);
+  if (paused) return { power: 0, bass: 0, mid: 0, treble: 0, kick: 0, beat: Math.floor(t / BEAT), bands };
+  const ph = (t % BEAT) / BEAT, kick = Math.exp(-ph * 7);
+  const sec = 0.55 + 0.3 * Math.sin(t / DUR * TAU - 1.2);
+  for (let i = 0; i < 48; i++) {
+    const f = i / 47;
+    const base = (0.75 - 0.5 * f) * sec + 0.12 * Math.sin(t * (2 + i * 0.37) + i);
+    bands[i] = clamp(base + (f < 0.18 ? kick * 0.45 * (1 - f / 0.18) : 0) + 0.06 * Math.sin(t * 9.1 + i * 1.7));
+  }
+  return { power: clamp(sec * 0.6 + kick * 0.4), bass: clamp(0.25 + 0.7 * kick * sec), mid: clamp(0.4 + 0.2 * Math.sin(t * 1.3)), treble: clamp(0.3 + 0.2 * Math.sin(t * 2.1)), kick, beat: Math.floor(t / BEAT), bands };
+}
+
+/* ---------- 主题（播放页固定深色 Vibrant）与封面 ---------- */
+const TH = { on: '#dff7f3', onv: '#8fb7b2', primary: '#9ff3e4', accent: '#66ccff', cover: [214, 122, 98] };
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const COVER = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const grd = g.createLinearGradient(0, 0, 256, 256);
+  grd.addColorStop(0, '#13394a'); grd.addColorStop(0.55, '#2f7f78'); grd.addColorStop(1, '#e08a6e');
+  g.fillStyle = grd; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = 'rgba(255,236,214,.92)'; g.beginPath(); g.arc(178, 74, 30, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.36)'; g.lineWidth = 3;
+  for (let k = 0; k < 5; k++) { g.beginPath(); for (let x = 0; x <= 256; x += 8) { const y = 150 + k * 19 + Math.sin(x / 22 + k) * 6; x ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); }
+  return c;
+})();
+window.__lyricCover = COVER;
+
+/* ---------- 排版：中日韩逐字、拉丁按词换行，返回每个字的位置和时间 ---------- */
+const LATIN = /[A-Za-z0-9'’\-]/;
+function layout(g, line, maxW, lh, align = 'center', maxRows = 3) {
+  const cs = line.chars, toks = [];
+  for (let i = 0; i < cs.length;) {
+    if (/\s/.test(cs[i].c)) { toks.push({ idx: [i], sp: true }); i++; continue; }
+    if (LATIN.test(cs[i].c)) { const s = i; while (i < cs.length && LATIN.test(cs[i].c)) i++; toks.push({ idx: Array.from({ length: i - s }, (_, k) => s + k) }); continue; }
+    toks.push({ idx: [i] }); i++;
+  }
+  const w = cs.map(ch => g.measureText(ch.c).width);
+  const rows = [[]]; let rw = 0;
+  for (const tk of toks) {
+    const tw = tk.idx.reduce((a, k) => a + w[k], 0);
+    const row = rows[rows.length - 1];
+    if (tk.sp) { if (row.length) { row.push(...tk.idx); rw += tw; } continue; }
+    if (row.length && rw + tw > maxW && rows.length < maxRows) { while (row.length && /\s/.test(cs[row[row.length - 1]].c)) { rw -= w[row.pop()]; } rows.push([]); rw = 0; }
+    rows[rows.length - 1].push(...tk.idx); rw += tw;
+  }
+  const out = [];
+  rows.forEach((row, r) => {
+    const total = row.reduce((a, k) => a + w[k], 0);
+    let x = align === 'center' ? -total / 2 : 0;
+    for (const k of row) { out.push({ ...cs[k], k, x, y: (r - (rows.length - 1) / 2) * lh, w: w[k], row: r }); x += w[k]; }
+  });
+  return { chars: out, rows: rows.length, h: rows.length * lh };
+}
+
+/* ---------- 宿主背景：流光场的简化（三团封面色光 + 压暗） ---------- */
+function drawBackdrop(g, W, H, S) {
+  g.fillStyle = '#041210'; g.fillRect(0, 0, W, H);
+  const blobs = [[0.2, 0.18, [64, 132, 170]], [0.85, 0.32, TH.cover], [0.45, 0.9, [46, 128, 108]]];
+  blobs.forEach(([x, y, c], i) => {
+    const px = W * (x + 0.06 * Math.sin(S.wall * 0.11 + i * 2)), py = H * (y + 0.05 * Math.cos(S.wall * 0.09 + i));
+    const r = Math.max(W, H) * (0.55 + 0.05 * Math.sin(S.wall * 0.2 + i) + (S.reactive ? 0.06 * S.audio.bass : 0));
+    const grd = g.createRadialGradient(px, py, 0, px, py, r);
+    grd.addColorStop(0, rgba(c, 0.42)); grd.addColorStop(1, rgba(c, 0));
+    g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  });
+  const s = g.createLinearGradient(0, 0, 0, H);
+  s.addColorStop(0, 'rgba(4,12,11,.38)'); s.addColorStop(0.5, 'rgba(4,12,11,.5)'); s.addColorStop(1, 'rgba(4,12,11,.86)');
+  g.fillStyle = s; g.fillRect(0, 0, W, H);
+}
+
+/* ======================================================================
+   各模式。create() 返回带自己状态的实例：手机、电视、缩略图各用各的。
+   S = { t, dt, wall, paused, idx, audio, still, wide }
+   ====================================================================== */
+const MODES = {};
+
+/* 经典：现在的 LyricsList，当前行放大停在 42% 处，邻行 60%，更远 38% 并轻微模糊，逐字填色 */
+MODES.classic = { create() {
+  let off = null, lifts = LINES.map(() => 0);
+  return { draw(g, W, H, S) {
+    const base = S.wide ? 24 : 21, grow = 1.22, big = base * grow, lh = big * 1.3, gap = S.wide ? 20 : 16, trF = big * 0.62;
+    const maxW = W - 28;
+    g.font = `900 ${big}px ${FONT}`;
+    const blocks = LINES.map(l => { const L = layout(g, l, maxW, lh, 'left'); return { L, hc: L.h + trF * 1.25 + 2 }; });
+    const k = S.still ? 1 : 1 - Math.exp(-S.dt * 7);
+    lifts = lifts.map((v, i) => lerp(v, i === S.idx ? 1 : 0, k));
+    const scales = lifts.map(v => (base * (1 + (grow - 1) * v)) / big);
+    const hs = blocks.map((b, i) => b.hc * scales[i] + gap);
+    const cur = Math.max(0, S.idx); let acc = 0;
+    for (let i = 0; i < cur; i++) acc += hs[i];
+    const target = H * 0.42 - (acc + hs[cur] / 2);
+    off = off === null || S.still ? target : lerp(off, target, 1 - Math.exp(-S.dt * 5));
+    let y = off;
+    blocks.forEach((b, i) => {
+      const s = scales[i], d = Math.min(2, Math.abs(i - S.idx));
+      if (y + hs[i] > -40 && y < H + 40) {
+        g.save();
+        g.globalAlpha = d <= 1 ? 1 - 0.4 * d : 0.38;
+        if (d >= 2) g.filter = 'blur(1.2px)';
+        g.translate(14, y + gap / 2); g.scale(s, s);
+        g.font = `${i === S.idx ? 900 : 650} ${big}px ${FONT}`; g.textBaseline = 'middle';
+        const top = lh / 2;
+        for (const ch of b.L.chars) {
+          const yy = top + ch.row * lh;
+          if (i === S.idx) {
+            g.fillStyle = 'rgba(223,247,243,.45)'; g.fillText(ch.c, ch.x, yy);
+            const p = clamp((S.t - ch.s) / (ch.e - ch.s));
+            if (p > 0) { g.save(); g.beginPath(); g.rect(ch.x, yy - lh / 2, ch.w * p, lh); g.clip(); g.fillStyle = TH.on; g.fillText(ch.c, ch.x, yy); g.restore(); }
+          } else { g.fillStyle = TH.on; g.fillText(ch.c, ch.x, yy); }
+        }
+        g.font = `500 ${trF}px ${FONT}`; g.fillStyle = TH.onv; g.fillText(LINES[i].tr, 0, b.L.h + 2 + trF * 0.62);
+        g.restore();
+      }
+      y += hs[i];
+    });
+    g.save(); g.globalCompositeOperation = 'destination-in';
+    const m = g.createLinearGradient(0, 0, 0, H);
+    m.addColorStop(0, 'rgba(0,0,0,0)'); m.addColorStop(0.14, '#000'); m.addColorStop(0.8, '#000'); m.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = m; g.fillRect(0, 0, W, H); g.restore();
+  } };
+} };
+
+/* 虹光（sample-aurora-visualizer）：只显示当前句，逐字按起点和进度换色相，唱到一半的字带光晕、抬 2px */
+MODES.aurora = { create() { return { draw(g, W, H, S) {
+  if (S.idx < 0) return;
+  const line = LINES[S.idx];
+  const fs = Math.min(S.wide ? 46 : 33, W * 0.1);
+  g.font = `500 ${fs}px ${FONT}`; g.textBaseline = 'middle';
+  const L = layout(g, line, W * 0.84, fs * 1.35);
+  g.save(); g.translate(W / 2, H * 0.46);
+  for (const ch of L.chars) {
+    const tt = clamp((S.t - ch.s) / (ch.e - ch.s));
+    if (S.t < ch.s) { g.shadowBlur = 0; g.fillStyle = 'rgba(255,255,255,.28)'; g.fillText(ch.c, ch.x, ch.y); continue; }
+    const hue = Math.round(((ch.s % 4) * 70 + tt * 40) % 360);
+    const lift = tt > 0 && tt < 1;
+    g.shadowColor = lift ? `hsla(${hue},90%,65%,.65)` : 'transparent';
+    g.shadowBlur = lift ? 8 + 14 * tt : 0;
+    g.fillStyle = `hsl(${hue},90%,${58 + 14 * tt}%)`;
+    g.fillText(ch.c, ch.x, ch.y - (lift ? 2 : 0));
+  }
+  g.restore();
+} }; } };
+
+/* 52Hz（visualizer52hz）：整句出现、逐字点亮；每个拍点从字形外缘发出一圈“年轮”，响度决定粗细与亮度 */
+function rnd(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function fnv(s) { let h = 0x811c9dc5; for (const c of s) { h ^= c.codePointAt(0); h = Math.imul(h, 0x01000193); } return h >>> 0; }
+MODES.rings = { create() {
+  let rings = [], lastBeat = null, fades = [], ring = null, lastIdx = -2;
+  const union = (c, boxes, inflate) => { for (const b of boxes) { const r = Math.max(0.5, inflate + b.r0); c.beginPath(); c.roundRect(b.x - inflate, b.y - inflate, b.w + inflate * 2, b.h + inflate * 2, r); c.fill(); } };
+  return { draw(g, W, H, S) {
+    const fs = Math.max(30, Math.min(W * (S.wide ? 0.058 : 0.088), H * 0.1));
+    const cx = W / 2, cy = H * 0.46;
+    if (S.idx !== lastIdx) { if (lastIdx >= 0) fades.push({ idx: lastIdx, from: S.wall }); lastIdx = S.idx; }
+    const metrics = idx => {
+      const line = LINES[idx]; g.font = `700 ${fs}px ${FONT}`;
+      const L = layout(g, line, W * 0.8, fs * 1.34);
+      const r = rnd(fnv(line.text));
+      L.chars.forEach(ch => { ch.dx = (r() * 2 - 1) * 0.035 * fs; ch.dy = (r() * 2 - 1) * 0.11 * fs; ch.rot = (r() * 2 - 1) * 0.075; ch.sc = 1 + (r() * 2 - 1) * 0.07; });
+      return L;
+    };
+    const boxesOf = L => L.chars.filter(ch => ch.c.trim()).map(ch => ({ x: cx + ch.x + ch.dx - fs * 0.04, y: cy + ch.y + ch.dy - fs * 0.48, w: ch.w + fs * 0.08, h: fs * 0.96, r0: fs * 0.14 }));
+    const curL = S.idx >= 0 ? metrics(S.idx) : null;
+    // 拍点发环；静帧时预铺一组
+    if (S.still && curL && !rings.length) for (let k = 3; k >= 0; k--) rings.push({ born: S.t - k * BEAT * 1.1, e: 0.3 + 0.6 * ((k * 37) % 10) / 10, boxes: boxesOf(curL) });
+    if (!S.paused && curL && lastBeat !== null && S.audio.beat !== lastBeat) rings.push({ born: S.t, e: S.audio.power, boxes: boxesOf(curL) });
+    lastBeat = S.audio.beat;
+    const halfDiag = Math.hypot(W, H) / 2, speed = halfDiag / 10, gap0 = 0.55 * fs * 0.35;
+    rings = rings.filter(r => (S.t - r.born) * speed < halfDiag && S.t >= r.born - 0.01);
+    if (rings.length > 4) rings = rings.slice(-4); // 原版着色器只有 4 个槽位
+    if (!ring || ring.width !== Math.round(W * DPR) || ring.height !== Math.round(H * DPR)) { ring = document.createElement('canvas'); ring.width = Math.round(W * DPR); ring.height = Math.round(H * DPR); }
+    const rc = ring.getContext('2d');
+    for (const r of rings) {
+      const d = (S.t - r.born) * speed, lw = (0.5 + 1.9 * Math.pow(r.e, 1.5)) * 1.4;
+      const fade = Math.pow(1 - d / halfDiag, 1.8) * (0.25 + 0.75 * r.e) * 0.8;
+      if (fade <= 0.01) continue;
+      rc.setTransform(DPR, 0, 0, DPR, 0, 0); rc.clearRect(0, 0, W, H);
+      const mix = clamp(d / halfDiag * 1.6);
+      rc.fillStyle = `rgb(${Math.round(lerp(102, 159, mix))},${Math.round(lerp(204, 243, mix))},${Math.round(lerp(255, 228, mix))})`;
+      union(rc, r.boxes, gap0 + d + lw);
+      rc.globalCompositeOperation = 'destination-out'; union(rc, r.boxes, gap0 + d); rc.globalCompositeOperation = 'source-over';
+      g.save(); g.globalAlpha = fade; g.drawImage(ring, 0, 0, W, H); g.restore();
+    }
+    // 字：底色 primary 30%，点亮 easeOutCubic，唱时微微鼓起；整句 0.45s 淡入淡出
+    const drawLine = (L, alpha) => {
+      g.save(); g.translate(cx, cy); g.textBaseline = 'middle'; g.font = `700 ${fs}px ${FONT}`;
+      for (const ch of L.chars) {
+        const p = (S.t - ch.s) / clamp(ch.e - ch.s, 0.12, 0.45);
+        const lit = S.still && ch.s < S.t ? 1 : easeOutCubic(p);
+        const sw = 1 + 0.12 * Math.sin(Math.PI * clamp(p));
+        g.save(); g.translate(ch.x + ch.dx + ch.w / 2, ch.y + ch.dy); g.rotate(ch.rot); g.scale(ch.sc * sw, ch.sc * sw);
+        g.globalAlpha = alpha * 0.3; g.fillStyle = TH.primary; g.fillText(ch.c, -ch.w / 2, 0);
+        if (lit > 0) { g.globalAlpha = alpha * lit; g.shadowColor = TH.accent; g.shadowBlur = fs * 0.45; g.fillText(ch.c, -ch.w / 2, 0); }
+        g.restore();
+      }
+      g.restore();
+    };
+    fades = fades.filter(f => S.wall - f.from < 0.45);
+    for (const f of fades) drawLine(metrics(f.idx), 1 - (S.wall - f.from) / 0.45);
+    if (curL) drawLine(curL, S.still ? 1 : clamp((S.t - LINES[S.idx].t) / 0.45 + 0.05));
+  } };
+} };
+
+/* MiSide 掉落（miside-drop）：打字机逐字出现，整句唱完整行掉到地面线，回弹、停留、淡出；灰阶 7 层挤出 */
+MODES.miside = { create() {
+  let parts = [], built = -2, typed = null, dropped = new Set(), pid = 0;
+  const R = rnd(fnv(SONG.key));
+  const extr = (g, c, x, y) => {
+    for (let i = 7; i >= 1; i--) { const v = Math.round(168 - (168 - 64) * (i - 1) / 6); g.fillStyle = `rgb(${v},${v},${v + 5})`; g.fillText(c, x + i, y + i); }
+    g.fillStyle = '#fff'; g.fillText(c, x, y);
+  };
+  return { draw(g, W, H, S) {
+    const fs = S.wide ? 46 : 30, ground = H * 0.82;
+    g.font = `700 ${fs}px ${FONT}`; g.textBaseline = 'alphabetic';
+    // 地面线
+    const grd = g.createLinearGradient(W * 0.08, 0, W * 0.92, 0);
+    grd.addColorStop(0, 'rgba(255,255,255,0)'); grd.addColorStop(0.18, 'rgba(255,255,255,.28)'); grd.addColorStop(0.82, 'rgba(255,255,255,.28)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd; g.globalAlpha = 0.5; g.fillRect(W * 0.08, ground, W * 0.84, 1); g.globalAlpha = 1;
+    const spawn = (idx, ch, k, n, vyMin = 0) => {
+      parts.push({ id: pid++, row: idx, c: ch.c, x: W / 2 + ch.x, y: H * 0.42 + ch.y, w: ch.w, vx: (R() - 0.5) * 170 * 0.3, vy: Math.max(vyMin, -60 - 80 * R()), rz: 0, rx: 0, ry: 0,
+        vrz: (R() - 0.5) * 300 * 0.3, vrx: (R() - 0.5) * 56 * 0.3, vry: (R() - 0.5) * 56 * 0.3, g: 1400 * (0.88 + 0.24 * R()), rest: 0.34 * (0.85 + 0.25 * R()), wait: 0.014 * k, settled: -1 });
+    };
+    if (S.idx !== built) {
+      if (typed && built >= 0 && !dropped.has(built)) { typed.chars.forEach((ch, k) => spawn(built, ch, k, typed.chars.length, 650)); dropped.add(built); }
+      built = S.idx; typed = S.idx >= 0 ? layout(g, LINES[S.idx], W * 0.84, fs * 1.35) : null;
+      if (S.still && S.idx > 0) { // 静帧：上一句已经落地
+        const prev = layout(g, LINES[S.idx - 1], W * 0.84, fs * 1.35);
+        prev.chars.forEach((ch, k) => parts.push({ id: pid++, row: S.idx - 1, c: ch.c, x: W / 2 + ch.x + (R() - 0.5) * 20, y: ground - fs * 0.05, w: ch.w, vx: 0, vy: 0, rz: (R() - 0.5) * 40, rx: 0, ry: 0, vrz: 0, vrx: 0, vry: 0, g: 0, rest: 0, wait: 0, settled: S.wall }));
+      }
+    }
+    if (S.idx >= 0 && typed && !dropped.has(S.idx) && S.t >= LINES[S.idx].e && !S.still) { typed.chars.forEach((ch, k) => spawn(S.idx, ch, k, typed.chars.length)); dropped.add(S.idx); }
+    if (S.t < 0.7) dropped.clear();
+    // 正在打字的这一句
+    if (typed && !dropped.has(S.idx)) {
+      for (const ch of typed.chars) if (S.still ? ch.s < S.t + 0.6 : S.t >= ch.s) extr(g, ch.c, W / 2 + ch.x, H * 0.42 + ch.y);
+    }
+    // 粒子：只在播放时积分（墙钟），暂停冻结
+    const dt = S.paused || S.still ? 0 : S.dt;
+    const rows = [...new Set(parts.map(p => p.row))];
+    const keep = new Set(rows.slice(-3));
+    parts = parts.filter(p => keep.has(p.row) || p.settled < 0);
+    for (const p of parts) {
+      if (p.wait > 0) { p.wait -= dt; } else if (p.settled < 0 && dt > 0) {
+        p.vy = Math.min(2600, p.vy + p.g * dt); p.vx *= Math.pow(0.985, 60 * dt);
+        p.x += p.vx * dt; p.y += p.vy * dt; p.rz += p.vrz * dt;
+        p.rx = clamp(p.rx + p.vrx * dt, -16, 16); p.ry = clamp(p.ry + p.vry * dt, -16, 16);
+        if (Math.abs(p.rx) >= 16) p.vrx *= -1; if (Math.abs(p.ry) >= 16) p.vry *= -1;
+        const floor = ground - fs * 0.05;
+        if (p.y >= floor) { p.y = floor; if (Math.abs(p.vy) > 50) { p.vy *= -p.rest; p.vx *= 0.7; p.vrz *= 0.4; p.vrx *= 0.4; p.vry *= 0.4; } else { p.vy = p.vx = p.vrz = 0; p.rx = p.ry = 0; p.settled = S.wall; } }
+      }
+      let a = 1;
+      if (p.settled >= 0) { const age = S.wall - p.settled; a = age < 2.5 ? 1 : 1 - (age - 2.5) / 1.5; }
+      if (a <= 0) { p.dead = true; continue; }
+      g.save(); g.globalAlpha = a; g.translate(p.x + p.w / 2, p.y); g.rotate(p.rz * Math.PI / 180);
+      g.scale(Math.cos(p.ry * Math.PI / 180), Math.cos(p.rx * Math.PI / 180));
+      extr(g, p.c, -p.w / 2, 0); g.restore();
+    }
+    parts = parts.filter(p => !p.dead);
+  } };
+} };
+
+/* 动感波光（wave-light）：两侧同心声波随封面主色呼吸，超大水印关键词，整句从中间往两边浮现；自己画背景和翻译 */
+function keyword(text) {
+  const words = text.match(/[A-Za-z]+|[一-鿿]{2,}/g) || [text];
+  if (/[A-Za-z]/.test(text)) return words.reduce((a, b) => (b.length > a.length ? b : a), '').toUpperCase();
+  const cjk = [...text.replace(/[^一-鿿]/g, '')];
+  return cjk.slice(Math.max(0, cjk.length - 2)).join('');
+}
+MODES.wave = { create() {
+  let shown = -2, since = 0;
+  return { draw(g, W, H, S) {
+    const c = TH.cover;
+    const bg = g.createRadialGradient(W / 2, H * 0.44, 0, W / 2, H * 0.44, Math.max(W, H) * 0.9);
+    bg.addColorStop(0, rgba(c.map(v => v * 0.24), 1)); bg.addColorStop(0.58, rgba(c.map(v => v * 0.07), 1)); bg.addColorStop(1, rgba(c.map(v => v * 0.04), 1));
+    const bt = S.bt || 0, bb = S.bb || 0;
+    g.fillStyle = bg; g.fillRect(0, -bt, W, H + bt + bb);
+    const wave = [120, 205, 230], tint = [244, 226, 220];
+    const t = S.wall;
+    g.save(); g.globalCompositeOperation = 'lighter';
+    const baseR = Math.min(W, H) * 0.62;
+    [[0.015 * W + 0.012 * W * Math.sin(0.06 * t + 1.2), 1, 1, 1], [0.985 * W + 0.012 * W * Math.sin(0.055 * t + 3.9), 1.04, 1.06, 0.92]].forEach(([cx, rk, tk, ak], side) => {
+      const cy = H * (0.45 + 0.02 * Math.sin(0.09 * t)) * (side ? 0.98 : 1), R = baseR * rk, tt = t * tk;
+      const core = g.createRadialGradient(cx, cy, 0, cx, cy, R * 0.9);
+      core.addColorStop(0, rgba(wave, 0.15 * ak)); core.addColorStop(0.5, rgba(wave, 0.06 * ak)); core.addColorStop(1, rgba(wave, 0));
+      g.fillStyle = core; g.fillRect(0, -bt, W, H + bt + bb);
+      const stroke = (a) => { const gr = g.createLinearGradient(0, cy - R, 0, cy + R); gr.addColorStop(0, rgba(wave, 0)); gr.addColorStop(0.5, rgba(wave, a)); gr.addColorStop(1, rgba(wave, 0)); return gr; };
+      for (let i = 0; i < 9; i++) {
+        const r1 = Math.abs(Math.sin((i + 1) * 127.1 + side * 311.7) * 43758.5453) % 1;
+        const r = R * (0.16 + 0.92 * i / 9) * (1 + 0.15 * Math.sin(tt * (0.65 + 0.15 * r1) - 0.62 * i + 2.1 * (side + 1)));
+        const a = (0.03 + 0.095 * (1 - i / 9)) * (0.6 + 0.4 * Math.sin(tt * 0.7 + i)) * ak;
+        g.strokeStyle = stroke(a * 2.2); g.lineWidth = H * (0.0012 + 0.005 * r1); g.beginPath(); g.arc(cx, cy, Math.max(1, r), 0, TAU); g.stroke();
+      }
+      for (let k = 0; k < 3; k++) {
+        const p = (tt * 0.12 + k / 3 + 0.21 * (side + 1)) % 1, r = R * (0.1 + 1.04 * p);
+        g.strokeStyle = stroke(0.17 * Math.pow(1 - p, 1.6) * 2 * ak); g.lineWidth = H * 0.003; g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.stroke();
+      }
+      for (let k = 0; k < 3; k++) {
+        const sp = 0.9 + 1.5 * ((k * 0.37 + side * 0.21) % 1), w = (0.05 + 0.07 * ((k * 0.53) % 1)) * (k % 2 ? -1 : 1);
+        const a0 = tt * w + k * 2.1, r = R * (0.35 + 0.18 * k);
+        g.strokeStyle = stroke(0.22 * ak); g.lineWidth = H * 0.0028; g.beginPath(); g.arc(cx, cy, r, a0, a0 + sp); g.stroke();
+      }
+    });
+    g.restore();
+    if (S.idx !== shown) { shown = S.idx; since = S.wall; }
+    const age = S.still ? 9 : S.wall - since;
+    const line = LINES[Math.max(0, S.idx)];
+    const base = Math.round(Math.min(110, Math.max(18, H * (S.wide ? 0.085 : 0.06))));
+    // 水印关键词
+    const kw = keyword(line.text);
+    const kFont = Math.max(28, Math.min(H * 0.42, W * 0.8 / Math.max(1, kw.length))) * 0.8;
+    const ka = smooth(0, 1, age / 0.55);
+    g.save(); g.font = `800 ${kFont}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.filter = `blur(${Math.max(2, Math.round(kFont * 0.025)) + (1 - ka) * 16}px)`;
+    g.globalAlpha = 0.92 * ka; g.fillStyle = rgba(c.map(v => v * 0.4), 0.88);
+    g.translate(W / 2, H * 0.46); g.scale(1.06 - 0.06 * ka, 1.06 - 0.06 * ka); g.fillText(kw, 0, 0); g.restore();
+    // 当前句：中间的字先出现，往两边错开 80ms
+    g.save(); g.font = `700 ${base}px ${FONT}`; g.textBaseline = 'middle';
+    const L = layout(g, line, W * 0.86, base * 1.3);
+    const mid = (L.chars.length - 1) / 2;
+    g.translate(W / 2, H * 0.46);
+    L.chars.forEach((ch, i) => {
+      const dist = Math.abs(i - mid), p = easeOutCubic((age - (0.1 + 0.08 * dist)) / 0.52);
+      if (p <= 0) return;
+      g.save(); g.globalAlpha = p; g.filter = p < 1 ? `blur(${(1 - p) * 14}px)` : 'none';
+      g.shadowColor = rgba(c.map(v => v * 0.4), 0.5); g.shadowBlur = 10;
+      g.fillStyle = rgba(tint, 0.97); g.fillText(ch.c, ch.x + Math.sign(i - mid) * Math.min(dist, 4) * 0.7 * base * (1 - p), ch.y); g.restore();
+    });
+    g.restore();
+    // 翻译：模式自己画
+    const tp = easeOutCubic((age - 0.1) / 0.5);
+    g.save(); g.globalAlpha = 0.68 * tp; g.filter = tp < 1 ? `blur(${(1 - tp) * 4}px)` : 'none';
+    g.font = `400 ${Math.max(12, base * 0.4)}px ${FONT}`; g.textAlign = 'center'; g.fillStyle = rgba(tint, 1);
+    g.fillText(line.tr, W / 2, H * 0.75 + kFont / 4); g.restore();
+  } };
+} };
+
+/* 黑胶唱片（vinyl-disc）：封面作碟心，播放时转、唱臂落下，暂停抬起停转；歌词排在唱片旁（竖屏改成上下排） */
+MODES.vinyl = { create() {
+  let angle = 0, arm = 0;
+  return { draw(g, W, H, S) {
+    const wide = W > H;
+    if (!S.paused && !S.still) angle += S.dt * TAU / 20;
+    const armTarget = S.paused ? -50 : 0;
+    arm = S.still ? armTarget : lerp(arm, armTarget, 1 - Math.exp(-S.dt * 5));
+    const d = wide ? Math.max(64, Math.min(H * 0.62, W * 0.42)) : Math.min(W * 0.62, H * 0.4);
+    const dx = wide ? W * 0.85 - d / 2 - W * 0.03 : W / 2, dy = wide ? H / 2 : H * 0.05 + d / 2 + 6;
+    const r = d / 2;
+    // 弥散投影
+    const halo = g.createRadialGradient(dx, dy, 0, dx, dy, r * 1.25);
+    halo.addColorStop(0, rgba(TH.cover, 0.55)); halo.addColorStop(0.36 / 1.25 * 1.25 * 0.8, rgba(TH.cover, 0.34)); halo.addColorStop(0.54, rgba(TH.cover, 0.14)); halo.addColorStop(0.684, rgba(TH.cover, 0));
+    g.save(); g.filter = `blur(${d * 0.09}px)`; g.fillStyle = halo; g.beginPath(); g.arc(dx, dy, r * 1.25, 0, TAU); g.fill(); g.restore();
+    g.save(); g.translate(dx, dy);
+    const disc = g.createRadialGradient(0, 0, 0, 0, 0, r);
+    disc.addColorStop(0, '#262626'); disc.addColorStop(0.3, '#1b1b1b'); disc.addColorStop(0.7, '#121212'); disc.addColorStop(1, '#0d0d0d');
+    g.fillStyle = disc; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.045)'; g.lineWidth = 1;
+    for (let rr = r * 0.62; rr < r * 0.96; rr += 4) { g.beginPath(); g.arc(0, 0, rr, 0, TAU); g.stroke(); }
+    g.strokeStyle = 'rgba(255,255,255,.10)'; g.lineWidth = r * 0.014; g.beginPath(); g.arc(0, 0, r * 0.971, 0, TAU); g.stroke();
+    g.save(); g.rotate(angle); g.beginPath(); g.arc(0, 0, r * 0.6, 0, TAU); g.clip(); g.drawImage(COVER, -r * 0.6, -r * 0.6, r * 1.2, r * 1.2); g.restore();
+    g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 1; g.beginPath(); g.arc(0, 0, r * 0.6, 0, TAU); g.stroke();
+    const sheen = g.createConicGradient(205 * Math.PI / 180, 0, 0);
+    sheen.addColorStop(0, 'rgba(255,255,255,0)'); sheen.addColorStop(46 / 360, 'rgba(255,255,255,.09)'); sheen.addColorStop(0.3, 'rgba(255,255,255,0)'); sheen.addColorStop(214 / 360, 'rgba(255,255,255,.06)'); sheen.addColorStop(0.75, 'rgba(255,255,255,0)'); sheen.addColorStop(1, 'rgba(255,255,255,0)');
+    g.globalCompositeOperation = 'screen'; g.fillStyle = sheen; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill(); g.globalCompositeOperation = 'source-over';
+    g.restore();
+    // 唱臂：在唱片 0–100 的坐标里，支点 (90,-8)
+    g.save(); g.translate(dx - r, dy - r); g.scale(d / 100, d / 100); g.translate(90, -8); g.rotate(arm * Math.PI / 180); g.translate(-90, 8);
+    g.strokeStyle = '#e8e8ec'; g.lineWidth = 1.9; g.lineCap = 'round'; g.beginPath(); g.moveTo(90, -8); g.lineTo(85.64, 12.07); g.quadraticCurveTo(85, 15, 82.63, 16.83); g.lineTo(77, 21.2); g.stroke();
+    g.save(); g.translate(77, 21.2); g.rotate(142 * Math.PI / 180); g.fillStyle = '#dcdce0'; g.beginPath(); g.roundRect(-5.5, -2.5, 11, 5, 1.2); g.fill(); g.restore();
+    g.fillStyle = '#c8c8cc'; g.beginPath(); g.arc(90, -8, 3, 0, TAU); g.fill();
+    g.restore();
+    // 文字栏
+    const base = Math.round(clamp(H * (wide ? 0.042 : 0.034), 12, 40));
+    const tx = wide ? W * 0.12 : W * 0.1, colW = wide ? dx - r - W * 0.06 - tx : W * 0.8;
+    let y = wide ? H * 0.2 : dy + r + 34;
+    g.textBaseline = 'alphabetic';
+    if (wide) { // 竖屏时页面顶栏已有歌名，不重复
+      g.font = `600 ${base}px ${FONT}`; g.fillStyle = 'rgba(159,243,228,.85)'; g.fillText(SONG.title, tx, y);
+      g.font = `500 ${base * 0.8}px ${FONT}`; g.fillStyle = 'rgba(223,247,243,.55)'; g.fillText(SONG.artist, tx, y + base * 1.2);
+      y += base * 1.2 + base * 1.6;
+    }
+    const from = Math.max(0, S.idx - (wide ? 2 : 1)), to = Math.min(LINES.length - 1, S.idx + (wide ? 4 : 2));
+    for (let i = from; i <= to; i++) {
+      if (y > H - base * 2.2) break; // 放不下的后几句不画
+      const cur = i === S.idx, dd = Math.abs(i - S.idx);
+      const fsz = cur ? base : base * 0.8;
+      g.font = `${cur ? 800 : 600} ${fsz}px ${FONT}`;
+      const L = layout(g, LINES[i], colW, fsz * 1.3, 'left', 2);
+      y += fsz * 0.9;
+      g.save(); g.translate(tx, y); g.globalAlpha = cur ? 1 : Math.max(0.16, 0.62 - (dd - 1) * 0.15);
+      for (const ch of L.chars) {
+        g.fillStyle = TH.on; g.fillText(ch.c, ch.x, ch.row * fsz * 1.3);
+        if (cur) { const p = clamp((S.t - ch.s) / (ch.e - ch.s)); if (p > 0) { g.save(); g.beginPath(); g.rect(ch.x, ch.row * fsz * 1.3 - fsz, ch.w * p, fsz * 1.3); g.clip(); g.fillStyle = rgba(TH.cover.map(v => Math.min(255, v * 1.25)), 1); g.fillText(ch.c, ch.x, ch.row * fsz * 1.3); g.restore(); } }
+      }
+      const trY = (L.rows - 1) * fsz * 1.3 + fsz * 0.62 * 1.5;
+      g.font = `500 ${base * 0.62}px ${FONT}`; g.fillStyle = 'rgba(102,204,255,.75)'; g.fillText(LINES[i].tr, 0, trY);
+      g.restore();
+      y += (L.rows - 1) * fsz * 1.3 + base * 0.62 * 1.5 + base * 0.9;
+    }
+  } };
+} };
+
+/* 星潮·银河（stardrift）：星海随机更替、流星划过；正在读的字在屏幕随机位置放大、罩一圈柔光，停留后缩小淡出 */
+function sparkle(g, x, y, r) {
+  g.beginPath();
+  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4 - Math.PI / 2, rr = i % 2 ? r * 0.45 : r; g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+  g.closePath(); g.fill();
+}
+MODES.stardrift = { create() {
+  let stars = [], meteors = [], glyphs = [], built = -2;
+  const R = rnd(fnv('stardrift'));
+  const tint = () => { const v = R(); return v < 0.55 ? [159, 243, 228] : v < 0.85 ? [102, 204, 255] : [57, 251, 245]; };
+  const newStar = (W, H, t) => {
+    const band = R() < 0.4, k = R();
+    const x = band ? W * (0.15 + 0.7 * k + (R() - 0.5) * 0.3) : W * R(), y = band ? H * (0.25 + 0.5 * k + (R() - 0.5) * 0.26) : H * R();
+    return { x, y, s: (0.6 + Math.pow(R(), 1.8) * 2.4), born: t, life: 1.6 + 3.2 * R(), sp: 0.25 + R(), ph: R() * TAU, c: tint() };
+  };
+  return { draw(g, W, H, S) {
+    const t = S.wall, pulse = S.paused ? 0.92 : 0.8 + 0.4 * Math.min(1, S.audio.power);
+    const bt = S.bt || 0, bb = S.bb || 0, FH = H + bt + bb;
+    const neb = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.55);
+    neb.addColorStop(0, `rgba(159,243,228,${0.05 * pulse})`); neb.addColorStop(0.5, `rgba(102,204,255,${0.035 * pulse})`); neb.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = neb; g.fillRect(0, -bt, W, FH);
+    const density = S.wide ? 150 : 90;
+    const ns = tt0 => { const s = newStar(W, FH, tt0); s.y -= bt; return s; };
+    if (S.still && !stars.length) for (let i = 0; i < density; i++) stars.push(ns(t - R() * 3));
+    if (!S.paused) { stars = stars.filter(s => t - s.born < s.life); while (stars.length < density * 0.6) stars.push(ns(t)); if (stars.length < density * 1.6 && R() < Math.min(0.5, density / 180)) stars.push(ns(t)); }
+    for (const s of stars) {
+      const age = (t - s.born) / s.life, env = Math.min(1, age / 0.15, (1 - age) / 0.15);
+      const br = 0.5 + 0.5 * Math.sin(s.sp * 1.2 * t + s.ph);
+      g.fillStyle = rgba(s.c, clamp((0.15 + 0.85 * br) * env * (0.8 + 0.2 * pulse))); sparkle(g, s.x, s.y, s.s);
+    }
+    if (!S.paused && !S.still && meteors.length < 1 && R() < 0.012) {
+      const side = R() < 0.5, x = side ? -20 : W * R(), y = side ? H * R() * 0.6 : -20;
+      const a = Math.atan2(H / 2 - y, W / 2 - x) + (R() - 0.5) * 0.9, v = 420 + 360 * R();
+      meteors.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, len: 110 + 90 * R(), w: 1.6 + 1.4 * R() });
+    }
+    meteors = meteors.filter(m => m.x > -300 && m.x < W + 300 && m.y < H + 300);
+    for (const m of meteors) {
+      if (!S.paused) { m.x += m.vx * S.dt; m.y += m.vy * S.dt; }
+      const sp = Math.hypot(m.vx, m.vy), tx = m.x - m.vx / sp * m.len, ty = m.y - m.vy / sp * m.len;
+      const gr = g.createLinearGradient(m.x, m.y, tx, ty); gr.addColorStop(0, 'rgba(223,247,243,.95)'); gr.addColorStop(1, 'rgba(223,247,243,0)');
+      g.strokeStyle = gr; g.lineWidth = m.w; g.lineCap = 'round'; g.beginPath(); g.moveTo(m.x, m.y); g.lineTo(tx, ty); g.stroke();
+      g.fillStyle = 'rgba(255,255,255,.95)'; sparkle(g, m.x, m.y, m.w * 2.6);
+    }
+    // 字：每个字一个随机位置；appear 0.5s 放大，停留到唱完 + 0.5s，再缩小淡出
+    const px = (S.wide ? 64 : 44);
+    if (S.idx !== built) {
+      built = S.idx; glyphs = glyphs.filter(gl => S.t >= gl.s); // 旧句已开始的字留下来自己走完
+      if (S.idx >= 0) {
+        const spots = [];
+        for (const ch of LINES[S.idx].chars) {
+          if (!ch.c.trim()) continue;
+          let best = null;
+          for (let k = 0; k < 8; k++) { const x = W * (0.08 + 0.84 * R()), y = H * (0.14 + 0.72 * R()); const dmin = spots.reduce((a, p) => Math.min(a, Math.hypot(p[0] - x, p[1] - y)), 1e9); if (!best || dmin > best[2]) best = [x, y, dmin]; if (dmin > Math.max(90, 1.15 * px)) break; }
+          spots.push(best); glyphs.push({ c: ch.c, s: ch.s, e: ch.e, x: best[0], y: best[1], latin: /[A-Za-z0-9]/.test(ch.c) });
+        }
+      }
+    }
+    const appearT = 0.5, holdT = 0.5, fadeT = 1;
+    glyphs = glyphs.filter(gl => S.t < gl.e + holdT + appearT + fadeT + 0.1 || S.t < gl.s);
+    g.save(); g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `500 ${px}px ${FONT}`;
+    for (const gl of glyphs) {
+      const tt = S.still ? Math.min(S.t, gl.e) : S.t;
+      if (tt < gl.s) continue;
+      const a = tt - gl.s, dur = gl.e - gl.s;
+      let sc, al, ring;
+      if (a < appearT) { const k = easeOutCubic(a / appearT); sc = 0.12 + 0.88 * k; al = k; ring = k; }
+      else if (a < appearT + dur + holdT) { sc = 1; al = 0.8 + 0.2 * pulse; ring = a < appearT + dur ? 1 : 1 - (a - appearT - dur) / holdT; }
+      else { const k = 1 - clamp((a - appearT - dur - holdT) / fadeT); sc = 0.12 + 0.88 * (k * k * k); al = k; ring = 0; }
+      if (ring > 0 && !gl.latin) {
+        const rr = px * 1.45 * ring, rg = g.createRadialGradient(gl.x, gl.y, 0, gl.x, gl.y, rr);
+        rg.addColorStop(0, `rgba(102,204,255,${0.12 * ring})`); rg.addColorStop(0.35, `rgba(102,204,255,${0.08 * ring})`); rg.addColorStop(0.7, `rgba(102,204,255,${0.035 * ring})`); rg.addColorStop(1, 'rgba(102,204,255,0)');
+        g.fillStyle = rg; g.beginPath(); g.arc(gl.x, gl.y, rr, 0, TAU); g.fill();
+      }
+      g.save(); g.translate(gl.x, gl.y); g.scale(sc, sc); g.globalAlpha = clamp(al);
+      g.shadowColor = '#66ccff'; g.shadowBlur = 18 * pulse; g.fillStyle = a < appearT ? '#bfeaff' : TH.primary; g.fillText(gl.c, 0, 0); g.restore();
+    }
+    g.restore();
+  } };
+} };
+
+/* 巨幕（cinerama）：像 LED 大屏，三种版式按句轮换——大字报（一块一块闪出）、小字报、斜切丝带；上下跑马灯带 */
+MODES.cinerama = { create() {
+  return { subLift: (H, wide) => H * 0.12 * (wide ? 1 : 0.7) + 6, draw(g, W, H, S) {
+    // 宿主已画背景（hostBackground=true）时屏面填充让位，只留扫描线（50%）与暗角
+    const accent = '#66ccff';
+    const bt = S.bt || 0, bb = S.bb || 0, FH = H + bt + bb;
+    g.fillStyle = 'rgba(102,204,255,.06)'; for (let y = -bt; y < H + bb; y += 3) g.fillRect(0, y, W, 1);
+    const vg = g.createRadialGradient(W / 2, FH / 2 - bt, Math.min(W, FH) * 0.35, W / 2, FH / 2 - bt, Math.max(W, FH) * 0.75); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(102,204,255,.16)'); g.fillStyle = vg; g.fillRect(0, -bt, W, FH);
+    if (S.idx < 0) return;
+    const line = LINES[S.idx], style = ['hero', 'ribbon', 'small', 'hero', 'ribbon', 'hero', 'small', 'ribbon'][S.idx];
+    const span = line.e - line.t, local = S.t - line.t;
+    const presence = S.still ? 1 : Math.min(smooth(0, 0.22, local), 1 - smooth(span - 0.25, span, local));
+    g.save(); g.globalAlpha = presence;
+    const glowText = (txt, x, y, size, italic = false) => {
+      g.font = `${italic ? 'italic ' : ''}900 ${size}px ${FONT}`;
+      g.shadowColor = accent; g.shadowBlur = 30; g.fillStyle = accent; g.fillText(txt, x, y);
+      g.shadowColor = 'rgba(0,0,0,.55)'; g.shadowBlur = 14; g.shadowOffsetY = 2; g.fillText(txt, x, y); g.shadowOffsetY = 0; g.shadowBlur = 0;
+    };
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    if (style === 'hero') {
+      // 按字切块，每块在自己被唱到的时间窗里独占全屏
+      const cs = line.chars, n = Math.min(4, Math.max(2, Math.ceil(cs.length / 3)));
+      const per = Math.ceil(cs.length / n), chunks = [];
+      for (let i = 0; i < cs.length; i += per) chunks.push(cs.slice(i, i + per));
+      const cur = chunks.findLastIndex(c => S.t >= c[0].s) ;
+      const ch = chunks[Math.max(0, S.still ? 1 : cur)];
+      const txt = ch.map(c => c.c).join('').trim();
+      const k = clamp((S.t - ch[0].s) / 0.4);
+      const size = Math.min(H * 0.34, W * 0.74 / Math.max(1.2, [...txt].length * 0.92));
+      g.save(); g.translate(W / 2, H * 0.5); const sc = 0.92 + 0.08 * easeOutCubic(k); g.scale(sc, sc);
+      g.strokeStyle = accent; g.lineWidth = size * 0.014; g.font = `900 ${size}px ${FONT}`; g.strokeText(txt, 0, 0);
+      const prog = clamp((S.t - ch[0].s) / Math.max(0.2, ch[ch.length - 1].e - ch[0].s));
+      const tw = g.measureText(txt).width; g.save(); g.beginPath(); g.rect(-tw / 2, -size, tw * (S.still ? 0.6 : prog), size * 2); g.clip(); glowText(txt, 0, 0, size); g.restore();
+      g.restore();
+    } else if (style === 'small') {
+      const size = Math.min(H * 0.1, W * 0.1);
+      g.font = `900 ${size}px ${FONT}`;
+      const L = layout(g, line, W * 0.8, size * 1.15);
+      g.save(); g.translate(W / 2, H / 2); g.textAlign = 'left';
+      for (const ch of L.chars) { const u = S.still ? 1 : smooth(ch.s - 0.15, ch.s + 0.25, S.t); g.globalAlpha = presence * u; glowText(ch.c, ch.x, ch.y + (1 - u) * size * 0.14, size); }
+      g.restore();
+    } else {
+      // 斜切丝带：几条不同角度的强调色胶带，原文和翻译交替，沿带滚动
+      g.save(); g.beginPath(); g.rect(0, 0, W, H); g.clip(); // 丝带不压顶栏和控件
+      const n = S.wide ? 6 : 5, thick = H * (S.wide ? 0.075 : 0.06), angles = [-13, 22, -34, 16, -48, 30];
+      for (let i = 0; i < n; i++) {
+        const a = angles[i] * Math.PI / 180, cy = H * (0.18 + 0.66 * i / (n - 1)) + Math.sin(S.wall * 0.1 + i) * 4;
+        g.save(); g.translate(W / 2, cy); g.rotate(a);
+        const len = Math.hypot(W, H) * 1.3;
+        const rg = g.createLinearGradient(0, -thick / 2, 0, thick / 2); rg.addColorStop(0, '#7fd6ff'); rg.addColorStop(1, '#3ea9e0');
+        g.shadowColor = accent; g.shadowBlur = 16; g.fillStyle = rg; g.fillRect(-len / 2, -thick / 2, len, thick); g.shadowBlur = 0;
+        const txt = (i % 2 ? line.tr : line.text) + '　·　';
+        g.font = `900 ${thick * 0.66}px ${FONT}`; g.fillStyle = '#04161c'; g.textAlign = 'left';
+        const tw = g.measureText(txt).width, off = -((S.wall * W * 0.16 * (i % 2 ? -1 : 1)) % tw) - len / 2 - tw;
+        for (let x = off; x < len / 2; x += tw) g.fillText(txt, x, 1);
+        g.restore();
+      }
+      g.restore();
+    }
+    g.restore();
+    if (style !== 'ribbon') {
+      // 上下两条跑马灯：上面原文，下面翻译反向
+      const bh = H * 0.12 * (S.wide ? 1 : 0.7);
+      [[0, line.text, 1], [H - bh, line.tr, -1]].forEach(([y, txt, dir]) => {
+        g.save(); g.globalAlpha = 0.9 * presence;
+        g.strokeStyle = 'rgba(102,204,255,.85)'; g.shadowColor = accent; g.shadowBlur = 8; g.lineWidth = 1.5; g.beginPath(); g.moveTo(0, y + (dir > 0 ? bh : 0)); g.lineTo(W, y + (dir > 0 ? bh : 0)); g.stroke(); g.shadowBlur = 0;
+        g.beginPath(); g.rect(0, y, W, bh); g.clip(); g.font = `800 ${bh * 0.55}px ${FONT}`; g.fillStyle = accent; g.textAlign = 'left'; g.textBaseline = 'middle';
+        const unit = txt + '　✦　', tw = g.measureText(unit).width, off = -((S.wall * W * 0.18) % tw) * dir - tw;
+        for (let x = off; x < W + tw; x += tw) g.fillText(unit, x, y + bh / 2);
+        g.restore();
+      });
+    }
+  } };
+} };
+
+/* 跳一跳（visualizer-jump）：一句拆成几块，每块是一根等轴测柱子，字在柱顶；小人在每块第一个字被唱到时落上去 */
+MODES.jump = { create() {
+  return { draw(g, W, H, S) {
+    if (S.idx < 0) return;
+    const pitch = 34 * Math.PI / 180, cell = Math.min(W, H) * (S.wide ? 0.13 : 0.15);
+    const ax = [cell / 2, -cell / 2 * Math.sin(pitch)], ay = [-cell / 2, -cell / 2 * Math.sin(pitch)], az = cell / Math.SQRT2 * Math.cos(pitch);
+    const P = (x, y, z) => [x * ax[0] + y * ay[0], x * ax[1] + y * ay[1] - z * az];
+    const rowsOf = idx => {
+      const cs = LINES[idx].chars.filter(c => c.c.trim()), latin = /[A-Za-z]/.test(LINES[idx].text);
+      const blocks = [];
+      if (latin) { LINES[idx].text.split(' ').forEach((w, k) => { const st = LINES[idx].chars[LINES[idx].text.split(' ').slice(0, k).join(' ').length + (k ? 1 : 0)]; blocks.push({ txt: w, s: st.s }); }); }
+      else for (let i = 0; i < cs.length; i += 2) blocks.push({ txt: cs.slice(i, i + 2).map(c => c.c).join(''), s: cs[i].s });
+      return blocks;
+    };
+    const dir = S.idx % 2 ? -1 : 1;
+    const blocks = rowsOf(S.idx);
+    // 每块沿 x（偶数行）或 y（奇数行）排开，间隙 1.2 格
+    let pos = 0; const placed = blocks.map(b => { g.font = `700 ${cell * 0.42}px ${FONT}`; const len = Math.max(1, g.measureText(b.txt).width / cell * 1.15); const p = { ...b, a: pos, len }; pos += len + 1.2; return p; });
+    const cur = Math.max(0, placed.findLastIndex(b => S.t >= b.s));
+    // 小人位置：在两块之间做抛物线
+    const nextB = placed[Math.min(placed.length - 1, cur + 1)], curB = placed[cur];
+    const fly = 0.45, k = nextB === curB ? 0 : clamp((S.t - (nextB.s - fly)) / fly);
+    const ra = lerp(curB.a + curB.len / 2, nextB.a + nextB.len / 2, k), hop = Math.sin(Math.PI * k) * 1.2;
+    const H0 = 1.9;
+    const map = (a, z) => dir > 0 ? P(a, 0, z) : P(0, a, z);
+    const cam = map(ra, 0);
+    g.save(); g.translate(W / 2 - cam[0], H * 0.62 - cam[1]);
+    // 翻译在柱子后面
+    g.save(); g.textAlign = 'center'; g.font = `600 ${cell * 0.36}px ${FONT}`; g.fillStyle = 'rgba(102,204,255,.55)'; g.shadowColor = '#66ccff'; g.shadowBlur = 8;
+    const tp = map(ra, 0); g.fillText(LINES[S.idx].tr, tp[0], tp[1] - cell * 3.2); g.restore();
+    const order = dir > 0 ? placed : placed;
+    for (const b of order) {
+      const rise = S.still ? 1 : easeOutCubic((S.t - LINES[S.idx].t + 0.4 - placed.indexOf(b) * 0.07) / 0.4);
+      const landed = S.t >= b.s && S.t < b.s + 0.09 ? 0.45 : 0;
+      const z = H0 * rise - landed * 0.3 - (1 - rise) * 0.9;
+      const c = (a, w, zz) => dir > 0 ? P(a, w, zz) : P(-w, a, zz);
+      const A = c(b.a, -0.5, z), B = c(b.a + b.len, -0.5, z), C = c(b.a + b.len, 0.5, z), D = c(b.a, 0.5, z);
+      const A0 = c(b.a, -0.5, 0), B0 = c(b.a + b.len, -0.5, 0), C0 = c(b.a + b.len, 0.5, 0), D0 = c(b.a, 0.5, 0);
+      g.globalAlpha = 0.8 * clamp(rise);
+      const face = (pts, col) => { g.fillStyle = col; g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); g.fill(); g.strokeStyle = 'rgba(159,243,228,.55)'; g.lineWidth = 1.2; g.stroke(); };
+      if (dir > 0) { face([D, C, C0, D0], 'rgba(30,84,92,.95)'); face([B, C, C0, B0], 'rgba(22,62,70,.95)'); }
+      else { face([A, D, D0, A0], 'rgba(22,62,70,.95)'); face([D, C, C0, D0], 'rgba(30,84,92,.95)'); }
+      face([A, B, C, D], 'rgba(57,120,128,.95)');
+      // 字贴在顶面
+      const mid = c(b.a + b.len / 2, 0, z);
+      g.save(); g.translate(mid[0], mid[1]); g.transform(1, dir > 0 ? -Math.sin(pitch) * 0.5 : Math.sin(pitch) * 0.5, 0, Math.sin(pitch) * 1.4, 0, 0);
+      g.globalAlpha = clamp(rise); g.fillStyle = S.t >= b.s ? TH.primary : 'rgba(159,243,228,.45)'; g.font = `700 ${cell * 0.42}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(b.txt, 0, 0); g.restore();
+      g.globalAlpha = 1;
+    }
+    // 落地环
+    const since = S.t - curB.s;
+    if (since >= 0 && since < 0.36 && !S.still) { const p = since / 0.36, m = map(curB.a + curB.len / 2, H0); g.strokeStyle = `rgba(102,204,255,${Math.pow(1 - p, 1.35)})`; g.lineWidth = 2; g.beginPath(); g.ellipse(m[0], m[1], cell * 0.8 * (0.4 + p), cell * 0.8 * (0.4 + p) * Math.sin(pitch), 0, 0, TAU); g.stroke(); }
+    // 小人
+    const rp = map(ra, H0 + hop);
+    const squash = k > 0 && k < 1 ? 1.06 : 0.94 + 0.06 * clamp(since / 0.12);
+    g.fillStyle = 'rgba(0,0,0,.35)'; const sp = map(ra, H0); g.beginPath(); g.ellipse(sp[0], sp[1], cell * 0.22, cell * 0.1, 0, 0, TAU); g.fill();
+    g.save(); g.translate(rp[0], rp[1]); g.scale(1 / squash, squash);
+    const u = cell * 0.36;
+    g.fillStyle = '#66ccff'; g.beginPath(); g.roundRect(-u * 0.26, -u * 0.95, u * 0.52, u * 0.7, u * 0.22); g.fill();
+    g.beginPath(); g.arc(0, -u * 1.15, u * 0.2, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.55)'; g.beginPath(); g.arc(-u * 0.06, -u * 1.2, u * 0.06, 0, TAU); g.fill();
+    g.restore();
+    g.restore();
+  } };
+} };
+
+/* 播放页图层：频谱（spectrum-visualizer）——48 根柱，左下角半透明卡片，不压歌词 */
+function drawSpectrum(g, W, H, S, box) {
+  const [x, y, w, h] = box;
+  g.save();
+  g.fillStyle = 'rgba(8,12,9,.42)'; g.beginPath(); g.roundRect(x, y, w, h, 10); g.fill();
+  const pad = 10, bw = (w - pad * 2) / 48;
+  for (let i = 0; i < 48; i++) {
+    const v = S.paused ? 0 : S.audio.bands[i], bh = Math.max(2, v * (h - 30));
+    g.fillStyle = i < 12 ? '#d8b975' : i < 30 ? '#c3cf87' : '#95b1a1';
+    g.fillRect(x + pad + i * bw, y + h - 18 - bh, Math.max(1, bw - 1.5), bh);
+  }
+  g.font = `600 9px ${FONT}`; g.fillStyle = 'rgba(223,247,243,.7)'; g.textBaseline = 'alphabetic';
+  const db = Math.round(-60 + 60 * clamp(S.audio.power));
+  g.fillText(`${db} dB`, x + pad, y + h - 5);
+  const peak = S.audio.bands.reduce((a, v, i, arr) => (v > arr[a] ? i : a), 0);
+  g.textAlign = 'right'; g.fillText(`峰值 ${Math.round(Math.pow(peak / 47, 2) * 16000 + 40)} Hz`, x + w - pad, y + h - 5);
+  g.restore();
+}
+
+window.LyricModes = { MODES, drawSpectrum, LINES, SONG, Clock, tick, audioAt, lineIndex, drawBackdrop, layout, rnd, fnv, DPR, FONT, TH, COVER, rgba, clamp, lerp, easeOutCubic, smooth, BEAT, DUR };
+})();
+
+</script>
+<script>
+(() => {
+'use strict';
+const LM = window.LyricModes;
+const { MODES, LINES, Clock, tick, audioAt, lineIndex, drawBackdrop, drawSpectrum, DPR, COVER, DUR } = LM;
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ---------- 设置表：数字 → 步进行，选项 → 连接按钮组，开关 → 开关行 ---------- */
+const trim = v => String(+(+v).toFixed(2));
+const fx = v => '×' + trim(v), fp = v => Math.round(v * 100) + '%', fs = v => trim(v) + ' 秒', fi = v => String(Math.round(v)), fdeg = v => Math.round(v) + '°';
+const num = (k, label, min, max, step, def, fmt = fx, sum = '') => ({ k, t: 'num', label, min, max, step, def, fmt, sum });
+const choice = (k, label, opts, def, sum = '') => ({ k, t: 'choice', label, opts, def, sum });
+const bool = (k, label, def, sum = '') => ({ k, t: 'bool', label, def, sum });
+
+const ORDER = ['classic', 'aurora', 'rings', 'miside', 'wave', 'vinyl', 'cinerama', 'stardrift', 'jump'];
+const META = {
+  classic: { name: '经典', tag: '现有', src: 'myMusic 现在的歌词列表', lic: '—', bg: true, sub: false, audio: '不用', orig: '—', cost: '无', fixed: 0, settings: [],
+    effect: '整页歌词滚动，当前句放大停在 42% 高度并逐字填色，邻句 60%、更远 38% 并轻微模糊；点一句跳过去。',
+    impl: ['原样复用 LyricsList，不改一行代码。', '默认就是它；选了别的模式也能随时切回来。'] },
+  aurora: { name: '虹光', tag: 'sample-aurora-visualizer 1.0.1', src: 'Folia 官方样例', lic: 'AGPL-3.0（folia-major 仓库）', bg: true, sub: true, audio: '不用', orig: '0 项', cost: '小', fixed: 0, settings: [],
+    effect: '只显示当前句、居中；每个字唱到时按起点换色相，唱的那一下带光晕、上抬 2px，还没唱到的字是 28% 白。',
+    impl: ['Canvas + TextMeasurer 逐字画；光晕用 nativeCanvas 的 Paint.setShadowLayer，所有系统版本都能用。', '逐字时间沿用现有 LyricWord，没有逐字的歌按句长均分。'] },
+  rings: { name: '52Hz', tag: 'visualizer52hz 1.0.1', src: 'Folia 官方', lic: 'AGPL-3.0；自带的 PixiJS（MIT）不移植', bg: true, sub: true, audio: '响度 + 低频拍点', orig: '5 项', cost: '中', fixed: 0,
+    settings: [num('reach', '年轮扩散', .4, 2, .1, 1), num('beatSensitivity', '拍点灵敏度', .4, 2.5, .1, 1), num('sensitivity', '响度灵敏度', .2, 3, .1, 1), num('opacity', '年轮浓度', .1, 1, .05, .8, fp), num('fontScale', '字号', .6, 1.6, .05, 1)],
+    effect: '整句一起出现，字按歌词文本的种子轻微错位、旋转，逐字点亮并鼓一下；每个拍点从整句字形的外轮廓发出一圈年轮，响度决定粗细和亮度。纯音乐时从随机“髓心”往外长。',
+    impl: ['年轮在 Android 13+ 用 RuntimeShader（AGSL）算圆角矩形并集的距离场，一次 drawRect 画完；12 及以下退到 Path.op 求并集再描边，同时最多 4 圈。', '拍点直接用 BeatTracker 锁定的拍点，不另做谱通量检测；没锁定时照原版每 2 秒补一拍。'] },
+  miside: { name: 'MiSide 掉落', tag: 'miside-drop 2.5.3', src: 'baiyangmuzz', lic: 'MIT', bg: true, sub: true, audio: '不用', orig: '14 项', cost: '中', fixed: 7,
+    settings: [choice('dropModeV2', '掉落方式', [['sentence', '整句'], ['word', '逐字']], 'sentence'), num('fontSizeV2', '字号', 24, 120, 4, 56, fi), num('gravity', '重力', 100, 6000, 100, 1400, fi), num('elasticity', '回弹', 0, .85, .05, .34, trim), num('settleHold', '落地停留', 0, 10, .5, 2.5, fs), num('keepRows', '地上保留几行', 0, 8, 1, 2, fi), bool('glowBoost', '立体字发光', true)],
+    effect: '打字机逐字浮现，白字带 7 层灰阶挤出；整句唱完后整行掉到地面线，按重力反弹、停住，停留一会儿再淡出，地上最多留几行。暂停时物理也停。',
+    impl: ['每个字一个粒子，自己做重力和反弹积分，不需要物理库；绕 X/Y 轴的翻转用 Matrix.setPolyToPoly。', '7 层挤出就是 7 次偏移 drawText，排版只量一次缓存起来。'] },
+  wave: { name: '动感波光', tag: 'wave-light 1.5.1', src: 'Zhangyx0824', lic: 'MIT', bg: false, sub: false, audio: '不用（只取封面主色）', orig: '5 项', cost: '小到中', fixed: 0,
+    settings: [choice('waveSource', '波光颜色', [['cover', '封面'], ['theme', '主题']], 'cover'), num('brightness', '亮度', .3, 2, .1, 1), num('speed', '速度', .2, 3, .1, 1), bool('keyword', '背后的大字水印', true, '取这句里分量最重的词'), num('textScale', '字号', .6, 1.8, .05, 1)],
+    effect: '自己画背景：左右两组同心声波随封面主色呼吸、缓慢转动；当前句从中间往两边浮现，背后是一个模糊的超大关键词水印，翻译排在下方。',
+    impl: ['背景走模式自己的 Background 槽，不画宿主的流光背景；圆环是 drawCircle 加竖向渐变描边。', '入场模糊在 Android 12+ 用 RenderEffect，以下只做透明度淡入；封面主色复用现有的 coverBlobColors。'] },
+  vinyl: { name: '黑胶唱片', tag: 'vinyl-disc 1.7.10', src: 'Zhangyx0824', lic: 'MIT', bg: true, sub: false, audio: '不用', orig: '11 项', cost: '中', fixed: 3,
+    settings: [choice('discSide', '唱片位置', [['left', '左'], ['right', '右']], 'right', '竖屏固定上下排'), num('discSize', '唱片大小', .3, 1, .02, .62, fp), num('spinSeconds', '转一圈', 6, 60, 2, 20, fs), choice('halo', '光晕', [['off', '关'], ['cover', '封面色'], ['theme', '主题色']], 'cover'), bool('showArm', '唱臂', true), bool('sheen', '唱片光泽', true), bool('showNext', '显示后面几句', true), num('textScale', '字号', .6, 1.8, .05, 1.25)],
+    effect: '封面做碟心，播放时唱片转、唱臂落下，暂停时唱臂抬起、唱片停转；歌词排在唱片旁，当前句逐字填封面色，每句下面跟着翻译。',
+    impl: ['唱片纹路和光泽（Brush.sweepGradient）一次画进缓存位图，每帧只转封面那一层。', '唱臂用 Path 画，抬落是一个 spring 动画；竖屏改成唱片在上、歌词在下，并省掉模式里的歌名行（顶栏已经有）。'] },
+  cinerama: { name: '巨幕', tag: 'cinerama 1.0.0', src: 'tumuyan', lic: '包里没有许可文件，要作者确认', bg: true, sub: true, audio: '不用', orig: '30 项', cost: '中到大', fixed: 24,
+    settings: [choice('marquee', '跑马灯带', [['off', '关'], ['auto', '自动'], ['bands', '双带'], ['frame', '四边']], 'auto'), num('heroWeight', '大字报', 0, 1, .05, .4, fp, '三种版式的出现比例'), num('smallWeight', '小字报', 0, 1, .05, .2, fp), num('ribbonWeight', '斜切丝带', 0, 1, .05, .4, fp), num('fontScale', '字号', .6, 1.6, .05, 1), num('marqueeSpeed', '带速', .2, 3, .1, 1)],
+    effect: '像 LED 大屏：每句抽一种版式——大字报（一块块先描边再填色）、小字报、斜切丝带；上下跑马灯带滚动原文、翻译或歌名。宿主画背景时屏面让位，只留扫描线和暗角。',
+    impl: ['三种版式各是一个 Composable，按歌曲种子抽签，相邻两句不重复。', '扫描线是一张平铺的 ImageShader；跑马灯是 drawText 加平移，辉光用 setShadowLayer。'] },
+  stardrift: { name: '星潮·银河', tag: 'stardrift 1.38.0', src: 'w0w1w2', lic: 'MIT', bg: true, sub: true, audio: '响度（音乐呼吸）', orig: '15 项', cost: '小', fixed: 7,
+    settings: [num('density', '星星数量', 30, 300, 10, 150, fi), num('fontScale', '字号', .6, 1.6, .05, 1), num('hold', '字停留', 0, 5, .25, .5, fs), num('meteor', '流星数量', 0, 3, .25, 1), bool('ring', '读字光罩', true), bool('ringLatin', '英文不亮圈', true), bool('punctHide', '屏蔽标点', true), bool('pulse', '音乐呼吸', true)],
+    effect: '星海不断更替，流星不时划过；正在唱的字出现在屏幕随机位置，放大并罩一圈柔光，唱完停留一下再缩小淡出。',
+    impl: ['所有星点合成一条 Path 一次画完；字用 TextMeasurer。', '原版用 Math.random，移植改成以歌曲为种子：同一首歌每次画面一样，也方便截图测试。'] },
+  jump: { name: '跳一跳', tag: 'visualizer-jump 1.2.0', src: 'tumuyan', lic: '包里没有许可文件，要作者确认', bg: true, sub: false, audio: '不用', orig: '25 项', cost: '中到大', fixed: 19,
+    settings: [choice('textFace', '字贴在', [['top', '顶面'], ['front', '正面'], ['side', '侧面'], ['above', '上方']], 'top'), num('pitch', '俯角', 18, 60, 2, 34, fdeg), num('chunkChars', '每块字数', 1, 4, 1, 2, fi, '只对中文有用'), num('flySeconds', '滞空时间', .1, 1.2, .05, .45, fs), num('arc', '跳跃高度', 0, 2.4, .1, 1.2), choice('translationMode', '译文', [['translation', '翻译'], ['romanization', '罗马音'], ['off', '不显示']], 'translation')],
+    effect: '一句拆成几块，每块是一根等轴测柱子、字在柱顶；小人在每块第一个字被唱到时跳上去，落地踩出一圈波纹，译文浮在柱子后面。',
+    impl: ['等轴测投影是一个固定矩阵，柱子三个面是三条 Path；字贴面用 Matrix.setPolyToPoly。', '原版的译文和宿主字幕会同时出现，移植时声明 hostSubtitles = false，只由模式自己画。'] },
+};
+const vals = {};
+ORDER.forEach(id => { vals[id] = {}; META[id].settings.forEach(s => { vals[id][s.k] = s.def; }); });
+
+/* ---------- 图标 ---------- */
+const P = {
+  back: 'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z',
+  heart: 'M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z',
+  spark: 'M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z',
+  lyrics: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z',
+  queue: 'M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z',
+  prev: 'M6 6h2v12H6zm3.5 6 8.5 6V6z', next: 'M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z',
+  play: 'M8 5v14l11-7z', pause: 'M6 19h4V5H6v14zm8-14v14h4V5h-4z',
+};
+const ico = (k, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[k]}"/></svg>`;
+const cookie = (() => { let d = ''; for (let i = 0; i <= 120; i++) { const a = i / 120 * Math.PI * 2, r = 28 * (0.93 + 0.07 * Math.cos(12 * a)); d += (i ? 'L' : 'M') + (28 + r * Math.cos(a)).toFixed(2) + ' ' + (28 + r * Math.sin(a)).toFixed(2); } return d + 'Z'; })();
+
+/* ---------- 手机：全屏歌词页 ---------- */
+const SW = 360, SH = 780, SAFE_T = 96, SAFE_B = 652, SAFE_H = SAFE_B - SAFE_T;
+const ph = $('#ph');
+const coverURL = COVER.toDataURL();
+ph.innerHTML = `
+  <canvas id="phBg"></canvas><canvas id="phStage"></canvas><canvas id="phFront"></canvas>
+  <div class="status"><span>9:41</span><span>5G ▮▮▮ 86%</span></div>
+  <div class="p-cover" style="position:absolute;left:20px;top:40px;background-image:url(${coverURL});z-index:5"></div>
+  <div class="p-head">
+    <div class="p-titles"><div class="p-title">${esc(LM.SONG.title)}</div><div class="p-artist">${esc(LM.SONG.artist)}</div></div>
+    <button class="ib new" id="btnAnim" aria-label="歌词动画">${ico('spark')}</button>
+    <button class="ib" aria-label="收藏">${ico('heart')}</button>
+  </div>
+  <div class="subtitle" id="phSub"></div>
+  <div class="p-bottom" id="phBottom">
+    <div class="wave"><svg id="phWave" viewBox="0 0 312 28" preserveAspectRatio="none"><path id="wvP" fill="none" stroke="var(--pl-primary)" stroke-width="4" stroke-linecap="round"/><line id="wvR" y1="14" y2="14" x2="312" stroke="var(--pl-outline-variant)" stroke-width="4" stroke-linecap="round"/><rect id="wvT" width="4" height="22" y="3" rx="2" fill="var(--pl-primary)"/></svg></div>
+    <div class="p-row">
+      <div class="tgroup playing" id="tgroup">
+        <span class="side l">${ico('prev')}</span>
+        <button class="cookie" id="btnPlay" aria-label="暂停"><svg viewBox="0 0 56 56"><path d="${cookie}"/></svg><i>${ico('pause')}</i></button>
+        <span class="side r">${ico('next')}</span>
+      </div>
+      <div class="toolbar"><button class="tb sel" aria-label="退出全屏歌词">${ico('lyrics')}</button><button class="tb" aria-label="播放队列">${ico('queue')}</button></div>
+    </div>
+  </div>
+  <div class="navpill"></div>
+  <div class="scrim" id="scrim"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-label="歌词动画">
+    <div class="grab"></div>
+    <div class="sh-head"><h5>歌词动画</h5><p>只在全屏歌词页生效</p></div>
+    <div class="sh-body" id="shBody"></div>
+  </div>`;
+
+function fit(c, w, h) { c.width = Math.round(w * DPR); c.height = Math.round(h * DPR); c.style.width = w + 'px'; c.style.height = h + 'px'; return c.getContext('2d'); }
+const phBg = fit($('#phBg'), SW, SH), phStage = fit($('#phStage'), SW, SH), phFront = fit($('#phFront'), SW, SH);
+[$('#phBg'), $('#phStage'), $('#phFront')].forEach((c, i) => { c.style.left = c.style.top = '0'; c.style.zIndex = String(i + 1); });
+
+/* ---------- 状态 ---------- */
+let mode = 'classic', auto = 'fixed', spectrum = false, reduce = false, frozenWall = 0, pinned = false;
+const tempo = [['慢', '90 以下', 'vinyl'], ['中', '90–120', 'rings'], ['快', '120–150', 'wave'], ['很快', '150 以上', 'jump']];
+let phInst = MODES[mode].create(), tvInst = MODES[mode].create();
+
+function setMode(id) {
+  mode = id;
+  phInst = MODES[id].create(); tvInst = MODES[id].create();
+  $$('.modebar button').forEach(b => b.classList.toggle('on', b.dataset.m === id));
+  $$('.mcard').forEach(b => b.classList.toggle('on', b.dataset.m === id));
+  $$('[data-curmode]').forEach(e => { e.textContent = META[id].name; });
+  renderFacts(); renderForm(); lastSubIdx = -9;
+}
+
+/* ---------- 面板 ---------- */
+const body = $('#shBody');
+body.innerHTML = `
+  <div class="lbl">模式</div>
+  <div class="grid" id="grid"></div>
+  <div class="lbl">每首歌换动画</div>
+  <div class="ctg" id="autoGroup"><button data-a="fixed" class="on">固定</button><button data-a="random">随机</button><button data-a="tempo">按速度</button></div>
+  <div class="note" id="autoNote"></div>
+  <div id="tempoRows" class="seg" style="margin-top:10px;display:none"></div>
+  <div id="pinRow" class="seg" style="margin-top:10px;display:none"><div class="row"><div class="t">这首歌固定用「<span data-curmode></span>」<small>不再自动换，下次播放也一样</small></div><div class="sw" id="pinSw" role="switch" aria-checked="false"></div></div></div>
+  <div class="lbl">叠加</div>
+  <div class="seg"><div class="row"><div class="t">频谱<small>左下角 48 段频谱，只在全屏歌词页</small></div><div class="sw" id="specSw" role="switch" aria-checked="false"></div></div></div>
+  <div class="lbl lblrow"><span>「<span data-curmode></span>」设置</span><button class="txtbtn" id="resetBtn">恢复默认</button></div>
+  <div id="form"></div>`;
+const grid = $('#grid');
+ORDER.forEach(id => {
+  const b = document.createElement('button');
+  b.className = 'mcard' + (id === mode ? ' on' : ''); b.dataset.m = id;
+  b.innerHTML = `<canvas></canvas><span class="nm">${META[id].name}${id === 'classic' ? '<i>现在的样子</i>' : ''}</span><span class="ck">✓</span>`;
+  b.onclick = () => setMode(id);
+  grid.appendChild(b);
+});
+const AUTO_NOTE = {
+  fixed: '所有歌都用上面选中的模式。',
+  random: '每首歌随机换一个，不和上一首重复；同一首歌再听时还是抽到的那个（本机记住最近 2000 首）。',
+  tempo: '按这首歌的速度挑模式。速度来自律动跟拍，锁定后才换；只在开头或两句之间的空当里换，不会在一句唱到一半时换。你手动选了模式，这首歌就不再自动换。',
+};
+function renderAuto() {
+  $$('#autoGroup button').forEach(b => b.classList.toggle('on', b.dataset.a === auto));
+  $('#autoNote').textContent = AUTO_NOTE[auto];
+  $('#tempoRows').style.display = auto === 'tempo' ? '' : 'none';
+  $('#pinRow').style.display = auto === 'fixed' ? 'none' : '';
+  $('#tempoRows').innerHTML = tempo.map((r, i) => `<div class="row click" data-i="${i}"><div class="t">${r[0]}<small>每分钟 ${r[1]} 拍</small></div><span class="val">${META[r[2]].name}</span><span class="chev">›</span></div>`).join('');
+  $$('#tempoRows .row').forEach(row => { row.onclick = () => { const r = tempo[+row.dataset.i]; r[2] = ORDER[(ORDER.indexOf(r[2]) + 1) % ORDER.length]; renderAuto(); }; });
+  $$('[data-autoval]').forEach(e => { e.textContent = { fixed: '固定', random: '随机', tempo: '按速度' }[auto]; });
+}
+$$('#autoGroup button').forEach(b => { b.onclick = () => { auto = b.dataset.a; renderAuto(); }; });
+function toggleSw(el, on) { el.classList.toggle('on', on); el.setAttribute('aria-checked', String(on)); }
+$('#pinSw').onclick = () => { pinned = !pinned; toggleSw($('#pinSw'), pinned); };
+function setSpectrum(on) { spectrum = on; toggleSw($('#specSw'), on); $$('[data-spec]').forEach(e => toggleSw(e, on)); $$('.ctl [data-c=spec]').forEach(b => b.classList.toggle('on', on)); }
+$('#specSw').onclick = () => setSpectrum(!spectrum);
+$('#resetBtn').onclick = () => { META[mode].settings.forEach(s => { vals[mode][s.k] = s.def; }); renderForm(); };
+
+function renderForm() {
+  const m = META[mode], form = $('#form');
+  $('#resetBtn').style.visibility = m.settings.length ? 'visible' : 'hidden';
+  if (!m.settings.length) {
+    form.innerHTML = `<div class="note">${mode === 'classic' ? '经典就是现在的歌词列表，字号和背景沿用「设置 → 播放页」。' : '原模组没有设置项。'}</div>`;
+    return;
+  }
+  // 连续的同类项合成一组（分段圆角），选项单独一块
+  const groups = [];
+  m.settings.forEach(s => { const last = groups[groups.length - 1]; if (s.t !== 'choice' && last && last.t === s.t) last.items.push(s); else groups.push({ t: s.t, items: [s] }); });
+  form.innerHTML = groups.map(gp => {
+    if (gp.t === 'choice') { const s = gp.items[0]; return `<div class="cap">${s.label}${s.sum ? `<small>${s.sum}</small>` : ''}</div><div class="ctg" data-k="${s.k}">${s.opts.map(([v, l]) => `<button data-v="${v}" class="${vals[mode][s.k] === v ? 'on' : ''}">${l}</button>`).join('')}</div>`; }
+    return `<div class="seg gap">${gp.items.map(s => s.t === 'bool'
+      ? `<div class="row"><div class="t">${s.label}${s.sum ? `<small>${s.sum}</small>` : ''}</div><div class="sw ${vals[mode][s.k] ? 'on' : ''}" data-k="${s.k}" role="switch" aria-checked="${!!vals[mode][s.k]}"></div></div>`
+      : `<div class="row"><div class="t">${s.label}${s.sum ? `<small>${s.sum}</small>` : ''}</div><div class="step" data-k="${s.k}"><button data-d="-1" aria-label="减小">−</button><b>${s.fmt(vals[mode][s.k])}</b><button data-d="1" aria-label="增大">+</button></div></div>`).join('')}</div>`;
+  }).join('') + (m.fixed ? `<div class="note">原模组还有 ${m.fixed} 项细调，保持原默认值，不放进面板。</div>` : '');
+  const find = k => m.settings.find(s => s.k === k);
+  $$('.ctg[data-k] button', form).forEach(b => { b.onclick = () => { vals[mode][b.parentNode.dataset.k] = b.dataset.v; renderForm(); }; });
+  $$('.sw[data-k]', form).forEach(sw => { sw.onclick = () => { const k = sw.dataset.k; vals[mode][k] = !vals[mode][k]; toggleSw(sw, vals[mode][k]); }; });
+  $$('.step', form).forEach(st => {
+    const s = find(st.dataset.k);
+    $$('button', st).forEach(b => { b.onclick = () => {
+      const v = Math.min(s.max, Math.max(s.min, Math.round((vals[mode][s.k] + s.step * +b.dataset.d) / s.step) * s.step));
+      vals[mode][s.k] = +v.toFixed(4); $('b', st).textContent = s.fmt(vals[mode][s.k]);
+    }; });
+  });
+}
+
+function openSheet(on) { $('#sheet').classList.toggle('open', on); $('#scrim').classList.toggle('open', on); if (on) { $('#btnAnim').classList.remove('new'); paintThumbs(); } }
+$('#btnAnim').onclick = () => openSheet(true);
+$('#scrim').onclick = () => openSheet(false);
+
+/* ---------- 缩略图：每个模式一张静帧 ---------- */
+let thumbsDone = false;
+function paintThumbs() {
+  if (thumbsDone) return;
+  const w = $('.mcard').offsetWidth; if (!w) return;
+  thumbsDone = true;
+  const t = 10.4, S = { t, dt: 1 / 60, wall: t, paused: false, idx: lineIndex(t), audio: audioAt(t, false), still: true, wide: false, bt: 0, bb: 0 };
+  $$('.mcard').forEach(card => {
+    const c = $('canvas', card), g = fit(c, w, 84);
+    const LW = w * 2, LH = 168;
+    g.setTransform(DPR * 0.5, 0, 0, DPR * 0.5, 0, 0);
+    if (META[card.dataset.m].bg) drawBackdrop(g, LW, LH, S); else { g.fillStyle = '#000'; g.fillRect(0, 0, LW, LH); }
+    MODES[card.dataset.m].create().draw(g, LW, LH, S);
+  });
+}
+
+/* ---------- 说明栏 ---------- */
+function renderFacts() {
+  const m = META[mode], box = $('#facts');
+  if (!box) return;
+  box.innerHTML = `<h4 style="margin:0 0 4px">${m.name} <span class="small">${m.tag}</span></h4>
+    <p style="margin:4px 0 8px">${m.effect}</p>
+    <dl><dt>来源</dt><dd>${m.src}${m.lic !== '—' ? ' · ' + m.lic : ''}</dd>
+    <dt>宿主背景</dt><dd>${m.bg ? '画（流光背景照常）' : '不画，模式自己画'}</dd>
+    <dt>宿主副行</dt><dd>${mode === 'classic' ? '不需要（列表里自带翻译）' : m.sub ? '显示（翻译 / 罗马音）' : '让位，模式自己排翻译'}</dd>
+    <dt>用到音频</dt><dd>${m.audio}</dd>
+    <dt>设置</dt><dd>原模组 ${m.orig}${m.settings.length ? `，面板放 ${m.settings.length} 项` : ''}${m.fixed ? `，其余 ${m.fixed} 项用原默认值` : ''}</dd>
+    <dt>工作量</dt><dd>${m.cost}</dd></dl>
+    <ul style="margin:6px 0 0;padding-left:18px">${m.impl.map(x => `<li>${x}</li>`).join('')}</ul>`;
+}
+
+const mt = $('#modeTable');
+if (mt) mt.innerHTML = '<thead><tr><th>模式</th><th>效果</th><th>宿主与音频</th><th>设置</th><th>Compose 做法</th><th>工作量</th></tr></thead><tbody>' +
+  ORDER.map(id => { const m = META[id]; return `<tr><td class="k">${m.name}<br><span class="small">${m.tag}</span><br><span class="small">${m.src}${m.lic !== '—' ? ' · ' + m.lic : ''}</span></td><td>${m.effect}</td><td>背景：${m.bg ? '画' : '不画'}<br>副行：${id === 'classic' ? '—' : m.sub ? '显示' : '让位'}<br>音频：${m.audio}</td><td>${m.orig}${m.settings.length ? `<br>面板 ${m.settings.length} 项` : ''}</td><td>${m.impl.join('<br>')}</td><td>${m.cost}</td></tr>`; }).join('') + '</tbody>';
+
+/* ---------- 模式条与控制 ---------- */
+$$('.modebar').forEach(bar => {
+  bar.innerHTML = ORDER.map(id => `<button data-m="${id}" class="${id === mode ? 'on' : ''}">${META[id].name}</button>`).join('');
+  $$('button', bar).forEach(b => { b.onclick = () => setMode(b.dataset.m); });
+});
+function setPaused(p) {
+  Clock.paused = p;
+  $('#btnPlay i').innerHTML = ico(p ? 'play' : 'pause');
+  $('#btnPlay').setAttribute('aria-label', p ? '播放' : '暂停');
+  $('#tgroup').classList.toggle('playing', !p);
+  $$('.ctl [data-c=play]').forEach(b => { b.textContent = p ? '播放' : '暂停'; });
+}
+$('#btnPlay').onclick = () => setPaused(!Clock.paused);
+$$('.ctl button').forEach(b => {
+  b.onclick = () => {
+    const c = b.dataset.c;
+    if (c === 'play') setPaused(!Clock.paused);
+    if (c === 'sheet') openSheet(!$('#sheet').classList.contains('open'));
+    if (c === 'spec') setSpectrum(!spectrum);
+    if (c === 'reduce') { reduce = !reduce; frozenWall = Clock.wall; b.classList.toggle('on', reduce); setMode(mode); }
+    if (c === 'idle') { const on = !$('#phBottom').classList.contains('idle'); $('#phBottom').classList.toggle('idle', on); b.classList.toggle('on', on); }
+    if (c === 'jump') { Clock.t = +b.dataset.t; setMode(mode); }
+  };
+});
+
+/* ---------- 设置页稿：开关和按钮组可点 ---------- */
+$$('.set .sw').forEach(sw => { if (sw.dataset.spec !== undefined) { sw.onclick = () => setSpectrum(!spectrum); return; } sw.onclick = () => toggleSw(sw, !sw.classList.contains('on')); });
+$$('.set .ctg').forEach(gp => $$('button', gp).forEach(b => { b.onclick = () => { $$('button', gp).forEach(x => x.classList.toggle('on', x === b)); }; }));
+$$('[data-open-sheet]').forEach(r => { r.onclick = () => { openSheet(true); $('#ph').scrollIntoView({ behavior: 'smooth', block: 'center' }); }; });
+
+/* ---------- 电视 ---------- */
+const tvScr = $('#tvScr');
+tvScr.innerHTML = '<canvas id="tvBg"></canvas><canvas id="tvStage"></canvas><div class="clock" id="tvClock">21:08</div><div class="subtitle" id="tvSub"></div>';
+let tvBg, tvStage, TW = 0, TH = 0;
+function fitTv() {
+  TW = tvScr.clientWidth; TH = tvScr.clientHeight;
+  if (!TW || !TH) return;
+  tvBg = fit($('#tvBg'), TW, TH); tvStage = fit($('#tvStage'), TW, TH);
+  $('#tvBg').style.zIndex = '1'; $('#tvStage').style.zIndex = '2';
+  $('#tvBg').style.left = $('#tvBg').style.top = $('#tvStage').style.left = $('#tvStage').style.top = '0';
+  tvInst = MODES[mode].create();
+}
+new ResizeObserver(fitTv).observe(tvScr);
+
+/* ---------- 每帧 ---------- */
+let lastSubIdx = -9, tvTick = 0;
+function setSub(elm, idx, show) {
+  if (!show || idx < 0) { elm.classList.add('off'); return; }
+  elm.classList.remove('off'); elm.textContent = LINES[idx].tr;
+}
+function frame(now) {
+  tick(now);
+  const t = Clock.t, idx = lineIndex(t), m = META[mode];
+  const base = { t, dt: reduce ? 0 : Clock.dt, wall: reduce ? frozenWall : Clock.wall, paused: Clock.paused, idx, audio: audioAt(t, Clock.paused), still: reduce, reactive: true };
+  // 手机
+  phBg.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (m.bg) drawBackdrop(phBg, SW, SH, base); else { phBg.fillStyle = '#000'; phBg.fillRect(0, 0, SW, SH); }
+  phStage.setTransform(DPR, 0, 0, DPR, 0, 0); phStage.clearRect(0, 0, SW, SH);
+  phStage.save(); phStage.translate(0, SAFE_T);
+  phInst.draw(phStage, SW, SAFE_H, { ...base, wide: false, bt: SAFE_T, bb: SH - SAFE_B });
+  phStage.restore();
+  phFront.setTransform(DPR, 0, 0, DPR, 0, 0); phFront.clearRect(0, 0, SW, SH);
+  if (spectrum) drawSpectrum(phFront, SW, SH, base, [16, SAFE_B - 68, 184, 60]);
+  const sub = $('#phSub');
+  sub.style.bottom = (SH - SAFE_B + 14 + (spectrum ? 70 : 0) + (phInst.subLift ? phInst.subLift(SAFE_H, false) : 0)) + 'px';
+  $('#tvSub').style.bottom = (22 + (TW && tvInst.subLift ? tvInst.subLift(TH, true) : 0)) + 'px';
+  if (idx !== lastSubIdx) { lastSubIdx = idx; setSub(sub, idx, m.sub); setSub($('#tvSub'), idx, m.sub); }
+  // 进度条
+  const prog = t / DUR, px = 312 * prog, ph0 = Clock.paused ? 0 : Clock.wall * 5;
+  let d = ''; for (let x = 0; x <= Math.max(0, px - 6); x += 2) d += (x ? 'L' : 'M') + x.toFixed(1) + ' ' + (14 + (Clock.paused ? 0 : 3) * Math.sin(x / 24 * Math.PI * 2 - ph0)).toFixed(2);
+  $('#wvP').setAttribute('d', d || 'M0 14');
+  $('#wvR').setAttribute('x1', Math.min(312, px + 8).toFixed(1));
+  $('#wvT').setAttribute('x', (px - 2).toFixed(1));
+  // 电视：30 帧
+  if (TW && (++tvTick & 1) === 0) {
+    tvBg.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (m.bg) drawBackdrop(tvBg, TW, TH, base); else { tvBg.fillStyle = '#000'; tvBg.fillRect(0, 0, TW, TH); }
+    tvStage.setTransform(DPR, 0, 0, DPR, 0, 0); tvStage.clearRect(0, 0, TW, TH);
+    tvInst.draw(tvStage, TW, TH, { ...base, dt: base.dt * 2, wide: true, bt: 0, bb: 0 });
+  }
+  requestAnimationFrame(frame);
+}
+
+renderAuto(); renderFacts(); renderForm(); setMode('classic');
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { fitTv(); requestAnimationFrame(frame); });
+})();
+
+</script>
+</body>
+</html>
