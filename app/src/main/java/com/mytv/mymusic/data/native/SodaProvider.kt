@@ -1,6 +1,7 @@
 package com.mytv.mymusic.data.native
 
 import android.net.Uri
+import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
@@ -124,15 +125,41 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         findCachedFile(trackId, workDir)?.let {
             // 文件名末段是播放信息里的原始码率（bps）；旧版本存下的 Song.bitrate 可能也是 bps，不能照搬
             val cachedBitrate = it.nameWithoutExtension.substringAfterLast('-').toIntOrNull()?.takeIf { br -> br > 0 }
+            AppLog.d(TAG, "取流命中本地缓存 track=$trackId 文件=${it.name}")
             return PlayableStream(
                 Uri.fromFile(it).toString(),
                 ext = it.extension.lowercase(),
                 bitrate = cachedBitrate?.let(::normalizeSodaBitrate) ?: song.bitrate,
             )
         }
+        val startedAt = System.currentTimeMillis()
+        AppLog.i(
+            TAG,
+            "取流开始 track=$trackId vip=${song.isVip} 签名器=${signerSummary()} " +
+                "cookie=${describeCookie(cookie)}",
+        )
         val info = resolveDownloadInfo(cookie, trackId, null)
         if (info.url.trim().isEmpty()) throw IllegalStateException("player info url not found")
-        val url = if (info.playAuth.trim().isEmpty()) downloadInfoUrl(info) else decryptToCache(trackId, info, workDir)
+        val url = if (info.playAuth.trim().isEmpty()) {
+            downloadInfoUrl(info)
+        } else {
+            try {
+                decryptToCache(trackId, info, workDir)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                AppLog.w(
+                    TAG,
+                    "整曲下载/解密失败 track=$trackId ${describeDownloadInfo(info)}：${error.message}",
+                )
+                throw error
+            }
+        }
+        AppLog.i(
+            TAG,
+            "取流完成 track=$trackId preview=${info.preview} ${describeDownloadInfo(info)} " +
+                "解密=${info.playAuth.isNotBlank()} 耗时=${System.currentTimeMillis() - startedAt}ms",
+        )
         return PlayableStream(
             url = url,
             ext = info.format.ifBlank { extensionFromUrl(url) }.ifBlank { song.ext },
@@ -145,9 +172,27 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     }
 
     override suspend fun accountInfo(cookie: String): AccountInfo? {
-        if (cookie.isBlank()) return null
-        val me = runCatching { fetchPcMe(cookie) }.getOrNull() ?: return null
+        if (cookie.isBlank()) {
+            AppLog.d(TAG, "账号资料：没有汽水 Cookie")
+            return null
+        }
+        val me = try {
+            fetchPcMe(cookie)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            AppLog.w(
+                TAG,
+                "账号资料取不到，Cookie 可能不是完整登录态 cookie=${describeCookie(cookie)}：${error.message}",
+            )
+            return null
+        }
         val nickname = firstNonEmpty(me.myInfo.nickname, me.myInfo.publicName)
+        AppLog.i(
+            TAG,
+            "账号资料 uid=${me.myInfo.id} 昵称=${nickname.ifBlank { "空" }} " +
+                "cookie=${describeCookie(cookie)}",
+        )
         if (nickname.isBlank()) return null
         return AccountInfo(
             nickname = nickname,
@@ -213,6 +258,9 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             return QRCheckResult(status = "waiting", message = "汽水正在确认登录，请稍候…", cookie = "")
         }
         entry.consecutiveErrors = 0
+        if (result.status == "success") {
+            AppLog.i(TAG, "扫码登录成功 cookie=${describeCookie(result.cookie)}")
+        }
         if (result.status == "success" || result.status == "expired" || result.status == "failed") {
             loginSessions.remove(sessionId)
             gateway.close()
@@ -704,6 +752,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val body = try {
             NativeHttp.get(webTrackV2Url(trackId), cookie = cookie, userAgent = SODA_USER_AGENT)
         } catch (error: Exception) {
+            AppLog.w(TAG, "web track_v2 请求失败，试 SEO 兜底: ${error.message}")
             return try {
                 fetchSeoTrackData(cookie, trackId)
             } catch (seoError: Exception) {
@@ -716,6 +765,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return try {
             parseTrackV2Response(body)
         } catch (parseError: Exception) {
+            AppLog.w(TAG, "web track_v2 解析失败，试 SEO 兜底: ${parseError.message}")
             try {
                 fetchSeoTrackData(cookie, trackId)
             } catch (seoError: Exception) {
@@ -731,6 +781,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val resp = decodeSodaJson<SodaTrackV2Response>(body, "soda track_v2 json parse error")
         if (resp.statusCode != 0) {
             val message = resp.statusInfo.statusMsg.trim().ifEmpty { "unknown error" }
+            AppLog.w(TAG, "track_v2 返回错误 status_code=${resp.statusCode} status_msg=$message")
             throw IllegalStateException(
                 "soda track_v2 api error: status_code=${resp.statusCode} status_msg=$message"
             )
@@ -779,6 +830,10 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val track = response.primaryTrack()
         var fullDuration = trackDurationSeconds(track)
         var isVipTrack = track.labelInfo.isVip()
+        AppLog.d(
+            TAG,
+            "track_v2 track=$id vip=$isVipTrack 时长=${fullDuration}s label=${describeLabel(track.labelInfo)}",
+        )
 
         var lastError: Exception? = null
         var webInfo = bestFromVideoModel(response.trackPlayer.videoModel)
@@ -790,52 +845,77 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
                 webInfo = fetchPlayerInfo(cookie, response.trackPlayer.urlPlayerInfo)
             } catch (error: Exception) {
                 lastError = error
+                AppLog.w(TAG, "web 播放信息失败，保留 videoModel 结果: ${error.message}")
                 // Keep an already-obtained preview stream so member tracks remain playable.
                 webInfo = previous
             }
         }
         val webIsPreview = downloadInfoIsPreview(webInfo, fullDuration)
         val webQuality = webInfo?.let { qualityRank(it.quality, it.format, it.bitrate) } ?: 0
+        AppLog.d(TAG, "web 流 quality=$webQuality preview=$webIsPreview ${describeDownloadInfo(webInfo)}")
 
         // 整曲流走 App 端点（POST /luna/pc/track_v2），逐请求签名头 x-helios/x-medusa
         // 由外部签名器生成；默认连 SodaM 的公共签名服务，关闭签名器时保持只走公开 web/SEO 端点。
         if (isSignerConfigured() && cookie.isNotBlank()) {
             val skipPc = webInfo != null && !isVipTrack && !webIsPreview && webQuality >= 60
             val shouldTryPc = !skipPc && (isVipTrack || webIsPreview || webQuality < 100)
+            AppLog.d(TAG, "签名整曲路径 skip=$skipPc shouldTry=$shouldTryPc webQuality=$webQuality")
             if (shouldTryPc) {
                 try {
                     val pcResp = fetchPcTrackV2Signed(cookie, id)
                     val pcTrack = pcResp.primaryTrack()
                     if (fullDuration == 0) fullDuration = trackDurationSeconds(pcTrack)
                     if (pcTrack.labelInfo.isVip()) isVipTrack = true
+                    AppLog.d(
+                        TAG,
+                        "pc track_v2 vip=$isVipTrack 时长=${fullDuration}s label=${describeLabel(pcTrack.labelInfo)}",
+                    )
 
                     val pcVideo = bestFromVideoModel(pcResp.trackPlayer.videoModel)
                     if (pcVideo != null && !downloadInfoIsPreview(pcVideo, fullDuration)) {
+                        AppLog.i(TAG, "pc videoModel 拿到整曲 ${describeDownloadInfo(pcVideo)}")
                         return pcVideo.copy(preview = false)
                     }
                     if (pcResp.trackPlayer.urlPlayerInfo.isNotEmpty()) {
                         val pcInfo = fetchPlayerInfo(cookie, pcResp.trackPlayer.urlPlayerInfo)
                         if (!downloadInfoIsPreview(pcInfo, fullDuration)) {
+                            AppLog.i(TAG, "pc 播放信息拿到整曲 ${describeDownloadInfo(pcInfo)}")
                             return pcInfo.copy(preview = false)
                         }
+                        AppLog.w(TAG, "pc 只返回了试听 ${describeDownloadInfo(pcInfo)}")
                         lastError = IllegalStateException("soda pc track_v2 returned preview stream")
                     } else {
+                        AppLog.w(TAG, "pc track_v2 没有 player info url")
                         lastError = IllegalStateException("soda pc track_v2 missing player info url")
                     }
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
+                    AppLog.w(TAG, "pc track_v2 失败: ${error.message}")
                     lastError = error
                 }
             }
+        } else {
+            AppLog.d(
+                TAG,
+                "跳过签名整曲：签名器=${isSignerConfigured()} cookie=${describeCookie(cookie)}",
+            )
         }
 
         if (webInfo != null && webInfo.url.isNotEmpty()) {
+            if (webIsPreview) {
+                AppLog.w(
+                    TAG,
+                    "最终退回公开试听流 track=$id vip=$isVipTrack ${describeDownloadInfo(webInfo)} " +
+                        "pc原因=${lastError?.message ?: "未尝试"}",
+                )
+            }
             return webInfo.copy(preview = webIsPreview)
         }
 
         if (isVipTrack) {
             val reason = lastError?.message ?: "未获取到公开播放地址"
+            AppLog.w(TAG, "会员曲无可用流 track=$id：$reason")
             throw IllegalStateException("$VIP_SIGNER_REQUIRED_MESSAGE：$reason")
         }
         if (lastError != null) throw lastError
@@ -848,10 +928,19 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val list = resp.result.data.playInfoList
         if (list.isEmpty()) {
             val message = resp.responseMetadata.error.message
-            if (message.isNotEmpty()) throw IllegalStateException(message)
+            if (message.isNotEmpty()) {
+                AppLog.w(TAG, "player_info 无音频流: $message")
+                throw IllegalStateException(message)
+            }
+            AppLog.w(TAG, "player_info 无音频流，返回体 ${body.length}B")
             throw IllegalStateException("no audio stream found")
         }
         val best = bestPlayerInfo(list) ?: throw IllegalStateException("invalid download url")
+        AppLog.d(
+            TAG,
+            "player_info 候选 ${list.size} 档: " +
+                list.joinToString(" | ") { "${it.quality}/${it.format}/${it.bitrate}/${it.duration.toInt()}s" },
+        )
         var downloadUrl = best.mainPlayUrl
         if (downloadUrl.isEmpty()) downloadUrl = best.backupPlayUrl
         if (downloadUrl.isEmpty()) throw IllegalStateException("invalid download url")
@@ -902,9 +991,21 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
+            AppLog.w(TAG, "签名器请求失败 endpoint=${describeEndpoint(endpoint)}：${error.message}")
             throw IllegalStateException("汽水签名器请求失败：${error.message}", error)
         }
-        return parseSignerResponse(response.body, requestUrl)
+        val signed = try {
+            parseSignerResponse(response.body, requestUrl)
+        } catch (error: Exception) {
+            AppLog.w(TAG, "签名器返回不可用 endpoint=${describeEndpoint(endpoint)}：${error.message}")
+            throw error
+        }
+        AppLog.d(
+            TAG,
+            "签名成功 HTTP=${response.code} headers=${signed.headers.keys.joinToString(",")} " +
+                "query=${if (signed.url != requestUrl) "已附加" else "无"}",
+        )
+        return signed
     }
 
     private fun parseSignerResponse(raw: String, requestUrl: String): SignedRequest {
@@ -968,9 +1069,11 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             }
         } catch (error: CancellationException) {
             throw error
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             // /config 不是所有签名器都提供；缺设备身份时用本地生成值
+            AppLog.w(TAG, "签名器 /config 取指纹失败，改用本地设备号：${error.message}")
         }
+        val fromSigner = deviceId.isNotEmpty()
         if (deviceId.isEmpty()) {
             // 签名器没给 /config 时用落盘的那份：每次启动重新生成的话，
             // 服务端（埋点、播放计数、推荐口味的 played_media）永远攒不起同一个人的历史
@@ -981,10 +1084,19 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         }
         if (iid.isEmpty()) iid = (System.currentTimeMillis() + 1).toString()
         if (fp.isEmpty()) fp = deviceId
+        AppLog.d(
+            TAG,
+            "设备指纹 来源=${if (fromSigner) "签名器/config" else "本地"} " +
+                "deviceId=${maskId(deviceId)} iid=${maskId(iid)} fp=${maskId(fp)}",
+        )
         return SodaAppCredentials(deviceId = deviceId, iid = iid, fp = fp).also {
             signerCredentials = it
         }
     }
+
+    /** 设备号只留首尾各 4 位，够对照又不会把完整指纹写进可分享的日志。 */
+    private fun maskId(id: String): String =
+        if (id.length <= 8) id else "${id.take(4)}…${id.takeLast(4)}(${id.length})"
 
     private fun signerConfigUrl(): String {
         var base = effectiveSignerUrl()
@@ -1083,11 +1195,24 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         if (response.body.isBlank()) {
             // 设备身份可能已变化（签名器重启），下次重新对齐 /config
             signerCredentials = null
+            AppLog.w(
+                TAG,
+                "pc track_v2 返回空响应 HTTP=${response.code} deviceId=${maskId(creds.deviceId)} " +
+                    "cookie=${describeCookie(cookie)}",
+            )
             throw IllegalStateException(
                 "soda pc track_v2 返回空响应：签名头未被接受，请检查签名器、设备指纹与 Cookie"
             )
         }
-        return parseTrackV2Response(response.body)
+        return try {
+            parseTrackV2Response(response.body)
+        } catch (error: Exception) {
+            AppLog.w(
+                TAG,
+                "pc track_v2 解析失败 HTTP=${response.code} deviceId=${maskId(creds.deviceId)}：${error.message}",
+            )
+            throw error
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -2412,6 +2537,41 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return info.duration + 5 < fullDurationSeconds
     }
 
+    // ---------------------------------------------------------------------
+    // 诊断日志：VIP 整曲取流是账号状态 × 签名器 × 服务端策略三方共同决定的，
+    // 只报「只能试听」没法定位。这里把每段判断都记进 AppLog（不记 Cookie/Token 值）。
+    // ---------------------------------------------------------------------
+
+    private fun describeDownloadInfo(info: DownloadInfo?): String {
+        if (info == null) return "流=none"
+        return "流 quality=${info.quality} format=${info.format} bitrate=${info.bitrate} " +
+            "时长=${info.duration}s 大小=${info.size} auth=${info.playAuth.length}B"
+    }
+
+    private fun describeLabel(label: SodaLabelInfo): String = buildString {
+        append("onlyVipPlay=").append(label.onlyVipPlayable)
+        append(" onlyVipDl=").append(label.onlyVipDownload)
+        if (label.qualityOnlyVipCanPlay.isNotEmpty()) {
+            append(" vipPlayQualities=").append(label.qualityOnlyVipCanPlay.joinToString(","))
+        }
+        if (label.qualityOnlyVipCanDownload.isNotEmpty()) {
+            append(" vipDlQualities=").append(label.qualityOnlyVipCanDownload.joinToString(","))
+        }
+        if (label.qualityMap.isNotEmpty()) append(" qualities=").append(label.qualityMap.keys.joinToString(","))
+    }
+
+    /** 只列 Cookie 的字段名，值一律不落日志。 */
+    private fun describeCookie(cookie: String): String = cookieFieldNames(cookie)
+
+    private fun signerSummary(): String = when {
+        !isSignerConfigured() -> "未启用"
+        isUsingDefaultSigner() -> "SodaM公共(${describeEndpoint(effectiveSignerUrl())})"
+        else -> "自定义(${describeEndpoint(effectiveSignerUrl())})"
+    }
+
+    private fun describeEndpoint(url: String): String =
+        url.toHttpUrlOrNull()?.let { "${it.host}:${it.port}" } ?: url
+
     internal fun parseSodaLyric(raw: String, translation: String = ""): String {
         val originals = mutableListOf<Pair<Int, String>>()
         raw.split("\n").forEach { rawLine ->
@@ -2689,6 +2849,18 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     private data class SignedRequest(val url: String, val headers: Map<String, String>)
 
     companion object {
+        /** 诊断日志在 AppLog 里的 tag；导出日志时按它筛汽水相关条目。 */
+        const val TAG = "Soda"
+
+        /** Cookie 字段名列表（不含值）：登录态是否完整，看有没有 sessionid/sid_guard 就够了。 */
+        fun cookieFieldNames(cookie: String): String {
+            if (cookie.isBlank()) return "无"
+            val names = cookie.split(';')
+                .mapNotNull { it.substringBefore('=').trim().takeIf(String::isNotEmpty) }
+                .distinct()
+            return "有(${names.joinToString(",")})"
+        }
+
         /**
          * 内置的 SodaM 公共签名服务：[SodaM](https://github.com/sodahub-org/sodam) 作者提供的默认实例，
          * 桌面版默认就连这一个。用户自己填了地址和 Token 就以填的为准。
@@ -2707,6 +2879,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             val now = System.currentTimeMillis()
             val deviceId = now.toString()
             val iid = (now + 1).toString()
+            AppLog.d(TAG, "福利接口参数 device_id=$deviceId iid=$iid region=cn tz=Asia/Shanghai")
             return welfareQuery(
                 mapOf(
                     "aid" to "386088",
@@ -2759,6 +2932,11 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             signerToken = nextToken
             signerEnabled = enabled
             signerCredentials = null
+            AppLog.i(
+                TAG,
+                "签名器配置更新 enabled=$enabled url=${nextUrl.ifBlank { DEFAULT_SIGNER_URL }} " +
+                    "token=${if ((nextToken.ifBlank { DEFAULT_SIGNER_TOKEN }).isNotBlank()) "已设置" else "空"}",
+            )
         }
 
         private fun normalizeSignerUrl(raw: String): String {

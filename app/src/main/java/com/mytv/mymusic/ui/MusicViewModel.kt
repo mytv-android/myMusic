@@ -3644,6 +3644,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 },
                 onFailure = { error ->
+                    AppLog.w(
+                        "Soda",
+                        "天天送会员请求失败 cookie=${settingsState.value.cookies[SodaProvider.SODA_PROVIDER_ID].orEmpty().isNotBlank()}：" +
+                            "${error.javaClass.simpleName}: ${error.message}",
+                    )
                     SodaWelfareUi(loading = false, loggedIn = true, error = error.message.orEmpty())
                 },
             )
@@ -3660,6 +3665,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _sodaWelfare.value = _sodaWelfare.value.copy(applying = true)
             val result = runCatching { SodaWelfare.applyFreeVip(cookie) }.getOrElse {
+                AppLog.w("Soda", "领取免费 VIP 请求失败：${it.javaClass.simpleName}: ${it.message}")
                 SodaApplyFreeVipResult(false, it.message.orEmpty())
             }
             _sodaWelfare.value = _sodaWelfare.value.copy(applying = false)
@@ -4257,6 +4263,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveCookie(providerId: String = settingsState.value.provider, cookie: String) = viewModelScope.launch {
+        if (providerId == SodaProvider.SODA_PROVIDER_ID) {
+            AppLog.i(
+                "Soda",
+                "保存汽水 Cookie：${if (cookie.isBlank()) "已清空" else SodaProvider.cookieFieldNames(cookie)}",
+            )
+        }
         resolver.clearCache()
         searchEngine.clearCache()
         app.settings.cookie(providerId, cookie)

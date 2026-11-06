@@ -140,6 +140,7 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         // 播放上报：开关、落盘的设备指纹、平台 Cookie 都从设置里来，
         // 和签名器一样改设置即时生效，不需要重启
         var reportDeviceIdReady = false
+        var sodaDiagLogged = false
         appScope.launch(Dispatchers.IO) {
             settings.state.collect { values ->
                 PlayReportHub.setEnabled(values.playReportEnabled)
@@ -150,6 +151,19 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
                 if (values.playReportEnabled && values.sodaReportDeviceId.isBlank() && !reportDeviceIdReady) {
                     reportDeviceIdReady = true
                     SodaProvider.configureFallbackDeviceId(settings.sodaReportDeviceId())
+                }
+                // 汽水「只能试听」类反馈先看这里：登录态字段和签名器配置各是什么
+                if (!sodaDiagLogged) {
+                    sodaDiagLogged = true
+                    val sodaCookie = values.cookies[SodaProvider.SODA_PROVIDER_ID].orEmpty()
+                    AppLog.i(
+                        SodaProvider.TAG,
+                        "启动状态 汽水cookie=${SodaProvider.cookieFieldNames(sodaCookie)} 签名器=" + when {
+                            !values.sodaSignerEnabled -> "关闭"
+                            values.sodaSignerUrl.isBlank() -> "SodaM公共"
+                            else -> "自定义(${values.sodaSignerUrl})"
+                        } + " token=${if (values.sodaSignerToken.isBlank()) "内置" else "自填"}",
+                    )
                 }
             }
         }

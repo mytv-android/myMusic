@@ -1,5 +1,6 @@
 package com.mytv.mymusic.data.native
 
+import com.mytv.mymusic.AppLog
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
@@ -47,7 +48,32 @@ object SodaWelfare {
             cookie = cookie,
             userAgent = SodaProvider.WELFARE_USER_AGENT,
         )
-        return parseCommerceInfo(response.body)
+        val info = parseCommerceInfo(response.body)
+        // 账号身份和 Cookie 字段名一起记：能区分「账号没会员」和「Cookie 根本不是完整登录态」
+        val uid = (NativeProviders.get(SodaProvider.SODA_PROVIDER_ID) as? SodaProvider)
+            ?.userId(cookie)
+            .orEmpty()
+        AppLog.i(
+            SodaProvider.TAG,
+            "天天送 commerce_info HTTP=${response.code} uid=${uid.ifBlank { "取不到" }} " +
+                "响应=${response.body.length}B cookie=${SodaProvider.cookieFieldNames(cookie)}",
+        )
+        if (!info.ok) {
+            AppLog.w(
+                SodaProvider.TAG,
+                "天天送接口异常 statusCode=${info.statusCode} statusMsg=${info.statusMsg.ifBlank { "空" }}",
+            )
+        } else {
+            AppLog.i(
+                SodaProvider.TAG,
+                "天天送状态 entrance=${info.entranceAuthorized} 活动=${info.activityStartDate}~" +
+                    "${info.activityEndDate} active=${info.activityActive} 已领=${info.latestApplyDate}" +
+                    "(${info.appliedCount}天) 今天已领=${info.todayClaimed} 待领=${info.pendingDays} " +
+                    "会员=${info.vipActive}/${info.vipType.ifBlank { "无" }} 到期=${info.vipExpireAt} " +
+                    "听歌任务=${info.taskMinutes}/${info.tasksFinished}",
+            )
+        }
+        return info
     }
 
     /** 把今天的免费 VIP 领到账号上；空 body，成败看 apply_status。 */
@@ -65,7 +91,13 @@ object SodaWelfare {
             cookie = cookie,
             userAgent = SodaProvider.WELFARE_USER_AGENT,
         )
-        return parseApplyResult(response.body)
+        val result = parseApplyResult(response.body)
+        AppLog.i(
+            SodaProvider.TAG,
+            "天天送 apply_free_vip HTTP=${response.code} success=${result.success} " +
+                "applyStatus=${result.applyStatus} message=${result.message}",
+        )
+        return result
     }
 
     fun parseCommerceInfo(raw: String, todayDate: String = todayDate()): SodaWelfareInfo {
@@ -73,6 +105,10 @@ object SodaWelfare {
             ?: return SodaWelfareInfo()
         val statusCode = root.int("status_code") ?: 0
         val statusMsg = root.string("status_info", "status_msg").orEmpty()
+        AppLog.d(
+            SodaProvider.TAG,
+            "commerce_info 顶层字段=${root.keys.joinToString(",")}",
+        )
         if (statusCode != 0) {
             return SodaWelfareInfo(statusCode = statusCode, statusMsg = statusMsg)
         }
