@@ -439,6 +439,16 @@ private fun PhoneIdleLyrics(
         val next = MaterialTheme.typography.bodyLarge.merge(IdleNextStyle)
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             CurrentLyric(line, position, playing, MaterialTheme.typography.bodyLarge.merge(IdleCurrentStyle))
+            // 外语歌的翻译跟着当前行；这一页只露三行，后两行不挤翻译
+            if (line.translation.isNotBlank()) {
+                Text(
+                    line.translation,
+                    style = MaterialTheme.typography.bodyLarge.merge(IdleTranslationStyle),
+                    color = dim.copy(alpha = dim.alpha * 0.85f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             lyrics.lines.getOrNull(index + 1)?.let { Text(it.text, style = next, color = dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             lyrics.lines.getOrNull(index + 2)?.let {
                 Text(it.text, style = next, color = dim.copy(alpha = dim.alpha * 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -907,3 +917,4 @@ private val ShortPreviewStyle = TextStyle(fontSize = 17.sp, lineHeight = 24.sp, 
 private val PreviewNextStyle = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
 private val IdleCurrentStyle = TextStyle(fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold)
 private val IdleNextStyle = TextStyle(fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
+private val IdleTranslationStyle = TextStyle(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium)
