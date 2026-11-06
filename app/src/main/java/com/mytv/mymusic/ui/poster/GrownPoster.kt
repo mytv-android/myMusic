@@ -244,6 +244,7 @@ internal fun GrownPoster(
     lyrics: String,
     showTranslation: Boolean,
     settled: Boolean,
+    lyricText: com.mytv.mymusic.data.LyricTextPrefs = com.mytv.mymusic.data.LyricTextPrefs(),
     coverScale: () -> Float = { 1f },
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
@@ -271,7 +272,7 @@ internal fun GrownPoster(
     // 解析放在后台（播放页同一条路径）；不是当前歌、歌词还没取回来时不解析
     val fetching = current && lyricsLoading
     val raw = if (current && !fetching) lyrics else ""
-    val parsed = rememberParsedLyrics(raw)
+    val parsed = rememberParsedLyrics(raw, lyricText)
     val lines = remember(parsed.lyrics) { posterLines(parsed.lyrics) }
     // 原文还在取、还在解析时先按“有歌词”排（不闪成大歌名），但不显示上一份结果
     val hasLyrics = fetching || (raw.isNotBlank() && (parsed.loading || lines.isNotEmpty()))

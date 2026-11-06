@@ -3,6 +3,7 @@ package com.mytv.mymusic.widget
 import android.content.Context
 import android.content.Intent
 import com.mytv.mymusic.MainActivity
+import com.mytv.mymusic.data.LyricTextPrefs
 import com.mytv.mymusic.data.Song
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -31,6 +32,8 @@ data class PlaybackSnapshot(
     val feedModeId: String = "",
     val hasPrevious: Boolean = false,
     val hasNext: Boolean = false,
+    /** 歌词文字设置（拆双语、简转繁），组件和全屏歌词页看到的是同一份文字。 */
+    val lyricText: LyricTextPrefs = LyricTextPrefs(),
 ) {
     fun positionAt(now: Long): Long {
         if (!playing) return positionMs

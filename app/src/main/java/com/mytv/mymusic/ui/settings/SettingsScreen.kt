@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.aggregate.MatchStrictness
 import com.mytv.mymusic.aggregate.PlaybackMode
+import com.mytv.mymusic.data.LyricAutoSwitch
 import com.mytv.mymusic.data.sync.SyncUiState
 import com.mytv.mymusic.data.update.UpdateUiState
 import com.mytv.mymusic.playback.EqPresets
@@ -63,6 +64,8 @@ import com.mytv.mymusic.ui.components.SegmentedGroup
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatBytes
 import com.mytv.mymusic.ui.player.label
+import com.mytv.mymusic.ui.player.stage.ClassicVisualizer
+import com.mytv.mymusic.ui.player.stage.LyricVisualizers
 import com.mytv.mymusic.ui.providerName
 import com.mytv.mymusic.ui.relativeTime
 import com.mytv.mymusic.ui.theme.FontScale
@@ -98,7 +101,10 @@ internal fun settingsOverview(
                 if (appearance.layout != LayoutMode.Auto) append(" · ${appearance.layout.label}")
                 if (appearance.fontScale != FontScale.Standard) append(" · ${appearance.fontScale.label}字号")
             },
-            SettingsSection.Lyrics to "封面${state.coverShape.label} · 背景${state.lyricsBackground.label}",
+            SettingsSection.Lyrics to buildString {
+                append("封面${state.coverShape.label} · 背景${state.lyricsBackground.label}")
+                lyricStageSummary(state)?.let { append(" · 动画$it") }
+            },
             SettingsSection.Playback to playbackModeSummary(state.aggregation.playbackMode) +
                 if (state.aggregation.matchStrictness == MatchStrictness.Strict) " · 严格匹配" else "",
             SettingsSection.Report to if (state.playReportEnabled) "已开启" else "已关闭",
@@ -386,4 +392,11 @@ private fun NewBadge() {
     ) {
         Text("新", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onError)
     }
+}
+
+/** 总览里“播放页”一行的歌词动画部分：固定用经典时不写，固定其他模式写模式名，自动换时写“随机”“按速度”。 */
+private fun lyricStageSummary(state: MusicUiState): String? = when (state.lyricStage.auto) {
+    LyricAutoSwitch.Fixed -> LyricVisualizers.byId(state.lyricStage.visualizer).takeIf { it.id != ClassicVisualizer.id }?.label
+    LyricAutoSwitch.Random -> "随机"
+    LyricAutoSwitch.Tempo -> "按速度"
 }

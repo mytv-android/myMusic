@@ -237,6 +237,7 @@ internal fun PosterWallScreen(
                         duration = state.duration,
                         lyrics = if (isCurrent && lyricsReady) state.lyrics else "",
                         showTranslation = state.poster.translation,
+                        lyricText = state.lyricText,
                         // 被播放页盖着时当作没落定：歌词不组合，跳动的条、花瓣旋转和波浪都停
                         settled = settled && active,
                         coverScale = if (isCurrent) pulseScale else NoPulse,

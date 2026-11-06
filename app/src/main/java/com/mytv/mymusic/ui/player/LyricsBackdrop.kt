@@ -545,10 +545,10 @@ private suspend fun loadBackdropCover(context: Context, url: String): ImageBitma
     return result.image.toBitmap().asImageBitmap()
 }
 
-private val blobColorCache = LruCache<String, List<Color>>(32)
+internal val blobColorCache = LruCache<String, List<Color>>(32)
 
 /** 封面量化后得分最高的几个颜色，在后台线程算，按封面地址缓存；取不到时返回空表，由配色补上。 */
-private suspend fun coverBlobColors(context: Context, url: String): List<Color> {
+internal suspend fun coverBlobColors(context: Context, url: String): List<Color> {
     if (url.isBlank()) return emptyList()
     blobColorCache.get(url)?.let { return it }
     // 与 CoverSeedRepository 用同样的尺寸、软件位图和缓存键，通常直接命中它刚取过色的那张；键与大封面分开，互不顶掉

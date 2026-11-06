@@ -66,6 +66,10 @@ import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.adaptive.FoldSplit
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.WavySeekBar
+import com.mytv.mymusic.ui.player.stage.LyricStage
+import com.mytv.mymusic.ui.player.stage.StageBinding
+import com.mytv.mymusic.ui.player.stage.StageInsets
+import com.mytv.mymusic.ui.player.stage.ToolbarAnimationButton
 import java.util.Calendar
 import kotlin.math.roundToInt
 
@@ -93,6 +97,7 @@ internal fun TabletopPlayer(
     lyrics: ParsedLyrics,
     lyricsLoading: Boolean,
     active: State<Int>,
+    stage: StageBinding,
     sourceProvider: String?,
     sourceDetail: String,
     playbackMode: String,
@@ -146,6 +151,7 @@ internal fun TabletopPlayer(
                         lyrics = lyrics,
                         lyricsLoading = lyricsLoading,
                         active = active,
+                        stage = stage,
                         position = position,
                         actions = actions,
                         pulse = pulse,
@@ -170,6 +176,7 @@ internal fun TabletopPlayer(
                 {
                     PlayerToolbar(height = TabletopToolbarHeight) {
                         if (top != TabletopTop.Lyrics) ToolbarLyricsButton(on = lyricsMode, onToggle = onLyricsMode)
+                        if (shown == TabletopTop.Lyrics) ToolbarAnimationButton(stage.onOpenSheet)
                         ToolbarQueueButton(onOpenQueue)
                         ToolbarSleepButton(sleep, onOpenTimer)
                         ToolbarSourceButton(onOpenSource)
@@ -217,6 +224,7 @@ private fun TabletopStage(
     lyrics: ParsedLyrics,
     lyricsLoading: Boolean,
     active: State<Int>,
+    stage: StageBinding,
     position: State<Long>,
     actions: MusicActions,
     pulse: BackdropPulse,
@@ -228,17 +236,43 @@ private fun TabletopStage(
     Crossfade(shown, Modifier.fillMaxSize(), MaterialTheme.motionScheme.defaultEffectsSpec(), label = "tabletopTop") { what ->
         when (what) {
             // 立在桌上隔着一段距离看：大折叠用平板专注歌词的字号，小折叠用平板歌词栏的字号；太宽时一行不超过 760dp
-            TabletopTop.Lyrics -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                LyricsList(
-                    lyrics,
-                    active,
-                    actions::seek,
-                    Modifier.widthIn(max = TabletopLyricsMaxWidth).padding(horizontal = 24.dp),
+            // 选了别的歌词动画时上半屏换成舞台，文字区左右和歌词列表一样留 24dp、最宽 760dp；
+            // 舞台上下边（顶栏下沿、折痕上方）硬切很显眼，各渐隐 [TabletopStageFade]，文字区让出这两条带
+            TabletopTop.Lyrics -> {
+                val insets = remember { StageInsets() }
+                LyricStage(
+                    mode = stage.mode,
+                    lyrics = stage.lyrics,
                     loading = lyricsLoading,
                     position = position,
                     playing = playing,
-                    sizing = if (wide) LyricsSizing.TabletFocus else LyricsSizing.Tablet,
-                )
+                    song = song,
+                    prefs = stage.prefs,
+                    textSp = TABLETOP_STAGE_SP,
+                    insets = insets,
+                    edgeFade = TabletopStageFade,
+                    modifier = Modifier.fillMaxSize().layout { measurable, constraints ->
+                        val side = maxOf(24.dp.toPx(), (constraints.maxWidth - TabletopLyricsMaxWidth.toPx()) / 2f + 24.dp.toPx())
+                        val fade = TabletopStageFade.toPx()
+                        insets.set(top = fade, bottom = 8.dp.toPx() + fade, start = side, end = side)
+                        val placeable = measurable.measure(constraints)
+                        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                    },
+                ) {
+                    // 经典照原样排，不用舞台的安全区
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                        LyricsList(
+                            lyrics,
+                            active,
+                            actions::seek,
+                            Modifier.widthIn(max = TabletopLyricsMaxWidth).padding(horizontal = 24.dp),
+                            loading = lyricsLoading,
+                            position = position,
+                            playing = playing,
+                            sizing = if (wide) LyricsSizing.TabletFocus else LyricsSizing.Tablet,
+                        )
+                    }
+                }
             }
             TabletopTop.Cover -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CoverStage(
@@ -476,6 +510,7 @@ private val TabletopToolbarHeight = 60.dp
 private val TabletopBlockMax = 560.dp
 private val TabletopCoverMax = 360.dp
 private val TabletopLyricsMaxWidth = 760.dp
+private val TabletopStageFade = 20.dp
 
 /** 横折痕切出的哪一块比这还矮，就当没有折痕（按中线分）。 */
 private val TabletopMinHalf = 160.dp
@@ -491,3 +526,6 @@ private val TabletopClockStyle = TextStyle(
     letterSpacing = (-0.02).em,
     fontFeatureSettings = "tnum",
 )
+
+/** 桌面姿态上半屏舞台的正文字号（sp）。 */
+private const val TABLETOP_STAGE_SP = 34f

@@ -39,7 +39,19 @@ data class RhythmFrame(
     val fluxBass: Float = 0f,
     /** 690–4000 Hz 的谱通量，按频点数平均：军鼓、拍手那一路。中频频点比低频多得多，不平均的话拍手会比底鼓还“响”。 */
     val fluxMid: Float = 0f,
+    /**
+     * 48 段频谱柱，0..1：第 i 段取 (i/47)² × 16 kHz 处那个频点的电平（−100..−30 dB 线性映射），
+     * 和 Folia spectrum-visualizer 的平方映射一致。给全屏歌词的频谱图层和歌词动画用；没分析时为空。
+     */
+    val bands: FloatArray = EMPTY_BANDS,
+    /** 电平最高的频点对应的频率（Hz），频谱图层的读数用；静音时为 0。 */
+    val peakHz: Float = 0f,
 )
+
+/** 频谱柱的段数，和 Folia spectrum-visualizer 一样。 */
+const val RHYTHM_BAND_COUNT = 48
+
+private val EMPTY_BANDS = FloatArray(0)
 
 class RhythmAnalysis {
     private val fft = RealFft()
@@ -138,6 +150,8 @@ class RhythmAnalysis {
             kick = kickResult.onset,
             fluxBass = if (bassEnd > 0) kickResult.flux / bassEnd else 0f,
             fluxMid = fluxMid,
+            bands = spectrumBands(spectrum, sampleRateHz),
+            peakHz = peakFrequency(spectrum, sampleRateHz),
         )
     }
 
@@ -147,6 +161,30 @@ class RhythmAnalysis {
         for (i in from until to) sum += values[i]
         return sum / (to - from)
     }
+}
+
+/**
+ * 48 段频谱柱（见 [RhythmFrame.bands]）。[spectrum] 是 0..255 的电平，长度 = FFT 点数 / 2。
+ * 最高一段落在 16 kHz（至少第 64 个频点）；每一帧都新建数组，界面拿到的那份不会被分析线程改写。
+ */
+internal fun spectrumBands(spectrum: FloatArray, sampleRateHz: Int): FloatArray {
+    val bins = spectrum.size
+    if (bins == 0) return FloatArray(RHYTHM_BAND_COUNT)
+    val binHz = sampleRateHz.toFloat() / (bins * 2)
+    val top = minOf(bins - 1, maxOf(64, Math.round(16_000f / binHz)))
+    return FloatArray(RHYTHM_BAND_COUNT) { i ->
+        val f = i.toFloat() / (RHYTHM_BAND_COUNT - 1)
+        val bin = minOf(bins - 1, (f * f * top).toInt())
+        spectrum[bin] / 255f
+    }
+}
+
+/** 电平最高的频点的频率；全是 0（静音）时返回 0。 */
+internal fun peakFrequency(spectrum: FloatArray, sampleRateHz: Int): Float {
+    var peak = 0f
+    var index = 0
+    for (i in spectrum.indices) if (spectrum[i] > peak) { peak = spectrum[i]; index = i }
+    return if (peak > 0f) index * sampleRateHz.toFloat() / (spectrum.size * 2) else 0f
 }
 
 /** 窗口 RMS（时域、未加窗）换算成 0..1 的响度。 */

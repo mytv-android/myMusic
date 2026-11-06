@@ -1,6 +1,6 @@
 package com.mytv.mymusic.widget
 
-import com.mytv.mymusic.ui.LyricsParser
+import com.mytv.mymusic.ui.LyricPipeline
 import com.mytv.mymusic.ui.poster.PosterLine
 import com.mytv.mymusic.ui.poster.posterLines
 
@@ -14,8 +14,8 @@ data class LyricWindow(
 )
 
 /**
- * 组件和“系统媒体条歌词”用同一套解析（[LyricsParser]）和同一种并行规则（[posterLines]：同一时间戳的翻译并到原文下面）。
- * 只按行换，不做逐字。
+ * 组件和“系统媒体条歌词”用同一套解析（[LyricPipeline]，按歌词文字设置拆双语、简转繁）和同一种并行规则
+ * （[posterLines]：同一时间戳的翻译并到原文下面）。只按行换，不做逐字；罗马音组件上不显示，不转写。
  */
 object WidgetLyrics {
     @Volatile
@@ -23,9 +23,10 @@ object WidgetLyrics {
 
     internal fun lines(snapshot: PlaybackSnapshot): List<PosterLine> {
         if (!snapshot.lyricsReady || snapshot.lyrics.isBlank()) return emptyList()
-        val key = snapshot.song.key + "#" + snapshot.lyrics.hashCode()
+        val text = snapshot.lyricText.copy(autoRomanize = false)
+        val key = snapshot.song.key + "#" + snapshot.lyrics.hashCode() + "#" + text.hashCode()
         cache?.let { if (it.first == key) return it.second }
-        val lines = posterLines(LyricsParser.parse(snapshot.lyrics))
+        val lines = posterLines(LyricPipeline.prepare(snapshot.lyrics, text))
         cache = key to lines
         return lines
     }

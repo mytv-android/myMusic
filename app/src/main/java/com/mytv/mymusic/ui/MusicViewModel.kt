@@ -61,6 +61,9 @@ import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.PlaylistEntity
 import com.mytv.mymusic.data.PlaylistEntryEntity
 import com.mytv.mymusic.data.PosterPrefs
+import com.mytv.mymusic.data.LyricMemoryEntry
+import com.mytv.mymusic.data.LyricStagePrefs
+import com.mytv.mymusic.data.LyricTextPrefs
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.playreport.PlayEndReason
 import com.mytv.mymusic.data.playreport.PlayFrame
@@ -198,6 +201,10 @@ data class MusicUiState(
     val rhythmOffsetMs: Int = 0,
     val rhythmDebug: Boolean = false,
     val poster: PosterPrefs = PosterPrefs(),
+    /** 全屏歌词动画（模式、自动切换、频谱、各模式设置）。 */
+    val lyricStage: LyricStagePrefs = LyricStagePrefs(),
+    /** 歌词文字变换（拆单行双语、简转繁、补罗马音）。 */
+    val lyricText: LyricTextPrefs = LyricTextPrefs(),
     val collectionView: CollectionView = CollectionView.List,
     val miniPlayerTarget: MiniPlayerTarget = MiniPlayerTarget.Player,
     /** 播放上报总开关；关掉后不再把播放记录回传给任何平台。 */
@@ -491,6 +498,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             rhythmOffsetMs = settings.rhythmOffsetMs,
             rhythmDebug = settings.rhythmDebug,
             poster = settings.poster,
+            lyricStage = settings.lyricStage,
+            lyricText = settings.lyricText,
             collectionView = settings.collectionView,
             miniPlayerTarget = settings.miniPlayerTarget,
             playReportEnabled = settings.playReportEnabled,
@@ -2954,9 +2963,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // 歌词还是上一首的（新歌还没取回来）：先留着歌手名，免得显示串了的歌词
         val key = base.value.lyricsKey
         if (key.isBlank() || key != song.key) return
-        if (notifLyricsKey != key) {
-            notifLyricsKey = key
-            notifLyricLines = LyricsParser.parse(base.value.lyrics).lines
+        // 按歌词文字设置拆双语、简转繁（罗马音这里用不上）；转换放后台，算好之前这一行先显示歌手名
+        val text = settingsState.value.lyricText.copy(autoRomanize = false)
+        val cacheKey = key + "#" + text.hashCode()
+        if (notifLyricsKey != cacheKey) {
+            notifLyricsKey = cacheKey
+            notifLyricLines = emptyList()
+            val raw = base.value.lyrics
+            viewModelScope.launch {
+                val lines = withContext(Dispatchers.Default) { LyricPipeline.prepare(raw, text).lines }
+                if (notifLyricsKey == cacheKey) notifLyricLines = lines
+            }
         }
         val line = notifLyricLines.getOrNull(LyricsParser.activeLineIndex(notifLyricLines, positionMs))
             ?.text?.trim().orEmpty()
@@ -4028,6 +4045,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             feedModeId = ui.listeningFeed?.modeId.orEmpty(),
             hasPrevious = ui.queue.size > 1,
             hasNext = index < ui.queue.lastIndex || looping || ui.listeningFeed != null,
+            lyricText = ui.lyricText,
         )
     }
 
@@ -4169,6 +4187,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setRhythmOffset(value: Int) = viewModelScope.launch { app.settings.rhythmOffsetMs(value) }
     fun setRhythmDebug(value: Boolean) = viewModelScope.launch { app.settings.rhythmDebug(value) }
     fun setPosterPrefs(transform: (PosterPrefs) -> PosterPrefs) = viewModelScope.launch { app.settings.poster(transform) }
+    fun setLyricStage(transform: (LyricStagePrefs) -> LyricStagePrefs) = viewModelScope.launch { app.settings.lyricStage(transform) }
+    fun setLyricText(transform: (LyricTextPrefs) -> LyricTextPrefs) = viewModelScope.launch { app.settings.lyricText(transform) }
+    suspend fun lyricMemory(songKey: String): LyricMemoryEntry? = app.settings.lyricMemory(songKey)
+
+    /** 记下这首歌随机到的模式或测到的速度；离开播放页也要写完，所以挂在应用作用域上。 */
+    fun rememberLyric(songKey: String, update: (LyricMemoryEntry) -> LyricMemoryEntry) {
+        app.appScope.launch { app.settings.rememberLyric(songKey, update) }
+    }
     fun setCollectionView(value: CollectionView) = viewModelScope.launch { app.settings.collectionView(value) }
     fun setMiniPlayerTarget(value: MiniPlayerTarget) = viewModelScope.launch { app.settings.miniPlayerTarget(value) }
     fun setShowBottomNav(value: Boolean) = viewModelScope.launch { app.settings.showBottomNav(value) }

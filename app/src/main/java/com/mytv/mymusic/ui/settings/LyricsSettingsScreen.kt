@@ -31,7 +31,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.mytv.mymusic.data.CoverShapeChoice
+import com.mytv.mymusic.data.LyricSubline
 import com.mytv.mymusic.data.LyricsBackgroundMode
 import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.data.RHYTHM_OFFSET_MAX_MS
@@ -60,13 +65,20 @@ import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.SystemScriptConverter
+import com.mytv.mymusic.ui.components.ListRow
 import com.mytv.mymusic.ui.components.SectionLabel
+import com.mytv.mymusic.ui.components.SegmentedGroup
 import com.mytv.mymusic.ui.components.SwitchRow
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.player.label
 import com.mytv.mymusic.ui.player.polygon
 import com.mytv.mymusic.ui.player.rhythmDebugAvailable
+import com.mytv.mymusic.ui.player.stage.AnimationSheet
+import com.mytv.mymusic.ui.player.stage.LyricVisualizers
+import com.mytv.mymusic.ui.player.stage.label
+import com.mytv.mymusic.ui.theme.PlayerTheme
 
 internal val LyricsBackgroundMode.label: String
     get() = when (this) {
@@ -89,6 +101,13 @@ internal val TabletopTop.label: String
         TabletopTop.Clock -> "时钟"
     }
 
+internal val LyricSubline.label: String
+    get() = when (this) {
+        LyricSubline.Translation -> "翻译"
+        LyricSubline.Romanization -> "罗马音"
+        LyricSubline.Both -> "都显示"
+    }
+
 internal val MiniPlayerTarget.label: String
     get() = when (this) {
         MiniPlayerTarget.Player -> "播放页"
@@ -96,7 +115,7 @@ internal val MiniPlayerTarget.label: String
     }
 
 /**
- * 设置 → 播放页（枚举仍叫 Lyrics）：封面形状、歌词背景、系统媒体条歌词、律动强度和跟拍校准、
+ * 设置 → 播放页（枚举仍叫 Lyrics）：封面形状、歌词背景、歌词动画和歌词文字、系统媒体条歌词、律动强度和跟拍校准、
  * 点按迷你播放器打开什么；折叠屏展开时加桌面姿态上半屏放什么，电视上再加环境模式时钟。都只存在本机，改了立即生效。
  */
 @Composable
@@ -109,6 +128,23 @@ fun LyricsSettingsScreen(
     val window = LocalAppWindow.current
     val mode = state.lyricsBackground
     val debuggable = rhythmDebugAvailable()
+    var animationOpen by rememberSaveable { mutableStateOf(false) }
+    if (animationOpen) {
+        // 和全屏歌词页右上角 ✦ 打开的是同一个面板，套播放页的深色配色；这里没有“这首歌”，点模式改的是默认模式
+        PlayerTheme {
+            AnimationSheet(
+                prefs = state.lyricStage,
+                song = state.current,
+                shown = state.lyricStage.visualizer,
+                actions = actions,
+                onPick = { id -> actions.setLyricStage { it.copy(visualizer = id) } },
+                onPin = null,
+                onDismiss = { animationOpen = false },
+            )
+        }
+    }
+    val stage = state.lyricStage
+    val text = state.lyricText
     SettingsPage(SettingsSection.Lyrics, embedded, onBack) {
         item(key = "shapeHead", contentType = "sectionHeader") { SectionLabel("封面形状") }
         item(key = "shapes", contentType = "coverShapes") {
@@ -140,6 +176,81 @@ fun LyricsSettingsScreen(
                     },
                 )
             }
+        }
+        item(key = "stageHead", contentType = "sectionHeader") { SectionLabel("歌词动画") }
+        item(key = "stage", contentType = "lyricStage") {
+            SegmentedGroup {
+                ListRow(
+                    title = "全屏歌词动画",
+                    index = 0,
+                    count = 3,
+                    onClick = { animationOpen = true },
+                    summary = "只在全屏歌词页生效",
+                    value = LyricVisualizers.byId(stage.visualizer).label,
+                )
+                ListRow(
+                    title = "每首歌换动画",
+                    index = 1,
+                    count = 3,
+                    onClick = { animationOpen = true },
+                    value = stage.auto.label,
+                )
+                SwitchRow(
+                    title = "频谱",
+                    checked = stage.spectrum,
+                    onCheckedChange = { on -> actions.setLyricStage { it.copy(spectrum = on) } },
+                    index = 2,
+                    count = 3,
+                    summary = "全屏歌词页左下角",
+                )
+            }
+        }
+        item(key = "stageNote", contentType = "note") {
+            SettingsNote("全屏歌词页右上角的 ✦ 打开的是同一个面板。")
+        }
+        item(key = "textHead", contentType = "sectionHeader") { SectionLabel("歌词文字") }
+        item(key = "text", contentType = "lyricText") {
+            SegmentedGroup {
+                SwitchRow(
+                    title = "拆分单行双语",
+                    checked = text.splitBilingual,
+                    onCheckedChange = { on -> actions.setLyricText { it.copy(splitBilingual = on) } },
+                    index = 0,
+                    count = 3,
+                    summary = "“原文 / 译文”写在同一行的歌词，拆成原文和翻译",
+                )
+                SwitchRow(
+                    title = "简体转繁体",
+                    checked = text.traditional && SystemScriptConverter.traditionalAvailable,
+                    onCheckedChange = { on -> actions.setLyricText { it.copy(traditional = on) } },
+                    index = 1,
+                    count = 3,
+                    summary = if (SystemScriptConverter.traditionalAvailable) "逐字转换，个别字转不准" else "需要 Android 10 及以上",
+                    enabled = SystemScriptConverter.traditionalAvailable,
+                )
+                SwitchRow(
+                    title = "没有罗马音时自动转写",
+                    checked = text.autoRomanize && SystemScriptConverter.romanizeAvailable,
+                    onCheckedChange = { on -> actions.setLyricText { it.copy(autoRomanize = on) } },
+                    index = 2,
+                    count = 3,
+                    summary = if (SystemScriptConverter.romanizeAvailable) "只转韩文、假名和西里尔字母，汉字不转" else "需要 Android 10 及以上",
+                    enabled = SystemScriptConverter.romanizeAvailable,
+                )
+            }
+        }
+        item(key = "sublineHead", contentType = "sectionHeader") { SectionLabel("歌词下面那一行") }
+        item(key = "subline", contentType = "toggleGroup") {
+            ConnectedToggleGroup(
+                options = LyricSubline.entries,
+                selected = stage.subline,
+                onSelect = { value -> actions.setLyricStage { it.copy(subline = value) } },
+                label = { it.label },
+                modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+            )
+        }
+        item(key = "textNote", contentType = "note") {
+            SettingsNote("前三项对全屏歌词页、系统媒体播放条、桌面小组件和海报墙都生效；最后一项只影响播放页。歌词没有罗马音时，选“罗马音”显示翻译。")
         }
         item(key = "notificationHead", contentType = "sectionHeader") { SectionLabel("系统媒体播放条") }
         item(key = "notification", contentType = "switch") {

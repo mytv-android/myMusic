@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -76,6 +77,9 @@ import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.components.WavySeekBar
+import com.mytv.mymusic.ui.player.stage.LyricStage
+import com.mytv.mymusic.ui.player.stage.StageBinding
+import com.mytv.mymusic.ui.player.stage.StageInsets
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatTime
 import com.mytv.mymusic.ui.theme.LocalAppearance
@@ -105,6 +109,7 @@ internal fun TvPlayer(
     lyrics: ParsedLyrics,
     lyricsLoading: Boolean,
     active: State<Int>,
+    stage: StageBinding,
     sourceProvider: String?,
     sourceDetail: String,
     playbackMode: String,
@@ -130,12 +135,18 @@ internal fun TvPlayer(
     Box(Modifier.size(1.dp).focusRequester(idleFocus).focusProperties { canFocus = ambient }.focusable())
 
     // 位置和大小走慢速空间弹簧，淡入淡出走默认效果弹簧；减少动画时位置直接到位，只保留淡入淡出
-    val stage = animateFloatAsState(if (ambient) 1f else 0f, if (reduceMotion) snap() else motion.slowSpatialSpec(), label = "tvStage")
+    val progress = animateFloatAsState(if (ambient) 1f else 0f, if (reduceMotion) snap() else motion.slowSpatialSpec(), label = "tvStage")
     val fade = animateFloatAsState(if (ambient) 1f else 0f, motion.defaultEffectsSpec(), label = "tvFade")
     val chromeAlpha = remember(fade) { { 1f - fade.value } }
+    // 选了经典以外的歌词动画：环境模式整屏给舞台，封面、歌名和歌词栏跟控制条一起淡出，完全进入后歌词栏不再组合
+    val custom = stage.custom
+    val pageAlpha = remember(fade, custom) { if (custom) ({ 1f - fade.value }) else ({ 1f }) }
+    val stageShown by remember(fade) { derivedStateOf { fade.value > 0.001f } }
+    val listHidden by remember(fade) { derivedStateOf { fade.value >= 0.999f } }
+    val stageInsets = remember { StageInsets() }
     val waveScale = remember(pulse) { { pulseWaveScale(pulse) } }
     val waveBpm = remember(pulse) { { pulseWaveBpm(pulse) } }
-    val policy = remember(stage, ambient, ambientClock) { TvStagePolicy(stage, ambient, ambientClock) }
+    val policy = remember(progress, ambient, ambientClock, stageInsets) { TvStagePolicy(progress, ambient, ambientClock, stageInsets) }
 
     Layout(
         contents = listOf<@Composable () -> Unit>(
@@ -147,9 +158,10 @@ internal fun TvPlayer(
                     playing = playing,
                     shapeChoice = coverShape,
                     pulse = pulse,
+                    modifier = if (custom) Modifier.graphicsLayer { alpha = pageAlpha() } else Modifier,
                 )
             },
-            { TvMeta(song, stage, ambient) },
+            { TvMeta(song, progress, ambient, pageAlpha) },
             {
                 // 只展示：换源走控制条上的按钮，这里不能拿遥控器焦点，否则多出一个和右下角重复的焦点位
                 SourcePill(
@@ -162,11 +174,12 @@ internal fun TvPlayer(
                 )
             },
             {
-                LyricsList(
+                if (!(custom && listHidden)) LyricsList(
                     lyrics,
                     active,
                     actions::seek,
                     modifier = Modifier
+                        .graphicsLayer { alpha = pageAlpha() }
                         // 歌词行能聚焦（确认键从这一句播放），上下键在行间走，往下要走完整首才回到控制条；
                         // 左边没有别的焦点位，按左键直接回控制条上刚才那个按钮
                         .onPreviewKeyEvent { event ->
@@ -177,7 +190,7 @@ internal fun TvPlayer(
                     loading = lyricsLoading,
                     position = position,
                     playing = playing,
-                    sizing = if (ambient) LyricsSizing.TvAmbient else LyricsSizing.Tv,
+                    sizing = if (ambient && !custom) LyricsSizing.TvAmbient else LyricsSizing.Tv,
                 )
             },
             { TvNotice(notice, chromeAlpha) },
@@ -199,10 +212,28 @@ internal fun TvPlayer(
                     onOpenQueue = onOpenQueue,
                     onOpenTimer = onOpenTimer,
                     onOpenSource = onOpenSource,
+                    onOpenSheet = stage.onOpenSheet,
                 )
             },
             { TvThinProgress(position, duration, fade, song.isLive) },
             { if (ambientClock) TvClock(fade) },
+            {
+                // 环境模式的歌词动画舞台：整屏，文字排在时钟下面、细进度上面（安全区由摆放策略写）
+                if (custom && stageShown) {
+                    LyricStage(
+                        mode = stage.mode,
+                        lyrics = stage.lyrics,
+                        loading = lyricsLoading,
+                        position = position,
+                        playing = playing,
+                        song = song,
+                        prefs = stage.prefs,
+                        textSp = TV_STAGE_SP,
+                        insets = stageInsets,
+                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = fade.value },
+                    )
+                }
+            },
         ),
         modifier = Modifier.fillMaxSize(),
         measurePolicy = policy,
@@ -211,12 +242,13 @@ internal fun TvPlayer(
 
 /** 歌名 34sp 粗体、歌手 20sp primary；环境模式缩到 30 / 19sp（图层缩放，过渡中不重新排版）。切歌时整块淡出淡入。 */
 @Composable
-private fun TvMeta(song: Song, stage: State<Float>, ambient: Boolean) {
+private fun TvMeta(song: Song, stage: State<Float>, ambient: Boolean, alpha: () -> Float) {
     val fade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     val titleStyle = MaterialTheme.typography.displaySmall.merge(TitleStyle)
     val artistStyle = MaterialTheme.typography.titleLarge.merge(ArtistStyle)
     AnimatedContent(
         targetState = song,
+        modifier = Modifier.graphicsLayer { this.alpha = alpha() },
         transitionSpec = { (fadeIn(fade) togetherWith fadeOut(fade)).using(null) },
         contentKey = { it.key },
         label = "tvTitle",
@@ -287,6 +319,7 @@ private fun TvDock(
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
     onOpenSource: () -> Unit,
+    onOpenSheet: () -> Unit,
 ) {
     Column(
         Modifier
@@ -331,6 +364,7 @@ private fun TvDock(
                 DockAction(Icons.AutoMirrored.Filled.QueueMusic, "播放队列", onOpenQueue)
                 DockAction(Icons.Filled.GridView, "海报墙", actions::openPosterWall)
                 DockAction(Icons.Filled.SwapHoriz, "换音源", onOpenSource)
+                DockAction(Icons.Filled.AutoAwesome, "歌词动画", onOpenSheet)
             }
         }
         // 时间放在进度条两侧而不是下方：两行的控制条已经比设计稿高，再多一行会压到封面下的音源胶囊
@@ -444,6 +478,7 @@ private class TvStagePolicy(
     private val stage: State<Float>,
     private val ambient: Boolean,
     private val clock: Boolean,
+    private val stageInsets: StageInsets,
 ) : MultiContentMeasurePolicy {
     override fun MeasureScope.measure(measurables: List<List<Measurable>>, constraints: Constraints): MeasureResult {
         val width = constraints.maxWidth
@@ -465,12 +500,19 @@ private class TvStagePolicy(
         val lyricsHeight = (frame.lyricsBottom(p) - lyricsTop).roundToInt().coerceAtLeast(0)
         // 歌词行自带 8dp 横向内边距，整栏往左挪 8dp，字和歌名左对齐
         val rowPadding = (8 * unit).roundToInt()
-        val lyrics = measurables[SlotLyrics].first()
-            .measure(Constraints.fixed((frame.lyricsWidth.roundToInt() + rowPadding * 2).coerceAtLeast(0), lyricsHeight))
+        val lyrics = measurables[SlotLyrics].firstOrNull()
+            ?.measure(Constraints.fixed((frame.lyricsWidth.roundToInt() + rowPadding * 2).coerceAtLeast(0), lyricsHeight))
         val notice = measurables[SlotNotice].firstOrNull()?.measure(Constraints(maxWidth = frame.lyricsWidth.roundToInt().coerceAtLeast(0)))
         val thin = measurables[SlotThin].firstOrNull()
             ?.measure(Constraints.fixed((width - side * 2).coerceAtLeast(0), (TvDp.ThinHeight * unit).roundToInt()))
         val clockText = measurables[SlotClock].firstOrNull()?.measure(Constraints())
+        // 歌词动画舞台整屏：左右按封面左边距留边，顶上让开时钟，底下让开细进度
+        val stagePlaceable = measurables[SlotStage].firstOrNull()?.let {
+            val edge = TvDp.CoverStart * unit
+            val top = (if (clock) TvDp.StageTopClock else TvDp.StageTop) * unit
+            stageInsets.set(top = top, bottom = TvDp.StageBottom * unit, start = edge, end = edge)
+            it.measure(Constraints.fixed(width, height))
+        }
 
         return layout(width, height) {
             val coverScale = frame.coverSize(p) / coverSide.coerceAtLeast(1)
@@ -481,7 +523,8 @@ private class TvStagePolicy(
             }
             meta?.place(textX.roundToInt(), metaY.roundToInt())
             pill?.place((TvDp.CoverStart * unit).roundToInt(), frame.pillY.roundToInt())
-            lyrics.place(textX.roundToInt() - rowPadding, lyricsTop.roundToInt())
+            stagePlaceable?.place(0, 0)
+            lyrics?.place(textX.roundToInt() - rowPadding, lyricsTop.roundToInt())
             thin?.place(side, height - (TvDp.DockBottom * unit).roundToInt())
             clockText?.place(width - (TvDp.ClockEnd * unit).roundToInt() - clockText.width, (TvDp.ClockTop * unit).roundToInt())
             notice?.place(frame.textX(0f).roundToInt(), dockTop - (TvDp.NoticeGap * unit).roundToInt() - notice.height)
@@ -575,6 +618,11 @@ internal object TvDp {
     const val ThinHeight = 3f
     const val ClockEnd = 56f
     const val ClockTop = 40f
+
+    /** 环境模式歌词动画的安全区：顶边（开着时钟时让到时钟下面）、底边。 */
+    const val StageTop = 48f
+    const val StageTopClock = 104f
+    const val StageBottom = 56f
 }
 
 private const val SlotCover = 0
@@ -585,6 +633,10 @@ private const val SlotNotice = 4
 private const val SlotDock = 5
 private const val SlotThin = 6
 private const val SlotClock = 7
+private const val SlotStage = 8
+
+/** 电视环境模式舞台的正文字号（sp）。 */
+private const val TV_STAGE_SP = 40f
 
 private val DockCorner = 38.dp
 private const val TitleAmbientScale = 30f / 34f

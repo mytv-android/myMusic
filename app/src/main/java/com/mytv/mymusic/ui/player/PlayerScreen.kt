@@ -62,11 +62,20 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.mytv.mymusic.data.LyricsBackgroundMode
 import com.mytv.mymusic.data.RhythmIntensity
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TabletopTop
 import com.mytv.mymusic.playback.SleepTimerState
+import com.mytv.mymusic.data.LyricTextPrefs
+import com.mytv.mymusic.ui.LyricPipeline
+import com.mytv.mymusic.ui.withSubline
+import com.mytv.mymusic.ui.player.stage.AnimationSheet
+import com.mytv.mymusic.ui.player.stage.StageBinding
+import com.mytv.mymusic.ui.player.stage.pick
+import com.mytv.mymusic.ui.player.stage.pin
+import com.mytv.mymusic.ui.player.stage.rememberLyricDirector
 import com.mytv.mymusic.ui.LyricsParser
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
@@ -122,7 +131,8 @@ fun PlayerScreen(
     val book = window.posture == Posture.Book && window.widthDp >= 600
     val wideLayout = book || (window.widthDp >= 600 && window.widthDp > window.heightDp)
     // 暂停时也照样计时：控制栏几秒后淡出，按确认键或点按唤醒。桌面姿态下半屏是平放着用手点的那一面，不进入空闲
-    val idle = rememberIdleState(holdAwake = sheetOpen || state.sourcePickerTrack != null || tabletop)
+    var animationOpen by rememberSaveable { mutableStateOf(false) }
+    val idle = rememberIdleState(holdAwake = sheetOpen || animationOpen || state.sourcePickerTrack != null || tabletop)
     // 电视环境模式下按住左右键切歌的按键状态，跨重组保留到松开
     val holdSkip = remember { HoldSkip() }
     PredictiveBackHandler { events ->
@@ -146,9 +156,28 @@ fun PlayerScreen(
     val pulse = rememberBackdropPulse()
     val favorite = remember(favorites, song.key) { favorites.any { it.key == song.key } }
     // 解析放在后台；状态不随原文重建，切歌时先保留上一份结果，等新原文解析完成再替换。
-    val lyricsState = rememberParsedLyrics(state.lyrics)
-    val lyrics = lyricsState.lyrics
+    val lyricsState = rememberParsedLyrics(state.lyrics, state.lyricText)
+    val stageLyrics = lyricsState.lyrics
+    // 经典列表、两行预览只认 translation：按“歌词下面那一行”换成罗马音或两行都要；动画舞台自己按设置取
+    val lyrics = remember(stageLyrics, state.lyricStage.subline) { stageLyrics.withSubline(state.lyricStage.subline) }
     val lyricsLoading = lyricsState.loading
+    val director = rememberLyricDirector(song, state.lyricStage, stageLyrics, lyricsLoading, position, state.playing, actions)
+    val stageMode = director.mode
+    val stage = remember(stageMode, state.lyricStage, stageLyrics) {
+        StageBinding(stageMode, state.lyricStage, stageLyrics) { animationOpen = true }
+    }
+    // 自己画背景的动画（动感波光）铺满歌词页时，底下的流光背景停掉；等歌词页淡入完再停，免得过渡中闪一下纯色。
+    // 桌面姿态的舞台只占上半屏，下半屏的控件还要流光背景
+    val stageCoversBackdrop = lyricsMode && !stageMode.hostBackground && !window.isTv && !tabletop
+    var backdropOff by remember { mutableStateOf(false) }
+    LaunchedEffect(stageCoversBackdrop) {
+        if (stageCoversBackdrop) {
+            delay(BACKDROP_OFF_DELAY_MS)
+            backdropOff = true
+        } else {
+            backdropOff = false
+        }
+    }
     // 进度每 100ms 变一次；派生状态只记录依赖，不在这里读取，当前行由歌词 leaf 消费
     val active = remember(lyrics, position) {
         derivedStateOf {
@@ -199,7 +228,7 @@ fun PlayerScreen(
         LyricsBackdrop(
             cover = song.cover,
             playing = state.playing,
-            mode = state.lyricsBackground,
+            mode = if (backdropOff) LyricsBackgroundMode.Off else state.lyricsBackground,
             intensity = state.rhythmIntensity,
             wide = wideBackdrop,
             pulse = pulse,
@@ -225,6 +254,7 @@ fun PlayerScreen(
                 lyrics = lyrics,
                 lyricsLoading = lyricsLoading,
                 active = active,
+                stage = stage,
                 sourceProvider = sourceProvider,
                 sourceDetail = sourceDetail,
                 playbackMode = playbackMode,
@@ -248,6 +278,7 @@ fun PlayerScreen(
                 lyrics = lyrics,
                 lyricsLoading = lyricsLoading,
                 active = active,
+                stage = stage,
                 sourceProvider = sourceProvider,
                 sourceDetail = sourceDetail,
                 playbackMode = playbackMode,
@@ -276,6 +307,7 @@ fun PlayerScreen(
                 lyrics = lyrics,
                 lyricsLoading = lyricsLoading,
                 active = active,
+                stage = stage,
                 sourceProvider = sourceProvider,
                 sourceDetail = sourceDetail,
                 playbackMode = playbackMode,
@@ -304,6 +336,7 @@ fun PlayerScreen(
                 lyrics = lyrics,
                 lyricsLoading = lyricsLoading,
                 active = active,
+                stage = stage,
                 sourceProvider = sourceProvider,
                 sourceDetail = sourceDetail,
                 playbackMode = playbackMode,
@@ -324,6 +357,17 @@ fun PlayerScreen(
             )
         }
         HeartBurst(burst, heartBurstPlacement(window.fold, book, tabletop))
+        if (animationOpen) {
+            AnimationSheet(
+                prefs = state.lyricStage,
+                song = song,
+                shown = stageMode.id,
+                actions = actions,
+                onPick = { id -> director.pick(song, state.lyricStage, id, actions) },
+                onPin = { on -> director.pin(song, on, actions) },
+                onDismiss = { animationOpen = false },
+            )
+        }
         if (state.rhythmDebug && rhythmDebugAvailable()) {
             RhythmDebugOverlay(pulse, state.rhythmOffsetMs, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp))
         }
@@ -337,11 +381,14 @@ fun PlayerScreen(
  */
 internal class ParsedLyricsState(val lyrics: ParsedLyrics, val loading: Boolean)
 
-/** 切歌时保留上一份解析结果，取消旧任务后只发布当前原文的结果。 */
+/**
+ * 切歌时保留上一份解析结果，取消旧任务后只发布当前原文的结果。解析走 [LyricPipeline]（拆单行双语、简转繁、补罗马音），
+ * 改了这几项开关原文不变，不算加载中，结果出来直接替换。
+ */
 @Composable
-internal fun rememberParsedLyrics(raw: String): ParsedLyricsState {
-    val lyrics by androidx.compose.runtime.produceState(ParsedLyrics(emptyList(), "", false), raw) {
-        val parsed = withContext(Dispatchers.Default) { LyricsParser.parse(raw) }
+internal fun rememberParsedLyrics(raw: String, text: LyricTextPrefs = LyricTextPrefs()): ParsedLyricsState {
+    val lyrics by androidx.compose.runtime.produceState(ParsedLyrics(emptyList(), "", false), raw, text) {
+        val parsed = withContext(Dispatchers.Default) { LyricPipeline.prepare(raw, text) }
         ensureActive()
         value = parsed
     }
@@ -350,6 +397,9 @@ internal fun rememberParsedLyrics(raw: String): ParsedLyricsState {
 }
 
 // ---------- 共用片段 ----------
+
+/** 自己画背景的动画铺满歌词页后，等这么久（歌词页淡入完）再停流光背景。 */
+private const val BACKDROP_OFF_DELAY_MS = 700L
 
 /**
  * 空闲时控件淡出的透明度，只在图层里读。空闲状态在效果协程里收集：返回值的函数不是独立的重组作用域，

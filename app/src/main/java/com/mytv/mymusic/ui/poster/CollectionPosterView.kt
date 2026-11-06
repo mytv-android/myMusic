@@ -234,6 +234,7 @@ internal fun CollectionPosterView(
                 lyrics = if (current) lyrics else "",
                 lyricsLoading = current && !lyricsReady,
                 showTranslation = translation,
+                lyricText = state.lyricText,
                 settled = settled && shown,
                 coverScale = if (current) pulseScale else NoPulse,
                 onPlayPause = { actions.transport("play") },

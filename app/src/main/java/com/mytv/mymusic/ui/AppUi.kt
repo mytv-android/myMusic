@@ -234,6 +234,13 @@ class MusicActions(private val model: MusicViewModel) {
     fun setRhythmDebug(value: Boolean) = model.setRhythmDebug(value)
     fun setPosterPrefs(transform: (com.mytv.mymusic.data.PosterPrefs) -> com.mytv.mymusic.data.PosterPrefs) =
         model.setPosterPrefs(transform)
+    fun setLyricStage(transform: (com.mytv.mymusic.data.LyricStagePrefs) -> com.mytv.mymusic.data.LyricStagePrefs) =
+        model.setLyricStage(transform)
+    fun setLyricText(transform: (com.mytv.mymusic.data.LyricTextPrefs) -> com.mytv.mymusic.data.LyricTextPrefs) =
+        model.setLyricText(transform)
+    suspend fun lyricMemory(songKey: String) = model.lyricMemory(songKey)
+    fun rememberLyric(songKey: String, update: (com.mytv.mymusic.data.LyricMemoryEntry) -> com.mytv.mymusic.data.LyricMemoryEntry) =
+        model.rememberLyric(songKey, update)
     fun setCollectionView(value: com.mytv.mymusic.data.CollectionView) = model.setCollectionView(value)
     fun setMiniPlayerTarget(value: MiniPlayerTarget) = model.setMiniPlayerTarget(value)
     fun startSleepTimer(minutes: Int) = model.startSleepTimer(minutes)

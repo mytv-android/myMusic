@@ -12,8 +12,10 @@ data class LyricLine(
     val timeMs: Long,
     val text: String,
     val words: List<LyricWord> = emptyList(),
-    /** 同一时间戳的下一层文本（翻译或罗马音）：QQ、酷我、网易云都按原文、罗马音、翻译的顺序写。 */
+    /** 同一时间戳的最后一层文本（翻译；只有两层时也可能是罗马音）：QQ、酷我、网易云都按原文、罗马音、翻译的顺序写。 */
     val translation: String = "",
+    /** 同一时间戳有三层时中间那层（罗马音），或者打开“自动转写”后补上的罗马音；没有就是空串。 */
+    val romanization: String = "",
 )
 
 data class ParsedLyrics(
@@ -93,7 +95,10 @@ object LyricsParser {
         return words
     }
 
-    /** 同一时间戳的连续几行并成一句：第一行是原文，最后一行是翻译或罗马音。 */
+    /**
+     * 同一时间戳的连续几行并成一句：第一行是原文，最后一行是翻译（只有两层时也可能是罗马音，分不出来，照旧当翻译）；
+     * 三层及以上时第二行是罗马音（各平台都按原文、罗马音、翻译的顺序写）。和原文一样的层不算。
+     */
     private fun mergeLayers(lines: List<LyricLine>): List<LyricLine> {
         val out = ArrayList<LyricLine>(lines.size)
         var i = 0
@@ -101,8 +106,13 @@ object LyricsParser {
             val head = lines[i]
             var j = i + 1
             while (j < lines.size && lines[j].timeMs == head.timeMs) j++
+            val original = head.text.trim()
             val extra = if (j - i > 1) lines[j - 1].text.trim() else ""
-            out += head.copy(translation = extra.takeUnless { it == head.text.trim() }.orEmpty())
+            val middle = if (j - i > 2) lines[i + 1].text.trim() else ""
+            out += head.copy(
+                translation = extra.takeUnless { it == original }.orEmpty(),
+                romanization = middle.takeUnless { it == original || it == extra }.orEmpty(),
+            )
             i = j
         }
         return out

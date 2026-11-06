@@ -90,6 +90,10 @@ import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.adaptive.FoldSplit
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.WavySeekBar
+import com.mytv.mymusic.ui.player.stage.LyricStage
+import com.mytv.mymusic.ui.player.stage.StageBinding
+import com.mytv.mymusic.ui.player.stage.StageInsets
+import com.mytv.mymusic.ui.player.stage.ToolbarAnimationButton
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlin.math.roundToInt
@@ -119,6 +123,7 @@ internal fun WidePlayer(
     lyrics: ParsedLyrics,
     lyricsLoading: Boolean,
     active: State<Int>,
+    stage: StageBinding,
     sourceProvider: String?,
     sourceDetail: String,
     playbackMode: String,
@@ -170,7 +175,8 @@ internal fun WidePlayer(
             wideEstimate(density, constraints.maxWidth, constraints.maxHeight, split)
         }
         val full = estimate.full
-        val policy = remember(move, focusTarget, estimate, split) { WideStagePolicy(move, focusTarget, estimate, split) }
+        val stageInsets = remember { StageInsets() }
+        val policy = remember(move, focusTarget, estimate, split, stageInsets) { WideStagePolicy(move, focusTarget, estimate, split, stageInsets) }
         Layout(
             contents = listOf<@Composable () -> Unit>(
                 {
@@ -221,6 +227,7 @@ internal fun WidePlayer(
                         WideGuard(idle, lyricsMode, Modifier.graphicsLayer { alpha = defaultChrome() }) {
                             PlayerToolbar(height = ToolbarHeight) {
                                 ToolbarLyricsButton(on = false, onToggle = onLyricsMode)
+                                ToolbarAnimationButton(stage.onOpenSheet)
                                 ToolbarQueueButton(onOpenQueue)
                                 ToolbarSleepButton(sleep, onOpenTimer)
                                 ToolbarSourceButton(onOpenSource)
@@ -230,7 +237,7 @@ internal fun WidePlayer(
                     }
                 },
                 { if (showFocus) FocusHeader(song, focusAlpha) },
-                { if (showFocus) FocusDock(playing, actions, idle, !lyricsMode, focusChrome, onLyricsMode, onOpenQueue) },
+                { if (showFocus) FocusDock(playing, actions, idle, !lyricsMode, focusChrome, onLyricsMode, onOpenQueue, stage.onOpenSheet) },
                 {
                     if (showFocus) {
                         WideGuard(null, !lyricsMode, Modifier.graphicsLayer { alpha = focusAlpha() }) {
@@ -239,16 +246,19 @@ internal fun WidePlayer(
                     }
                 },
                 {
-                    LyricsList(
-                        lyrics,
-                        active,
-                        actions::seek,
-                        Modifier.fillMaxSize(),
-                        loading = lyricsLoading,
-                        position = position,
-                        playing = playing,
-                        sizing = if (lyricsMode) LyricsSizing.TabletFocus else LyricsSizing.Tablet,
-                    )
+                    // 专注歌词换成了动画舞台时，歌词栏随过渡淡出，稳定后不再组合
+                    if (!stage.custom || showDefault) {
+                        LyricsList(
+                            lyrics,
+                            active,
+                            actions::seek,
+                            if (stage.custom) Modifier.fillMaxSize().graphicsLayer { alpha = defaultAlpha() } else Modifier.fillMaxSize(),
+                            loading = lyricsLoading,
+                            position = position,
+                            playing = playing,
+                            sizing = if (lyricsMode && !stage.custom) LyricsSizing.TabletFocus else LyricsSizing.Tablet,
+                        )
+                    }
                 },
                 { WideNotice(notice) },
                 {
@@ -271,6 +281,23 @@ internal fun WidePlayer(
                             Modifier
                         },
                     )
+                },
+                {
+                    // 专注歌词的动画舞台：铺满窗口，文字排在专注歌词那一栏里（安全区由摆放策略按专注布局写）
+                    if (showFocus && stage.custom) {
+                        LyricStage(
+                            mode = stage.mode,
+                            lyrics = stage.lyrics,
+                            loading = lyricsLoading,
+                            position = position,
+                            playing = playing,
+                            song = song,
+                            prefs = stage.prefs,
+                            textSp = WIDE_STAGE_SP,
+                            insets = stageInsets,
+                            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = focusAlpha() },
+                        )
+                    }
                 },
             ),
             modifier = Modifier.fillMaxSize(),
@@ -354,6 +381,7 @@ private fun FocusDock(
     alpha: () -> Float,
     onLyricsMode: (Boolean) -> Unit,
     onOpenQueue: () -> Unit,
+    onOpenSheet: () -> Unit,
 ) {
     WideGuard(idle, blocked, Modifier.graphicsLayer { this.alpha = alpha() }) {
         VerticalFloatingToolbar(
@@ -377,6 +405,7 @@ private fun FocusDock(
                 DockSkipButton(Icons.Filled.SkipNext, "下一首") { actions.transport("next") }
                 Box(Modifier.size(40.dp, 1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)))
                 ToolbarLyricsButton(on = true, onToggle = onLyricsMode)
+                ToolbarAnimationButton(onOpenSheet)
                 ToolbarQueueButton(onOpenQueue)
             }
         }
@@ -491,6 +520,7 @@ private class WideStagePolicy(
     private val focus: State<Boolean>,
     private val estimate: WideEstimate,
     private val split: FoldSplit?,
+    private val stageInsets: StageInsets,
 ) : MultiContentMeasurePolicy {
     private var lastMeta = estimate.meta
     private var lastSeek = estimate.seek
@@ -555,7 +585,17 @@ private class WideStagePolicy(
         val lyricsY = if (focused) frame.lyricsY else lyricsTop
         val lyricsWidth = if (focused) frame.lyricsWidth else cols.lyricsWidth
         val lyricsHeight = if (focused) frame.lyricsHeight else defaultLyricsHeight
-        val lyrics = measurables[SlotLyrics].first().measure(Constraints.fixed(lyricsWidth, lyricsHeight))
+        val lyrics = measurables[SlotLyrics].firstOrNull()?.measure(Constraints.fixed(lyricsWidth, lyricsHeight))
+        // 动画舞台铺满窗口，安全区就是专注歌词那一栏
+        val stagePlaceable = measurables[SlotStage].firstOrNull()?.let {
+            stageInsets.set(
+                top = frame.lyricsY.toFloat(),
+                bottom = (height - frame.lyricsY - frame.lyricsHeight).toFloat(),
+                start = frame.contentX.toFloat(),
+                end = (width - frame.contentX - frame.lyricsWidth).toFloat(),
+            )
+            it.measure(Constraints.fixed(width, height))
+        }
         val notice = measurables[SlotNotice].firstOrNull()?.measure(Constraints(maxWidth = lyricsWidth))
         val cover = measurables[SlotCover].first().measure(Constraints.fixed(coverSize, coverSize))
 
@@ -571,7 +611,8 @@ private class WideStagePolicy(
                     translationX = -move.value * slide
                 }
             }
-            lyrics.placeWithLayer(lyricsX, lyricsY) {
+            stagePlaceable?.place(0, 0)
+            lyrics?.placeWithLayer(lyricsX, lyricsY) {
                 val t = move.value
                 translationX = lerp(cols.lyricsX.toFloat(), frame.contentX.toFloat(), t) - lyricsX
                 translationY = lerp(lyricsTop.toFloat(), frame.lyricsY.toFloat(), t) - lyricsY
@@ -784,6 +825,10 @@ private const val SlotFocusSeek = 9
 private const val SlotLyrics = 10
 private const val SlotNotice = 11
 private const val SlotCover = 12
+private const val SlotStage = 13
+
+/** 平板专注歌词舞台的正文字号（sp）。 */
+private const val WIDE_STAGE_SP = 40f
 
 /** 封面不再缩小的边长（dp）；再矮就整栏等比缩小。 */
 internal const val WideCoverFloor = 128f
@@ -810,8 +855,8 @@ private val DockSidePadding = 8.dp
 private val DockSpacing = 10.dp
 private val DockCoverSize = 64.dp
 
-/** 竖向工具栏的自然高度：64 封面 + 48 + 72 + 48 + 1 分隔 + 48 + 48，六个 10dp 间距，上下各 12。 */
-private val DockHeightEstimate = 413.dp
+/** 竖向工具栏的自然高度：64 封面 + 48 + 72 + 48 + 1 分隔 + 48 + 48 + 48，七个 10dp 间距，上下各 12。 */
+private val DockHeightEstimate = 471.dp
 
 /** 竖折痕切出的哪一页比这还窄，就当没有折痕：贴边的折痕分出来也放不下左栏。 */
 private val WideFoldMinPage = 240.dp

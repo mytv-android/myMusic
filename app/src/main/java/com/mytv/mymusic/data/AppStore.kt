@@ -37,6 +37,9 @@ import java.util.UUID
 
 private val Context.dataStore by preferencesDataStore("mymusic")
 
+// 每首歌的随机结果和速度单独一个文件：切一首歌写一次，放进主设置会让整个界面跟着收到一次新设置
+private val Context.lyricMemoryStore by preferencesDataStore("lyric_memory")
+
 @Serializable
 data class EqBandSetting(val freqHz: Int = 0, val gainDb: Float = 0f)
 
@@ -62,6 +65,60 @@ private fun String?.toRhythmIntensity(): RhythmIntensity =
 
 /** 跟拍校准的范围（毫秒）。 */
 const val RHYTHM_OFFSET_MAX_MS = 200
+
+/** 播放页歌词下面那一行（经典列表的第二行、其他动画模式的宿主副行）放什么。没有罗马音时“罗马音”回退成翻译。 */
+enum class LyricSubline { Translation, Romanization, Both }
+
+/** 全屏歌词每首歌换不换动画：固定、随机、按速度。 */
+enum class LyricAutoSwitch { Fixed, Random, Tempo }
+
+/** 按速度换动画的一档：每分钟拍数低于 [maxBpm]（左闭右开，上一档的上限是这一档的下限）时用 [mode]。 */
+@Serializable
+data class TempoRule(val maxBpm: Int, val mode: String)
+
+/** 四档速度的默认对应：慢、中、快、很快。 */
+val DefaultTempoRules = listOf(
+    TempoRule(90, "vinyl"),
+    TempoRule(120, "rings"),
+    TempoRule(150, "wave"),
+    TempoRule(TEMPO_RULE_OPEN_END, "stardrift"),
+)
+
+/** 最后一档没有上限。 */
+const val TEMPO_RULE_OPEN_END = 999
+
+/**
+ * 歌词文字变换（见 LyricPipeline），对播放页、通知栏、桌面小组件、海报墙都生效；默认全关，关着时歌词和原来一模一样。
+ */
+data class LyricTextPrefs(
+    val splitBilingual: Boolean = false,
+    val traditional: Boolean = false,
+    val autoRomanize: Boolean = false,
+)
+
+/**
+ * 全屏歌词动画（设置 › 播放页 › 歌词动画，和全屏歌词页右上角 ✦ 打开的面板是同一份）。
+ * [pluginSettings] 是“模式 id → { 设置键: 值 }”，只存改过的项，读的时候按模式的设置表合并默认值、夹紧。
+ * [pins] 是“歌曲 key → 固定用的模式”。每首歌随机抽到的模式和测到的速度记在另一处（见 SettingsStore.lyricMemory），
+ * 不放进这里：每首歌都可能写一次，放这里会让整个界面跟着重组。
+ */
+data class LyricStagePrefs(
+    val visualizer: String = "classic",
+    val auto: LyricAutoSwitch = LyricAutoSwitch.Fixed,
+    val tempoRules: List<TempoRule> = DefaultTempoRules,
+    val spectrum: Boolean = false,
+    val subline: LyricSubline = LyricSubline.Translation,
+    val pluginSettings: Map<String, Map<String, String>> = emptyMap(),
+    val pins: Map<String, String> = emptyMap(),
+    /** 首次进入全屏歌词页时 ✦ 外面的呼吸提示，打开过一次面板就不再显示。 */
+    val hintSeen: Boolean = false,
+)
+
+/** 每首歌记下的随机结果和速度（最近 [LYRIC_MEMORY_LIMIT] 首）。 */
+@Serializable
+data class LyricMemoryEntry(val mode: String = "", val bpm: Float = 0f)
+
+const val LYRIC_MEMORY_LIMIT = 2000
 
 /** 播放页封面形状：随机（每次切歌换一种，不和上一首重复）或固定成某一种 MaterialShapes。 */
 enum class CoverShapeChoice { Random, Cookie12, Cookie9, Cookie7, Sunny, SoftBurst, Clover8 }
@@ -144,6 +201,19 @@ class SettingsStore(private val context: Context) {
     private val playReportEnabledKey = booleanPreferencesKey("play_report_enabled")
     // 汽水上报用的设备标识：每次启动重新生成就没法积累口味，所以落盘
     private val sodaReportDeviceIdKey = stringPreferencesKey("soda_report_device_id")
+    // 全屏歌词动画与歌词文字变换
+    private val lyricVisualizerKey = stringPreferencesKey("lyric_visualizer")
+    private val lyricVisualizerAutoKey = stringPreferencesKey("lyric_visualizer_auto")
+    private val lyricTempoRulesKey = stringPreferencesKey("lyric_tempo_rules")
+    private val lyricVisualizerPinsKey = stringPreferencesKey("lyric_visualizer_pins")
+    private val lyricVisualizerMemoryKey = stringPreferencesKey("lyric_visualizer_memory")
+    private val lyricPluginSettingsKey = stringPreferencesKey("lyric_plugin_settings")
+    private val lyricSpectrumKey = booleanPreferencesKey("lyric_spectrum")
+    private val lyricSublineKey = stringPreferencesKey("lyric_subline")
+    private val lyricHintSeenKey = booleanPreferencesKey("lyric_visualizer_hint_seen")
+    private val lyricSplitBilingualKey = booleanPreferencesKey("lyric_split_bilingual")
+    private val lyricTraditionalKey = booleanPreferencesKey("lyric_traditional")
+    private val lyricAutoRomanizeKey = booleanPreferencesKey("lyric_auto_romanize")
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -185,6 +255,12 @@ class SettingsStore(private val context: Context) {
             miniPlayerTarget = values[miniPlayerTargetKey].toMiniPlayerTarget(),
             playReportEnabled = values[playReportEnabledKey] ?: true,
             sodaReportDeviceId = values[sodaReportDeviceIdKey] ?: "",
+            lyricStage = lyricStagePrefs(values),
+            lyricText = LyricTextPrefs(
+                splitBilingual = values[lyricSplitBilingualKey] ?: false,
+                traditional = values[lyricTraditionalKey] ?: false,
+                autoRomanize = values[lyricAutoRomanizeKey] ?: false,
+            ),
             equalizer = EqualizerSettings(
                 enabled = values[equalizerEnabledKey] ?: false,
                 presetId = values[equalizerPresetKey] ?: "flat",
@@ -281,6 +357,69 @@ class SettingsStore(private val context: Context) {
         follow = values[posterFollowKey] ?: true,
         tvDrift = values[posterTvDriftKey] ?: true,
     )
+
+    private fun lyricStagePrefs(values: Preferences) = LyricStagePrefs(
+        visualizer = values[lyricVisualizerKey] ?: "classic",
+        auto = LyricAutoSwitch.entries.firstOrNull { it.name == values[lyricVisualizerAutoKey] } ?: LyricAutoSwitch.Fixed,
+        tempoRules = runCatching { json.decodeFromString<List<TempoRule>>(values[lyricTempoRulesKey] ?: "") }
+            .getOrNull()?.takeIf { it.size == DefaultTempoRules.size } ?: DefaultTempoRules,
+        spectrum = values[lyricSpectrumKey] ?: false,
+        subline = LyricSubline.entries.firstOrNull { it.name == values[lyricSublineKey] } ?: LyricSubline.Translation,
+        pluginSettings = runCatching {
+            json.decodeFromString<Map<String, Map<String, String>>>(values[lyricPluginSettingsKey] ?: "{}")
+        }.getOrDefault(emptyMap()),
+        pins = runCatching { json.decodeFromString<Map<String, String>>(values[lyricVisualizerPinsKey] ?: "{}") }
+            .getOrDefault(emptyMap()),
+        hintSeen = values[lyricHintSeenKey] ?: false,
+    )
+
+    /** 全屏歌词动画的设置：同一次 edit 里读出当前值再写回，连着改几项不会互相覆盖。 */
+    suspend fun lyricStage(transform: (LyricStagePrefs) -> LyricStagePrefs) = context.dataStore.edit {
+        val value = transform(lyricStagePrefs(it))
+        it[lyricVisualizerKey] = value.visualizer
+        it[lyricVisualizerAutoKey] = value.auto.name
+        it[lyricTempoRulesKey] = json.encodeToString(value.tempoRules)
+        it[lyricSpectrumKey] = value.spectrum
+        it[lyricSublineKey] = value.subline.name
+        it[lyricPluginSettingsKey] = json.encodeToString(value.pluginSettings)
+        it[lyricVisualizerPinsKey] = json.encodeToString(value.pins)
+        it[lyricHintSeenKey] = value.hintSeen
+    }
+
+    suspend fun lyricText(transform: (LyricTextPrefs) -> LyricTextPrefs) = context.dataStore.edit {
+        val current = LyricTextPrefs(
+            splitBilingual = it[lyricSplitBilingualKey] ?: false,
+            traditional = it[lyricTraditionalKey] ?: false,
+            autoRomanize = it[lyricAutoRomanizeKey] ?: false,
+        )
+        val value = transform(current)
+        it[lyricSplitBilingualKey] = value.splitBilingual
+        it[lyricTraditionalKey] = value.traditional
+        it[lyricAutoRomanizeKey] = value.autoRomanize
+    }
+
+    /** 这首歌记下的随机结果和速度；没记过返回 null。 */
+    suspend fun lyricMemory(songKey: String): LyricMemoryEntry? {
+        if (songKey.isBlank()) return null
+        return decodeLyricMemory(context.lyricMemoryStore.data.first()[lyricVisualizerMemoryKey])[songKey]
+    }
+
+    /** 更新这首歌的记录并挪到最新；超过 [LYRIC_MEMORY_LIMIT] 首时丢掉最久没听的。 */
+    suspend fun rememberLyric(songKey: String, update: (LyricMemoryEntry) -> LyricMemoryEntry) {
+        if (songKey.isBlank()) return
+        context.lyricMemoryStore.edit {
+            val memory = decodeLyricMemory(it[lyricVisualizerMemoryKey])
+            val entry = update(memory.remove(songKey) ?: LyricMemoryEntry())
+            memory[songKey] = entry
+            while (memory.size > LYRIC_MEMORY_LIMIT) memory.remove(memory.keys.first())
+            it[lyricVisualizerMemoryKey] = json.encodeToString<Map<String, LyricMemoryEntry>>(memory)
+        }
+    }
+
+    /** JSON 对象按写入顺序解码，最早的在前面。 */
+    private fun decodeLyricMemory(raw: String?): LinkedHashMap<String, LyricMemoryEntry> =
+        runCatching { LinkedHashMap(json.decodeFromString<Map<String, LyricMemoryEntry>>(raw ?: "{}")) }
+            .getOrDefault(LinkedHashMap())
 
     suspend fun sodaSigner(url: String, token: String, enabled: Boolean = true) = context.dataStore.edit {
         it[sodaSignerUrlKey] = url.trim()
@@ -451,6 +590,10 @@ data class AppSettings(
     val playReportEnabled: Boolean = true,
     /** 汽水上报用的设备标识，空表示还没生成过（见 SettingsStore.sodaReportDeviceId）。 */
     val sodaReportDeviceId: String = "",
+    /** 全屏歌词动画。 */
+    val lyricStage: LyricStagePrefs = LyricStagePrefs(),
+    /** 歌词文字变换（拆单行双语、简转繁、补罗马音）。 */
+    val lyricText: LyricTextPrefs = LyricTextPrefs(),
     val equalizer: EqualizerSettings = EqualizerSettings(),
     val searchHistory: List<String> = emptyList(),
     val lastUpdateCheck: Long = 0L,

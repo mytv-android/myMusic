@@ -69,6 +69,10 @@ import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.WavySeekBar
+import com.mytv.mymusic.ui.player.stage.AnimationSheetButton
+import com.mytv.mymusic.ui.player.stage.LyricStage
+import com.mytv.mymusic.ui.player.stage.StageBinding
+import com.mytv.mymusic.ui.player.stage.StageInsets
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlin.math.roundToInt
 
@@ -96,6 +100,7 @@ internal fun PhonePlayer(
     lyrics: ParsedLyrics,
     lyricsLoading: Boolean,
     active: State<Int>,
+    stage: StageBinding,
     sourceProvider: String?,
     sourceDetail: String,
     playbackMode: String,
@@ -194,6 +199,7 @@ internal fun PhonePlayer(
                         lyrics = lyrics,
                         lyricsLoading = lyricsLoading,
                         active = active,
+                        stage = stage,
                         position = position,
                         duration = duration,
                         playing = playing,
@@ -565,8 +571,10 @@ private fun PhoneNotice(notice: String, alpha: () -> Float) {
 }
 
 /**
- * 歌词页：左上角留给缩小成圆的封面（由封面舞台自己画），旁边是歌名、歌手和收藏；
- * 歌词左对齐；底部是波浪进度、小号按钮组和“歌词 / 队列”。空闲时底部淡出并拦截点按。
+ * 歌词页：左上角留给缩小成圆的封面（由封面舞台自己画），旁边是歌名、歌手、✦（歌词动画面板）和收藏；
+ * 底部是波浪进度、小号按钮组和“歌词 / 队列”，空闲时底部淡出并拦截点按。
+ * 中间是歌词舞台（[LyricStage]）：铺满整页，垫在顶栏和控件下面，文字排在两者之间的安全区里；
+ * 经典模式就是原来的左对齐歌词列表，位置和原来一样（安全区 = 原来列表占的那块）。
  */
 @Composable
 private fun PhoneLyricsPage(
@@ -575,6 +583,7 @@ private fun PhoneLyricsPage(
     lyrics: ParsedLyrics,
     lyricsLoading: Boolean,
     active: State<Int>,
+    stage: StageBinding,
     position: State<Long>,
     duration: Long,
     playing: Boolean,
@@ -589,66 +598,104 @@ private fun PhoneLyricsPage(
     onOpenQueue: () -> Unit,
     onSkip: (Int) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha() }.blockTouchesWhen(blocked)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = LyricsCoverStart + LyricsCoverSize + 14.dp, end = 8.dp, top = LyricsCoverTop)
-                .height(LyricsCoverSize),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    song.title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp, lineHeight = 22.sp),
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    song.artist,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            FavoriteToggle(song, favorite, actions)
-        }
-        LyricsList(
-            lyrics,
-            active,
-            actions::seek,
-            Modifier.weight(1f).padding(horizontal = 16.dp),
-            loading = lyricsLoading,
-            position = position,
-            playing = playing,
-            sizing = LyricsSizing.PhoneLyrics,
-        )
-        IdleGuard(idle, false, Modifier.padding(start = 20.dp, end = 16.dp, bottom = 8.dp).graphicsLayer { this.alpha = chrome.value }) {
-            val awake = !idle.idle
-            Column {
-                WavySeekBar(position, duration, playing && awake, actions::seek, Modifier.padding(start = 4.dp, end = 8.dp), amplitudeScale = waveScale, waveBpm = waveBpm, live = song.isLive)
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    TransportButtonGroup(
+    val insets = remember { StageInsets() }
+    Layout(
+        contents = listOf<@Composable () -> Unit>(
+            {
+                LyricStage(
+                    mode = stage.mode,
+                    lyrics = stage.lyrics,
+                    loading = lyricsLoading,
+                    position = position,
+                    playing = playing,
+                    song = song,
+                    prefs = stage.prefs,
+                    textSp = PHONE_STAGE_SP,
+                    insets = insets,
+                    modifier = Modifier.fillMaxSize(),
+                ) { modifier ->
+                    LyricsList(
+                        lyrics,
+                        active,
+                        actions::seek,
+                        modifier,
+                        loading = lyricsLoading,
+                        position = position,
                         playing = playing,
-                        onPrevious = { onSkip(-1) },
-                        onPlayPause = { actions.transport("play") },
-                        onNext = { onSkip(1) },
-                        size = TransportGroupSize.Compact,
+                        sizing = LyricsSizing.PhoneLyrics,
                     )
-                    PlayerToolbar {
-                        ToolbarLyricsButton(on = true, onToggle = onLyricsMode)
-                        ToolbarQueueButton(onOpenQueue)
+                }
+            },
+            {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = LyricsCoverStart + LyricsCoverSize + 14.dp, end = 8.dp, top = LyricsCoverTop)
+                        .height(LyricsCoverSize),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            song.title,
+                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp, lineHeight = 22.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            song.artist,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    AnimationSheetButton(hint = !stage.prefs.hintSeen, onClick = stage.onOpenSheet)
+                    FavoriteToggle(song, favorite, actions)
+                }
+            },
+            {
+                IdleGuard(idle, false, Modifier.padding(start = 20.dp, end = 16.dp, bottom = 8.dp).graphicsLayer { this.alpha = chrome.value }) {
+                    val awake = !idle.idle
+                    Column {
+                        WavySeekBar(position, duration, playing && awake, actions::seek, Modifier.padding(start = 4.dp, end = 8.dp), amplitudeScale = waveScale, waveBpm = waveBpm, live = song.isLive)
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            TransportButtonGroup(
+                                playing = playing,
+                                onPrevious = { onSkip(-1) },
+                                onPlayPause = { actions.transport("play") },
+                                onNext = { onSkip(1) },
+                                size = TransportGroupSize.Compact,
+                            )
+                            PlayerToolbar {
+                                ToolbarLyricsButton(on = true, onToggle = onLyricsMode)
+                                ToolbarQueueButton(onOpenQueue)
+                            }
+                        }
                     }
                 }
-            }
+            },
+        ),
+        modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha() }.blockTouchesWhen(blocked),
+    ) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        val header = measurables[1].first().measure(Constraints(maxWidth = width, maxHeight = height))
+        val controls = measurables[2].first().measure(Constraints(minWidth = width, maxWidth = width, maxHeight = height))
+        // 安全区 = 原来歌词列表占的那块：顶栏下面、控件上面，左右各 16dp
+        val side = 16.dp.toPx()
+        insets.set(top = header.height.toFloat(), bottom = controls.height.toFloat(), start = side, end = side)
+        val stagePlaceable = measurables[0].first().measure(Constraints.fixed(width, height))
+        layout(width, height) {
+            stagePlaceable.place(0, 0)
+            header.place(0, 0)
+            controls.place(0, height - controls.height)
         }
     }
 }
@@ -907,6 +954,9 @@ private val MinGaps = listOf(8.dp, 14.dp, 12.dp, 10.dp)
 private val LyricsCoverSize = 52.dp
 private val LyricsCoverStart = 20.dp
 private val LyricsCoverTop = 12.dp
+
+/** 手机歌词页舞台的正文字号（sp）。 */
+private const val PHONE_STAGE_SP = 30f
 
 /** 矮窗口：封面旁那一行歌词最多折成两行的高度；控件区（进度 + 8dp + 56dp 小号按钮组）的估计高度。 */
 private val ShortPreviewHeight = 48.dp
