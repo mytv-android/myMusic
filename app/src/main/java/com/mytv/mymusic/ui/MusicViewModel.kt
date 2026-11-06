@@ -193,6 +193,8 @@ data class MusicUiState(
     val tabletopTop: TabletopTop = TabletopTop.Lyrics,
     /** 电视播放时保持屏幕常亮，阻止系统屏保；默认关，见 AppSettings.keepScreenOn。 */
     val keepScreenOn: Boolean = false,
+    /** 电视上离开应用后继续播放（后台播放）；默认关，见 AppSettings.tvBackgroundPlay。 */
+    val tvBackgroundPlay: Boolean = false,
     val rhythmOffsetMs: Int = 0,
     val rhythmDebug: Boolean = false,
     val poster: PosterPrefs = PosterPrefs(),
@@ -482,6 +484,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             tvAmbientClock = settings.tvAmbientClock,
             tabletopTop = settings.tabletopTop,
             keepScreenOn = settings.keepScreenOn,
+            tvBackgroundPlay = settings.tvBackgroundPlay,
             rhythmOffsetMs = settings.rhythmOffsetMs,
             rhythmDebug = settings.rhythmDebug,
             poster = settings.poster,
@@ -3410,9 +3413,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 controller?.prepare()
                 return
             }
+            val failedSource = base.value.currentSource ?: track.sources.find { it.song.key == base.value.current?.key }
             // 直播断流：别的平台没有这个台，换源没有意义；先按原台重签地址重连，短时间内连不上就停下提示。
-            // HLS 清单每十秒重拉一次，网络抖动、清单刷新失败都会走到这里
-            val live = queued?.isLive == true
+            // HLS 清单每十秒重拉一次，网络抖动、清单刷新失败都会走到这里。
+            // isLive 依赖 Song.extra；队列被重建过、extra 掉了时按云听的 m3u8 兜底认出来
+            val live = queued?.isLive == true ||
+                (failedSource?.providerId == YUNTING_ID && queued?.ext == "m3u8")
+            AppLog.i(
+                "Player",
+                "错误分流：live=$live provider=${failedSource?.providerId ?: "无"} ext=${queued?.ext.orEmpty()}",
+            )
             if (live) {
                 val song = queued ?: return
                 if (!allowLiveRetry(song.key)) {
@@ -3422,7 +3432,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 base.value = base.value.copy(playbackNotice = "直播中断，正在重连…")
             }
-            val failedSource = base.value.currentSource ?: track.sources.find { it.song.key == base.value.current?.key }
             val position = controller?.currentPosition ?: 0L
             failoverInProgress = true
             viewModelScope.launch {
@@ -4122,6 +4131,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setTvAmbientClock(value: Boolean) = viewModelScope.launch { app.settings.tvAmbientClock(value) }
     fun setTabletopTop(value: TabletopTop) = viewModelScope.launch { app.settings.tabletopTop(value) }
     fun setKeepScreenOn(value: Boolean) = viewModelScope.launch { app.settings.keepScreenOn(value) }
+    fun setTvBackgroundPlay(value: Boolean) = viewModelScope.launch { app.settings.tvBackgroundPlay(value) }
     fun setRhythmOffset(value: Int) = viewModelScope.launch { app.settings.rhythmOffsetMs(value) }
     fun setRhythmDebug(value: Boolean) = viewModelScope.launch { app.settings.rhythmDebug(value) }
     fun setPosterPrefs(transform: (PosterPrefs) -> PosterPrefs) = viewModelScope.launch { app.settings.poster(transform) }
@@ -4577,14 +4587,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 电视上离开应用即暂停播放，避免回到桌面后还在响；手机和平板保留后台播放。
+     * 电视上默认离开应用即暂停播放，避免回到桌面后还在响；手机和平板保留后台播放。
+     * 设置 › 播放页 › 电视 › 后台播放打开后电视也一样：离开应用不暂停，通知栏、播放页都能停。
      *
      * [resumeOnReturn] 为真时记下「这不是用户自己要停的」，回到前台由 [resumeIfInterrupted] 接着放：
      * 电视上按 Home、被别的应用盖住都会走到这儿，音乐跟着人回来，不会因为屏保（有些电视的屏保就是
      * 别的应用拉起来的前台界面）弹一下就一直停着。退出应用（finish）不算，回前台不自动放。
      */
     fun onAppBackgrounded(resumeOnReturn: Boolean = true) {
-        if (!isTvLayout()) return
+        // 后台播放打开后电视和手机一个行为：谁都不拦，音乐接着放
+        if (!isTvLayout() || settingsState.value.tvBackgroundPlay) return
         val player = controller?.takeIf { it.playWhenReady } ?: return
         interruptedBySystem = resumeOnReturn
         autoPauseInFlight = resumeOnReturn

@@ -128,6 +128,7 @@ class SettingsStore(private val context: Context) {
     private val tvAmbientClockKey = booleanPreferencesKey("tv_ambient_clock")
     private val tabletopTopKey = stringPreferencesKey("tabletop_top")
     private val keepScreenOnKey = booleanPreferencesKey("tv_keep_screen_on")
+    private val tvBackgroundPlayKey = booleanPreferencesKey("tv_background_play")
     private val rhythmOffsetKey = intPreferencesKey("rhythm_offset_ms")
     private val rhythmDebugKey = booleanPreferencesKey("rhythm_debug")
     // 海报墙：墙内设置六项 + 详情页视图 + 迷你播放器去处，和播放页的设置一样只存在本机
@@ -176,6 +177,7 @@ class SettingsStore(private val context: Context) {
             tvAmbientClock = values[tvAmbientClockKey] ?: true,
             tabletopTop = values[tabletopTopKey].toTabletopTop(),
             keepScreenOn = values[keepScreenOnKey] ?: false,
+            tvBackgroundPlay = values[tvBackgroundPlayKey] ?: false,
             rhythmOffsetMs = (values[rhythmOffsetKey] ?: 0).coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS),
             rhythmDebug = values[rhythmDebugKey] ?: false,
             poster = posterPrefs(values),
@@ -237,6 +239,7 @@ class SettingsStore(private val context: Context) {
     suspend fun tvAmbientClock(value: Boolean) = context.dataStore.edit { it[tvAmbientClockKey] = value }
     suspend fun tabletopTop(value: TabletopTop) = context.dataStore.edit { it[tabletopTopKey] = value.name }
     suspend fun keepScreenOn(value: Boolean) = context.dataStore.edit { it[keepScreenOnKey] = value }
+    suspend fun tvBackgroundPlay(value: Boolean) = context.dataStore.edit { it[tvBackgroundPlayKey] = value }
     suspend fun rhythmOffsetMs(value: Int) =
         context.dataStore.edit { it[rhythmOffsetKey] = value.coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS) }
     suspend fun rhythmDebug(value: Boolean) = context.dataStore.edit { it[rhythmDebugKey] = value }
@@ -429,6 +432,11 @@ data class AppSettings(
      * 默认关：屏幕会一直亮着，OLED 有烧屏风险；息屏听歌、离开应用都不受影响。
      */
     val keepScreenOn: Boolean = false,
+    /**
+     * 电视上离开应用后继续播放（后台播放）。默认关：按 Home、切到别的应用、退出应用都会暂停，
+     * 和手机、平板相反——那边一直是后台播放。
+     */
+    val tvBackgroundPlay: Boolean = false,
     /** 跟拍校准：律动画面相对“听到的位置”再晚多少毫秒（负数提前），−200..200。 */
     val rhythmOffsetMs: Int = 0,
     /** 播放页角落显示跟拍调试信息（只在可调试的安装包里能打开）。 */

@@ -266,6 +266,19 @@ fun LyricsSettingsScreen(
             item(key = "keepScreenOnNote", contentType = "note") {
                 SettingsNote("系统屏保是屏幕超时才启动的，所以只有“屏幕常亮”能拦住它。电视自己拉的第三方屏保界面拦不住，那种情况下音乐会继续放。")
             }
+            item(key = "tvBackgroundPlay", contentType = "switch") {
+                SwitchRow(
+                    title = "后台播放",
+                    checked = state.tvBackgroundPlay,
+                    onCheckedChange = actions::setTvBackgroundPlay,
+                    index = 2,
+                    count = 3,
+                    summary = "离开应用后音乐不中断：按 Home、切到别的应用、退出应用都接着放，和手机上一样",
+                )
+            }
+            item(key = "tvBackgroundPlayNote", contentType = "note") {
+                SettingsNote("要停就进应用按暂停，或者用通知栏、系统媒体控件上的停止。少数电视系统会自己清理后台应用，那种情况下音乐还是会停。")
+            }
         }
     }
 }

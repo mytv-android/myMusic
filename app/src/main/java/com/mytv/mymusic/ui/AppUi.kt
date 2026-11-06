@@ -229,6 +229,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun setTvAmbientClock(value: Boolean) = model.setTvAmbientClock(value)
     fun setTabletopTop(value: com.mytv.mymusic.data.TabletopTop) = model.setTabletopTop(value)
     fun setKeepScreenOn(value: Boolean) = model.setKeepScreenOn(value)
+    fun setTvBackgroundPlay(value: Boolean) = model.setTvBackgroundPlay(value)
     fun setRhythmOffset(value: Int) = model.setRhythmOffset(value)
     fun setRhythmDebug(value: Boolean) = model.setRhythmDebug(value)
     fun setPosterPrefs(transform: (com.mytv.mymusic.data.PosterPrefs) -> com.mytv.mymusic.data.PosterPrefs) =
