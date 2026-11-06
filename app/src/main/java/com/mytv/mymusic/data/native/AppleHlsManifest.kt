@@ -56,11 +56,20 @@ internal object AppleHlsManifest {
 
     fun variants(master: String): List<Variant> = VARIANT_REGEX.findAll(master).mapNotNull { match ->
         val attrs = match.groupValues[1]
-        val group = AUDIO_REGEX.find(attrs)?.groupValues?.get(1) ?: return@mapNotNull null
         val uri = match.groupValues[2].trim()
         val bandwidth = BANDWIDTH_REGEX.find(attrs)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        // `/v1/play/assets` 回的清单是简版：只有 256/128/64 三个变体，没有 AUDIO="…"
+        // 也没有 EXT-X-MEDIA，档位只能从带宽认。旧 enhancedHls 的组名照旧优先。
+        val group = AUDIO_REGEX.find(attrs)?.groupValues?.get(1) ?: groupForBandwidth(bandwidth)
         if (group in AUDIO_GROUPS) Variant(group, uri, bandwidth / 1000) else null
     }.toList()
+
+    /** 简版清单的档位判定：256k 实测带宽 ~289k、128k ~150k、HE-64 ~80k。 */
+    private fun groupForBandwidth(bandwidth: Int): String = when {
+        bandwidth >= 200_000 -> "audio-stereo-256"
+        bandwidth >= 100_000 -> "audio-stereo-128"
+        else -> "audio-HE-stereo-64"
+    }
 
     /** 按 [AUDIO_GROUPS] 的顺序挑第一个；码率再高也不插队，省得挑到设备解不了的档。 */
     fun preferred(master: String): Variant? = variants(master).minByOrNull { AUDIO_GROUPS.indexOf(it.group) }

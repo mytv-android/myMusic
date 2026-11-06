@@ -103,31 +103,39 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
      * 拼成 `MediaItem.DrmConfiguration`。
      */
     override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
-        val master = song.extra[EXTRA_APPLE_HLS]?.takeIf { it.isNotBlank() }
-            ?: appleEnhancedHls(cookie, song)
-        AppLog.d(TAG, "playableStream ${song.name} master=${master?.take(80)}")
-        if (!master.isNullOrBlank()) {
+        // 官方客户端（MusicKit v3 prepareCatalogSong）走 /v1/play/assets 拿清单，和目录里
+        // enhancedHls 指向的**不是同一份资产**：后者有一类只带 FairPlay 密钥（安卓放不了），
+        // play/assets 回的那份带 Widevine。按这个顺序试，前一份拿不到 Widevine 再换下一份。
+        val candidates = listOf<suspend () -> String?>(
+            { applePlaybackAsset(cookie, song) },
+            { song.extra[EXTRA_APPLE_HLS] },
+            { appleEnhancedHls(cookie, song) },
+        )
+        val tried = mutableSetOf<String>()
+        for (candidate in candidates) {
+            val master = candidate()?.takeIf { it.isNotBlank() && tried.add(it) } ?: continue
+            AppLog.d(TAG, "playableStream ${song.name} master=${master.take(80)}")
             val variant = appleHlsVariant(master)
-            if (variant != null) {
-                val (url, introUrl) = appleLocalPlaylists(song, variant, workDir)
-                AppLog.i(TAG, "整曲就绪 ${song.name} ${variant.bitrate}kbps 开头段=${introUrl != null} ${variant.playlistUrl.take(100)}")
-                return PlayableStream(
-                    url = url,
-                    ext = "m4a",
-                    bitrate = variant.bitrate,
-                    extra = buildMap {
-                        put(AppleWidevineDrmCallback.EXTRA_DRM_SCHEME, AppleWidevineDrmCallback.DRM_SCHEME_WIDEVINE)
-                        put(AppleWidevineDrmCallback.EXTRA_DRM_PSSH, variant.pssh)
-                        put(AppleWidevineDrmCallback.EXTRA_DRM_ADAM_ID, song.id)
-                        if (introUrl != null) put(AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL, introUrl)
-                    },
-                )
+            if (variant == null) {
+                AppLog.w(TAG, "整曲清单没解析出可用档位，换下一份: $master")
+                continue
             }
-            AppLog.w(TAG, "整曲清单没解析出可用档位，退回试听: $master")
-        } else {
-            AppLog.w(TAG, "没有 enhancedHls，退回试听: ${song.name}")
+            val (url, introUrl) = appleLocalPlaylists(song, variant, workDir)
+            AppLog.i(TAG, "整曲就绪 ${song.name} ${variant.bitrate}kbps 开头段=${introUrl != null} ${variant.playlistUrl.take(100)}")
+            return PlayableStream(
+                url = url,
+                ext = "m4a",
+                bitrate = variant.bitrate,
+                extra = buildMap {
+                    put(AppleWidevineDrmCallback.EXTRA_DRM_SCHEME, AppleWidevineDrmCallback.DRM_SCHEME_WIDEVINE)
+                    put(AppleWidevineDrmCallback.EXTRA_DRM_PSSH, variant.pssh)
+                    put(AppleWidevineDrmCallback.EXTRA_DRM_ADAM_ID, song.id)
+                    if (introUrl != null) put(AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL, introUrl)
+                },
+            )
         }
         // 整曲这条路不通：退回片段，并明确标出来
+        AppLog.w(TAG, "没有可用的整曲清单，退回试听: ${song.name}")
         val preview = song.url.ifBlank { parseSong(cookie, song.id).url }
         if (preview.isBlank()) throw IllegalStateException("apple music: 没有可播放的地址")
         return PlayableStream(url = preview, ext = "m4a", bitrate = 0, preview = true)
@@ -148,8 +156,8 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
     ): Pair<String, String?> {
         val rewritten = AppleHlsRewrite.rewrite(variant.playlistBody, variant.playlistUrl)
         // init 段的 tenc 里 Apple 把 default_KID 写成全零，安卓 CDM 按 kid 查表会报
-        // ERROR_DRM_NO_LICENSE（真机 6006）。两个样本条目各归各的 key，分别改写。
-        val patched = appleLocalInitSegment(song, variant, rewritten, workDir) ?: rewritten
+        // ERROR_DRM_NO_LICENSE（真机 6006）。每个样本条目归清单里对应那把 key，分别改写。
+        val patched = appleLocalInitSegment(song, rewritten, workDir) ?: rewritten
         val split = AppleHlsRewrite.splitAtSecondKeyBlock(patched)
         fun write(name: String, body: String): String? = runCatching {
             val file = File(workDir, name)
@@ -173,17 +181,17 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
 
     private suspend fun appleLocalInitSegment(
         song: Song,
-        variant: AppleHlsVariant,
         playlist: String,
         workDir: File,
     ): String? {
-        // 样本条目顺序：预取条目（默认 key，开头 30s 左右）在前，正片条目（轮换 key）在后，
-        // 与清单里 key 块的出现顺序一致。
-        val rotationKid = AppleHlsManifest.widevineKeyId(variant.pssh) ?: run {
+        // 样本条目顺序和清单里 key 块的出现顺序一致：enhancedHls 老资产是「预取默认 key
+        // 在前、轮换 key 在后」两条 tenc；play/assets 的简版清单只有一把 key、一个 tenc。
+        // 硬套「默认+轮换」会把简版唯一的 tenc 写成默认 kid，所以按清单里实际的 key 取。
+        val kids = AppleHlsManifest.widevineKeyUris(playlist).mapNotNull { AppleHlsManifest.widevineKeyId(it) }
+        if (kids.isEmpty()) {
             AppLog.w(TAG, "PSSH 里没取到 kid，跳过 init 段改写")
             return null
         }
-        val defaultKid = AppleHlsManifest.widevineKeyId(AppleHlsManifest.defaultWidevineKeyUri())
         val mapLine = playlist.lineSequence().firstOrNull { it.startsWith("#EXT-X-MAP") } ?: return null
         val uri = MAP_URI.find(mapLine)?.groupValues?.getOrNull(1) ?: return null
         val range = MAP_RANGE.find(mapLine)
@@ -200,7 +208,6 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             AppLog.w(TAG, "init 段下载失败，跳过 kid 改写")
             return null
         }
-        val kids = listOfNotNull(defaultKid, rotationKid)
         val patchedInit = AppleHlsRewrite.patchInitSegmentKids(initBytes, kids)
         val file = runCatching {
             val f = File(workDir, "apple-${song.id}-init.mp4")
@@ -213,6 +220,42 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         return playlist.lineSequence().joinToString("\n") { line ->
             if (line.startsWith("#EXT-X-MAP")) "#EXT-X-MAP:URI=\"$localUri\"" else line
         } + if (playlist.endsWith("\n")) "\n" else ""
+    }
+
+    /**
+     * 官方播放接口回的整曲主清单（MusicKit v3 `prepareCatalogSong` 同款）：
+     * `/v1/play/assets?id=&kind=song&includeLicenseUrls=true&hlsEncryption=CBC`。
+     *
+     * 实测它和目录里的 `extendedAssetUrls.enhancedHls` **不是同一份资产**——同一首
+     * Housewife（adam 6822497774）目录给的是 `HLSMusic211/…/P1525601812_default.m3u8`
+     * （只有 FairPlay），这里是 `HLSMusic221/…/P1525602171_default.m3u8`（三套 DRM 齐全、
+     * 带 Widevine），2026-11-06 用真 media-user-token 对比确认。
+     *
+     * 必须带 media-user-token（Cookie 或请求头都行，缺了 403）；`hlsEncryption` 只认
+     * `CBC`，换成 cbcs/NONE 都是 400。没登录时返回空，由调用方退回目录地址。
+     */
+    private suspend fun applePlaybackAsset(cookie: String, song: Song): String? {
+        if (song.id.isBlank() || mediaUserToken(cookie).isBlank()) return null
+        val body = runCatching {
+            ampGet(
+                cookie,
+                "/v1/play/assets",
+                mapOf(
+                    "id" to song.id,
+                    "kind" to "song",
+                    "includeLicenseUrls" to "true",
+                    "hlsEncryption" to "CBC",
+                ),
+                mediaTokenHeader = true,
+            )
+        }.onFailure {
+            AppLog.w(TAG, "play/assets 失败 adamId=${song.id}: ${it.message?.take(100)}")
+        }.getOrNull() ?: return null
+        val url = runCatching {
+            json.decodeFromString<ApplePlayAssetsResponse>(body).results.assets.firstOrNull()?.url.orEmpty()
+        }.getOrNull().orEmpty()
+        if (url.isNotBlank()) AppLog.d(TAG, "play/assets ${song.name} ${url.take(100)}")
+        return url.takeIf { it.isNotBlank() }
     }
 
     /** 从歌曲资源上取整曲主清单；拿不到（没登录 / 该曲没有 enhancedHls）返回空。 */
@@ -1271,6 +1314,16 @@ private data class AppleAssetUrls(
     val plus: String = "",
     val superLightweight: String = "",
 )
+
+/** `/v1/play/assets` 的响应。`assets[0].url` 就是官方客户端用的那份 HLS 主清单。 */
+@Serializable
+private data class ApplePlayAssetsResponse(val results: ApplePlayAssets = ApplePlayAssets())
+
+@Serializable
+private data class ApplePlayAssets(val assets: List<ApplePlayAsset> = emptyList())
+
+@Serializable
+private data class ApplePlayAsset(val url: String = "")
 
 @Serializable
 private data class AppleArtwork(val url: String = "", val width: Int = 0, val height: Int = 0)

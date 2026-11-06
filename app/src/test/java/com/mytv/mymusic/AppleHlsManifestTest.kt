@@ -39,6 +39,56 @@ class AppleHlsManifestTest {
     }
 
     @Test
+    fun `play assets master without AUDIO attributes is parsed by bandwidth`() {
+        // /v1/play/assets 回的是简版主清单：没有 AUDIO="…"、没有 EXT-X-MEDIA，只有三档。
+        // 实抓自 Housewife（adam 6822497774，2026-11-06）。
+        val master = """
+            #EXTM3U
+            #EXT-X-VERSION:7
+            #EXT-X-INDEPENDENT-SEGMENTS
+            #EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=269599,BANDWIDTH=289565,CODECS="mp4a.40.2",STABLE-VARIANT-ID="2q5f5td31"
+            P1525602171_A6822497774_MS_audio_gr256_f2_AAC.m3u8
+            #EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=138670,BANDWIDTH=150251,CODECS="mp4a.40.2",STABLE-VARIANT-ID="08ws0xwdp"
+            P1525602171_A6822497774_MS_audio_gr128_f1_AAC.m3u8
+            #EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=69833,BANDWIDTH=79675,CODECS="mp4a.40.5",STABLE-VARIANT-ID="f0em5p4su"
+            P1525602171_A6822497774_MS_audio_gr64_f22_AAC.m3u8
+        """.trimIndent()
+
+        val variants = AppleHlsManifest.variants(master)
+        assertEquals(3, variants.size)
+        assertEquals("audio-stereo-256", variants[0].group)
+        // BANDWIDTH 正则会先命中 AVERAGE-BANDWIDTH（269599），老清单也是这个行为
+        assertEquals(269, variants[0].bitrateKbps)
+        assertEquals("audio-stereo-128", variants[1].group)
+        assertEquals("audio-HE-stereo-64", variants[2].group)
+        assertEquals("P1525602171_A6822497774_MS_audio_gr256_f2_AAC.m3u8", AppleHlsManifest.preferred(master)?.uri)
+    }
+
+    @Test
+    fun `play assets media playlist has a single widevine key`() {
+        // 简版媒体清单：三套 DRM 挤在一个 key 块里，只有一条 Widevine、一个 tenc。
+        // init 段 kid 改写必须按这把 key 来，不能套 enhancedHls 的「默认+轮换」两条。
+        val media = """
+            #EXTM3U
+            #EXT-X-VERSION:7
+            #EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://itunes.apple.com/P1525602171/e1",KEYFORMAT="com.apple.streamingkeydelivery",KEYFORMATVERSIONS="1"
+            #EXT-X-KEY:METHOD=SAMPLE-AES,URI="data:text/plain;charset=UTF-16;base64,vgEAAAEAAQC0ATwA",KEYFORMAT="com.microsoft.playready",KEYFORMATVERSIONS="1"
+            #EXT-X-KEY:METHOD=SAMPLE-AES,URI="data:text/plain;base64,AAAAOHBzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAABgSEAAAAABa7td7ZTEgICAgICBI88aJmwY=",KEYFORMAT="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed",KEYFORMATVERSIONS="1"
+            #EXT-X-MAP:URI="P1525602171_A6822497774_MS_audio_gr256_f2_AAC-.mp4",BYTERANGE="1557@0"
+            #EXTINF:9.98458,
+            #EXT-X-BYTERANGE:326021@1557
+            P1525602171_A6822497774_MS_audio_gr256_f2_AAC-.mp4
+            #EXT-X-ENDLIST
+        """.trimIndent()
+
+        val uris = AppleHlsManifest.widevineKeyUris(media)
+        assertEquals(1, uris.size)
+        assertEquals(uris.single(), AppleHlsManifest.widevinePssh(media))
+        val kid = AppleHlsManifest.widevineKeyId(uris.single())
+        assertEquals("000000005aeed77b6531202020202020", kid?.joinToString("") { "%02x".format(it.toInt() and 0xFF) })
+    }
+
+    @Test
     fun `preferred group wins over later better bitrate`() {
         val master = """
             #EXT-X-STREAM-INF:BANDWIDTH=900000,AUDIO="audio-HE-stereo-64"

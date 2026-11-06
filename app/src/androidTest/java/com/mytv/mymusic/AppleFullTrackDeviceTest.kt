@@ -86,19 +86,23 @@ class AppleFullTrackDeviceTest {
             log("SKIP 没有传 cookie")
             return
         }
-        runBlocking { play(cookie, useCache) }
+        // 默认这首是本来就带 Widevine 的；传 adamId 可以验目录里只有 FairPlay 的资产
+        // （play/assets 应该给另一份带 Widevine 的清单，例：Housewife = 6822497774）
+        val adamId = args.getString("adamId").orEmpty().ifBlank { "6829122414" }
+        val name = args.getString("songName").orEmpty().ifBlank { "Hong Kong (feat. 王菲季候風)" }
+        runBlocking { play(cookie, useCache, adamId, name) }
     }
 
-    private suspend fun play(cookie: String, useCache: Boolean) = runBlocking {
+    private suspend fun play(cookie: String, useCache: Boolean, adamId: String, songName: String) = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         AppleTokenCache.attach(context)
         // Media3 的 DRM 日志（会话回收 / initData / 错误）默认不开，排 key 轮换必须看
         androidx.media3.common.util.Log.setLogLevel(androidx.media3.common.util.Log.LOG_LEVEL_ALL)
 
         val song = Song(
-            id = "6829122414",
-            name = "Hong Kong (feat. 王菲季候風)",
-            artist = "The Weeknd",
+            id = adamId,
+            name = songName,
+            artist = "",
             source = "apple",
             extra = mapOf("storefront" to "cn"),
         )
@@ -112,7 +116,7 @@ class AppleFullTrackDeviceTest {
                 playlistFile.readLines().filter { it.startsWith("#EXT-X-MAP") || it.startsWith("#EXT-X-KEY") }
                     .forEach { log("PLAYLIST " + it.take(120)) }
             }
-            val initFile = File(context.cacheDir, "apple-6829122414-init.mp4")
+            val initFile = File(context.cacheDir, "apple-$adamId-init.mp4")
             if (initFile.isFile) {
                 val bytes = initFile.readBytes()
                 var i = 0
