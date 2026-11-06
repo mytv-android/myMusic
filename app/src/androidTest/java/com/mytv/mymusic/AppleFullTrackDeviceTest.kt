@@ -163,6 +163,10 @@ class AppleFullTrackDeviceTest {
                 log("建 manager uri kid=$kid")
                 DefaultDrmSessionManager.Builder()
                     .setMultiSession(true)
+                    .setUuidAndExoMediaDrmProvider(
+                        C.WIDEVINE_UUID,
+                        AppleWidevineDrmCallback.SECURE_IF_AVAILABLE_PROVIDER,
+                    )
                     .build(
                         AppleWidevineDrmCallback(
                             cookieProvider = { cookie },

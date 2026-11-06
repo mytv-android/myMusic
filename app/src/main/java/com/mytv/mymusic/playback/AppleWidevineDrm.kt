@@ -7,6 +7,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.drm.ExoMediaDrm
+import androidx.media3.exoplayer.drm.FrameworkMediaDrm
 import androidx.media3.exoplayer.drm.HttpMediaDrmCallback
 import androidx.media3.exoplayer.drm.MediaDrmCallback
 import androidx.media3.exoplayer.drm.MediaDrmCallbackException
@@ -196,6 +197,27 @@ class AppleWidevineDrmCallback(
     companion object {
         private const val TAG = "AppleDrm"
 
+        /**
+         * 设备上有安全解码器就用它。
+         *
+         * L1（硬件 TEE）CDM 解出来的明文只肯交给安全解码器；如果 Media3 选了普通解码器，
+         * 真机上的症状就是 `requested key has not been loaded: ERROR_DRM_NO_LICENSE`（6006）
+         * 和 `Decoder failed`（4003）——密钥明明装上了，解码器却拿不到。模拟器是 L3、没有
+         * 安全解码器，所以一直复现不了。
+         */
+        val SECURE_IF_AVAILABLE_PROVIDER: ExoMediaDrm.Provider = object : ExoMediaDrm.Provider {
+            override fun acquireExoMediaDrm(uuid: UUID): ExoMediaDrm =
+                SecurePreferringMediaDrm(FrameworkMediaDrm.newInstance(uuid))
+        }
+
+        /** 设备上有没有能解 [mimeType] 的安全解码器（fMP4 + Widevine L1 的音频要靠它）。 */
+        internal fun hasSecureDecoder(mimeType: String): Boolean = runCatching {
+            // 走 Media3 自己的查询：安全解码器支持看的是 CodecCapabilities 的 secure 特性
+            androidx.media3.exoplayer.mediacodec.MediaCodecUtil
+                .getDecoderInfos(mimeType, /* secure = */ true, /* tunneling = */ false)
+                .isNotEmpty()
+        }.getOrDefault(false)
+
         const val LICENSE_ENDPOINT = "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense"
         const val KEY_SYSTEM = "com.widevine.alpha"
         private const val APPLE_WEB_ORIGIN = "https://music.apple.com"
@@ -264,6 +286,28 @@ class AppleWidevineDrmCallback(
             runCatching {
                 (Json.parseToJsonElement(body).jsonObject[name] as? JsonPrimitive)?.contentOrNull
             }.getOrNull().orEmpty()
+    }
+}
+
+/** 包住 `FrameworkMediaDrm`：设备上有安全解码器就要求用它，其余行为原样透传。 */
+@UnstableApi
+private class SecurePreferringMediaDrm(private val delegate: ExoMediaDrm) : ExoMediaDrm by delegate {
+    private var logged = false
+
+    override fun requiresSecureDecoder(initData: ByteArray, mimeType: String): Boolean {
+        val cdmWants = runCatching { delegate.requiresSecureDecoder(initData, mimeType) }.getOrDefault(false)
+        val secureAvailable = AppleWidevineDrmCallback.hasSecureDecoder(mimeType)
+        val wanted = cdmWants || secureAvailable
+        if (!logged) {
+            logged = true
+            val level = runCatching { delegate.getPropertyString("securityLevel") }.getOrNull()
+            AppLog.i(
+                "AppleDrm",
+                "解码器选择 mime=$mimeType CDM要求安全=$cdmWants 设备有安全解码器=$secureAvailable " +
+                    "安全等级=${level ?: "?"} → 用安全解码器=$wanted",
+            )
+        }
+        return wanted
     }
 }
 

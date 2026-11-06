@@ -346,6 +346,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     )
     private var collectionGeneration = 0
     private var failoverInProgress = false
+
+    /** 本轮播放里已经试过并失败的平台（按曲目）：换源重试要累积排除，不然会在两个源之间来回切。 */
+    private val failoverExcluded = mutableMapOf<String, MutableSet<String>>()
     private var updateDownloadJob: Job? = null
     private var pendingUpdateInstall = false
     private var installLaunching = false
@@ -3395,6 +3398,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (base.value.queue.getOrNull(player.currentMediaItemIndex)?.url?.isNotBlank() == true) prepareIfStopped()
         }
 
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            // 放起来了就把这一轮的排除记录清掉，下次出错重新从所有源里挑
+            if (playbackState == Player.STATE_READY) {
+                base.value.currentTrack?.id?.let(failoverExcluded::remove)
+            }
+        }
+
         override fun onPlayerError(error: PlaybackException) {
             // 失败原因必须进日志：DRM 会话这类错误只在 onPlayerError 里露头，UI 提示之外没人看得见。
             // 之前这里一条不打，整曲播放失败时只能看到"整曲就绪"然后每隔 11 秒自动跳下一首。
@@ -3464,15 +3474,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 failedSource?.let { resolver.invalidate(it) }
+                // 排除集要跨重试累积：只排除上一次失败的那个源，两个源会互相顶替、来回切个不停
+                // （真机上 DRM 每轮都失败，就一直在「排除 apple」「排除 netease」之间打转）。
+                val excluded = if (live) {
+                    emptySet()
+                } else {
+                    failoverExcluded.getOrPut(track.id) { mutableSetOf() }
+                        .apply { failedSource?.providerId?.let(::add) }
+                        .toSet()
+                }
                 AppLog.w(
                     "Player",
                     if (live) "直播断流，重连《${track.title}》"
-                    else "换源重试《${track.title}》：排除 ${failedSource?.providerId ?: "无"}",
+                    else "换源重试《${track.title}》：排除 ${excluded.joinToString(",").ifBlank { failedSource?.providerId ?: "无" }}",
                 )
                 val result = if (live) {
                     resolvePlayable(track, pinnedProvider = failedSource?.providerId)
                 } else {
-                    resolvePlayable(track, null, setOfNotNull(failedSource?.providerId))
+                    resolvePlayable(track, null, excluded)
                 }
                 val resolution = result.resolution as? Resolution.Ready
                 if (resolution != null) {

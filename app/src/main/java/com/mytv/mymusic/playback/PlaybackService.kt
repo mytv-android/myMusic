@@ -103,15 +103,19 @@ class PlaybackService : MediaSessionService() {
                     "建 Widevine session manager adamId=${params["adamId"]} pssh=${params["pssh"]?.length ?: 0}B",
                 )
                 if (drmInfoLogged.compareAndSet(false, true)) {
-                    // 真机上 4003 的排查线索：L1 设备会要求硬件安全解码器
+                    // 真机上 4003 的排查线索：L1 设备会要求硬件安全解码器。
+                    // 每个属性单独取，某个属性不支持不影响其它几项。
+                    val secureAac = AppleWidevineDrmCallback.hasSecureDecoder("audio/mp4a-latm")
                     runCatching {
                         val md = androidx.media3.exoplayer.drm.FrameworkMediaDrm.newInstance(C.WIDEVINE_UUID)
                         try {
+                            fun prop(name: String) = runCatching {
+                                md.getPropertyString(name)
+                            }.getOrElse { "<${it.message?.take(40)}>" }
                             AppLog.i(
                                 "PlaybackDrm",
-                                "CDM vendor=${runCatching { md.getPropertyString("vendor") }.getOrDefault("?")} " +
-                                    "level=${runCatching { md.getPropertyString("securityLevel") }.getOrDefault("?")} " +
-                                    "aacSecure=${md.requiresSecureDecoder(ByteArray(0), "audio/mp4a-latm")}",
+                                "CDM vendor=${prop("vendor")} version=${prop("version")} level=${prop("securityLevel")} " +
+                                    "安全AAC解码器=$secureAac",
                             )
                         } finally {
                             md.release()
@@ -124,6 +128,11 @@ class PlaybackService : MediaSessionService() {
                             // 清单里两把 key 各保各的段：默认 key 保开头 30s 左右，轮换 key
                             // 保正片。过界时两把 key 要同时在，所以开多会话。
                             .setMultiSession(true)
+                            // L1 设备的明文只交给安全解码器，详见 provider 的注释
+                            .setUuidAndExoMediaDrmProvider(
+                                C.WIDEVINE_UUID,
+                                AppleWidevineDrmCallback.SECURE_IF_AVAILABLE_PROVIDER,
+                            )
                             .build(
                             AppleWidevineDrmCallback(
                                 cookieProvider = { AppleSession.cookie },
