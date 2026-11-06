@@ -3191,6 +3191,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // 换上地址后又收到空地址留下的“文件不存在”时只重新准备一次，避免真坏的地址来回重试
         private var staleErrorRetried = -1
 
+        // 直播断流重连：同一个台短时间内最多两次，再失败就停下留提示
+        private var liveRetryKey = ""
+        private var liveRetryCount = 0
+        private var liveRetryAt = 0L
+
+        private fun allowLiveRetry(key: String): Boolean {
+            val now = SystemClock.elapsedRealtime()
+            if (key != liveRetryKey || now - liveRetryAt > LIVE_RETRY_WINDOW_MS) {
+                liveRetryKey = key
+                liveRetryCount = 0
+            }
+            liveRetryAt = now
+            return liveRetryCount++ < MAX_LIVE_RETRIES
+        }
+
         /**
          * 记录这次暂停是不是用户自己要的：只有被系统打断（抢焦点、输出切换）的才在回到前台时接着放。
          * 用户按的暂停（界面、通知栏、遥控器、组件）、睡眠定时、队列播完都不接。
@@ -3198,6 +3213,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (playWhenReady) {
                 interruptedBySystem = false
+                // 用户自己按的播放：断流重连的次数重新算
+                liveRetryCount = 0
                 return
             }
             // 离开应用时的自动暂停：账在 onAppBackgrounded 里已经记了，别当成用户按的暂停清掉
@@ -3393,6 +3410,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 controller?.prepare()
                 return
             }
+            // 直播断流：别的平台没有这个台，换源没有意义；先按原台重签地址重连，短时间内连不上就停下提示。
+            // HLS 清单每十秒重拉一次，网络抖动、清单刷新失败都会走到这里
+            val live = queued?.isLive == true
+            if (live) {
+                val song = queued ?: return
+                if (!allowLiveRetry(song.key)) {
+                    controller?.pause()
+                    base.value = base.value.copy(playbackNotice = "直播中断，点播放重新连接")
+                    return
+                }
+                base.value = base.value.copy(playbackNotice = "直播中断，正在重连…")
+            }
             val failedSource = base.value.currentSource ?: track.sources.find { it.song.key == base.value.current?.key }
             val position = controller?.currentPosition ?: 0L
             failoverInProgress = true
@@ -3417,9 +3446,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 failedSource?.let { resolver.invalidate(it) }
-                val exclude = setOfNotNull(failedSource?.providerId)
-                AppLog.w("Player", "换源重试《${track.title}》：排除 ${failedSource?.providerId ?: "无"}")
-                val result = resolvePlayable(track, null, exclude)
+                AppLog.w(
+                    "Player",
+                    if (live) "直播断流，重连《${track.title}》"
+                    else "换源重试《${track.title}》：排除 ${failedSource?.providerId ?: "无"}",
+                )
+                val result = if (live) {
+                    resolvePlayable(track, pinnedProvider = failedSource?.providerId)
+                } else {
+                    resolvePlayable(track, null, setOfNotNull(failedSource?.providerId))
+                }
                 val resolution = result.resolution as? Resolution.Ready
                 if (resolution != null) {
                     val player = controller
@@ -3430,7 +3466,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     val resolved = resolution.source.song.copy(url = resolution.url)
                     player.replaceMediaItem(at, mediaItem(resolved))
-                    player.seekTo(position)
+                    // 直播没有可续的位置，重连后从直播点接着放
+                    if (!live) player.seekTo(position)
                     player.play()
                     if (pinnedProviders[track.id] == failedSource?.providerId) {
                         pinnedProviders[track.id] = resolution.source.providerId
@@ -3441,10 +3478,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         current = resolved,
                         currentTrack = result.track,
                         currentSource = resolution.source,
-                        playbackNotice = if (result.autoMatched) {
-                            "当前音源中断，已自动匹配到${resolution.source.providerName}，并从 ${formatPosition(position)} 继续播放"
-                        } else {
-                            "当前音源中断，已切换到${resolution.source.providerName}，并从 ${formatPosition(position)} 继续播放"
+                        playbackNotice = when {
+                            live -> "直播中断，已重新连接"
+                            result.autoMatched -> "当前音源中断，已自动匹配到${resolution.source.providerName}，并从 ${formatPosition(position)} 继续播放"
+                            else -> "当前音源中断，已切换到${resolution.source.providerName}，并从 ${formatPosition(position)} 继续播放"
                         },
                     )
                     rememberCanonical(result.track)
@@ -4712,6 +4749,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
 private const val AUTO_MATCH_TIMEOUT_MS = 8_000L
 private const val MAX_UNPLAYABLE_SKIPS = 10
+
+/** 直播断流重连：一分钟内最多重连两次，再断就停下留提示，免得一直重试。 */
+private const val LIVE_RETRY_WINDOW_MS = 60_000L
+private const val MAX_LIVE_RETRIES = 2
 
 /** 回前台复查更新的最小间隔；启动时无论如何都会查一次。 */
 private const val UPDATE_RECHECK_INTERVAL_MS = 30L * 60 * 1000

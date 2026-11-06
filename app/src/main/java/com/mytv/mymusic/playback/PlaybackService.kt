@@ -36,6 +36,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.R
+import com.mytv.mymusic.data.native.YUNTING_LIVE_HOST
 import com.mytv.mymusic.widget.WidgetLinks
 import com.mytv.mymusic.widget.WidgetTarget
 import kotlinx.coroutines.launch
@@ -77,7 +78,15 @@ class PlaybackService : MediaSessionService() {
         builder.setMediaSourceFactory(
             DefaultMediaSourceFactory(
                 cache?.let {
-                    CacheDataSource.Factory().setCache(it).setUpstreamDataSourceFactory(DefaultDataSource.Factory(this))
+                    val direct = DefaultDataSource.Factory(this)
+                    LiveBypassDataSourceFactory(
+                        cached = CacheDataSource.Factory().setCache(it).setUpstreamDataSourceFactory(direct),
+                        direct = direct,
+                        isLive = { uri ->
+                            val host = uri.host.orEmpty()
+                            host == YUNTING_LIVE_HOST || (host.endsWith(".radio.cn") && uri.path.orEmpty().endsWith(".m3u8"))
+                        },
+                    )
                 } ?: DefaultDataSource.Factory(this),
             ).setDrmSessionManagerProvider { mediaItem ->
                 val drm = mediaItem.localConfiguration?.drmConfiguration

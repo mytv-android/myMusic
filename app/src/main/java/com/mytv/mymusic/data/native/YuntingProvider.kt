@@ -19,6 +19,9 @@ private const val STATION_PAGE = "https://www.radio.cn/pc-portal/erji/radioStati
 private const val LIVE_PREFIX = "live:"
 private const val REPLAY_PREFIX = "rp:"
 
+/** 所有电台的直播 HLS 都在这个域下，播放层据此让直播流绕开磁盘缓存。 */
+internal const val YUNTING_LIVE_HOST = "ytcast2.radio.cn"
+
 /** 网页版自己用的签名常量（pc-portal/js/api.js），不是账号密钥。 */
 private const val SIGN_KEY = "f0fc4c668392f9f9a447e48584c214ee"
 
