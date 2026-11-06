@@ -27,6 +27,50 @@ class AppleHlsRewriteTest {
         .use { it.readText() }
 
     @Test
+    fun `whole default key block is dropped, not just the widevine line`() {
+        // 真机症状（release 40）：只删 Widevine 那一行，FairPlay/PlayReady 留在原 key 块里，
+        // 紧跟其后的第一个段就变成"有 key 但没有 Widevine"——Media3 当它没加密，
+        // 不建 DRM 会话、不要 license，直接喂密文，无声且无错误。
+        // 所以必须整块删。这条断言盯的就是"每个段前面生效的 key 里必须有 Widevine"。
+        val out = AppleHlsRewrite.rewrite(media, playlistUrl)
+        // 默认那块（含 s1/e1 的 FairPlay）整块消失
+        assertFalse("默认 key 块没整块删掉:\n$out", out.contains("P000000000/s1/e1"))
+        assertFalse("默认 Widevine key 还在:\n$out", out.contains(AppleHlsManifest.defaultWidevineKeyUri()))
+        // 剩下恰好一个 key 块，且块里有 Widevine
+        val blocks = keyBlocks(out)
+        assertEquals("应只剩一个 key 块，实际 ${blocks.size}", 1, blocks.size)
+        assertTrue("剩下的 key 块里没有 Widevine:\n${blocks[0]}", blocks[0].contains("edef8ba9"))
+        // HLS：key 对后面所有段生效——**丢掉静音前导段之后**，第一个段之前必须已经出现过
+        // Widevine key，否则 Media3 会把这段当成未加密。
+        val trimmed = runBlocking { AppleHlsRewrite.trimPrefetchSegments(out) { _, _, _ -> TFHD_PREFETCH } }
+        val firstSegmentAt = trimmed.indexOf("#EXTINF")
+        val firstWidevineAt = trimmed.indexOf("edef8ba9")
+        assertTrue(
+            "第一个段之前没有 Widevine key（会被当成未加密）: firstSeg=$firstSegmentAt firstWv=$firstWidevineAt\n" +
+                trimmed.lines().filter { it.startsWith("#EXT-X-KEY") || it.startsWith("#EXTINF") }
+                    .take(6).joinToString("\n") { it.take(70) },
+            firstWidevineAt in 0 until firstSegmentAt,
+        )
+    }
+
+    /** 按连续 `#EXT-X-KEY` 行切块，返回每块的原文。 */
+    private fun keyBlocks(content: String): List<String> {
+        val blocks = mutableListOf<String>()
+        val current = StringBuilder()
+        content.split("\n").forEach { line ->
+            if (line.startsWith("#EXT-X-KEY")) {
+                if (current.isNotEmpty()) current.append('\n')
+                current.append(line)
+            } else if (current.isNotEmpty()) {
+                blocks += current.toString()
+                current.clear()
+            }
+        }
+        if (current.isNotEmpty()) blocks += current.toString()
+        return blocks
+    }
+
+    @Test
     fun `default widevine key line is gone and rotated key stays`() {
         val defaultLine = media.lineSequence().first { it.contains("edef8ba9") && it.contains("AAAAAczEvZTEg") }
         assertTrue("isDefaultWidevineKey 不认这行:\n$defaultLine", AppleHlsRewrite.isDefaultWidevineKey(defaultLine))
@@ -56,8 +100,8 @@ class AppleHlsRewriteTest {
     @Test
     fun `byte count is preserved apart from removed lines`() {
         val out = AppleHlsRewrite.rewrite(media, playlistUrl)
-        // 删掉的恰好是默认 key 那一行：行数差 1（split 的末尾空元素两边一致）
-        assertEquals(media.split("\n").size - 1, out.split("\n").size)
+        // 删掉的是默认 key 那一整块（FairPlay + PlayReady + Widevine 三行）
+        assertEquals(media.split("\n").size - 3, out.split("\n").size)
     }
 
     @Test

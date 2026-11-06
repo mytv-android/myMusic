@@ -41,19 +41,42 @@ internal object AppleHlsRewrite {
         var lines = content.split("\r\n", "\n")
         // 结尾换行会在 split 里多出一个空元素，先摘掉，最后统一补回，避免多拼一个换行
         if (endsWithNewline && lines.isNotEmpty() && lines.last().isEmpty()) lines = lines.dropLast(1)
-        val out = StringBuilder(content.length)
+        // 要整块删掉"含默认 Widevine key 的那一组 #EXT-X-KEY"，不能只删 Widevine 那一行：
+        // HLS 的 key 对后面所有段生效，而 Apple 每组 key 都捆着 FairPlay + PlayReady + Widevine
+        // 三行。只删 Widevine 会把 FairPlay/PlayReady 两行留下来，于是紧跟其后的第一个段
+        // 看着"有 key 但没有 Widevine"——Media3 当它没加密，不建 DRM 会话、不要 license，
+        // 直接把密文喂解码器，症状是**无声且没有任何错误**。
+        val dropKeyBlock = BooleanArray(lines.size)
+        var blockStart = -1
+        fun closeKeyBlock(endExclusive: Int) {
+            if (blockStart < 0) return
+            if (lines.subList(blockStart, endExclusive).any { isDefaultWidevineKey(it) }) {
+                for (i in blockStart until endExclusive) dropKeyBlock[i] = true
+            }
+            blockStart = -1
+        }
         lines.forEachIndexed { index, line ->
+            if (KEY_LINE.containsMatchIn(line)) {
+                if (blockStart < 0) blockStart = index
+            } else {
+                closeKeyBlock(index)
+            }
+        }
+        closeKeyBlock(lines.size)
+
+        val out = StringBuilder(content.length)
+        var first = true
+        lines.forEachIndexed { index, line ->
+            if (dropKeyBlock[index]) return@forEachIndexed
             val rewritten = when {
                 line.isBlank() -> line
-                isDefaultWidevineKey(line) -> null
                 !line.startsWith("#") -> absolutize(line, base)
                 line.startsWith("#EXT-X-MAP") -> absolutizeAttr(line, base)
                 else -> line
             }
-            if (rewritten != null) {
-                if (index > 0) out.append(separator)
-                out.append(rewritten)
-            }
+            if (!first) out.append(separator)
+            out.append(rewritten)
+            first = false
         }
         if (endsWithNewline) out.append(separator)
         return out.toString()
@@ -149,7 +172,13 @@ internal object AppleHlsRewrite {
         (data[at].toInt() and 0xFF) shl 24 or (data[at + 1].toInt() and 0xFF) shl 16 or
             (data[at + 2].toInt() and 0xFF) shl 8 or (data[at + 3].toInt() and 0xFF)
 
-    /** 把行流切成段组：#EXTINF 之后的 #EXT-X-BYTERANGE / URI 行都属于同一组。 */
+    /**
+     * 把行流切成段组：`#EXTINF` 起，到**段 URI 那一行**结束。
+     *
+     * 边界必须卡在 URI 行，不能卡在下一个 `#EXTINF`：Apple 的 `#EXT-X-KEY` 块写在上一段
+     * URI **之后**、下一段 `#EXTINF` **之前**，按"下一个 EXTINF"划段会把属于后续段的 key
+     * 块算进被丢弃的那一段里一起删掉，结果整份清单一把 key 都不剩。
+     */
     private fun segmentGroups(lines: List<String>): List<SegmentGroup> {
         val groups = mutableListOf<SegmentGroup>()
         var start = -1
@@ -160,20 +189,25 @@ internal object AppleHlsRewrite {
             if (start >= 0 && endExclusive > start) {
                 groups += SegmentGroup(start, endExclusive - start, url, offset, length)
             }
+            start = -1
+            url = null; offset = 0L; length = 0L
         }
         for (index in lines.indices) {
             val line = lines[index]
             if (line.startsWith("#EXTINF")) {
                 close(index)
                 start = index
-                url = null; offset = 0L; length = 0L
             } else if (start >= 0) {
+                if (line.isNotEmpty() && !line.startsWith("#")) {
+                    url = line
+                    close(index + 1) // 段止于 URI 行；后面的 key/MAP 属于下一段的前导
+                    continue
+                }
                 val range = BYTERANGE.find(line)
                 if (range != null) {
                     length = range.groupValues[1].toLongOrNull() ?: 0L
                     offset = range.groupValues[2].toLongOrNull() ?: 0L
                 }
-                if (line.isNotEmpty() && !line.startsWith("#")) url = line
             }
         }
         close(lines.size)
