@@ -126,8 +126,72 @@ class AppleFullTrackDeviceTest {
         val stateRef = java.util.concurrent.atomic.AtomicInteger(0)
         var error: PlaybackException? = null
         val player = java.util.concurrent.atomic.AtomicReference<ExoPlayer?>(null)
+        // PCM 探针：抓送到 AudioSink 的采样，算峰值。进度在走也可能只是静音，
+        // 只有波形有振幅才叫"有声音"。
+        val pcmPeak = java.util.concurrent.atomic.AtomicInteger(0)
+        val pcmFrames = java.util.concurrent.atomic.AtomicLong(0)
+        val pcmSink = object : androidx.media3.exoplayer.audio.TeeAudioProcessor.AudioBufferSink {
+            private var bytesPerSample = 2
+            private var channels = 2
+            override fun flush(sampleRateHz: Int, channelCount: Int, encoding: Int) {
+                channels = channelCount.coerceAtLeast(1)
+                bytesPerSample = if (encoding == C.ENCODING_PCM_FLOAT) 4 else 2
+            }
+
+            override fun handleBuffer(buffer: java.nio.ByteBuffer) {
+                val copy = buffer.duplicate()
+                val n = copy.remaining()
+                val bytes = ByteArray(n)
+                copy.get(bytes)
+                if (bytesPerSample == 2) {
+                    var i = 0
+                    while (i + 1 < n) {
+                        val v = ((bytes[i].toInt() and 0xFF) or (bytes[i + 1].toInt() shl 8)).toShort().toInt()
+                        val a = kotlin.math.abs(v)
+                        pcmPeak.accumulateAndGet(a) { x, y -> maxOf(x, y) }
+                        i += 2
+                    }
+                } else {
+                    var i = 0
+                    while (i + 3 < n) {
+                        val bits = (bytes[i].toInt() and 0xFF) or ((bytes[i + 1].toInt() and 0xFF) shl 8) or
+                            ((bytes[i + 2].toInt() and 0xFF) shl 16) or ((bytes[i + 3].toInt() and 0xFF) shl 24)
+                        val f = java.lang.Float.intBitsToFloat(bits)
+                        val a = (kotlin.math.abs(f) * 32768).toInt()
+                        pcmPeak.accumulateAndGet(a) { x, y -> maxOf(x, y) }
+                        i += 4
+                    }
+                }
+                pcmFrames.addAndGet((n / (bytesPerSample * channels)).toLong())
+            }
+
+        }
+        val renderersFactory = object : androidx.media3.exoplayer.DefaultRenderersFactory(context) {
+            override fun buildAudioSink(
+                context: android.content.Context,
+                enableFloatOutput: Boolean,
+                enableAudioOutputPlaybackParams: Boolean,
+            ): androidx.media3.exoplayer.audio.AudioSink =
+                androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                    // 固定 16 位整数输出，PCM 探针就不用管浮点分支
+                    .setEnableFloatOutput(false)
+                    .setAudioProcessors(
+                        arrayOf(androidx.media3.exoplayer.audio.TeeAudioProcessor(pcmSink)),
+                    )
+                    .build()
+        }
+
         instrument.runOnMainSync {
-            val p = ExoPlayer.Builder(context).build()
+            val p = ExoPlayer.Builder(context)
+                .setRenderersFactory(renderersFactory)
+                .setAudioAttributes(
+                    androidx.media3.common.AudioAttributes.Builder()
+                        .setUsage(C.USAGE_MEDIA)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                        .build(),
+                    true,
+                )
+                .build()
             player.set(p)
             p.addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(state: Int) {
@@ -162,8 +226,14 @@ class AppleFullTrackDeviceTest {
             state = p?.playbackState ?: 0
             err = p?.playerError?.errorCodeName
         }
-        log("PROGRESS position=$position playing=$playing state=$state err=$err")
+        log("PROGRESS position=$position playing=$playing state=$state err=$err pcmPeak=${pcmPeak.get()} pcmFrames=${pcmFrames.get()}")
         assertTrue("播了 6 秒进度还是 $position ms —— 没有真正出声", position > 2_000)
+        assertTrue("没收到任何 PCM 数据", pcmFrames.get() > 0)
+        // 静音段峰值是 0~1；真实音乐样本通常在数千以上（16 位满刻度 32767）
+        assertTrue(
+            "PCM 峰值只有 ${pcmPeak.get()}（16 位满刻度 32767）—— 解码出来基本是静音",
+            pcmPeak.get() > 500,
+        )
         log("RESULT ok=$ok position=$position state=${stateRef.get()} error=${error?.errorCodeName ?: "none"}")
         instrument.runOnMainSync { player.get()?.release() }
 
