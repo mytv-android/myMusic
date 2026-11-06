@@ -150,14 +150,64 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             }.getOrNull()
         }
         if (trimmed !== rewritten) AppLog.i(TAG, "已丢静音前导段: ${song.name}")
+        // init 段的 tenc 里 Apple 把 default_KID 写成全零，安卓 CDM 按 kid 查表会报
+        // ERROR_DRM_NO_LICENSE（真机 6006）。把 kid 改写成本次授权用的那个，并指向本地文件。
+        val patched = appleLocalInitSegment(song, variant, trimmed, workDir) ?: trimmed
         return runCatching {
             val file = File(workDir, "apple-${song.id}.m3u8")
-            file.writeText(trimmed)
+            file.writeText(patched)
             android.net.Uri.fromFile(file).toString()
         }.getOrElse {
             AppLog.w(TAG, "本地清单写失败，用原地址: ${it.message}")
             variant.playlistUrl
         }
+    }
+
+    /**
+     * 下载 EXT-X-MAP 那个 init 段、把 tenc 的 kid 改写成本次授权的 kid、落成本地文件，
+     * 并把清单里的 EXT-X-MAP 指过去。任一步失败就返回 null（清单保持原样，行为不退化）。
+     */
+    private val MAP_URI = Regex("URI=\"([^\"]+)\"")
+    private val MAP_RANGE = Regex("BYTERANGE=\"(\\d+)@(\\d+)\"")
+
+    private suspend fun appleLocalInitSegment(
+        song: Song,
+        variant: AppleHlsVariant,
+        playlist: String,
+        workDir: File,
+    ): String? {
+        val kid = AppleHlsManifest.widevineKeyId(variant.pssh) ?: run {
+            AppLog.w(TAG, "PSSH 里没取到 kid，跳过 init 段改写")
+            return null
+        }
+        val mapLine = playlist.lineSequence().firstOrNull { it.startsWith("#EXT-X-MAP") } ?: return null
+        val uri = MAP_URI.find(mapLine)?.groupValues?.getOrNull(1) ?: return null
+        val range = MAP_RANGE.find(mapLine)
+        val initBytes = runCatching {
+            val offset = range?.groupValues?.getOrNull(2)?.toLongOrNull() ?: 0L
+            val length = range?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+            NativeHttp.getResponse(
+                uri,
+                headers = if (length > 0) mapOf("Range" to "bytes=$offset-${offset + length - 1}") else emptyMap(),
+                userAgent = APPLE_WEB_UA,
+                binary = true,
+            ).bytes
+        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: run {
+            AppLog.w(TAG, "init 段下载失败，跳过 kid 改写")
+            return null
+        }
+        val patchedInit = AppleHlsRewrite.patchInitSegmentKid(initBytes, kid)
+        val file = runCatching {
+            val f = File(workDir, "apple-${song.id}-init.mp4")
+            f.writeBytes(patchedInit)
+            f
+        }.getOrNull() ?: return null
+        val localUri = android.net.Uri.fromFile(file).toString()
+        AppLog.i(TAG, "init 段 kid 已改写为 ${kid.joinToString("") { "%02x".format(it.toInt() and 0xFF) }}")
+        // 本地文件本身就是完整的 init 段，BYTERANGE 必须去掉
+        return playlist.lineSequence().joinToString("\n") { line ->
+            if (line.startsWith("#EXT-X-MAP")) "#EXT-X-MAP:URI=\"$localUri\"" else line
+        } + if (playlist.endsWith("\n")) "\n" else ""
     }
 
     /** 从歌曲资源上取整曲主清单；拿不到（没登录 / 该曲没有 enhancedHls）返回空。 */

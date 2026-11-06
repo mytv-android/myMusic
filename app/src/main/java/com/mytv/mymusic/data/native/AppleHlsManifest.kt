@@ -66,6 +66,63 @@ internal object AppleHlsManifest {
     fun preferred(master: String): Variant? = variants(master).minByOrNull { AUDIO_GROUPS.indexOf(it.group) }
 
     /**
+     * 从 `data:...;base64,<pssh box>` 里取出 WidevinePsshData 的 key_id（16 字节）。
+     *
+     * 用途是改写 init 段的 tenc：Apple 的 default_KID 恒为全零，而安卓 CDM 按 kid 严格
+     * 查表，必须把它换成授权用的那个 kid 才能解出声音。
+     */
+    fun widevineKeyId(psshUri: String): ByteArray? {
+        val base64 = psshUri.substringAfter("base64,", "")
+        if (base64.isBlank()) return null
+        val box = decodeBase64(base64) ?: return null
+        if (box.size < 28) return null
+        val payload = box.copyOfRange(28, box.size)
+        // protobuf: field 2 (key_id), wire type 2 → 0x12 0x10 + 16 字节
+        var i = 0
+        while (i + 18 <= payload.size) {
+            if (payload[i] == 0x12.toByte() && payload[i + 1] == 0x10.toByte()) {
+                return payload.copyOfRange(i + 2, i + 18)
+            }
+            i++
+        }
+        return null
+    }
+
+    private const val B64 =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+    /**
+     * 宽容的 base64 解码（忽略空白、允许省略 padding）。
+     *
+     * 不用 `android.util.Base64`：它在 JVM 单测里不可用，只能靠 returnDefaultValues 返回 null，
+     * 会让这条逻辑永远测不到（Apple 的 PSSH 经常缺 padding，正是需要测的地方）。
+     */
+    internal fun decodeBase64(value: String): ByteArray? {
+        val out = java.io.ByteArrayOutputStream(value.length * 3 / 4 + 3)
+        var buffer = 0
+        var bits = 0
+        for (ch in value) {
+            if (ch == '=') break
+            val v = when (ch) {
+                in 'A'..'Z' -> ch - 'A'
+                in 'a'..'z' -> ch - 'a' + 26
+                in '0'..'9' -> ch - '0' + 52
+                '+' -> 62
+                '/' -> 63
+                ' ', '\n', '\r', '\t' -> continue
+                else -> return null
+            }
+            buffer = (buffer shl 6) or v
+            bits += 6
+            if (bits >= 8) {
+                bits -= 8
+                out.write((buffer shr bits) and 0xFF)
+            }
+        }
+        return out.toByteArray()
+    }
+
+    /**
      * 媒体清单里真正管音频数据的那个 Widevine key，返回**带 `data:text/plain;base64,` 前缀的完整串**
      * ——Apple 的授权接口要的就是这个形式（gamdl 直接把 `key.uri` 当 `uri` 传）。
      *

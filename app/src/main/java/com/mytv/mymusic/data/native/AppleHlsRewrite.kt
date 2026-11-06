@@ -216,6 +216,41 @@ internal object AppleHlsRewrite {
 
     private val BYTERANGE = Regex("""#EXT-X-BYTERANGE:(\d+)@(\d+)""")
 
+    /**
+     * 把 init 段里所有 `tenc` 的 default_KID 改写成授权用的 kid。
+     *
+     * Apple 的 tenc default_KID 恒为全零（enhancedHls 和 web 的 lossy 都一样，实抓确认），
+     * 而授权回来的密钥带着 PSSH 里那个 kid。安卓的 CDM 按样本的 kid 严格查表，
+     * 全零对不上任何密钥，于是 MediaCodec 报
+     * `CryptoException: requested key has not been loaded: ERROR_DRM_NO_LICENSE`
+     * （真机 6006）。Chromium 的 CDM 容忍全零，所以网页版照常播。
+     *
+     * 只改 16 字节、盒子长度不变，不会破坏任何偏移。tenc 布局：fourcc 之后
+     * version(1) flags(3) reserved(1) crypt_skip(1) isProtected(1) ivSize(1) 然后 16 字节 KID。
+     */
+    internal fun patchInitSegmentKid(init: ByteArray, kid: ByteArray): ByteArray {
+        if (kid.size != 16) return init
+        val out = init.copyOf()
+        val marker = "tenc".toByteArray()
+        var i = 0
+        while (i <= out.size - marker.size) {
+            if (matchesAt(out, i, marker)) {
+                val kidAt = i + marker.size + 8
+                if (kidAt >= 0 && kidAt + 16 <= out.size) kid.copyInto(out, kidAt)
+                i += marker.size
+            } else {
+                i++
+            }
+        }
+        return out
+    }
+
+    private fun matchesAt(data: ByteArray, at: Int, pattern: ByteArray): Boolean {
+        if (at + pattern.size > data.size) return false
+        for (j in pattern.indices) if (data[at + j] != pattern[j]) return false
+        return true
+    }
+
     /** 默认 key 行：Widevine keyformat 且 URI 就是那把 init 段默认 key。internal 给单测钉住。 */
     internal fun isDefaultWidevineKey(line: String): Boolean {
         if (!KEY_LINE.containsMatchIn(line)) return false
