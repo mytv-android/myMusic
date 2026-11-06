@@ -3,7 +3,9 @@ package com.mytv.mymusic.ui.player.stage
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.mytv.mymusic.ui.player.stage.modes.AuroraVisualizer
+import com.mytv.mymusic.ui.player.stage.modes.MisideDropVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.Rings52HzVisualizer
+import com.mytv.mymusic.ui.player.stage.modes.StardriftVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.VinylDiscVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.WaveLightVisualizer
 
@@ -13,8 +15,10 @@ object LyricVisualizers {
         ClassicVisualizer,
         AuroraVisualizer,
         Rings52HzVisualizer,
+        MisideDropVisualizer,
         WaveLightVisualizer,
         VinylDiscVisualizer,
+        StardriftVisualizer,
     ).sortedBy { it.order }
 
     /** 认不出的 id（比如以后删掉的模式）按经典。 */
