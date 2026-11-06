@@ -75,6 +75,7 @@ class PlaybackService : MediaSessionService() {
         // 按 licenseUri 缓存，换歌不重复建。
         val drmManagers = mutableMapOf<String, DrmSessionManager>()
         val drmLock = Any()
+        val drmInfoLogged = java.util.concurrent.atomic.AtomicBoolean(false)
         builder.setMediaSourceFactory(
             DefaultMediaSourceFactory(
                 cache?.let {
@@ -97,9 +98,32 @@ class PlaybackService : MediaSessionService() {
                     "PlaybackDrm",
                     "建 Widevine session manager adamId=${params["adamId"]} pssh=${params["pssh"]?.length ?: 0}B",
                 )
+                if (drmInfoLogged.compareAndSet(false, true)) {
+                    // 真机上 4003 的排查线索：L1 设备会要求硬件安全解码器
+                    runCatching {
+                        val md = androidx.media3.exoplayer.drm.FrameworkMediaDrm.newInstance(C.WIDEVINE_UUID)
+                        try {
+                            AppLog.i(
+                                "PlaybackDrm",
+                                "CDM vendor=${runCatching { md.getPropertyString("vendor") }.getOrDefault("?")} " +
+                                    "level=${runCatching { md.getPropertyString("securityLevel") }.getOrDefault("?")} " +
+                                    "aacSecure=${md.requiresSecureDecoder(ByteArray(0), "audio/mp4a-latm")}",
+                            )
+                        } finally {
+                            md.release()
+                        }
+                    }.onFailure { AppLog.w("PlaybackDrm", "CDM 信息读取失败: ${it.message}") }
+                }
                 synchronized(drmLock) {
                     drmManagers.getOrPut(uri) {
-                        DefaultDrmSessionManager.Builder().build(
+                        DefaultDrmSessionManager.Builder()
+                            // 不用 secure decoder：Apple 的 cbcs 0:0 全样本加密在 L1 设备的
+                            // 硬件安全解码器上解出来是垃圾（真机 4003），详见 provider 的注释
+                            .setUuidAndExoMediaDrmProvider(
+                                C.WIDEVINE_UUID,
+                                AppleWidevineDrmCallback.NO_SECURE_DECODER_PROVIDER,
+                            )
+                            .build(
                             AppleWidevineDrmCallback(
                                 cookieProvider = { AppleSession.cookie },
                                 adamId = params["adamId"].orEmpty(),

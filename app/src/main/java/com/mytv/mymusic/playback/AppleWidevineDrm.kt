@@ -7,6 +7,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.drm.ExoMediaDrm
+import androidx.media3.exoplayer.drm.FrameworkMediaDrm
 import androidx.media3.exoplayer.drm.HttpMediaDrmCallback
 import androidx.media3.exoplayer.drm.MediaDrmCallback
 import androidx.media3.exoplayer.drm.MediaDrmCallbackException
@@ -195,6 +196,23 @@ class AppleWidevineDrmCallback(
 
     companion object {
         private const val TAG = "AppleDrm"
+
+        /**
+         * 一律不使用 secure decoder。
+         *
+         * L1 设备（如 Pixel 8 Pro）对 DRM 内容会要求硬件安全解码器，而 Apple 的 fMP4 用的是
+         * cbcs **0:0 全样本加密**（crypt_byte_block=0、skip_byte_block=0）。安全解码器对这种
+         * 模式的兼容性参差，实测真机症状是：kid 对上、license 拿到、CDM 不报 NO_LICENSE，
+         * 接着解码器报 4003 —— 说明解密结果已经是垃圾。软件解码 + CDM 自行解密（L3 设备
+         * 一直走的路）没有这个问题，模拟器上同一份数据能正常出声。
+         *
+         * 用 `requiresSecureDecoder` 强制返回 false，让 MediaCodecRenderer 走普通解码器。
+         */
+        val NO_SECURE_DECODER_PROVIDER: ExoMediaDrm.Provider = object : ExoMediaDrm.Provider {
+            override fun acquireExoMediaDrm(uuid: UUID): ExoMediaDrm =
+                NoSecureDecoderMediaDrm(FrameworkMediaDrm.newInstance(uuid))
+        }
+
         const val LICENSE_ENDPOINT = "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense"
         const val KEY_SYSTEM = "com.widevine.alpha"
         private const val APPLE_WEB_ORIGIN = "https://music.apple.com"
@@ -238,6 +256,16 @@ class AppleWidevineDrmCallback(
             runCatching {
                 (Json.parseToJsonElement(body).jsonObject[name] as? JsonPrimitive)?.contentOrNull
             }.getOrNull().orEmpty()
+    }
+}
+
+/** 包住 `FrameworkMediaDrm`，把"必须用安全解码器"的要求吞掉，其余行为原样透传。 */
+@UnstableApi
+private class NoSecureDecoderMediaDrm(private val delegate: ExoMediaDrm) : ExoMediaDrm by delegate {
+    override fun requiresSecureDecoder(initData: ByteArray, mimeType: String): Boolean {
+        val wanted = runCatching { delegate.requiresSecureDecoder(initData, mimeType) }.getOrDefault(false)
+        if (wanted) AppLog.i("AppleDrm", "设备要求安全解码器，强制改用普通解码器: $mimeType")
+        return false
     }
 }
 
