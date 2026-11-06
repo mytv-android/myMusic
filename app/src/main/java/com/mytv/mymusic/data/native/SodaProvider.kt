@@ -16,6 +16,7 @@ import com.mytv.mymusic.data.playreport.PlayReportHub
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -987,12 +988,13 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val token = effectiveSignerToken()
         if (token.isNotBlank()) signerHeaders["Authorization"] = "Bearer $token"
         val response = try {
-            NativeHttp.postJson(endpoint, payload, signerHeaders, userAgent = SODA_USER_AGENT)
+            postSignerWithRetry(endpoint, payload, signerHeaders)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
             AppLog.w(TAG, "签名器请求失败 endpoint=${describeEndpoint(endpoint)}：${error.message}")
-            throw IllegalStateException("汽水签名器请求失败：${error.message}", error)
+            val hint = signerErrorHint(error.message.orEmpty())
+            throw IllegalStateException("汽水签名器请求失败：${hint ?: error.message}", error)
         }
         val signed = try {
             parseSignerResponse(response.body, requestUrl)
@@ -1008,13 +1010,42 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return signed
     }
 
+    /**
+     * libmssdk 的 429 `RATE_LIMITED` / 503 `BUSY` 都是可重试的（签名没有副作用），
+     * 重试一次、等 1 秒；其余状态码直接失败。
+     */
+    private suspend fun postSignerWithRetry(
+        endpoint: String,
+        payload: String,
+        headers: Map<String, String>,
+    ): NativeResponse {
+        var lastError: Exception? = null
+        repeat(2) { attempt ->
+            try {
+                return NativeHttp.postJson(endpoint, payload, headers, userAgent = SODA_USER_AGENT)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                lastError = error
+                val message = error.message.orEmpty()
+                val retryable = attempt == 0 && (message.contains("HTTP 429") || message.contains("HTTP 503"))
+                if (!retryable) return@repeat
+                AppLog.d(TAG, "签名服务忙/限流，1 秒后重试：${signerErrorHint(message) ?: message.take(120)}")
+                delay(1_000)
+            }
+        }
+        throw lastError ?: IllegalStateException("汽水签名器请求失败")
+    }
+
     private fun parseSignerResponse(raw: String, requestUrl: String): SignedRequest {
         val root = runCatching { SODA_JSON.parseToJsonElement(raw) as? JsonObject }.getOrNull()
             ?: throw IllegalStateException("汽水签名器返回的不是 JSON")
         val ok = (root["ok"] as? JsonPrimitive)?.booleanOrNull
         if (ok == false) {
             var message = jsonString(root, "error").ifEmpty { "unknown error" }
-            if (message.contains("unauthorized", ignoreCase = true)) {
+            val code = jsonString(root, "code")
+            if (code.isNotEmpty()) message += "（$code）"
+            if (message.contains("unauthorized", ignoreCase = true) || code.equals("UNAUTHORIZED", true)) {
                 message += "（签名服务要求鉴权：在设置里填写签名器 Token）"
             }
             throw IllegalStateException("汽水签名器错误：$message")
@@ -1036,7 +1067,30 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         if (headers.isEmpty() && msToken.isEmpty() && aBogus.isEmpty()) {
             throw IllegalStateException("汽水签名器没有返回签名头")
         }
+        // libmssdk 新版在回包里带它实际签名用的 device_id（URL 里没点名设备号时就是服务自己那份）
+        jsonString(root, "device_id").takeIf { it.isNotEmpty() }?.let(::adoptSignerDeviceId)
         return SignedRequest(appendSignerQuery(requestUrl, msToken, aBogus), headers)
+    }
+
+    /** 把签名器实际使用的设备号写回缓存，后续 URL 里的 device_id / fp 与签名保持一致。 */
+    private fun adoptSignerDeviceId(deviceId: String) {
+        val current = signerCredentials
+        if (current?.deviceId == deviceId) return
+        signerCredentials = SodaAppCredentials(
+            deviceId = deviceId,
+            iid = current?.iid ?: deviceId,
+            fp = deviceId,
+        )
+        AppLog.d(TAG, "采用签名器设备号 deviceId=${maskId(deviceId)}（后续 URL 与之对齐）")
+    }
+
+    /** libmssdk 的失败原因码按「下一步做什么」分类，这里把它翻译成用户能看懂的提示。 */
+    private fun signerErrorHint(raw: String): String? = when {
+        raw.contains("RATE_LIMITED") -> "签名服务被限流，请稍后重试"
+        raw.contains("\"code\":\"BUSY\"") || raw.contains("\"code\":\"busy\"") -> "签名服务忙，请稍后重试"
+        raw.contains("UNAUTHORIZED", ignoreCase = true) || raw.contains("unauthorized", ignoreCase = true) ->
+            "签名服务要求鉴权：在设置里填写签名器 Token"
+        else -> null
     }
 
     private fun appendSignerQuery(url: String, msToken: String, aBogus: String): String {
@@ -1047,67 +1101,34 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return builder.build().toString()
     }
 
-    /** 签名器 /config：设备指纹必须与签名侧一致，整曲签名才会被服务端接受。 */
-    private suspend fun ensureSignerCredentials(): SodaAppCredentials {
+    /**
+     * 设备身份。libmssdk 新版已删除 `GET /config`（它会明文返回完整设备号与安装号），
+     * 这里先用落盘的设备号发第一份签名；签名器实际使用的那份会随 `/sign` 回包的
+     * `device_id` 回来，[adoptSignerDeviceId] 对齐后后续 URL 与签名就是同一份。
+     */
+    private fun ensureSignerCredentials(): SodaAppCredentials {
         signerCredentials?.let { return it }
-        var deviceId = ""
-        var iid = ""
-        var fp = ""
-        try {
-            val headers = linkedMapOf("Accept" to "application/json")
-            val token = effectiveSignerToken()
-            if (token.isNotBlank()) headers["Authorization"] = "Bearer $token"
-            val body = NativeHttp.get(signerConfigUrl(), headers, userAgent = SODA_USER_AGENT)
-            val root = SODA_JSON.parseToJsonElement(body) as? JsonObject
-            if (root != null) {
-                val identity = root["identity"] as? JsonObject
-                val identityDevice = identity?.let { jsonString(it, "device_id") }.orEmpty()
-                val topDevice = jsonString(root, "device_id")
-                deviceId = identityDevice.ifEmpty { if (topDevice.contains("*")) "" else topDevice }
-                iid = identity?.let { jsonString(it, "iid") }.orEmpty()
-                fp = identity?.let { jsonString(it, "fp") }.orEmpty()
-            }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            // /config 不是所有签名器都提供；缺设备身份时用本地生成值
-            AppLog.w(TAG, "签名器 /config 取指纹失败，改用本地设备号：${error.message}")
-        }
-        val fromSigner = deviceId.isNotEmpty()
-        if (deviceId.isEmpty()) {
-            // 签名器没给 /config 时用落盘的那份：每次启动重新生成的话，
-            // 服务端（埋点、播放计数、推荐口味的 played_media）永远攒不起同一个人的历史
-            val now = System.currentTimeMillis()
-            deviceId = fallbackDeviceId.ifEmpty { now.toString() }
-            iid = (now + 1).toString()
-            fp = deviceId
-        }
-        if (iid.isEmpty()) iid = (System.currentTimeMillis() + 1).toString()
-        if (fp.isEmpty()) fp = deviceId
+        // 用落盘的那份：每次启动重新生成的话，服务端（埋点、播放计数、推荐口味的
+        // played_media）永远攒不起同一个人的历史
+        val now = System.currentTimeMillis()
+        val deviceId = fallbackDeviceId.ifEmpty { now.toString() }
+        val credentials = SodaAppCredentials(
+            deviceId = deviceId,
+            iid = (now + 1).toString(),
+            fp = deviceId,
+        )
+        signerCredentials = credentials
         AppLog.d(
             TAG,
-            "设备指纹 来源=${if (fromSigner) "签名器/config" else "本地"} " +
-                "deviceId=${maskId(deviceId)} iid=${maskId(iid)} fp=${maskId(fp)}",
+            "设备指纹 来源=本地 deviceId=${maskId(deviceId)} iid=${maskId(credentials.iid)} " +
+                "（/config 已被签名服务删除，/sign 回包会带实际使用的那份）",
         )
-        return SodaAppCredentials(deviceId = deviceId, iid = iid, fp = fp).also {
-            signerCredentials = it
-        }
+        return credentials
     }
 
     /** 设备号只留首尾各 4 位，够对照又不会把完整指纹写进可分享的日志。 */
     private fun maskId(id: String): String =
         if (id.length <= 8) id else "${id.take(4)}…${id.takeLast(4)}(${id.length})"
-
-    private fun signerConfigUrl(): String {
-        var base = effectiveSignerUrl()
-        for (suffix in listOf("/sign", "/sign/")) {
-            if (base.endsWith(suffix)) {
-                base = base.dropLast(suffix.length)
-                break
-            }
-        }
-        return base.trimEnd('/') + "/config"
-    }
 
     /**
      * 业务写接口的带签名 POST：播放上报（`/luna/pc/action`、`/luna/pc/me/recently-played-media`）
@@ -1193,7 +1214,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             userAgent = creds.userAgentOrDefault(),
         )
         if (response.body.isBlank()) {
-            // 设备身份可能已变化（签名器重启），下次重新对齐 /config
+            // 签名器可能换了设备号或重启：清掉缓存，下次从 /sign 回包里重新对齐
             signerCredentials = null
             AppLog.w(
                 TAG,
