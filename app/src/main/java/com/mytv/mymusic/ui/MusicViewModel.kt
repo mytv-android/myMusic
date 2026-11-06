@@ -3418,7 +3418,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // HLS 清单每十秒重拉一次，网络抖动、清单刷新失败都会走到这里。
             // isLive 依赖 Song.extra；队列被重建过、extra 掉了时按云听的 m3u8 兜底认出来
             val live = queued?.isLive == true ||
-                (failedSource?.providerId == YUNTING_ID && queued?.ext == "m3u8")
+                (failedSource?.providerId == "yunting" && queued?.ext == "m3u8")
             AppLog.i(
                 "Player",
                 "错误分流：live=$live provider=${failedSource?.providerId ?: "无"} ext=${queued?.ext.orEmpty()}",
