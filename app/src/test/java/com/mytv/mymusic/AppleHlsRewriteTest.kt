@@ -2,9 +2,9 @@ package com.mytv.mymusic
 
 import com.mytv.mymusic.data.native.AppleHlsManifest
 import com.mytv.mymusic.data.native.AppleHlsRewrite
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,9 +12,9 @@ import org.junit.Test
 /**
  * 整曲媒体清单重写。样例是 2026-11-05 实抓的 NEON（adam 6820428730）stereo-256 清单。
  *
- * 重写的唯一动机：删掉默认 key 行后 Media3 的 DRM initData 才会落到轮换 key 上，
- * Apple 的 license（只回挑战里那个 kid）才能对上音频段 tenc 的 kid——
- * 不删的话 CDM 拿着默认 key 的密钥解不了任何音频段，解码器报 4003。
+ * 重写只做两件事：段/init 地址绝对化、init 段 tenc kid 按样本条目改写（见
+ * [AppleInitSegmentKidTest]）。两把 key 都必须原样留着——默认 key 保开头 30s 左右，
+ * 轮换 key 保正片，删掉任何一把都会丢一段真实的歌（开头那段曾被误当静音删过）。
  */
 class AppleHlsRewriteTest {
 
@@ -26,64 +26,66 @@ class AppleHlsRewriteTest {
         .bufferedReader()
         .use { it.readText() }
 
+    private val widevineKeyLine =
+        Regex("""#EXT-X-KEY:[^\r\n]*edef8ba9-79d6-4ace-a3c8-27dcd51d21ed[^\r\n]*""")
+
     @Test
-    fun `whole default key block is dropped, not just the widevine line`() {
-        // 真机症状（release 40）：只删 Widevine 那一行，FairPlay/PlayReady 留在原 key 块里，
-        // 紧跟其后的第一个段就变成"有 key 但没有 Widevine"——Media3 当它没加密，
-        // 不建 DRM 会话、不要 license，直接喂密文，无声且无错误。
-        // 所以必须整块删。这条断言盯的就是"每个段前面生效的 key 里必须有 Widevine"。
+    fun `both widevine keys survive the rewrite`() {
         val out = AppleHlsRewrite.rewrite(media, playlistUrl)
-        // 默认那块（含 s1/e1 的 FairPlay）整块消失
-        assertFalse("默认 key 块没整块删掉:\n$out", out.contains("P000000000/s1/e1"))
-        assertFalse("默认 Widevine key 还在:\n$out", out.contains(AppleHlsManifest.defaultWidevineKeyUri()))
-        // 剩下恰好一个 key 块，且块里有 Widevine
-        val blocks = keyBlocks(out)
-        assertEquals("应只剩一个 key 块，实际 ${blocks.size}", 1, blocks.size)
-        assertTrue("剩下的 key 块里没有 Widevine:\n${blocks[0]}", blocks[0].contains("edef8ba9"))
-        // HLS：key 对后面所有段生效——**丢掉静音前导段之后**，第一个段之前必须已经出现过
-        // Widevine key，否则 Media3 会把这段当成未加密。
-        val trimmed = runBlocking { AppleHlsRewrite.trimPrefetchSegments(out) { _, _, _ -> TFHD_PREFETCH } }
-        val firstSegmentAt = trimmed.indexOf("#EXTINF")
-        val firstWidevineAt = trimmed.indexOf("edef8ba9")
-        assertTrue(
-            "第一个段之前没有 Widevine key（会被当成未加密）: firstSeg=$firstSegmentAt firstWv=$firstWidevineAt\n" +
-                trimmed.lines().filter { it.startsWith("#EXT-X-KEY") || it.startsWith("#EXTINF") }
-                    .take(6).joinToString("\n") { it.take(70) },
-            firstWidevineAt in 0 until firstSegmentAt,
-        )
+        // 默认 key（预取段）和轮换 key（正片）都得在，且保持 data: URI 原样
+        assertTrue("默认 key 行丢了:\n$out", out.contains(AppleHlsManifest.defaultWidevineKeyUri()))
+        val lines = widevineKeyLine.findAll(out).toList()
+        assertEquals("Widevine key 行数量不对:\n$out", 2, lines.size)
+        lines.forEach { assertTrue("URI 不是原样的 data: URI: ${it.value}", it.value.contains("URI=\"data:text/plain;base64,")) }
+        // 两把 key 的先后顺序不能变：默认在前，轮换在后（样本条目 1=预取、2=正片就按这个排）
+        val defaultAt = out.indexOf(AppleHlsManifest.defaultWidevineKeyUri())
+        val rotatedAt = out.indexOf(lines.last().value)
+        assertTrue("默认 key 应排在轮换 key 前面", defaultAt in 0 until rotatedAt)
     }
 
-    /** 按连续 `#EXT-X-KEY` 行切块，返回每块的原文。 */
-    private fun keyBlocks(content: String): List<String> {
-        val blocks = mutableListOf<String>()
-        val current = StringBuilder()
-        content.split("\n").forEach { line ->
-            if (line.startsWith("#EXT-X-KEY")) {
-                if (current.isNotEmpty()) current.append('\n')
-                current.append(line)
-            } else if (current.isNotEmpty()) {
-                blocks += current.toString()
-                current.clear()
-            }
+    @Test
+    fun `rotated pssh is picked from the playlist`() {
+        val all = AppleHlsManifest.widevineKeyUris(media)
+        assertEquals("应识别出两把 key", 2, all.size)
+        assertEquals("第一个应是默认 key", AppleHlsManifest.defaultWidevineKeyUri(), all[0])
+        assertEquals("widevinePssh 必须给轮换 key", all[1], AppleHlsManifest.widevinePssh(media))
+    }
+
+    @Test
+    fun `split puts the default key block and its segments in the intro part`() {
+        val out = AppleHlsRewrite.rewrite(media, playlistUrl)
+        val split = AppleHlsRewrite.splitAtSecondKeyBlock(out)
+        val intro = split.intro
+        assertNotNull("两把 key 的清单应该切出开头段", intro)
+        // 每份清单只留一把 Widevine key，否则 Media3 整轨只会用其中一把
+        assertEquals("intro 里的 Widevine key 数不对:\n$intro", 1, widevineKeyLine.findAll(intro!!).count())
+        assertTrue("intro 没拿到默认 key:\n$intro", intro.contains(AppleHlsManifest.defaultWidevineKeyUri()))
+        assertEquals("main 里的 Widevine key 数不对", 1, widevineKeyLine.findAll(split.main).count())
+        assertFalse("main 不该再有默认 key", split.main.contains(AppleHlsManifest.defaultWidevineKeyUri()))
+        // 两份都要有 init 段和 ENDLIST
+        listOf(intro, split.main).forEach {
+            assertTrue("缺 EXT-X-MAP:\n$it", it.contains("#EXT-X-MAP"))
+            assertTrue("缺 ENDLIST:\n$it", it.trimEnd().endsWith("#EXT-X-ENDLIST"))
         }
-        if (current.isNotEmpty()) blocks += current.toString()
-        return blocks
+        // 段一个都不能丢
+        val total = out.split("\n").count { it.startsWith("https://") }
+        val kept = intro.split("\n").count { it.startsWith("https://") } +
+            split.main.split("\n").count { it.startsWith("https://") }
+        assertEquals("切完段数变了", total, kept)
     }
 
     @Test
-    fun `default widevine key line is gone and rotated key stays`() {
-        val defaultLine = media.lineSequence().first { it.contains("edef8ba9") && it.contains("AAAAAczEvZTEg") }
-        assertTrue("isDefaultWidevineKey 不认这行:\n$defaultLine", AppleHlsRewrite.isDefaultWidevineKey(defaultLine))
-        val out = AppleHlsRewrite.rewrite(media, playlistUrl)
-        // 默认 key 必须没了——它就是让 initData 落错的那行
-        assertFalse("默认 key 行没删掉:\n$out", out.contains(AppleHlsManifest.defaultWidevineKeyUri()))
-        // 轮换 key 必须还在，而且保持 data: URI 原样（不能被 resolve 弄坏）
-        val widevineKeys = Regex("""#EXT-X-KEY:[^\r\n]*edef8ba9-79d6-4ace-a3c8-27dcd51d21ed[^\r\n]*""").findAll(out).toList()
-        assertEquals("轮换 key 行数量不对:\n$out", 1, widevineKeys.size)
-        assertTrue(widevineKeys[0].value.contains("URI=\"data:text/plain;base64,"))
-        // FairPlay / PlayReady 行不受影响
-        assertTrue(out.contains("com.apple.streamingkeydelivery"))
-        assertTrue(out.contains("com.microsoft.playready"))
+    fun `split leaves a single-key playlist alone`() {
+        val one = """
+            #EXTM3U
+            #EXT-X-KEY:METHOD=SAMPLE-AES,URI="${AppleHlsManifest.defaultWidevineKeyUri()}",KEYFORMAT="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
+            #EXTINF:15.0,
+            seg1.mp4
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        val split = AppleHlsRewrite.splitAtSecondKeyBlock(one)
+        assertNull("只有一把 key 不该切", split.intro)
+        assertEquals(one, split.main)
     }
 
     @Test
@@ -98,10 +100,9 @@ class AppleHlsRewriteTest {
     }
 
     @Test
-    fun `byte count is preserved apart from removed lines`() {
+    fun `line count is unchanged`() {
         val out = AppleHlsRewrite.rewrite(media, playlistUrl)
-        // 删掉的是默认 key 那一整块（FairPlay + PlayReady + Widevine 三行）
-        assertEquals(media.split("\n").size - 3, out.split("\n").size)
+        assertEquals(media.split("\n").size, out.split("\n").size)
     }
 
     @Test
@@ -134,64 +135,8 @@ class AppleHlsRewriteTest {
             #EXT-X-ENDLIST
         """.trimIndent()
         val out = AppleHlsRewrite.rewrite(onlyDefault, "https://example.com/a/master.m3u8")
-        assertFalse("默认 key 行没删掉:\n$out", out.contains("edef8ba9"))
+        assertTrue("默认 key 行被删了:\n$out", out.contains("edef8ba9"))
         assertTrue("MAP 没绝对化:\n$out", out.contains("https://example.com/a/init.mp4"))
         assertTrue("段没绝对化:\n$out", out.contains("https://example.com/a/seg1.mp4"))
-    }
-
-    // ---- 静音前导段识别（tfhd 探测）----
-
-    /** 真机样例：预取段的 tfhd（flags=0x020008，不标 sample_description_index）。 */
-    private val TFHD_PREFETCH = byteArrayOf(
-        0, 0, 1, 8, 't'.code.toByte(), 'f'.code.toByte(), 'h'.code.toByte(), 'd'.code.toByte(),
-        0x00, 0x02, 0x00, 0x08, // version=0 flags=0x020008（无 sdi 位）
-        0, 0, 0, 1,             // track_id=1
-        0, 0, 4, 0,             // default_duration
-    )
-
-    /** 真机样例：正片段的 tfhd（flags=0x02000A，sample_description_index=2）。 */
-    private val TFHD_REAL = byteArrayOf(
-        0, 0, 1, 12, 't'.code.toByte(), 'f'.code.toByte(), 'h'.code.toByte(), 'd'.code.toByte(),
-        0x00, 0x02, 0x00, 0x0A, // version=0 flags=0x02000A（带 sdi）
-        0, 0, 0, 1,             // track_id=1
-        0, 0, 0, 2,             // sample_description_index=2 → 正片条目
-    )
-
-    @Test
-    fun `tfhd probe distinguishes prefetch from real fragments`() {
-        assertEquals("没标 sdi 的应是预取段", true, AppleHlsRewrite.isPrefetchFragment(TFHD_PREFETCH))
-        assertEquals("sdi=2 应是正片段", false, AppleHlsRewrite.isPrefetchFragment(TFHD_REAL))
-        assertNull("没有 tfhd 应返回 null（看不懂）", AppleHlsRewrite.isPrefetchFragment(ByteArray(64)))
-        assertNull("太短应返回 null", AppleHlsRewrite.isPrefetchFragment(TFHD_PREFETCH.copyOf(10)))
-    }
-
-    @Test
-    fun `trim drops leading prefetch segments and keeps the rest`() = runBlocking {
-        val rewritten = AppleHlsRewrite.rewrite(media, playlistUrl)
-        val originalSegments = rewritten.split("\n").count { it.startsWith("https://") }
-        // 第 1 段是预取静音（NEON 实测），其余是正片
-        var calls = 0
-        val trimmed = AppleHlsRewrite.trimPrefetchSegments(rewritten) { _, _, _ ->
-            calls++
-            if (calls == 1) TFHD_PREFETCH else TFHD_REAL
-        }
-        val kept = trimmed.split("\n").count { it.startsWith("https://") }
-        assertEquals("应丢 1 段", originalSegments - 1, kept)
-        assertFalse("丢的应是第一个段", trimmed.contains("485745@1127"))
-        assertTrue("EXT-X-MAP 必须保留", trimmed.contains("#EXT-X-MAP"))
-        assertTrue("ENDLIST 必须保留", trimmed.contains("#EXT-X-ENDLIST"))
-        assertEquals("探测次数应止于第一个正片段", 2, calls)
-    }
-
-    @Test
-    fun `trim keeps everything when probe fails or all real`() = runBlocking {
-        val rewritten = AppleHlsRewrite.rewrite(media, playlistUrl)
-        // 探测失败 → 原样
-        assertEquals(rewritten, AppleHlsRewrite.trimPrefetchSegments(rewritten) { _, _, _ -> null })
-        // 第一个就是正片 → 原样
-        assertEquals(rewritten, AppleHlsRewrite.trimPrefetchSegments(rewritten) { _, _, _ -> TFHD_REAL })
-        // 没有 byterange 的清单不动
-        val plain = "#EXTM3U\n#EXTINF:15.0,\nhttps://example.com/whole.mp4\n#EXT-X-ENDLIST\n"
-        assertEquals(plain, AppleHlsRewrite.trimPrefetchSegments(plain) { _, _, _ -> TFHD_PREFETCH })
     }
 }

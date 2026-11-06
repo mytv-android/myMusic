@@ -15,7 +15,9 @@ import org.junit.Test
  * 为什么必须改：Apple 的 `tenc.default_KID` 恒为全零（enhancedHls 和 web 的 lossy 都一样），
  * 而授权回来的密钥带着 PSSH 里那个 kid。安卓 CDM 按样本 kid 严格查表，全零对不上任何密钥，
  * MediaCodec 就报 `requested key has not been loaded: ERROR_DRM_NO_LICENSE`（真机 6006）。
- * 在模拟器（Pixel 等价 Widevine L3）上验证过：不改时播放失败，改完后进度正常前进。
+ *
+ * 两个样本条目各归各的 key：条目 1（tfhd 不标 sdi）= 默认 key 保的开头 30s 左右，
+ * 条目 2（sdi=2）= 轮换 key 保的正片。所以两个 tenc 要分别改写。
  */
 class AppleInitSegmentKidTest {
 
@@ -39,6 +41,8 @@ class AppleInitSegmentKidTest {
         return out
     }
 
+    private fun hex(kid: ByteArray) = kid.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+
     @Test
     fun `real init segment has all-zero kids`() {
         val kids = tencKids(init)
@@ -50,31 +54,34 @@ class AppleInitSegmentKidTest {
     fun `key id is read out of the pssh`() {
         val kid = AppleHlsManifest.widevineKeyId(pssh)
         assertNotNull("PSSH 里没取到 kid", kid)
-        assertEquals(
-            "000000005bbbd2536332322020202020",
-            kid!!.joinToString("") { "%02x".format(it.toInt() and 0xFF) },
-        )
+        assertEquals("000000005bbbd2536332322020202020", hex(kid!!))
+        // 默认 key 的 PSSH 也要能取出 kid（预取条目用）
+        val defaultKid = AppleHlsManifest.widevineKeyId(AppleHlsManifest.defaultWidevineKeyUri())
+        assertNotNull("默认 PSSH 里没取到 kid", defaultKid)
+        assertEquals("000000000000000073312f6531202020", hex(defaultKid!!))
     }
 
     @Test
-    fun `patching rewrites every tenc kid and leaves the rest untouched`() {
-        val kid = AppleHlsManifest.widevineKeyId(pssh)!!
-        val patched = AppleHlsRewrite.patchInitSegmentKid(init, kid)
+    fun `patching rewrites each tenc with its own kid`() {
+        val defaultKid = AppleHlsManifest.widevineKeyId(AppleHlsManifest.defaultWidevineKeyUri())!!
+        val rotationKid = AppleHlsManifest.widevineKeyId(pssh)!!
+        val patched = AppleHlsRewrite.patchInitSegmentKids(init, listOf(defaultKid, rotationKid))
         assertEquals("长度必须不变（盒子偏移全靠它）", init.size, patched.size)
-        val expected = kid.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-        tencKids(patched).forEach { assertEquals(expected, it) }
-        // 除了 kid 那 32 字节，别的一个字节都不能变
-        var changed = 0
+        assertEquals("条目 1 应改成本地默认 key 的 kid", hex(defaultKid), tencKids(patched)[0])
+        assertEquals("条目 2 应改成本次授权的轮换 kid", hex(rotationKid), tencKids(patched)[1])
+        // 除了 kid 那几个字节，别的一个字节都不能变
         for (i in init.indices) {
             if (init[i] != patched[i]) {
-                changed++
-                val offsetInTenc = i
-                assertTrue("改到了 tenc kid 之外的位置: $offsetInTenc", isInsideTencKid(init, i))
+                assertTrue("改到了 tenc kid 之外的位置: $i", isInsideTencKid(init, i))
             }
         }
-        // kid 前 4 字节本来就是 0，不会变；实际改动数 = 每个 kid 的非零字节数 × 2
-        val nonZero = kid.count { it != 0.toByte() }
-        assertEquals("改动字节数应恰好是两个 kid 的非零字节", nonZero * 2, changed)
+    }
+
+    @Test
+    fun `single kid list is applied to every tenc`() {
+        val kid = AppleHlsManifest.widevineKeyId(pssh)!!
+        val patched = AppleHlsRewrite.patchInitSegmentKids(init, listOf(kid))
+        tencKids(patched).forEach { assertEquals(hex(kid), it) }
     }
 
     /** 判断某个下标是否落在任一 tenc 的 16 字节 kid 区间内。 */
@@ -93,11 +100,12 @@ class AppleInitSegmentKidTest {
     @Test
     fun `junk input is returned unchanged`() {
         val kid = ByteArray(16) { 1 }
-        assertArrayEquals(ByteArray(0), AppleHlsRewrite.patchInitSegmentKid(ByteArray(0), kid))
+        assertArrayEquals(ByteArray(0), AppleHlsRewrite.patchInitSegmentKids(ByteArray(0), listOf(kid)))
         val junk = ByteArray(64) { 7 }
-        assertArrayEquals(junk, AppleHlsRewrite.patchInitSegmentKid(junk, kid))
+        assertArrayEquals(junk, AppleHlsRewrite.patchInitSegmentKids(junk, listOf(kid)))
         // kid 长度不对就原样返回，避免把 init 段写坏
-        assertArrayEquals(init, AppleHlsRewrite.patchInitSegmentKid(init, ByteArray(8)))
+        assertArrayEquals(init, AppleHlsRewrite.patchInitSegmentKids(init, listOf(ByteArray(8))))
+        assertArrayEquals(init, AppleHlsRewrite.patchInitSegmentKids(init, emptyList()))
     }
 
     @Test

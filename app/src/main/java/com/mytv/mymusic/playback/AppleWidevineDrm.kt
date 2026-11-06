@@ -7,7 +7,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.drm.ExoMediaDrm
-import androidx.media3.exoplayer.drm.FrameworkMediaDrm
 import androidx.media3.exoplayer.drm.HttpMediaDrmCallback
 import androidx.media3.exoplayer.drm.MediaDrmCallback
 import androidx.media3.exoplayer.drm.MediaDrmCallbackException
@@ -140,7 +139,7 @@ class AppleWidevineDrmCallback(
                 AppLog.e(TAG, "license base64 解不开", it)
                 throw failure(uuid, it)
             }
-        AppLog.i(TAG, "授权成功，license ${bytes.size}B")
+        AppLog.i(TAG, "授权成功，license ${bytes.size}B kid=${licenseKeyIds(bytes)}")
         return MediaDrmCallback.Response(bytes)
     }
 
@@ -197,22 +196,6 @@ class AppleWidevineDrmCallback(
     companion object {
         private const val TAG = "AppleDrm"
 
-        /**
-         * 一律不使用 secure decoder。
-         *
-         * L1 设备（如 Pixel 8 Pro）对 DRM 内容会要求硬件安全解码器，而 Apple 的 fMP4 用的是
-         * cbcs **0:0 全样本加密**（crypt_byte_block=0、skip_byte_block=0）。安全解码器对这种
-         * 模式的兼容性参差，实测真机症状是：kid 对上、license 拿到、CDM 不报 NO_LICENSE，
-         * 接着解码器报 4003 —— 说明解密结果已经是垃圾。软件解码 + CDM 自行解密（L3 设备
-         * 一直走的路）没有这个问题，模拟器上同一份数据能正常出声。
-         *
-         * 用 `requiresSecureDecoder` 强制返回 false，让 MediaCodecRenderer 走普通解码器。
-         */
-        val NO_SECURE_DECODER_PROVIDER: ExoMediaDrm.Provider = object : ExoMediaDrm.Provider {
-            override fun acquireExoMediaDrm(uuid: UUID): ExoMediaDrm =
-                NoSecureDecoderMediaDrm(FrameworkMediaDrm.newInstance(uuid))
-        }
-
         const val LICENSE_ENDPOINT = "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense"
         const val KEY_SYSTEM = "com.widevine.alpha"
         private const val APPLE_WEB_ORIGIN = "https://music.apple.com"
@@ -226,6 +209,12 @@ class AppleWidevineDrmCallback(
         const val EXTRA_DRM_PSSH = "drm_pssh"
         const val EXTRA_DRM_ADAM_ID = "drm_adam_id"
         const val DRM_SCHEME_WIDEVINE = "widevine"
+
+        /**
+         * 开头那段（默认 key 保的，30s 左右）的清单地址。两把 key 不能放进同一份清单，
+         * 否则 Media3 整轨只用一把 key，开头那段解成静音——播放侧拿这个地址拼前一段。
+         */
+        const val EXTRA_DRM_INTRO_URL = "drm_intro_url"
 
         /**
          * 拼授权载体地址。adamId 和 PSSH 都塞进 query，回调里再从
@@ -252,20 +241,29 @@ class AppleWidevineDrmCallback(
          * schema 整个解析失败，license 在手里也被当成"没给"。字段缺失、类型不是
          * 字符串、响应根本不是 JSON，都返回空串，由调用方按失败处理。
          */
+        /**
+         * license 里每把内容密钥的 kid。Widevine license 是 protobuf，KeyContainer 的
+         * 字段 1 就是 16 字节 key_id（外层 `0x0a 0x10`），扫一遍就够用——两个 CDM 会话
+         * 各拿各的 key，日志里对上 kid 才知道 key 轮换到底有没有生效。
+         */
+        internal fun licenseKeyIds(license: ByteArray): String {
+            val out = mutableListOf<String>()
+            var i = 0
+            while (i + 18 <= license.size) {
+                if (license[i] == 0x0A.toByte() && license[i + 1] == 0x10.toByte()) {
+                    out += license.copyOfRange(i + 2, i + 18).joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+                    i += 18
+                } else {
+                    i++
+                }
+            }
+            return out.distinct().joinToString(",")
+        }
+
         internal fun licenseField(body: String, name: String): String =
             runCatching {
                 (Json.parseToJsonElement(body).jsonObject[name] as? JsonPrimitive)?.contentOrNull
             }.getOrNull().orEmpty()
-    }
-}
-
-/** 包住 `FrameworkMediaDrm`，把"必须用安全解码器"的要求吞掉，其余行为原样透传。 */
-@UnstableApi
-private class NoSecureDecoderMediaDrm(private val delegate: ExoMediaDrm) : ExoMediaDrm by delegate {
-    override fun requiresSecureDecoder(initData: ByteArray, mimeType: String): Boolean {
-        val wanted = runCatching { delegate.requiresSecureDecoder(initData, mimeType) }.getOrDefault(false)
-        if (wanted) AppLog.i("AppleDrm", "设备要求安全解码器，强制改用普通解码器: $mimeType")
-        return false
     }
 }
 

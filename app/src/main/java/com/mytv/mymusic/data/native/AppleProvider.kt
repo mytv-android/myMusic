@@ -109,8 +109,8 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         if (!master.isNullOrBlank()) {
             val variant = appleHlsVariant(master)
             if (variant != null) {
-                val url = appleLocalPlaylist(song, variant, workDir)
-                AppLog.i(TAG, "整曲就绪 ${song.name} ${variant.bitrate}kbps ${variant.playlistUrl.take(100)}")
+                val (url, introUrl) = appleLocalPlaylists(song, variant, workDir)
+                AppLog.i(TAG, "整曲就绪 ${song.name} ${variant.bitrate}kbps 开头段=${introUrl != null} ${variant.playlistUrl.take(100)}")
                 return PlayableStream(
                     url = url,
                     ext = "m4a",
@@ -119,6 +119,7 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
                         put(AppleWidevineDrmCallback.EXTRA_DRM_SCHEME, AppleWidevineDrmCallback.DRM_SCHEME_WIDEVINE)
                         put(AppleWidevineDrmCallback.EXTRA_DRM_PSSH, variant.pssh)
                         put(AppleWidevineDrmCallback.EXTRA_DRM_ADAM_ID, song.id)
+                        if (introUrl != null) put(AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL, introUrl)
                     },
                 )
             }
@@ -134,33 +135,33 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
 
     /**
      * 把媒体清单重写后落到本地文件，播放器读这个文件（见 [AppleHlsRewrite] 的说明：
-     * 剔默认 key 让 initData 落到轮换 key 上，再丢掉默认 key 保的静音前导段）。
+     * 相对地址补绝对、init 段 tenc kid 按样本条目改写）。
+     *
+     * 两把 key 的段拆成两份清单：Media3 每份 HLS 清单只按一把 key 建会话，混在一起时
+     * 开头那 30s（默认 key）会解成静音。播放侧用 ConcatenatingMediaSource2 把两段拼回一首歌。
      * 写不了就退回原 URL，效果回到重写前的行为，不会更糟。
      */
-    private suspend fun appleLocalPlaylist(song: Song, variant: AppleHlsVariant, workDir: File): String {
+    private suspend fun appleLocalPlaylists(
+        song: Song,
+        variant: AppleHlsVariant,
+        workDir: File,
+    ): Pair<String, String?> {
         val rewritten = AppleHlsRewrite.rewrite(variant.playlistBody, variant.playlistUrl)
-        val trimmed = AppleHlsRewrite.trimPrefetchSegments(rewritten) { url, offset, length ->
-            runCatching {
-                NativeHttp.getResponse(
-                    url,
-                    headers = mapOf("Range" to "bytes=$offset-${offset + length - 1}"),
-                    userAgent = APPLE_WEB_UA,
-                    binary = true,
-                ).bytes
-            }.getOrNull()
-        }
-        if (trimmed !== rewritten) AppLog.i(TAG, "已丢静音前导段: ${song.name}")
         // init 段的 tenc 里 Apple 把 default_KID 写成全零，安卓 CDM 按 kid 查表会报
-        // ERROR_DRM_NO_LICENSE（真机 6006）。把 kid 改写成本次授权用的那个，并指向本地文件。
-        val patched = appleLocalInitSegment(song, variant, trimmed, workDir) ?: trimmed
-        return runCatching {
-            val file = File(workDir, "apple-${song.id}.m3u8")
-            file.writeText(patched)
+        // ERROR_DRM_NO_LICENSE（真机 6006）。两个样本条目各归各的 key，分别改写。
+        val patched = appleLocalInitSegment(song, variant, rewritten, workDir) ?: rewritten
+        val split = AppleHlsRewrite.splitAtSecondKeyBlock(patched)
+        fun write(name: String, body: String): String? = runCatching {
+            val file = File(workDir, name)
+            file.writeText(body)
             android.net.Uri.fromFile(file).toString()
-        }.getOrElse {
-            AppLog.w(TAG, "本地清单写失败，用原地址: ${it.message}")
-            variant.playlistUrl
+        }.getOrNull()
+        val main = write("apple-${song.id}.m3u8", split.main) ?: run {
+            AppLog.w(TAG, "本地清单写失败，用原地址")
+            return variant.playlistUrl to null
         }
+        val intro = split.intro?.let { write("apple-${song.id}-intro.m3u8", it) }
+        return main to intro
     }
 
     /**
@@ -176,10 +177,13 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         playlist: String,
         workDir: File,
     ): String? {
-        val kid = AppleHlsManifest.widevineKeyId(variant.pssh) ?: run {
+        // 样本条目顺序：预取条目（默认 key，开头 30s 左右）在前，正片条目（轮换 key）在后，
+        // 与清单里 key 块的出现顺序一致。
+        val rotationKid = AppleHlsManifest.widevineKeyId(variant.pssh) ?: run {
             AppLog.w(TAG, "PSSH 里没取到 kid，跳过 init 段改写")
             return null
         }
+        val defaultKid = AppleHlsManifest.widevineKeyId(AppleHlsManifest.defaultWidevineKeyUri())
         val mapLine = playlist.lineSequence().firstOrNull { it.startsWith("#EXT-X-MAP") } ?: return null
         val uri = MAP_URI.find(mapLine)?.groupValues?.getOrNull(1) ?: return null
         val range = MAP_RANGE.find(mapLine)
@@ -196,14 +200,15 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
             AppLog.w(TAG, "init 段下载失败，跳过 kid 改写")
             return null
         }
-        val patchedInit = AppleHlsRewrite.patchInitSegmentKid(initBytes, kid)
+        val kids = listOfNotNull(defaultKid, rotationKid)
+        val patchedInit = AppleHlsRewrite.patchInitSegmentKids(initBytes, kids)
         val file = runCatching {
             val f = File(workDir, "apple-${song.id}-init.mp4")
             f.writeBytes(patchedInit)
             f
         }.getOrNull() ?: return null
         val localUri = android.net.Uri.fromFile(file).toString()
-        AppLog.i(TAG, "init 段 kid 已改写为 ${kid.joinToString("") { "%02x".format(it.toInt() and 0xFF) }}")
+        AppLog.i(TAG, "init 段 kid 已改写：${kids.joinToString(" / ") { it.joinToString("") { b -> "%02x".format(b.toInt() and 0xFF) } }}")
         // 本地文件本身就是完整的 init 段，BYTERANGE 必须去掉
         return playlist.lineSequence().joinToString("\n") { line ->
             if (line.startsWith("#EXT-X-MAP")) "#EXT-X-MAP:URI=\"$localUri\"" else line

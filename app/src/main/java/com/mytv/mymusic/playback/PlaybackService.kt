@@ -4,6 +4,7 @@ import com.mytv.mymusic.AppLog
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -16,6 +17,10 @@ import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.drm.DefaultDrmSessionManager
 import androidx.media3.exoplayer.drm.DrmSessionManager
+import androidx.media3.exoplayer.drm.DrmSessionManagerProvider
+import androidx.media3.exoplayer.source.ConcatenatingMediaSource2
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -76,8 +81,7 @@ class PlaybackService : MediaSessionService() {
         val drmManagers = mutableMapOf<String, DrmSessionManager>()
         val drmLock = Any()
         val drmInfoLogged = java.util.concurrent.atomic.AtomicBoolean(false)
-        builder.setMediaSourceFactory(
-            DefaultMediaSourceFactory(
+        val baseFactory = DefaultMediaSourceFactory(
                 cache?.let {
                     val direct = DefaultDataSource.Factory(this)
                     LiveBypassDataSourceFactory(
@@ -117,12 +121,9 @@ class PlaybackService : MediaSessionService() {
                 synchronized(drmLock) {
                     drmManagers.getOrPut(uri) {
                         DefaultDrmSessionManager.Builder()
-                            // 不用 secure decoder：Apple 的 cbcs 0:0 全样本加密在 L1 设备的
-                            // 硬件安全解码器上解出来是垃圾（真机 4003），详见 provider 的注释
-                            .setUuidAndExoMediaDrmProvider(
-                                C.WIDEVINE_UUID,
-                                AppleWidevineDrmCallback.NO_SECURE_DECODER_PROVIDER,
-                            )
+                            // 清单里两把 key 各保各的段：默认 key 保开头 30s 左右，轮换 key
+                            // 保正片。过界时两把 key 要同时在，所以开多会话。
+                            .setMultiSession(true)
                             .build(
                             AppleWidevineDrmCallback(
                                 cookieProvider = { AppleSession.cookie },
@@ -133,8 +134,8 @@ class PlaybackService : MediaSessionService() {
                         )
                     }
                 }
-            },
-        )
+            }
+        builder.setMediaSourceFactory(AppleIntroMediaSourceFactory(baseFactory))
         val player = builder.build()
         // 随机顺序跟着队列改动走：随机时“下一首播放”照样下一首放，解析完换地址也不会跳到别的歌
         player.setShuffleOrder(QueueShuffleOrder())
@@ -280,6 +281,53 @@ class ResumeButtonReceiver : MediaButtonReceiver() {
         val app = context.applicationContext as? MyMusicApp ?: return false
         return app.queueStore.hasSaved()
     }
+}
+
+/**
+ * Apple 整曲开头 30s 左右是另一把 key（默认 key），Media3 每份 HLS 清单只按一把 key 建
+ * DRM 会话——两把混在一份清单里时整轨只用其中一把，另一段解成静音（实测）。Provider 因此
+ * 把它单独写成一份清单，这里把两段拼成一个媒体项：播放位置、歌词、进度条仍然是一首歌。
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
+private class AppleIntroMediaSourceFactory(
+    private val base: MediaSource.Factory,
+) : MediaSource.Factory {
+
+    override fun createMediaSource(mediaItem: MediaItem): MediaSource {
+        val main = base.createMediaSource(mediaItem)
+        val introUrl = mediaItem.mediaMetadata.extras
+            ?.getString(AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL)
+            ?.takeIf { it.isNotBlank() } ?: return main
+        val drm = mediaItem.localConfiguration?.drmConfiguration ?: return main
+        val adamId = AppleWidevineDrmCallback.parseQuery(drm.licenseUri?.toString().orEmpty())["adamId"].orEmpty()
+        if (adamId.isBlank()) return main
+        val introItem = mediaItem.buildUpon()
+            .setUri(introUrl)
+            // 去掉 extras，免得再拼一层
+            .setMediaMetadata(MediaMetadata.Builder().build())
+            .setDrmConfiguration(
+                drm.buildUpon()
+                    .setLicenseUri(
+                        AppleWidevineDrmCallback.licenseUri(
+                            adamId,
+                            com.mytv.mymusic.data.native.AppleHlsManifest.defaultWidevineKeyUri(),
+                        ),
+                    )
+                    .build(),
+            )
+            .build()
+        return ConcatenatingMediaSource2.Builder()
+            .add(base.createMediaSource(introItem))
+            .add(main)
+            .setMediaItem(mediaItem)
+            .build()
+    }
+
+    override fun setDrmSessionManagerProvider(provider: DrmSessionManagerProvider): MediaSource.Factory = this
+
+    override fun setLoadErrorHandlingPolicy(policy: LoadErrorHandlingPolicy): MediaSource.Factory = this
+
+    override fun getSupportedTypes(): IntArray = base.supportedTypes
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)

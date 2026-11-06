@@ -129,12 +129,15 @@ internal object AppleHlsManifest {
      * 跳过 [WIDEVINE_DEFAULT_KEY_URI] 那个坏的 init-segment key；万一 Apple 换了默认值、
      * 所有 key 都撞上，就退回最后一个（key 轮换里后来的覆盖前面的）。
      */
-    fun widevinePssh(mediaPlaylist: String): String? {
-        val uris = WIDEVINE_KEY_REGEX.findAll(mediaPlaylist)
+    fun widevinePssh(mediaPlaylist: String): String? =
+        widevineKeyUris(mediaPlaylist).firstOrNull { it != WIDEVINE_DEFAULT_KEY_URI }
+            ?: widevineKeyUris(mediaPlaylist).lastOrNull()
+
+    /** 媒体清单里所有 Widevine key，按出现顺序去重：默认 key（预取段）在前，轮换 key（正片）在后。 */
+    fun widevineKeyUris(mediaPlaylist: String): List<String> =
+        WIDEVINE_KEY_REGEX.findAll(mediaPlaylist)
             .map { it.groupValues[1] }
             .filter { it.isNotBlank() }
+            .distinct()
             .toList()
-        if (uris.isEmpty()) return null
-        return uris.firstOrNull { it != WIDEVINE_DEFAULT_KEY_URI } ?: uris.last()
-    }
 }

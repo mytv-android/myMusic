@@ -3139,12 +3139,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         app.database.dao().save(SavedSong(song.key, bucket, json.encodeToString(song), System.currentTimeMillis()))
 
     private fun mediaItem(song: Song): MediaItem {
+        // Apple 整曲开头那段用的是另一把 key，Provider 单独成了一份清单；地址搭在
+        // mediaMetadata.extras 上送到播放侧（tag 过不了 MediaSession 的序列化）
+        val introUrl = song.extra[AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL].orEmpty()
+        val introExtras = introUrl.takeIf { it.isNotBlank() }?.let {
+            android.os.Bundle().apply { putString(AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL, it) }
+        }
         val builder = MediaItem.Builder().setMediaId(song.key).setUri(song.url).setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(song.title)
                 .setArtist(song.artist)
                 .setAlbumTitle(song.album)
                 .setArtworkUri(song.cover.takeIf { it.isNotBlank() }?.let(Uri::parse))
+                .apply { introExtras?.let { setExtras(it) } }
                 .build()
         )
         // Apple Music 整曲是 Widevine 加密的 HLS。adamId 和 PSSH 由 AppleProvider.playableStream
@@ -3165,7 +3172,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             pssh = pssh,
                         ),
                     )
-                    .setMultiSession(false)
+                    // 清单里有两把 key（默认 key 保开头 30s 左右、轮换 key 保正片），
+                    // 播放器过界时要能同时持有两个 CDM 会话
+                    .setMultiSession(true)
                     .build(),
             )
         } else if (song.source == "apple" && song.url.contains(".m3u8", ignoreCase = true)) {

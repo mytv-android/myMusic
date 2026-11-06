@@ -57,6 +57,18 @@ class AppleFullTrackDeviceTest {
 
     private fun log(msg: String) = android.util.Log.i(tag, msg)
 
+    private fun positionOf(player: AtomicReference<ExoPlayer?>): Long {
+        var pos = -1L
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { pos = player.get()?.currentPosition ?: -1L }
+        return pos
+    }
+
+    private fun dumpAppLog() {
+        com.mytv.mymusic.AppLog.snapshot()
+            .filter { it.tag in setOf("AppleDrm", "AppleProvider", "MediaItem", "PlaybackDrm") }
+            .forEach { log("APPLOG ${it.level}/${it.tag}: ${it.message.take(220)}") }
+    }
+
     @Test
     fun playFullTrackPlainDataSource() {
         run(useCache = false)
@@ -80,6 +92,8 @@ class AppleFullTrackDeviceTest {
     private suspend fun play(cookie: String, useCache: Boolean) = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         AppleTokenCache.attach(context)
+        // Media3 的 DRM 日志（会话回收 / initData / 错误）默认不开，排 key 轮换必须看
+        androidx.media3.common.util.Log.setLogLevel(androidx.media3.common.util.Log.LOG_LEVEL_ALL)
 
         val song = Song(
             id = "6829122414",
@@ -130,26 +144,34 @@ class AppleFullTrackDeviceTest {
                     setDrmConfiguration(
                         MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
                             .setLicenseUri(AppleWidevineDrmCallback.licenseUri(adamId, pssh))
-                            .setMultiSession(false)
+                            .setMultiSession(true)
                             .build(),
                     )
                 }
             }
             .build()
 
-        val manager = DefaultDrmSessionManager.Builder()
-            // 和 PlaybackService 一致：不用 secure decoder
-            .setUuidAndExoMediaDrmProvider(
-                C.WIDEVINE_UUID,
-                AppleWidevineDrmCallback.NO_SECURE_DECODER_PROVIDER,
-            )
-            .build(
-                AppleWidevineDrmCallback(
-                    cookieProvider = { cookie },
-                    adamId = adamId,
-                    pssh = pssh,
-                ),
-            )
+        // 和 PlaybackService 一致：按 MediaItem 的 licenseUri 建 manager。
+        // 授权请求里的 uri 必须和这份清单的 key 是同一把——用另一把 key 的 PSSH 拿到的
+        // license 即使 kid 相同也解不出正确的明文（实测：整段变成静音，不报错）。
+        val managers = mutableMapOf<String, DefaultDrmSessionManager>()
+        fun managerFor(licenseUri: String): androidx.media3.exoplayer.drm.DrmSessionManager {
+            val params = AppleWidevineDrmCallback.parseQuery(licenseUri)
+            return managers.getOrPut(licenseUri) {
+                val kid = com.mytv.mymusic.data.native.AppleHlsManifest.widevineKeyId(params["pssh"].orEmpty())
+                    ?.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+                log("建 manager uri kid=$kid")
+                DefaultDrmSessionManager.Builder()
+                    .setMultiSession(true)
+                    .build(
+                        AppleWidevineDrmCallback(
+                            cookieProvider = { cookie },
+                            adamId = params["adamId"].orEmpty(),
+                            pssh = params["pssh"].orEmpty(),
+                        ),
+                    )
+            }
+        }
         val upstream: DataSource.Factory = DefaultDataSource.Factory(context)
         var cache: SimpleCache? = null
         val dataSourceFactory: DataSource.Factory = if (useCache) {
@@ -163,8 +185,36 @@ class AppleFullTrackDeviceTest {
         }
         log("数据源=${if (useCache) "CacheDataSource" else "DefaultDataSource"}")
         val factory = DefaultMediaSourceFactory(dataSourceFactory)
-            .setDrmSessionManagerProvider { manager }
-        val source = factory.createMediaSource(mediaItem)
+            .setDrmSessionManagerProvider { item ->
+                managerFor(item.localConfiguration?.drmConfiguration?.licenseUri?.toString().orEmpty())
+            }
+        // 开头段（默认 key）是另一份清单，和 PlaybackService 一样拼成一个媒体项
+        val introUrl = stream.extra[AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL]
+        val source = if (introUrl.isNullOrBlank()) {
+            factory.createMediaSource(mediaItem)
+        } else {
+            log("INTRO 拼开头段 $introUrl")
+            val introItem = mediaItem.buildUpon()
+                .setUri(introUrl)
+                .setMediaMetadata(androidx.media3.common.MediaMetadata.Builder().build())
+                .setDrmConfiguration(
+                    MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
+                        .setLicenseUri(
+                            AppleWidevineDrmCallback.licenseUri(
+                                adamId,
+                                com.mytv.mymusic.data.native.AppleHlsManifest.defaultWidevineKeyUri(),
+                            ),
+                        )
+                        .setMultiSession(true)
+                        .build(),
+                )
+                .build()
+            androidx.media3.exoplayer.source.ConcatenatingMediaSource2.Builder()
+                .add(factory.createMediaSource(introItem))
+                .add(factory.createMediaSource(mediaItem))
+                .setMediaItem(mediaItem)
+                .build()
+        }
 
         // PCM 探针：抓送到 AudioSink 的采样，算峰值。进度在走也可能只是静音，
         // 只有波形有振幅才叫"有声音"。
@@ -243,8 +293,17 @@ class AppleFullTrackDeviceTest {
             p.play()
         }
         val ok = done.await(60, TimeUnit.SECONDS)
-        // READY 只是"能开始播放"，必须让进度真的走起来、并且 PCM 有振幅
-        Thread.sleep(6_000)
+        // READY 只是"能开始播放"，必须让进度真的走起来、并且 PCM 有振幅。
+        // 开头 30s 是默认 key 保的预取段，按秒采样能看到"什么时候才真的有声"。
+        val sampler = Thread {
+            repeat(16) {
+                Thread.sleep(2_000)
+                log("T+${(it + 1) * 2}s pos=${positionOf(player)} peak=${pcmPeak.get()} frames=${pcmFrames.get()}")
+            }
+        }
+        sampler.isDaemon = true
+        sampler.start()
+        Thread.sleep(32_000)
         var position = 0L
         var playing = false
         var state = 0
@@ -259,8 +318,29 @@ class AppleFullTrackDeviceTest {
         log("RESULT cache=$useCache ok=$ok position=$position playing=$playing state=$state err=$err " +
             "pcmPeak=${pcmPeak.get()} pcmFrames=${pcmFrames.get()}")
 
+        // 开头 30s 左右用的是默认 key（预取条目），后面是轮换 key。必须跨过这条边界还能解，
+        // 否则就是"只有前奏能放"或者反过来——两种情况都算失败。
+        val peakBeforeSeek = pcmPeak.get()
+        val framesBeforeSeek = pcmFrames.get()
+        instrument.runOnMainSync { player.get()?.seekTo(35_000) }
+        Thread.sleep(8_000)
+        var position2 = 0L
+        var err2: String? = null
+        var state2 = 0
+        instrument.runOnMainSync {
+            val p = player.get()
+            position2 = p?.currentPosition ?: 0L
+            err2 = p?.playerError?.errorCodeName
+            state2 = p?.playbackState ?: 0
+        }
+        log(
+            "RESULT-AFTER-KEY $useCache position=$position2 state=$state2 err=$err2 " +
+                "pcmPeak=$peakBeforeSeek→${pcmPeak.get()} frames=$framesBeforeSeek→${pcmFrames.get()}",
+        )
+
         instrument.runOnMainSync { player.get()?.release() }
         cache?.release()
+        dumpAppLog()
 
         assertTrue("[cache=$useCache] 等待超时，没到 READY 也没报错", ok)
         assertTrue("[cache=$useCache] 播放失败: $err (${error?.message})", error == null)
@@ -270,6 +350,13 @@ class AppleFullTrackDeviceTest {
         assertTrue(
             "[cache=$useCache] PCM 峰值只有 ${pcmPeak.get()}（满刻度 32767）—— 解出来基本是静音",
             pcmPeak.get() > 500,
+        )
+        // 跨过 key 边界（35s 处属于轮换 key 的正片）必须继续能放
+        assertTrue("[cache=$useCache] 跳转后报错: $err2", err2 == null)
+        assertTrue("[cache=$useCache] 跳转后进度没走（$position2 ms）", position2 > 36_000)
+        assertTrue(
+            "[cache=$useCache] 跳转后没有新的 PCM 数据（${pcmFrames.get()} vs $framesBeforeSeek）",
+            pcmFrames.get() > framesBeforeSeek,
         )
     }
 }
