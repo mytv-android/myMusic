@@ -121,6 +121,62 @@ SOFTWARE.
 - Location: `app/src/main/java/com/mytv/mymusic/ui/poster` (the `Wall*.kt` layout core and the poster UI built on it)
 - Usage: the queue / collection poster wall adapts the layout mechanism of folia-major's Lattice view: 12×8-unit blocks holding 12 poster slots; four hand-drawn block templates × four mirrors, with the template chosen by a linear step over the block coordinates and the mirror by a coordinate hash; infinite tiling of a repeat cell of ceil(N/12) blocks; growing a tapped poster in place to 6×6 and reflowing only its own block with the minimum-movement exact cover; following the current track with the camera to the nearest copy; and D-pad navigation scored as gap + 2·miss + pitch. myMusic redrew the four templates, precomputes the 192 reflows offline (`WallReflowTable.kt`) and replaces the visual layer with Material 3 Expressive components. The code is a Kotlin rewrite, not a copy of the upstream TypeScript, and no upstream assets are bundled. It is a derivative work distributed under AGPL-3.0; modifications must retain this notice and the AGPL-3.0 terms.
 
+## Folia mods (full-screen lyric animations)
+
+Location: `app/src/main/java/com/mytv/mymusic/ui/player/stage` (`modes/` holds one file per ported animation). Each mod was read from the package in the Folium mod catalog and rewritten as native Kotlin / Jetpack Compose drawing code: no upstream JavaScript, WebView, script engine or dynamic code loading is involved, and no upstream images, fonts or other assets are bundled. Visual parameters that were not exposed in the app keep the upstream defaults. Random motion is seeded per song instead of `Math.random`, and every port draws a static frame when "reduce motion" is on.
+
+### folia-major official sample mods (AGPL-3.0)
+
+- Upstream: https://github.com/chthollyphile/folia-major (catalog `mods/official/sample-aurora-visualizer` 1.0.1 and `mods/official/visualizer52hz` 1.0.1, author "Folia Mod Samples")
+- License: GNU Affero General Public License v3.0
+- Usage: the "虹光" (aurora) and "52Hz" lyric animations port the drawing logic of these two samples (the aurora ribbons and per-character glow; the 52Hz concentric rings, character timing and beat response, with beats taken from myMusic's own rhythm analysis). The mod interface itself (settings schema with merge-defaults and clamping, the per-frame stage context, character timings and the line index that is −1 between lines) follows the Folium v1.x documentation in the same repository. These files are derivative works distributed under AGPL-3.0; modifications must retain this notice and the AGPL-3.0 terms.
+
+### Community mods (MIT)
+
+| Animation in myMusic | Mod | Copyright holder | Source |
+| --- | --- | --- | --- |
+| MiSide 掉落 | miside-drop 2.5.3 | baiyangmuzz | https://github.com/baiyangmuzz/miside-drop @ a9d5b1b5b52527e26fa1a8ef1be2e7b08fd3bda8 |
+| 动感波光 | wave-light 1.5.1 | pomepii | https://github.com/Zhangyx0824/folia-mod-wave-light @ ad7358b3fa7af98e98d18da2753054ea9d84e2d5 |
+| 黑胶唱片 | vinyl-disc 1.7.10 | pomepii | https://github.com/Zhangyx0824/folia-mod-vinyl-disc @ e4f1e270df114d5af5b574fc53b756a6ea88fc80 |
+| 星潮·银河 | stardrift 1.38.0 | w0w1w2 | https://github.com/w0w1w2/stardrift @ fefdc328349c5746ff80825037f565632e003b16 |
+
+"按速度" (switching animations by tempo) takes its idea — measure the song's BPM, then map tempo bands to animations — from bpm-style-director 1.0.0 (Copyright (c) 2026 LingShiQwQ, https://github.com/LingShiQwQ/folia-bpm-style-director @ 0620874b93087ccfb8e96392b6796c4620e119bc, MIT). No code was taken; the BPM comes from myMusic's existing beat tracker.
+
+Each of the mods above ships the following license, with its own copyright line (Copyright (c) 2026 baiyangmuzz; Copyright (c) 2026 pomepii; Copyright (c) 2026 w0w1w2; Copyright (c) 2026 LingShiQwQ):
+
+```
+MIT License
+
+Copyright (c) 2026 <copyright holder listed above>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Independent reimplementations
+
+These features were written from the mods' public descriptions only; none of their code is used.
+
+- Spectrum overlay — spectrum-visualizer 0.4.0 (ACUNGER0321, https://github.com/ACUNGER0321/-spectrum-visualizer-folia-mods-): 48 bands, loudness and peak frequency, fed by myMusic's own PCM analysis.
+- Splitting one-line bilingual lyrics — lyric-split-translation 1.2.0 (tumuyan, https://cnb.cool/ai-zoomer/fork-from/folia): the whole-song divider vote and threshold rule described in its README.
+- Per-song random animation — lyric-style-switcher 1.2.1 (Huaq520, https://github.com/Huaq520/lyric-style-switcher).
+- Simplified-to-Traditional conversion and romanization use the transliterators built into Android (`android.icu.text.Transliterator`, Android 10+); no dictionary or library is bundled. opencc-traditional-lyrics and bilingual-ruby-lyrics were consulted only for the feature set.
+
 ## MaterialKolor
 
 - Upstream: https://github.com/jordond/MaterialKolor
