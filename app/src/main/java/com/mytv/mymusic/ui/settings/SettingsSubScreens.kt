@@ -1650,6 +1650,23 @@ private fun platformReportSummary(providerId: String, state: MusicUiState): Stri
 // ======================= 开源许可 / 隐私说明 =======================
 
 private const val LICENSE_URL = "https://github.com/mytv-android/myMusic/blob/main/LICENSE"
+private const val NOTICES_URL = "https://github.com/mytv-android/myMusic/blob/main/THIRD_PARTY_NOTICES.md"
+
+/** 移植的 MIT 歌词动画模组：MIT 要求随副本附上版权行和许可原文，这里原样给出。 */
+private const val FOLIA_MIT_NOTICE =
+    "Copyright (c) 2026 baiyangmuzz（miside-drop）\n" +
+        "Copyright (c) 2026 pomepii（wave-light、vinyl-disc）\n" +
+        "Copyright (c) 2026 w0w1w2（stardrift）\n" +
+        "Copyright (c) 2026 LingShiQwQ（bpm-style-director）\n\n" +
+        "Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated " +
+        "documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation " +
+        "the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to " +
+        "permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\n" +
+        "The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\n" +
+        "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO " +
+        "THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE " +
+        "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, " +
+        "TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
 
 @Composable
 fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
@@ -1663,6 +1680,10 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
         "MaterialKolor、Haze" to "动态配色（MIT）与模糊效果（Apache-2.0）。",
         "YesPlayMusic" to "歌词背景“律动”的分频段自适应增益与频谱通量鼓点检测参考其 MIT 实现；音频分析改由本机 ExoPlayer PCM 完成。",
         "Roboto Flex 字体" to "拉丁字母和数字使用 Roboto Flex（SIL Open Font License 1.1），应用内为只含字重轴和拉丁字符的子集。",
+        "folia-major（Folia）" to "全屏歌词动画的模式接口照 Folium v1.x 文档设计；虹光、52Hz 移植自它的官方样例模组；队列和歌单的海报墙参考它的 Lattice 版块布局。均为 AGPL-3.0。",
+        "Folia 社区歌词动画模组" to "巨幕、跳一跳移植自 tumuyan 的 cinerama 1.0.0、visualizer-jump 1.2.0（AGPL-3.0）；" +
+            "MiSide 掉落、动感波光、黑胶唱片、星潮·银河分别移植自 miside-drop、wave-light、vinyl-disc、stardrift（MIT），" +
+            "“按速度”换动画的思路来自 bpm-style-director（MIT）。全部用 Kotlin 原生重写，不运行、也不打包原模组的代码和素材。",
     )
     SettingsPage(SettingsSection.Licenses, embedded, onBack) {
         item(key = "app", contentType = "licenseCard") {
@@ -1687,6 +1708,22 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
             contentType = { _, _ -> "license" },
         ) { index, (title, body) ->
             TextCard(title, body, index, thirdParty.size)
+        }
+        item(key = "mitHead", contentType = "sectionHeader") { SectionLabel("MIT 许可原文") }
+        item(key = "mit", contentType = "licenseCard") {
+            TextCard(
+                title = "MIT License（MiSide 掉落、动感波光、黑胶唱片、星潮·银河、按速度）",
+                body = FOLIA_MIT_NOTICE,
+                index = 0,
+                count = 1,
+                footer = {
+                    TextButton(onClick = { openUri(NOTICES_URL) }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                        Text("查看完整第三方声明")
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, null, Modifier.size(18.dp))
+                    }
+                },
+            )
         }
         item(key = "note", contentType = "note") {
             Box(Modifier.padding(top = 16.dp)) {
