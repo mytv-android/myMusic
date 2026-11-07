@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.mytv.mymusic.baselineprofile"
     compileSdk = libs.versions.compileSdk.get().toInt()
+    buildToolsVersion = libs.versions.buildTools.get()
 
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()
