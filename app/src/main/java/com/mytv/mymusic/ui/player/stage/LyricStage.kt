@@ -193,8 +193,10 @@ private fun StageHost(
             cover = List(4) { coverColors?.getOrNull(it) ?: fallback[it] },
         )
     }
-    val display = remember(textSp, reduceMotion, tv, window.widthDp, window.heightDp, insets) {
-        StageDisplay(textSp, reduceMotion, tv, wide = tv || window.widthDp > window.heightDp, insets = insets)
+    // 频谱卡片开着时安全区底部让出卡片那一截（卡片本身按原来的安全区摆）
+    val reserve = if (prefs.spectrum && audio != null) with(LocalDensity.current) { SpectrumReserve.toPx() } else 0f
+    val display = remember(textSp, reduceMotion, tv, window.widthDp, window.heightDp, insets, reserve) {
+        StageDisplay(textSp, reduceMotion, tv, wide = tv || window.widthDp > window.heightDp, insets = insets, reserveBottom = reserve)
     }
     val raw = prefs.pluginSettings[mode.id].orEmpty()
     val settings = remember(mode, raw) { SettingValues(mode.settings, raw) }
@@ -219,10 +221,7 @@ private fun StageHost(
     Box(Modifier.fillMaxSize().stageEdgeFade(edgeFade)) {
         if (!mode.hostBackground) mode.Background(ctx, Modifier.fillMaxSize().bleedToWindowEdges())
         mode.Stage(ctx, Modifier.fillMaxSize())
-        if (mode.hostSubtitles) {
-            val lift = (if (prefs.spectrum && audio != null) SpectrumLift else 0.dp) + mode.subtitleInset(ctx)
-            HostSubtitle(ctx, lift)
-        }
+        if (mode.hostSubtitles) HostSubtitle(ctx, mode)
         if (prefs.spectrum && audio != null) SpectrumLayer(audio, clock, insets)
         StageSemantics(ctx)
     }
@@ -417,5 +416,6 @@ private fun StageSemantics(ctx: LyricStageContext) {
 }
 
 private val MIN_STAGE_HEIGHT = 320.dp
-private val SpectrumLift = 70.dp
+/** 频谱卡片 60dp 高、离安全区底 8dp，再留 2dp。 */
+private val SpectrumReserve = 70.dp
 private const val JITTER_MS = 120L

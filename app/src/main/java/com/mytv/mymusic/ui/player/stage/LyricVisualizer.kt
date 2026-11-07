@@ -17,14 +17,14 @@ import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
 import com.mytv.mymusic.data.LyricSubline
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.playback.RHYTHM_BAND_COUNT
 import com.mytv.mymusic.ui.LyricLine
 import com.mytv.mymusic.ui.LyricWord
 import com.mytv.mymusic.ui.ParsedLyrics
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 /*
@@ -72,8 +72,11 @@ interface LyricVisualizer {
     /** 没有同步歌词（纯音乐、电台）时也画；false 时宿主显示和经典一样的“这首歌没有歌词”。 */
     val drawsWithoutLyrics: Boolean get() = false
 
-    /** 模式占了安全区底部（比如跑马灯带）时，宿主副行往上让多少。 */
-    fun subtitleInset(ctx: LyricStageContext): Dp = 0.dp
+    /**
+     * 模式占了安全区底部（比如跑马灯带）时，宿主副行再往上让多少（像素）。宿主在副行的布局阶段调用，
+     * [stage] 是舞台尺寸（安全区用 `ctx.display.safeRect(stage)` 求），不要在这里读逐帧变化的值。
+     */
+    fun subtitleInset(ctx: LyricStageContext, stage: Size, density: Density): Float = 0f
 
     /** [hostBackground] 为 false 时铺满舞台的背景。 */
     @Composable
@@ -418,9 +421,14 @@ class StageDisplay(
     /** 横向的舞台（平板、电视、横屏）。 */
     val wide: Boolean,
     val insets: StageInsets,
+    /** 安全区底部再让出的高度（像素）：频谱卡片开着时是卡片那一截，文字和宿主副行都不压它。 */
+    val reserveBottom: Float = 0f,
 ) {
     /** 安全区，在绘制阶段用。 */
-    fun safeRect(size: Size): Rect = insets.rect(size)
+    fun safeRect(size: Size): Rect {
+        val rect = insets.rect(size)
+        return if (reserveBottom > 0f) rect.copy(bottom = max(rect.top, rect.bottom - reserveBottom)) else rect
+    }
 
     /** 电视上星星、年轮这类数量按六成画。 */
     val countScale: Float get() = if (tv) 0.6f else 1f

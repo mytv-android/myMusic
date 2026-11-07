@@ -98,7 +98,7 @@ internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStageP
         ) {
             if (mode.hostBackground) PreviewBackdrop(colors) else mode.Background(ctx, Modifier.fillMaxSize())
             mode.Stage(ctx, Modifier.fillMaxSize())
-            if (mode.hostSubtitles) HostSubtitle(ctx, 0.dp)
+            if (mode.hostSubtitles) HostSubtitle(ctx, mode)
         }
     }
 }

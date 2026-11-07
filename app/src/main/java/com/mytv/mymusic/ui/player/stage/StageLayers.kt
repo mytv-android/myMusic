@@ -22,7 +22,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
@@ -32,7 +31,7 @@ import kotlin.math.roundToInt
  * 换句时交叉淡入淡出；只随换句重组，位置在布局阶段按安全区算。
  */
 @Composable
-internal fun HostSubtitle(ctx: LyricStageContext, lift: Dp) {
+internal fun HostSubtitle(ctx: LyricStageContext, mode: LyricVisualizer) {
     val text = ctx.currentLine?.subtitle(ctx.subline).orEmpty()
     val insets = ctx.display.insets
     val size = ctx.display.textSp * SUBTITLE_SCALE
@@ -57,7 +56,8 @@ internal fun HostSubtitle(ctx: LyricStageContext, lift: Dp) {
                     val available = (constraints.maxWidth - left - insets.end.roundToInt() - side).coerceAtLeast(0)
                     val placeable = measurable.measure(Constraints(maxWidth = available))
                     layout(constraints.maxWidth, constraints.maxHeight) {
-                        val bottom = constraints.maxHeight - insets.bottom - 14.dp.toPx() - lift.toPx()
+                        val stage = Size(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat())
+                        val bottom = ctx.display.safeRect(stage).bottom - 14.dp.toPx() - mode.subtitleInset(ctx, stage, this)
                         placeable.place(left + (available - placeable.width) / 2, (bottom - placeable.height).roundToInt())
                     }
                 },

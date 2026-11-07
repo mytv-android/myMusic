@@ -81,7 +81,7 @@ val DefaultTempoRules = listOf(
     TempoRule(90, "vinyl"),
     TempoRule(120, "rings"),
     TempoRule(150, "wave"),
-    TempoRule(TEMPO_RULE_OPEN_END, "stardrift"),
+    TempoRule(TEMPO_RULE_OPEN_END, "jump"),
 )
 
 /** 最后一档没有上限。 */

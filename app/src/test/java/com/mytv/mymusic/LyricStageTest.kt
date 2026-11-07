@@ -1,5 +1,6 @@
 package com.mytv.mymusic
 
+import androidx.compose.ui.geometry.Size
 import com.mytv.mymusic.data.DefaultTempoRules
 import com.mytv.mymusic.playback.RHYTHM_BAND_COUNT
 import com.mytv.mymusic.playback.peakFrequency
@@ -11,6 +12,8 @@ import com.mytv.mymusic.ui.LyricWord
 import com.mytv.mymusic.ui.LyricsParser
 import com.mytv.mymusic.ui.player.stage.LyricSetting
 import com.mytv.mymusic.ui.player.stage.SettingValues
+import com.mytv.mymusic.ui.player.stage.StageDisplay
+import com.mytv.mymusic.ui.player.stage.StageInsets
 import com.mytv.mymusic.ui.player.stage.StageLine
 import com.mytv.mymusic.ui.player.stage.StageRandom
 import com.mytv.mymusic.ui.player.stage.canSwitchAt
@@ -224,8 +227,8 @@ class LyricStageTest {
         assertEquals("vinyl", modeForTempo(DefaultTempoRules, 89.9f))
         assertEquals("rings", modeForTempo(DefaultTempoRules, 90f))
         assertEquals("wave", modeForTempo(DefaultTempoRules, 149f))
-        assertEquals("stardrift", modeForTempo(DefaultTempoRules, 150f))
-        assertEquals("stardrift", modeForTempo(DefaultTempoRules, 5_000f))
+        assertEquals("jump", modeForTempo(DefaultTempoRules, 150f))
+        assertEquals("jump", modeForTempo(DefaultTempoRules, 5_000f))
         assertNull(modeForTempo(emptyList(), 120f))
         // 顺序乱了也按上限排
         assertEquals("b", modeForTempo(listOf(TempoRule(200, "b"), TempoRule(100, "a")), 150f))
@@ -273,5 +276,22 @@ class LyricStageTest {
         spectrum[50] = 120f
         assertEquals(100 * 48_000f / 4096f, peakFrequency(spectrum, 48_000), 1e-3f)
         assertEquals(0f, peakFrequency(FloatArray(2048), 48_000), 0f)
+    }
+
+    @Test
+    fun safeRectLeavesRoomForTheSpectrumCard() {
+        val insets = StageInsets().apply { set(top = 100f, bottom = 50f, start = 20f, end = 30f) }
+        val plain = StageDisplay(30f, reduceMotion = false, tv = false, wide = false, insets = insets)
+        val reserved = StageDisplay(30f, reduceMotion = false, tv = false, wide = false, insets = insets, reserveBottom = 70f)
+        val size = Size(400f, 800f)
+        assertEquals(750f, plain.safeRect(size).bottom, 0f)
+        val safe = reserved.safeRect(size)
+        assertEquals(680f, safe.bottom, 0f)
+        assertEquals(100f, safe.top, 0f)
+        assertEquals(20f, safe.left, 0f)
+        assertEquals(370f, safe.right, 0f)
+        // 舞台矮到放不下卡片时安全区收成一条线，不会倒过来
+        val tiny = reserved.safeRect(Size(400f, 200f))
+        assertEquals(tiny.top, tiny.bottom, 0f)
     }
 }
