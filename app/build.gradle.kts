@@ -28,6 +28,8 @@ val appVersionName = "1.0"
 android {
     namespace = "com.mytv.mymusic"
     compileSdk = libs.versions.compileSdk.get().toInt()
+    // 与 compileSdk / targetSdk 对齐，本地和 CI（.github/workflows/build.yml）用同一套
+    buildToolsVersion = libs.versions.buildTools.get()
 
     defaultConfig {
         applicationId = "com.mytv.mymusic"
