@@ -1,5 +1,7 @@
 package com.mytv.mymusic.ui.library
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,14 +20,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -47,7 +52,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.mytv.mymusic.AppLog
+import com.mytv.mymusic.data.sync.LocalNetworkAccess
 import com.mytv.mymusic.data.sync.SyncSetupServer
 import com.mytv.mymusic.data.sync.SyncSetupSnapshot
 import com.mytv.mymusic.data.sync.SyncSetupSubmission
@@ -149,6 +157,7 @@ internal fun TvSyncSetupContent(
                 }
             }
             infoContent()
+            SyncSetupLocalNetworkHint()
             InfoNote("网页面板只在本次配置期间开放；离开此页或电视进入后台即关闭。")
         }
 
@@ -369,3 +378,54 @@ private fun currentSyncSetupTheme(): SyncSetupTheme {
 }
 
 private fun Color.cssHex(): String = String.format(Locale.ROOT, "#%06X", toArgb() and 0xFFFFFF)
+
+/** 进程内只申请一次：配置页重建（返回再进、切深色模式）时不要反复弹框 */
+private var localNetworkRequested = false
+
+/**
+ * 局域网权限提示。Android 17 起没有 ACCESS_LOCAL_NETWORK 时，面板在本机跑得好好地，手机连
+ * 局域网 IP 却被内核丢包——二维码扫得出来、页面打不开，服务端连异常都不报。
+ * 用户已经看得见二维码时申请一次；被拒后说明原因并给系统设置入口（权限属于 NEARBY_DEVICES 组，
+ * 被拒后再申请系统也不再弹框）。低版本系统由 INTERNET 隐式放行，不申请也不提示。
+ */
+@Composable
+private fun SyncSetupLocalNetworkHint(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    if (!LocalNetworkAccess.isRequired(context)) return
+    var granted by remember { mutableStateOf(LocalNetworkAccess.isGranted(context)) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { result ->
+        granted = LocalNetworkAccess.isGranted(context)
+        AppLog.i("SyncSetup", "ACCESS_LOCAL_NETWORK granted=$result")
+    }
+    LaunchedEffect(Unit) {
+        if (localNetworkRequested) return@LaunchedEffect
+        localNetworkRequested = true
+        if (!granted) launcher.launch(LocalNetworkAccess.PERMISSION)
+    }
+    // 从系统设置回来重新读一次，授权后提示立即消失
+    LifecycleResumeEffect(context) {
+        granted = LocalNetworkAccess.isGranted(context)
+        onPauseOrDispose { }
+    }
+    if (granted) return
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                "手机扫码后打不开页面？Android 17 需要允许「附近的设备」权限，手机才能访问本机局域网。",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            TextButton(
+                onClick = { LocalNetworkAccess.openSettings(context) },
+                modifier = Modifier.padding(top = 4.dp).tvFocusRing(RoundedCornerShape(20.dp)),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+            ) { Text("去设置") }
+        }
+    }
+}
