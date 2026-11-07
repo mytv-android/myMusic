@@ -296,8 +296,8 @@ pre{margin:14px 0 22px;padding:16px 18px;border-radius:16px;background:var(--md-
       <tr><td class="k">wave-light 1.5.1</td><td>歌词动画</td><td>两侧声波 + 水印</td><td><span class="pill do">移植</span></td><td>自己画背景，对应 hostBackground = false</td></tr>
       <tr><td class="k">vinyl-disc 1.7.10</td><td>歌词动画</td><td>黑胶唱片</td><td><span class="pill do">移植</span></td><td>纯渲染</td></tr>
       <tr><td class="k">stardrift 1.38.0</td><td>歌词动画</td><td>星海随机字</td><td><span class="pill do">移植</span></td><td>只用到响度</td></tr>
-      <tr><td class="k">cinerama 1.0.0</td><td>歌词动画</td><td>LED 巨幕</td><td><span class="pill do">移植</span>（待授权）</td><td>包里没有许可文件，见第 12 节</td></tr>
-      <tr><td class="k">visualizer-jump 1.2.0</td><td>歌词动画</td><td>跳一跳</td><td><span class="pill do">移植</span>（待授权）</td><td>同上</td></tr>
+      <tr><td class="k">cinerama 1.0.0</td><td>歌词动画</td><td>LED 巨幕</td><td><span class="pill do">移植</span></td><td>AGPL-3.0（源码仓库的许可），见第 12 节</td></tr>
+      <tr><td class="k">visualizer-jump 1.2.0</td><td>歌词动画</td><td>跳一跳</td><td><span class="pill do">移植</span></td><td>同上</td></tr>
       <tr><td class="k">lyric-split-translation 1.2.0</td><td>歌词变换</td><td>拆单行双语</td><td><span class="pill do">移植</span></td><td>没有许可文件，按 README 写的规则自己实现</td></tr>
       <tr><td class="k">opencc-traditional-lyrics 1.1.6</td><td>歌词变换</td><td>简转繁；自动补中文字幕</td><td><span class="pill do">简转繁</span> <span class="pill later">补字幕待定</span></td><td>简转繁用系统 ICU，代替 1 MB 的 OpenCC 词典；补字幕要联网搜别的平台，见第 14 节</td></tr>
       <tr><td class="k">bilingual-ruby-lyrics 1.6.1</td><td>歌词变换 + 动画</td><td>原文译文配对、注音、罗马音</td><td><span class="pill do">部分</span></td><td>配对现在的 mergeLayers 已经在做；罗马音层改成保留下来。注音读的是本地音频文件内嵌的标签，myMusic 是在线曲库，用不上，它的“阅读”模式也就不做</td></tr>
@@ -440,7 +440,7 @@ pre{margin:14px 0 22px;padding:16px 18px;border-radius:16px;background:var(--md-
     <div><b>2</b>播放页图层 · 后（stage.back）<span>目前没有</span></div>
     <div class="acc"><b>3</b>歌词动画 Stage（经典 = 现在的 LyricsList）<span>铺满，文字在安全区</span></div>
     <div><b>4</b>宿主副行：翻译或罗马音<span>hostSubtitles</span></div>
-    <div><b>5</b>播放页图层 · 前（stage.front）：频谱<span>左下角，副行自动上移让位</span></div>
+    <div><b>5</b>播放页图层 · 前（stage.front）：频谱<span>左下角，开着时安全区底部让出卡片那一截，文字和副行都不压它</span></div>
     <div><b>6</b>页面控件：顶栏、进度、按钮<span>空闲淡出（已有 IdleGuard）</span></div>
   </div>
   <p>现在有 4 处调用 LyricsList：PhonePlayer、TabletopPlayer、TvPlayer、WidePlayer。全部换成 <code>LyricStage</code>，经典模式内部就是 LyricsList，参数原样传进去，所以默认情况下画面一个像素都不变。模式切换时只重建舞台，背景和控件不动。</p>
@@ -456,7 +456,8 @@ pre{margin:14px 0 22px;padding:16px 18px;border-radius:16px;background:var(--md-
     <span class="kw">val</span> hostSubtitles: Boolean <span class="kw">get</span>() = <span class="kw">true</span>    <span class="cm">// false：模式自己排翻译，宿主副行让位</span>
     <span class="kw">val</span> wantsAudio: Boolean <span class="kw">get</span>() = <span class="kw">false</span>      <span class="cm">// true 才去开 RhythmAnalyzer</span>
 
-    <span class="kw">fun</span> subtitleInset(ctx: LyricStageContext): Dp = 0.dp   <span class="cm">// 模式占了底部（巨幕的跑马灯带）时副行往上让</span>
+    <span class="kw">fun</span> subtitleInset(ctx: LyricStageContext, stage: Size, density: Density): Float = 0f
+                                     <span class="cm">// 模式占了安全区底部（巨幕的跑马灯带）时副行往上让多少像素，宿主在副行的布局阶段调</span>
 
     @Composable <span class="kw">fun</span> Background(ctx: LyricStageContext) {}
     @Composable <span class="kw">fun</span> Stage(ctx: LyricStageContext, modifier: Modifier)
@@ -587,7 +588,7 @@ pre{margin:14px 0 22px;padding:16px 18px;border-radius:16px;background:var(--md-
       <tr><td class="k">虹光、52Hz</td><td>AGPL-3.0（folia-major 仓库）</td><td>许可相同，可以照逻辑移植。THIRD_PARTY_NOTICES 里已经有 folia-major 一节（海报墙），在那一节补上</td></tr>
       <tr><td class="k">MiSide、动感波光、黑胶、星潮、bpm-style-director</td><td>MIT</td><td>保留版权声明，各写一节</td></tr>
       <tr><td class="k">bilingual-ruby-lyrics</td><td>GPL-3.0</td><td>只借“三层同时间戳配对、假名和西里尔转写”的思路，转写用 ICU，不搬代码</td></tr>
-      <tr><td class="k">巨幕、跳一跳</td><td>包里没有许可文件</td><td>目录里填的源码地址（cnb.cool 上的 Folia 分叉）根目录是 AGPL-3.0，但看不到模组目录，不能算数。先问作者 tumuyan；不同意就只按效果描述重写，不看代码</td></tr>
+      <tr><td class="k">巨幕、跳一跳</td><td>AGPL-3.0（目录里填的源码仓库，cnb.cool 上的 Folia 分叉）</td><td>包里没有单独的许可文件，按源码仓库的 AGPL-3.0 照逻辑移植（myMusic 也是 AGPL-3.0）；THIRD_PARTY_NOTICES 写明作者、仓库和对应提交</td></tr>
       <tr><td class="k">拆单行双语、频谱、智能歌词样式切换</td><td>包里没有许可文件</td><td>功能简单，按 README 描述自己实现</td></tr>
       <tr><td class="k">opencc-traditional-lyrics</td><td>MIT（词典 Apache-2.0）</td><td>不用它的代码和词典，改用系统 ICU</td></tr>
     </tbody>
@@ -602,7 +603,7 @@ pre{margin:14px 0 22px;padding:16px 18px;border-radius:16px;background:var(--md-
     <li><b>MIT 组</b>：黑胶、动感波光、MiSide、星潮，加频谱图层。</li>
     <li><b>歌词文字</b>：拆单行双语、简转繁、罗马音副行。</li>
     <li><b>自动切换</b>：随机、按速度。</li>
-    <li><b>巨幕、跳一跳</b>：拿到授权或重写完成后。</li>
+    <li><b>巨幕、跳一跳</b>：按 AGPL-3.0 移植，最后一期。</li>
   </ol>
   <p>每期单独提交。单元测试覆盖歌词变换、逐字时间、设置值夹紧；每期都在手机、平板、折叠屏、电视模拟器上过一遍。</p>
 </section>
@@ -611,7 +612,7 @@ pre{margin:14px 0 22px;padding:16px 18px;border-radius:16px;background:var(--md-
   <h2><span class="num">14</span>待定</h2>
   <ol>
     <li><b>第一批做哪些模式？</b>建议第 1、2 期一起做：虹光、52Hz、黑胶、动感波光、MiSide、星潮。</li>
-    <li><b>巨幕和跳一跳</b>：先找作者要授权，还是直接按效果重写？建议先问。</li>
+    <li><b>巨幕和跳一跳</b>：已定，按源码仓库的 AGPL-3.0 移植。</li>
     <li><b>自动补中文字幕要不要做？</b>这是 opencc 模组的另一半：这首歌没有翻译时，按歌名和歌手去别的平台找带翻译的歌词，按时间轴对齐后补上。要联网、要多平台搜索，建议另起一份设计。</li>
     <li><b>AI 导演</b>：建议不做。</li>
     <li><b>自动转写罗马音</b>：建议默认关。</li>
@@ -1351,7 +1352,7 @@ const META = {
     settings: [choice('discSide', '唱片位置', [['left', '左'], ['right', '右']], 'right', '竖屏固定上下排'), num('discSize', '唱片大小', .3, 1, .02, .62, fp), num('spinSeconds', '转一圈', 6, 60, 2, 20, fs), choice('halo', '光晕', [['off', '关'], ['cover', '封面色'], ['theme', '主题色']], 'cover'), bool('showArm', '唱臂', true), bool('sheen', '唱片光泽', true), bool('showNext', '显示后面几句', true), num('textScale', '字号', .6, 1.8, .05, 1.25)],
     effect: '封面做碟心，播放时唱片转、唱臂落下，暂停时唱臂抬起、唱片停转；歌词排在唱片旁，当前句逐字填封面色，每句下面跟着翻译。',
     impl: ['唱片纹路和光泽（Brush.sweepGradient）一次画进缓存位图，每帧只转封面那一层。', '唱臂用 Path 画，抬落是一个 spring 动画；竖屏改成唱片在上、歌词在下，并省掉模式里的歌名行（顶栏已经有）。'] },
-  cinerama: { name: '巨幕', tag: 'cinerama 1.0.0', src: 'tumuyan', lic: '包里没有许可文件，要作者确认', bg: true, sub: true, audio: '不用', orig: '30 项', cost: '中到大', fixed: 24,
+  cinerama: { name: '巨幕', tag: 'cinerama 1.0.0', src: 'tumuyan', lic: 'AGPL-3.0', bg: true, sub: true, audio: '不用', orig: '30 项', cost: '中到大', fixed: 24,
     settings: [choice('marquee', '跑马灯带', [['off', '关'], ['auto', '自动'], ['bands', '双带'], ['frame', '四边']], 'auto'), num('heroWeight', '大字报', 0, 1, .05, .4, fp, '三种版式的出现比例'), num('smallWeight', '小字报', 0, 1, .05, .2, fp), num('ribbonWeight', '斜切丝带', 0, 1, .05, .4, fp), num('fontScale', '字号', .6, 1.6, .05, 1), num('marqueeSpeed', '带速', .2, 3, .1, 1)],
     effect: '像 LED 大屏：每句抽一种版式——大字报（一块块先描边再填色）、小字报、斜切丝带；上下跑马灯带滚动原文、翻译或歌名。宿主画背景时屏面让位，只留扫描线和暗角。',
     impl: ['三种版式各是一个 Composable，按歌曲种子抽签，相邻两句不重复。', '扫描线是一张平铺的 ImageShader；跑马灯是 drawText 加平移，辉光用 setShadowLayer。'] },
@@ -1359,7 +1360,7 @@ const META = {
     settings: [num('density', '星星数量', 30, 300, 10, 150, fi), num('fontScale', '字号', .6, 1.6, .05, 1), num('hold', '字停留', 0, 5, .25, .5, fs), num('meteor', '流星数量', 0, 3, .25, 1), bool('ring', '读字光罩', true), bool('ringLatin', '英文不亮圈', true), bool('punctHide', '屏蔽标点', true), bool('pulse', '音乐呼吸', true)],
     effect: '星海不断更替，流星不时划过；正在唱的字出现在屏幕随机位置，放大并罩一圈柔光，唱完停留一下再缩小淡出。',
     impl: ['所有星点合成一条 Path 一次画完；字用 TextMeasurer。', '原版用 Math.random，移植改成以歌曲为种子：同一首歌每次画面一样，也方便截图测试。'] },
-  jump: { name: '跳一跳', tag: 'visualizer-jump 1.2.0', src: 'tumuyan', lic: '包里没有许可文件，要作者确认', bg: true, sub: false, audio: '不用', orig: '25 项', cost: '中到大', fixed: 19,
+  jump: { name: '跳一跳', tag: 'visualizer-jump 1.2.0', src: 'tumuyan', lic: 'AGPL-3.0', bg: true, sub: false, audio: '不用', orig: '25 项', cost: '中到大', fixed: 19,
     settings: [choice('textFace', '字贴在', [['top', '顶面'], ['front', '正面'], ['side', '侧面'], ['above', '上方']], 'top'), num('pitch', '俯角', 18, 60, 2, 34, fdeg), num('chunkChars', '每块字数', 1, 4, 1, 2, fi, '只对中文有用'), num('flySeconds', '滞空时间', .1, 1.2, .05, .45, fs), num('arc', '跳跃高度', 0, 2.4, .1, 1.2), choice('translationMode', '译文', [['translation', '翻译'], ['romanization', '罗马音'], ['off', '不显示']], 'translation')],
     effect: '一句拆成几块，每块是一根等轴测柱子、字在柱顶；小人在每块第一个字被唱到时跳上去，落地踩出一圈波纹，译文浮在柱子后面。',
     impl: ['等轴测投影是一个固定矩阵，柱子三个面是三条 Path；字贴面用 Matrix.setPolyToPoly。', '原版的译文和宿主字幕会同时出现，移植时声明 hostSubtitles = false，只由模式自己画。'] },

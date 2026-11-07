@@ -131,6 +131,12 @@ Location: `app/src/main/java/com/mytv/mymusic/ui/player/stage` (`modes/` holds o
 - License: GNU Affero General Public License v3.0
 - Usage: the "虹光" (aurora) and "52Hz" lyric animations port the drawing logic of these two samples (the aurora ribbons and per-character glow; the 52Hz concentric rings, character timing and beat response, with beats taken from myMusic's own rhythm analysis). The mod interface itself (settings schema with merge-defaults and clamping, the per-frame stage context, character timings and the line index that is −1 between lines) follows the Folium v1.x documentation in the same repository. These files are derivative works distributed under AGPL-3.0; modifications must retain this notice and the AGPL-3.0 terms.
 
+### tumuyan's community mods (AGPL-3.0)
+
+- Upstream: https://cnb.cool/ai-zoomer/fork-from/folia, the source repository the Folium mod catalog lists for both packages (catalog `mods/community/cinerama` 1.0.0 @ 2498536c457f316abf1219decbb82b80faaef2b6 and `mods/community/visualizer-jump` 1.2.0 @ f77181ca827f1a65c8a7c2ae5298fd1c8a44fe92, author tumuyan)
+- License: GNU Affero General Public License v3.0 (the license of that repository; the mod packages carry no separate license file)
+- Usage: the "巨幕" (cinerama) and "跳一跳" (visualizer-jump) lyric animations port the drawing logic of these mods (cinerama's per-line layouts and marquee bands; visualizer-jump's isometric pillars, jumping runner and translation placement). Settings not shown in the app keep the upstream defaults; visualizer-jump's own translation picker is replaced by the app-wide "歌词下面那一行" setting. These files are derivative works distributed under AGPL-3.0; modifications must retain this notice and the AGPL-3.0 terms.
+
 ### Community mods (MIT)
 
 | Animation in myMusic | Mod | Copyright holder | Source |
