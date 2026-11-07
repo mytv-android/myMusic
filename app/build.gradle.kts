@@ -31,6 +31,14 @@ android {
     // 与 compileSdk / targetSdk 对齐，本地和 CI（.github/workflows/build.yml）用同一套
     buildToolsVersion = libs.versions.buildTools.get()
 
+    testOptions {
+        unitTests.all { test ->
+            // NetworkSecurityConfigTest 直接读 res/xml 下的原文，而资源目录默认不算单元测试的输入，
+            // 改了配置测试却不重跑、拿旧结果骗人；显式声明后才跟随增量
+            test.inputs.dir("src/main/res/xml")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.mytv.mymusic"
         minSdk = libs.versions.minSdk.get().toInt()
