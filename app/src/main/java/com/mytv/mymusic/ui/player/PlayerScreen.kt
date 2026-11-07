@@ -155,12 +155,14 @@ fun PlayerScreen(
     }
     val pulse = rememberBackdropPulse()
     val favorite = remember(favorites, song.key) { favorites.any { it.key == song.key } }
-    // 解析放在后台；状态不随原文重建，切歌时先保留上一份结果，等新原文解析完成再替换。
-    val lyricsState = rememberParsedLyrics(state.lyrics, state.lyricText)
+    // 切歌后新歌词取回来之前 state.lyrics 还是上一首的（解析失败跳过、取词慢时会一直挂着）：没对上这首就按“还在取”处理
+    val lyricsReady = state.lyricsKey == song.key
+    // 解析放在后台；状态不随原文重建，换歌词文字设置时先保留上一份结果，等新原文解析完成再替换。
+    val lyricsState = rememberParsedLyrics(if (lyricsReady) state.lyrics else "", state.lyricText)
     val stageLyrics = lyricsState.lyrics
     // 经典列表、两行预览只认 translation：按“歌词下面那一行”换成罗马音或两行都要；动画舞台自己按设置取
     val lyrics = remember(stageLyrics, state.lyricStage.subline) { stageLyrics.withSubline(state.lyricStage.subline) }
-    val lyricsLoading = lyricsState.loading
+    val lyricsLoading = lyricsState.loading || !lyricsReady
     val director = rememberLyricDirector(song, state.lyricStage, stageLyrics, lyricsLoading, position, state.playing, actions)
     val stageMode = director.mode
     val stage = remember(stageMode, state.lyricStage, stageLyrics) {
