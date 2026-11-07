@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  明文流量开关。官方计划废弃 android:usesCleartextTraffic，改为用网络安全性配置表达，
+  所以在这里显式声明；minSdk 23 低于 NSC 生效的 API 24，清单里那个属性要一并留着兜底
+  （API 23 上 NSC 被忽略，只认清单属性）。
+
+  为什么仍然全局放行、而不是逐个域名列白名单：
+  1. 酷狗 / 酷我 / QQ / 网易 / 咪咕 / 5sing 的接口和 CDN 大量只有 http://，三十多个域名；
+  2. 其中一部分主机由接口动态返回（酷我封面 "http://$cover"、汽水播放地址），没法预先列全；
+  3. SodaM 签名服务地址由用户自填，默认补 http://，自填的常是局域网机器
+     （http://192.168.x.x:8899/sign），域名根本不可枚举。
+
+  电视扫码同步的配置面板不受这份配置影响：那是本机起服务端、手机来连，
+  应用自身从不连接那个地址——usesCleartextTraffic 管的也只是应用作为客户端的外连。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

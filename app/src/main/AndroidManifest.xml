@@ -35,12 +35,17 @@
         </intent>
     </queries>
 
+    <!-- 明文流量：酷狗/酷我/QQ/网易/咪咕/5sing 的接口和 CDN 大量只有 http://，且 SodaM
+         签名服务地址由用户自填（可能是局域网机器），域名列不全，只能全局放行。
+         minSdk 23 低于 NSC 生效的 API 24，所以两个都要留着：API 23 只认 usesCleartextTraffic，
+         API 24+ 以 network_security_config 为准。详见 res/xml/network_security_config.xml -->
     <application
         android:name=".MyMusicApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:banner="@drawable/tv_banner"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
