@@ -215,6 +215,7 @@ fun Modifier.wakeOnInput(
     consumeKeyWhenIdle: Boolean,
     holdSkip: HoldSkip? = null,
     onSkip: (Int) -> Unit = {},
+    onAnyKey: (() -> Unit)? = null,
 ): Modifier = this
     .pointerInput(idle) {
         awaitPointerEventScope {
@@ -228,6 +229,8 @@ fun Modifier.wakeOnInput(
         // 返回键留给播放页的返回处理：控制栏亮着时先收起，环境模式下才退出播放页
         if (event.key == Key.Back) return@onPreviewKeyEvent false
         val down = event.type == KeyEventType.KeyDown
+        // 过渡动画按任意键收掉（电视上），不拦按键
+        if (down) onAnyKey?.invoke()
         if (holdSkip != null) {
             if (idle.idle && down && (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)) {
                 idle.poke()

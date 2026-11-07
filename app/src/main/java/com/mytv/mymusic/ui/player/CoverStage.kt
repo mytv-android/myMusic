@@ -1,6 +1,7 @@
 package com.mytv.mymusic.ui.player
 
 import android.os.Build
+import android.os.SystemClock
 import androidx.collection.FloatFloatPair
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
@@ -11,13 +12,17 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -27,6 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
@@ -44,6 +50,7 @@ import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
@@ -66,6 +73,9 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.size.Precision
 import com.mytv.mymusic.data.CoverShapeChoice
+import com.mytv.mymusic.data.CrossfadeAnimation
+import com.mytv.mymusic.playback.CrossfadeStatus
+import com.mytv.mymusic.playback.CrossfadeTransition
 import com.mytv.mymusic.playback.NowPlayingShape
 import com.mytv.mymusic.ui.CoverBox
 import com.mytv.mymusic.ui.components.LocalAppWindow
@@ -108,6 +118,7 @@ fun CoverStage(
     pulse: BackdropPulse? = null,
     collapsed: Boolean = false,
     halo: Boolean = true,
+    transitionAnimation: CrossfadeAnimation = CrossfadeAnimation.Off,
     onSkip: ((Int) -> Unit)? = null,
     onDoubleTap: (() -> Unit)? = null,
     sharedElement: Boolean = false,
@@ -262,6 +273,121 @@ fun CoverStage(
         ) {
             CoverImage(cover, title)
         }
+        val transition by CrossfadeStatus.transition.collectAsState()
+        val dismissedAt by CrossfadeStatus.dismissedAt.collectAsState()
+        val active = transition
+        if (active != null && transitionAnimation != CrossfadeAnimation.Off && !collapsed && !reduceMotion &&
+            active.durationMs >= TRANSITION_ANIMATION_MIN_MS && dismissedAt != active.startedAtMs
+        ) {
+            CoverTransitionOverlay(stage, active, transitionAnimation, Modifier.fillMaxSize())
+        }
+    }
+}
+
+/**
+ * 这次接歌的进度画在封面上：屏幕圆环是一整圈粗描边，封面描边是沿轮廓的细线；进度按真实时间走，
+ * 不参与任何决策。点一下就不画了（本次切歌内），电视遥控器按任意键由播放页统一收掉。
+ */
+@Composable
+private fun CoverTransitionOverlay(
+    stage: CoverStageState,
+    transition: CrossfadeTransition,
+    style: CrossfadeAnimation,
+    modifier: Modifier = Modifier,
+) {
+    val progress = remember(transition) { mutableFloatStateOf(0f) }
+    // 每帧按真实时间算：电视 30 帧上限下最多晚一帧，进度不会漂
+    LaunchedEffect(transition) {
+        var last = -1f
+        while (last < 1f) {
+            withFrameNanos {
+                last = transition.progressAt(SystemClock.elapsedRealtime())
+                progress.floatValue = last
+            }
+        }
+    }
+    val primary = MaterialTheme.colorScheme.primary
+    val track = MaterialTheme.colorScheme.outlineVariant
+    Box(
+        modifier.pointerInput(transition) {
+            detectTapGestures { CrossfadeStatus.dismissActive() }
+        },
+    ) {
+        Spacer(
+            Modifier
+                .fillMaxSize()
+                .drawWithCache {
+                    val ring = style == CrossfadeAnimation.Ring
+                    val stroke = Stroke(if (ring) RING_STROKE.toPx() else OUTLINE_STROKE.toPx())
+                    val scale = if (ring) RING_SCALE else 1f
+                    val center = Offset(size.width / 2f, size.height / 2f)
+                    val bounds = Rect(0f, 0f, size.width, size.height)
+                    val shape = Path()
+                    val scratch = MutableCubic()
+                    val wedge = Path()
+                    var builtMorph: Morph? = null
+                    var builtProgress = Float.NaN
+                    onDrawBehind {
+                        val morph = stage.morph
+                        val stageProgress = stage.drawProgress
+                        if (morph !== builtMorph || stageProgress != builtProgress) {
+                            morph.fillPath(stageProgress, shape, scratch, size.width, size.height)
+                            builtMorph = morph
+                            builtProgress = stageProgress
+                        }
+                        val t = progress.floatValue
+                        // 整圈先画成底色，再按角度裁出已经走过的那一段
+                        drawRing(shape, track, stroke, scale, stage.angle, center)
+                        val sweep = t * 360f
+                        if (sweep >= 359.9f) {
+                            drawRing(shape, primary, stroke, scale, stage.angle, center)
+                        } else if (sweep > 0f) {
+                            wedge.rewind()
+                            wedge.moveTo(center.x, center.y)
+                            wedge.arcTo(bounds, -90f, sweep, false)
+                            wedge.close()
+                            clipPath(wedge) {
+                                drawRing(shape, primary, stroke, scale, stage.angle, center)
+                            }
+                        }
+                    }
+                },
+        )
+        if (style == CrossfadeAnimation.Ring) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 10.dp),
+            ) {
+                Text(
+                    text = transition.method + " · " + "%.1f".format(transition.durationMs / 1000f) + " 秒",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+        }
+    }
+}
+
+/** 封面轮廓往外放大一点再描边，和封面之间留出一道缝。 */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawRing(
+    shape: Path,
+    color: Color,
+    stroke: Stroke,
+    scale: Float,
+    angle: Float,
+    center: Offset,
+) {
+    withTransform({
+        translate(center.x, center.y)
+        scale(scale, scale, Offset.Zero)
+        rotate(angle, Offset.Zero)
+        translate(-center.x, -center.y)
+    }) {
+        drawPath(shape, color, style = stroke)
     }
 }
 
@@ -667,6 +793,12 @@ internal fun coverPolygon(choice: CoverShapeChoice): RoundedPolygon =
 // MaterialShapes 自带缓存；这里再固定一次引用，形变状态按引用判断“是不是暂停态 / 圆形”
 private val PausedPolygon: RoundedPolygon by lazy { PausedCoverPolygon }
 private val CollapsedPolygon: RoundedPolygon by lazy { MaterialShapes.Circle }
+
+/** 短于 5 秒的过渡不画动画（和参考一致）。 */
+internal const val TRANSITION_ANIMATION_MIN_MS = 5_000L
+private val RING_STROKE = 5.dp
+private val OUTLINE_STROKE = 2.dp
+private const val RING_SCALE = 1.035f
 
 private const val SPIN_PERIOD_S = 40f
 private const val SETTLED = 0.001f

@@ -6,12 +6,14 @@ import android.os.SystemClock
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.MyMusicApp
+import com.mytv.mymusic.data.CrossfadeMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -19,10 +21,14 @@ import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.sin
 
 /** 媒体项里带上完整时长（毫秒）：在线流常常没有 Content-Length，播放器直到快放完才知道时长。 */
 internal const val MEDIA_EXTRA_DURATION_MS = "mymusic_duration_ms"
+
+private fun String.toMode(): CrossfadeMode =
+    CrossfadeMode.entries.firstOrNull { it.name == this } ?: CrossfadeMode.Automix
 
 /**
  * 等功率交叉淡化的两条音量曲线：功率恒定，叠在一起时总响度不会在中间塌下去。
@@ -43,6 +49,7 @@ internal fun crossfadeGains(t: Float): Pair<Float, Float> {
 internal class CrossfadeController(
     private val app: MyMusicApp,
     private val createPlayer: (Int) -> ExoPlayer,
+    private val params: Array<CrossfadeParams>,
     private val onPromote: (ExoPlayer, Int) -> Unit,
 ) {
     private val handler = Handler(Looper.getMainLooper())
@@ -54,11 +61,18 @@ internal class CrossfadeController(
     private var secondary: ExoPlayer? = null
     private var secondarySlot = SOURCE_SECONDARY
     private var preparedIndex = C.INDEX_UNSET
+    private var preparedStartMs = 0L
 
     private var fade: Fade? = null
 
+    /** 预载时定下的接法；分析结果没赶上就是等功率淡化。 */
+    private var plan: TransitionPlan? = null
+
     private var enabled = false
     private var seconds = 6
+
+    /** 交叉淡化时永远等功率；智能过渡才看分析结果挑接法。 */
+    private var mode = CrossfadeMode.Automix
 
     /** 这一首已经试过、放弃过渡了：不要每 200ms 重新预载一次。 */
     private var skipForIndex = C.INDEX_UNSET
@@ -71,6 +85,7 @@ internal class CrossfadeController(
         val startAtMs: Long,
         val durationMs: Long,
         val index: Int,
+        val plan: TransitionPlan,
     )
 
     private val tick = object : Runnable {
@@ -87,12 +102,17 @@ internal class CrossfadeController(
         observe(player)
         settingsJob = app.appScope.launch {
             app.settings.state
-                .map { it.crossfadeEnabled to it.crossfadeSeconds }
+                .map { Triple(it.crossfadeEnabled, it.crossfadeSeconds, it.crossfadeMode.toMode()) }
                 .distinctUntilChanged()
-                .collect { (on, value) ->
+                .collect { (on, value, nextMode) ->
+                    val changed = nextMode != mode
                     enabled = on
                     seconds = value
-                    if (!on) cancel("总开关关掉了")
+                    mode = nextMode
+                    when {
+                        !on -> cancel("总开关关掉了")
+                        changed && fade != null -> cancel("方式换了")
+                    }
                 }
         }
         running = true
@@ -105,6 +125,7 @@ internal class CrossfadeController(
         settingsJob?.cancel()
         settingsJob = null
         fade = null
+        CrossfadeStatus.end()
         secondary?.release()
         secondary = null
         preparedIndex = C.INDEX_UNSET
@@ -115,7 +136,14 @@ internal class CrossfadeController(
         val player = primary ?: return
         if (!enabled) return
         if (!player.isPlaying) {
-            if (fade != null) cancel("主播放器暂停了")
+            val active = fade
+            if (active == null) return
+            // 淡着淡着缓冲 / 放完了：只要不是用户按了暂停就接着推完，别把下一首从 0 再放一遍
+            if (player.playWhenReady) {
+                advance(active)
+            } else {
+                cancel("主播放器暂停了")
+            }
             return
         }
         if (app.sleepTimer.state.value.active) {
@@ -135,28 +163,63 @@ internal class CrossfadeController(
             return
         }
 
-        val leadMs = seconds * 1000L
+        val candidate = planFor(player, next)
+        val leadMs = candidate?.startAtRemainingMs ?: (seconds * 1000L)
         if (remaining > leadMs + PREPARE_AHEAD_MS) {
             releasePrepared()
+            plan = null
             return
         }
         if (secondary == null || preparedIndex != next) {
             releasePrepared()
             if (!eligible(player, next)) return
-            prepare(player, next)
+            plan = candidate
+            prepare(player, next, candidate?.incomingStartMs ?: 0L)
             return
         }
         if (remaining > leadMs) return
+        // 预载和分析是并行的：到这里再取一次接法，分析刚赶上就直接用，不沿用预载时的判断
+        val current = planFor(player, next) ?: plan
         val playerReady = secondary?.playbackState == Player.STATE_READY
-        val fadeMs = min(leadMs, remaining - TAIL_MARGIN_MS)
-        if (!playerReady || fadeMs < MIN_FADE_MS) {
+        val wanted = min(current?.fadeMs ?: leadMs, remaining - TAIL_MARGIN_MS)
+        val minimum = if (current?.method == AutomixMethod.BeatCut) BEAT_CUT_MIN_MS else MIN_FADE_MS
+        if (!playerReady || wanted < minimum) {
             // 预载来不及：这一首直接硬切，不再反复尝试
             skipForIndex = next
             cancel("下一首还没准备好")
             return
         }
-        startFade(player, fadeMs)
+        val target = current ?: equalPowerPlan()
+        if (target.incomingStartMs != preparedStartMs) {
+            secondary?.seekTo(next, target.incomingStartMs)
+            preparedStartMs = target.incomingStartMs
+        }
+        plan = target
+        startFade(player, target, wanted)
     }
+
+    /** 当前两首都分析过就按分析挑接法；没有分析结果时等功率淡化。 */
+    private fun planFor(player: ExoPlayer, nextIndex: Int): TransitionPlan? {
+        if (mode != CrossfadeMode.Automix) return equalPowerPlan()
+        val duration = durationOf(player)
+        if (duration <= 0L) return null
+        val currentKey = player.currentMediaItem?.mediaId.orEmpty()
+        val nextKey = runCatching { player.getMediaItemAt(nextIndex).mediaId }.getOrNull().orEmpty()
+        val outgoing = app.automixStore.cached(currentKey)
+        val incoming = app.automixStore.cached(nextKey)
+        if (outgoing == null && incoming == null) return equalPowerPlan()
+        return AutomixPlanner.plan(outgoing, incoming, seconds, duration)
+    }
+
+    private fun equalPowerPlan(): TransitionPlan = TransitionPlan(
+        method = AutomixMethod.EqualPowerFade,
+        startAtRemainingMs = seconds * 1000L,
+        fadeMs = seconds * 1000L,
+        incomingStartMs = 0L,
+        outgoingSpeed = 1f,
+        bassCutoffHz = 0f,
+        echoMix = 0f,
+    )
 
     /**
      * 播放器给的时长，拿不到就用媒体项里带的完整时长。在线 Progressive 流没有 Content-Length 时
@@ -187,17 +250,29 @@ internal class CrossfadeController(
         if (lastIneligible != index) {
             lastIneligible = index
             AppLog.i("Crossfade", "跳过过渡：$reason")
+            CrossfadeStatus.publish(
+                CrossfadeReport(
+                    fromTitle = currentTitle(),
+                    toTitle = item.mediaMetadata.title?.toString().orEmpty(),
+                    method = "直接切",
+                    seconds = 0f,
+                    fallbackReason = reason,
+                ),
+            )
         }
         return false
     }
 
-    private fun prepare(player: ExoPlayer, index: Int) {
+    private fun currentTitle(): String =
+        primary?.currentMediaItem?.mediaMetadata?.title?.toString().orEmpty()
+
+    private fun prepare(player: ExoPlayer, index: Int, startPositionMs: Long) {
         val next = createPlayer(secondarySlot)
         val count = player.mediaItemCount
         val items = List(count) { player.getMediaItemAt(it) }
         next.repeatMode = player.repeatMode
         next.shuffleModeEnabled = player.shuffleModeEnabled
-        next.setMediaItems(items, index, 0L)
+        next.setMediaItems(items, index, startPositionMs)
         (player.shuffleOrder as? QueueShuffleOrder)?.let { order ->
             runCatching { next.setShuffleOrder(QueueShuffleOrder.of(order.order())) }
         }
@@ -214,15 +289,42 @@ internal class CrossfadeController(
         next.prepare()
         secondary = next
         preparedIndex = index
-        AppLog.i("Crossfade", "预载下一首 index=$index（${items.getOrNull(index)?.mediaId.orEmpty()}）")
+        preparedStartMs = startPositionMs
+        val mediaId = items.getOrNull(index)?.mediaId.orEmpty()
+        val analysis = app.automixStore.cached(mediaId)
+        AppLog.i(
+            "Crossfade",
+            "预载下一首 index=$index（$mediaId）" + if (analysis != null) {
+                "，已分析 ${"%.0f".format(analysis.bpm)} BPM · ${keyLabel(analysis.keyIndex, analysis.keyMinor)}"
+            } else {
+                "，还没有分析结果"
+            } + "，接法 ${plan?.method?.label ?: "等功率淡化"}",
+        )
     }
 
-    private fun startFade(player: ExoPlayer, durationMs: Long) {
+    private fun startFade(player: ExoPlayer, plan: TransitionPlan, durationMs: Long) {
         val next = secondary ?: return
         next.volume = 0f
+        if (plan.bassCutoffHz > 0f) {
+            params[primarySlot].lowPassHz = FILTER_MAX_HZ
+            params[secondarySlot].highPassHz = plan.bassCutoffHz
+        }
+        if (plan.echoMix > 0f) params[primarySlot].echoMix = plan.echoMix
+        if (plan.outgoingSpeed != 1f) player.playbackParameters = PlaybackParameters(plan.outgoingSpeed)
         next.play()
-        fade = Fade(next, SystemClock.elapsedRealtime(), durationMs, player.currentMediaItemIndex)
-        AppLog.i("Crossfade", "开始交叉淡化 ${durationMs}ms")
+        val startedAt = SystemClock.elapsedRealtime()
+        fade = Fade(next, startedAt, durationMs, player.currentMediaItemIndex, plan)
+        // 固定交叉淡化不画动画，只有智能过渡才让播放页把这次接歌画出来
+        if (mode == CrossfadeMode.Automix) CrossfadeStatus.begin(
+            CrossfadeTransition(
+                fromTitle = currentTitle(),
+                toTitle = next.currentMediaItem?.mediaMetadata?.title?.toString().orEmpty(),
+                method = plan.method.label,
+                durationMs = durationMs,
+                startedAtMs = startedAt,
+            ),
+        )
+        AppLog.i("Crossfade", "开始${plan.method.label} ${durationMs}ms，原速 ${"%.3f".format(plan.outgoingSpeed)}")
     }
 
     private fun advance(fade: Fade) {
@@ -239,16 +341,39 @@ internal class CrossfadeController(
         val (out, incoming) = crossfadeGains(t)
         player.volume = out
         fade.player.volume = incoming
-        if (t >= 1f) promote(fade.player)
+        if (fade.plan.bassCutoffHz > 0f) {
+            // 上一首低通往下压、下一首高通往上开，低频在中间交接
+            val cutoff = fade.plan.bassCutoffHz
+            params[primarySlot].lowPassHz =
+                (FILTER_MAX_HZ.toDouble() * (cutoff / FILTER_MAX_HZ).toDouble().pow(t.toDouble())).toFloat()
+            params[secondarySlot].highPassHz =
+                (FILTER_MIN_HZ.toDouble() * (cutoff / FILTER_MIN_HZ).toDouble().pow((1f - t).toDouble())).toFloat()
+        }
+        if (t >= 1f) {
+            CrossfadeStatus.publish(
+                CrossfadeReport(
+                    fromTitle = currentTitle(),
+                    toTitle = fade.player.currentMediaItem?.mediaMetadata?.title?.toString().orEmpty(),
+                    method = fade.plan.method.label,
+                    seconds = fade.durationMs / 1000f,
+                ),
+            )
+            promote(fade.player)
+        }
     }
 
     private fun promote(next: ExoPlayer) {
         if (primary == null) return
+        CrossfadeStatus.end()
         fade?.let { fading ->
             CrossfadeHandoff.mark(primary?.getMediaItemAt(fading.index)?.mediaId)
         }
         fade = null
+        plan = null
+        next.playbackParameters = PlaybackParameters(1f, 1f)
         next.volume = 1f
+        params[primarySlot].clear()
+        params[secondarySlot].clear()
         val newSlot = secondarySlot
         primary = next
         primarySlot = newSlot
@@ -271,15 +396,34 @@ internal class CrossfadeController(
     private fun cancel(reason: String) {
         val fading = fade
         val next = secondary
+        val fromTitle = if (fading != null) currentTitle() else ""
+        val toTitle = fading?.player?.currentMediaItem?.mediaMetadata?.title?.toString().orEmpty()
         fade = null
         secondary = null
+        plan = null
         preparedIndex = C.INDEX_UNSET
-        if (fading != null) primary?.volume = 1f
+        if (fading != null) CrossfadeStatus.end()
+        if (fading != null) {
+            primary?.volume = 1f
+            primary?.playbackParameters = PlaybackParameters(1f, 1f)
+            params.forEach { it.clear() }
+        }
         if (next != null) {
             next.pause()
             next.release()
         }
         if (fading != null || next != null) AppLog.i("Crossfade", "放弃过渡：$reason")
+        if (fading != null) {
+            CrossfadeStatus.publish(
+                CrossfadeReport(
+                    fromTitle = fromTitle,
+                    toTitle = toTitle,
+                    method = "直接切",
+                    seconds = 0f,
+                    fallbackReason = reason,
+                ),
+            )
+        }
     }
 
     private fun observe(player: ExoPlayer) {
@@ -308,7 +452,16 @@ internal class CrossfadeController(
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (!isPlaying && fade != null) cancel("主播放器停了")
+                if (isPlaying || fade == null) return
+                when {
+                    // 上一首正好在这几秒里放完：下一首已经淡入了一部分，直接换过去。
+                    // 取消的话，正常换歌会把下一首从 0 再放一遍，听感上是重来。
+                    player.playbackState == Player.STATE_ENDED ->
+                        handler.post { fade?.let { promote(it.player) } }
+                    // 用户按了暂停：回到上一首，下次再淡
+                    !player.playWhenReady -> cancel("主播放器暂停了")
+                    // 只是缓冲或换段：等它自己回来，墙钟继续推
+                }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -331,7 +484,13 @@ internal class CrossfadeController(
 
         /** 提前这么久预载下一首，缓冲慢的在线歌曲也来得及。 */
         const val PREPARE_AHEAD_MS = 12_000L
-        const val MIN_FADE_MS = 1_500L
+        const val MIN_FADE_MS = 1_200L
+
+        /** 切拍只叠很短一下，下限比普通淡化低。 */
+        const val BEAT_CUT_MIN_MS = 400L
+
+        const val FILTER_MAX_HZ = 20_000f
+        const val FILTER_MIN_HZ = 20f
 
         /** 不把上一首最后这一点吃掉：淡完立刻换主，尾巴本来也已经听不见了。 */
         const val TAIL_MARGIN_MS = 250L

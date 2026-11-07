@@ -222,7 +222,13 @@ fun PlayerScreen(
             .background(MaterialTheme.colorScheme.surface)
             // 电视上焦点不能跑到播放页下面的页面里
             .then(if (window.isTv) Modifier.focusProperties { onExit = { cancelFocusChange() } }.focusGroup() else Modifier)
-            .wakeOnInput(idle, consumeKeyWhenIdle = window.isTv, holdSkip = holdSkip.takeIf { window.isTv }, onSkip = onSkip),
+            .wakeOnInput(
+                idle,
+                consumeKeyWhenIdle = window.isTv,
+                holdSkip = holdSkip.takeIf { window.isTv },
+                onSkip = onSkip,
+                onAnyKey = { com.mytv.mymusic.playback.CrossfadeStatus.dismissActive() },
+            ),
     ) {
         val wideBackdrop = !tabletop && (window.isTv || wideLayout)
         // 桌面姿态上半屏此刻放什么：设置里选的，或者工具栏、更多菜单临时换成的歌词
@@ -265,6 +271,7 @@ fun PlayerScreen(
                 idle = idle,
                 pulse = pulse,
                 coverShape = state.coverShape,
+                transitionAnimation = state.crossfadeAnimation,
                 ambientClock = state.tvAmbientClock,
                 onOpenQueue = onOpenQueue,
                 onOpenTimer = onOpenTimer,
@@ -298,6 +305,7 @@ fun PlayerScreen(
                 onSkip = onSkip,
                 pulse = pulse,
                 coverShape = state.coverShape,
+                transitionAnimation = state.crossfadeAnimation,
             )
             wideLayout -> WidePlayer(
                 song = song,
@@ -327,6 +335,7 @@ fun PlayerScreen(
                 onSkip = onSkip,
                 pulse = pulse,
                 coverShape = state.coverShape,
+                transitionAnimation = state.crossfadeAnimation,
             )
             else -> PhonePlayer(
                 song = song,
@@ -356,6 +365,7 @@ fun PlayerScreen(
                 onSkip = onSkip,
                 pulse = pulse,
                 coverShape = state.coverShape,
+                transitionAnimation = state.crossfadeAnimation,
             )
         }
         HeartBurst(burst, heartBurstPlacement(window.fold, book, tabletop))

@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.mytv.mymusic.data.CoverShapeChoice
+import com.mytv.mymusic.data.CrossfadeAnimation
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TabletopTop
 import com.mytv.mymusic.playback.SleepTimerState
@@ -115,6 +116,7 @@ internal fun TabletopPlayer(
     onSkip: (Int) -> Unit,
     pulse: BackdropPulse,
     coverShape: CoverShapeChoice,
+    transitionAnimation: CrossfadeAnimation,
 ) {
     val window = LocalAppWindow.current
     val density = LocalDensity.current
@@ -156,6 +158,7 @@ internal fun TabletopPlayer(
                         actions = actions,
                         pulse = pulse,
                         coverShape = coverShape,
+                        transitionAnimation = transitionAnimation,
                         wide = window.widthDp >= 600,
                         onSkip = onSkip,
                         onFavoriteBurst = onFavoriteBurst,
@@ -229,6 +232,7 @@ private fun TabletopStage(
     actions: MusicActions,
     pulse: BackdropPulse,
     coverShape: CoverShapeChoice,
+    transitionAnimation: CrossfadeAnimation,
     wide: Boolean,
     onSkip: (Int) -> Unit,
     onFavoriteBurst: () -> Unit,
@@ -282,6 +286,7 @@ private fun TabletopStage(
                     playing = playing,
                     shapeChoice = coverShape,
                     pulse = pulse,
+                    transitionAnimation = transitionAnimation,
                     onSkip = onSkip,
                     onDoubleTap = onFavoriteBurst,
                     // 小折叠是手机形态，迷你播放器的封面照样飞到这里

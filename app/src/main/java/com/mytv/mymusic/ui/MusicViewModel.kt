@@ -217,6 +217,12 @@ data class MusicUiState(
     val crossfadeEnabled: Boolean = false,
     /** 交叉淡化时长（秒），见 [AppSettings.crossfadeSeconds]。 */
     val crossfadeSeconds: Int = 6,
+    /** 上一次自动接歌用了什么接法，或者为什么退回直接切。 */
+    val crossfadeReport: com.mytv.mymusic.playback.CrossfadeReport? = null,
+    /** 播放页上画不画这次过渡，见 [com.mytv.mymusic.data.CrossfadeAnimation]。 */
+    val crossfadeAnimation: com.mytv.mymusic.data.CrossfadeAnimation = com.mytv.mymusic.data.CrossfadeAnimation.Ring,
+    /** 交叉淡化还是智能过渡，见 [com.mytv.mymusic.data.CrossfadeMode]。 */
+    val crossfadeMode: com.mytv.mymusic.data.CrossfadeMode = com.mytv.mymusic.data.CrossfadeMode.Automix,
     val cacheLimitMb: Int = 512,
     val reduceMotion: Boolean = false,
     val volumeNormalization: Boolean = false,
@@ -299,6 +305,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** 交叉淡化：已经提前解析过的下一首（下标 + 曲目 id），同一首不重复解析。 */
     private var prefetchIndex = -1
     private var prefetchKey = ""
+    /** 上一次解析的时间：失败后隔几秒再试，别每轮进度都重来一遍。 */
+    private var prefetchAt = 0L
+    /** 已经交给离线分析的下一首，别每 100ms 重复请求。 */
+    private var analysisRequested = ""
+    /** 当前这首也要分析：第一首的接法同样需要它。 */
+    private var analysisCurrentRequested = ""
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private val connected = MutableStateFlow<MediaController?>(null)
     private var progressJob: Job? = null
@@ -485,8 +497,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
-    val state: StateFlow<MusicUiState> = combine(base, settingsState, _accountProfiles) { ui, settings, profiles ->
+    val state: StateFlow<MusicUiState> = combine(
+        base,
+        settingsState,
+        _accountProfiles,
+        com.mytv.mymusic.playback.CrossfadeStatus.report,
+    ) { ui, settings, profiles, report ->
         ui.copy(
+            crossfadeReport = report,
             providerId = settings.provider,
             chartsSource = settings.chartsSource,
             playlistsSource = settings.playlistsSource,
@@ -515,6 +533,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             sleepFade = settings.sleepFade,
             crossfadeEnabled = settings.crossfadeEnabled,
             crossfadeSeconds = settings.crossfadeSeconds,
+            crossfadeAnimation = com.mytv.mymusic.data.CrossfadeAnimation.entries
+                .firstOrNull { it.name == settings.crossfadeAnimation }
+                ?: com.mytv.mymusic.data.CrossfadeAnimation.Ring,
+            crossfadeMode = com.mytv.mymusic.data.CrossfadeMode.entries
+                .firstOrNull { it.name == settings.crossfadeMode }
+                ?: com.mytv.mymusic.data.CrossfadeMode.Automix,
             cacheLimitMb = settings.cacheLimitMb.takeIf { it > 0 } ?: app.defaultCacheLimitMb(),
             reduceMotion = settings.reduceMotion,
             volumeNormalization = settings.volumeNormalization,
@@ -3674,17 +3698,31 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun maybePrefetchNextForCrossfade(player: Player, position: Long, duration: Long) {
         if (!settingsState.value.crossfadeEnabled) return
         if (duration == C.TIME_UNSET || duration <= 0) return
-        val remaining = duration - position
-        if (remaining !in 1..CROSSFADE_PREFETCH_AHEAD_MS) return
+        if (duration - position <= 0) return
+        val queue = base.value.queue
+        // 当前这首也要分析：接法是两首歌一起挑的，只有下一首的结果挑不出切拍。队列里的那份才有地址。
+        val current = queue.getOrNull(player.currentMediaItemIndex)
+        if (current != null && current.url.isNotBlank() && current.key != analysisCurrentRequested) {
+            analysisCurrentRequested = current.key
+            app.automixAnalyzer.request(current)
+        }
         val nextIndex = player.nextMediaItemIndex
         if (nextIndex == C.INDEX_UNSET || nextIndex == player.currentMediaItemIndex) return
-        val queue = base.value.queue
         val song = queue.getOrNull(nextIndex) ?: return
-        if (song.url.isNotBlank()) return
+        if (song.url.isNotBlank()) {
+            // 切歌前先分析：下一首整个开头放的时候就能拿到，不用等歌尾
+            if (analysisRequested != song.key) {
+                analysisRequested = song.key
+                app.automixAnalyzer.request(song)
+            }
+            return
+        }
         val track = base.value.canonicalQueue.getOrNull(nextIndex) ?: return
-        if (prefetchIndex == nextIndex && prefetchKey == track.id) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (prefetchIndex == nextIndex && prefetchKey == track.id && now - prefetchAt < PREFETCH_RETRY_MS) return
         prefetchIndex = nextIndex
         prefetchKey = track.id
+        prefetchAt = now
         AppLog.i("Crossfade", "提前解析下一首 index=$nextIndex ${track.title}")
         viewModelScope.launch {
             val local = localFileFor(track)
@@ -3707,6 +3745,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 queue = base.value.queue.mapIndexed { i, queued -> if (i == nextIndex) resolved else queued },
                 canonicalQueue = base.value.canonicalQueue.mapIndexed { i, queued -> if (i == nextIndex) resolvedTrack else queued },
             )
+            analysisRequested = resolved.key
+            app.automixAnalyzer.request(resolved)
         }
     }
 
@@ -4244,6 +4284,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setSleepFade(value: Boolean) = viewModelScope.launch { app.settings.sleepFade(value) }
     fun setCrossfadeEnabled(value: Boolean) = viewModelScope.launch { app.settings.crossfadeEnabled(value) }
     fun setCrossfadeSeconds(value: Int) = viewModelScope.launch { app.settings.crossfadeSeconds(value) }
+
+    fun setCrossfadeAnimation(value: com.mytv.mymusic.data.CrossfadeAnimation) =
+        viewModelScope.launch { app.settings.crossfadeAnimation(value) }
+
+    fun setCrossfadeMode(value: com.mytv.mymusic.data.CrossfadeMode) =
+        viewModelScope.launch { app.settings.crossfadeMode(value) }
     fun setReduceMotion(value: Boolean) = viewModelScope.launch { app.settings.reduceMotion(value) }
     fun setVolumeNormalization(value: Boolean) =
         viewModelScope.launch { app.settings.volumeNormalization(value) }
@@ -4870,14 +4916,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 进度循环 100ms 一圈：歌词换行、系统媒体条和进度条都靠它，越密跟得越紧。100 圈（10 秒）存一次位置。 */
         const val PROGRESS_TICK_MS = 100L
-
-        /** 距歌尾这么远开始解析下一首地址，给解析和预载留够时间。 */
-        const val CROSSFADE_PREFETCH_AHEAD_MS = 30_000L
         const val CURSOR_SAVE_TICKS = 100
         /** 听歌计时累计这么久才落一次盘（福利中心任务用）。 */
         const val LISTEN_FLUSH_MS = 10_000L
         /** 单个 tick 最多认这么多时长：拖进度条刷不出任务进度。 */
         const val LISTEN_DELTA_CAP_MS = 500L
+
+        /** 交叉淡化预解析失败后隔这么久再试。 */
+        const val PREFETCH_RETRY_MS = 4_000L
 
         /**
          * 账号资料最多试几次、每次隔多久：各平台的用户信息接口偶发超时/风控，

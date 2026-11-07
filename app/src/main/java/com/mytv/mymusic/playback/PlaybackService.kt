@@ -52,6 +52,8 @@ class PlaybackService : MediaSessionService() {
     private var equalizer: EqualizerController? = null
     private var player: ExoPlayer? = null
     private var crossfade: CrossfadeController? = null
+    /** 两路播放器各自的过渡效果参数（低通 / 高通 / 回声），和音频线程共享。 */
+    private val crossfadeParams = arrayOf(CrossfadeParams(), CrossfadeParams())
     private lateinit var mediaSourceFactory: MediaSource.Factory
     private val handler = Handler(Looper.getMainLooper())
     private val foregroundGuard = Runnable { ensureForegroundOrStop() }
@@ -147,7 +149,10 @@ class PlaybackService : MediaSessionService() {
         equalizer = app?.equalizer
         equalizer?.let { controller -> attachEqualizer(primary, controller) }
         app?.sleepTimer?.attach(primary)
-        app?.let { crossfade = CrossfadeController(it, ::newPlayer) { next, slot -> promoteTo(next, slot) }.also { it.attach(primary) } }
+        app?.let {
+            crossfade = CrossfadeController(it, ::newPlayer, crossfadeParams) { next, slot -> promoteTo(next, slot) }
+                .also { controller -> controller.attach(primary) }
+        }
         // 通知栏卡片、锁屏和系统媒体面板点一下要能回到播放页；不给内容意图的话点了没反应
         val openPlayer = PendingIntent.getActivity(
             this,
@@ -176,7 +181,11 @@ class PlaybackService : MediaSessionService() {
             // 息屏后在线播放也要保持网络和 CPU，避免 Wi-Fi 休眠导致卡住
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setMediaSourceFactory(mediaSourceFactory)
-        app?.let { builder.setRenderersFactory(RhythmRenderersFactory(this, it.rhythmAnalyzer, source)) }
+        app?.let {
+            builder.setRenderersFactory(
+                RhythmRenderersFactory(this, it.rhythmAnalyzer, source, crossfadeParams[source]),
+            )
+        }
         val created = builder.build()
         // 随机顺序跟着队列改动走：随机时“下一首播放”照样下一首放，解析完换地址也不会跳到别的歌
         created.setShuffleOrder(QueueShuffleOrder())
@@ -387,6 +396,7 @@ private class RhythmRenderersFactory(
     context: Context,
     private val analyzer: RhythmAnalyzer,
     private val source: Int,
+    private val crossfadeParams: CrossfadeParams,
 ) : DefaultRenderersFactory(context) {
     override fun buildAudioSink(
         context: Context,
@@ -400,6 +410,7 @@ private class RhythmRenderersFactory(
                 arrayOf(
                     TeeAudioProcessor(analyzer.sink(source)),
                     VolumeGainAudioProcessor(),
+                    CrossfadeAudioProcessor(crossfadeParams),
                 )
             )
             .build(),

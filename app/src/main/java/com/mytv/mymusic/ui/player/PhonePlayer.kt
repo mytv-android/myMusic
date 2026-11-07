@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import com.mytv.mymusic.data.CoverShapeChoice
+import com.mytv.mymusic.data.CrossfadeAnimation
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.LyricLine
@@ -118,6 +119,7 @@ internal fun PhonePlayer(
     onSkip: (Int) -> Unit,
     pulse: BackdropPulse,
     coverShape: CoverShapeChoice,
+    transitionAnimation: CrossfadeAnimation,
 ) {
     val motion = MaterialTheme.motionScheme
     val reduceMotion = LocalAppearance.current.reduceMotion
@@ -225,6 +227,7 @@ internal fun PhonePlayer(
                     shapeChoice = coverShape,
                     pulse = pulse,
                     collapsed = lyricsMode,
+                    transitionAnimation = transitionAnimation,
                     onSkip = onSkip,
                     onDoubleTap = onFavoriteBurst,
                     sharedElement = true,

@@ -126,6 +126,19 @@ enum class CoverShapeChoice { Random, Cookie12, Cookie9, Cookie7, Sunny, SoftBur
 private fun String?.toCoverShapeChoice(): CoverShapeChoice =
     CoverShapeChoice.entries.firstOrNull { it.name == this } ?: CoverShapeChoice.Random
 
+/** 两档方式：固定长度的等功率淡化，或者先分析再挑接法。 */
+enum class CrossfadeMode(val label: String) {
+    Automix("智能过渡"),
+    Fade("交叉淡化"),
+}
+
+/** 播放页上怎么画出这次接歌：不画、围着封面的一整圈，或沿封面外轮廓走一圈。 */
+enum class CrossfadeAnimation(val label: String) {
+    Off("关闭"),
+    Ring("屏幕圆环"),
+    Outline("封面描边"),
+}
+
 /** 折叠屏桌面姿态（半开、竖着立起来的那一半）播放页上半屏放什么；下半屏固定是控制。 */
 enum class TabletopTop { Lyrics, Cover, Clock }
 
@@ -177,6 +190,8 @@ class SettingsStore(private val context: Context) {
     private val sleepFadeKey = booleanPreferencesKey("sleep_fade")
     private val crossfadeEnabledKey = booleanPreferencesKey("crossfade_enabled")
     private val crossfadeSecondsKey = intPreferencesKey("crossfade_seconds")
+    private val crossfadeAnimationKey = stringPreferencesKey("crossfade_animation")
+    private val crossfadeModeKey = stringPreferencesKey("crossfade_mode")
     private val cacheLimitKey = intPreferencesKey("cache_limit_mb")
     private val lyricsBackgroundKey = stringPreferencesKey("lyrics_background")
     private val notificationLyricsKey = booleanPreferencesKey("notification_lyrics")
@@ -288,6 +303,8 @@ class SettingsStore(private val context: Context) {
             sleepFade = values[sleepFadeKey] ?: true,
             crossfadeEnabled = values[crossfadeEnabledKey] ?: false,
             crossfadeSeconds = (values[crossfadeSecondsKey] ?: 6).coerceIn(4, 10),
+            crossfadeAnimation = values[crossfadeAnimationKey] ?: CrossfadeAnimation.Ring.name,
+            crossfadeMode = values[crossfadeModeKey] ?: CrossfadeMode.Automix.name,
             cacheLimitMb = values[cacheLimitKey] ?: 0,
         )
     }
@@ -342,6 +359,10 @@ class SettingsStore(private val context: Context) {
     suspend fun sleepFade(value: Boolean) = context.dataStore.edit { it[sleepFadeKey] = value }
     suspend fun crossfadeEnabled(value: Boolean) = context.dataStore.edit { it[crossfadeEnabledKey] = value }
     suspend fun crossfadeSeconds(value: Int) = context.dataStore.edit { it[crossfadeSecondsKey] = value.coerceIn(4, 10) }
+    suspend fun crossfadeAnimation(value: CrossfadeAnimation) =
+        context.dataStore.edit { it[crossfadeAnimationKey] = value.name }
+    suspend fun crossfadeMode(value: CrossfadeMode) =
+        context.dataStore.edit { it[crossfadeModeKey] = value.name }
     suspend fun cacheLimitMb(value: Int) = context.dataStore.edit { it[cacheLimitKey] = value }
 
     /** 墙内设置：在同一次 edit 里读出当前值再写回，连着点两个开关也不会互相覆盖。 */
@@ -618,6 +639,10 @@ data class AppSettings(
     val crossfadeEnabled: Boolean = false,
     /** 交叉淡化的时长（秒），只在这一步用；智能过渡在后续阶段自己决定长度。 */
     val crossfadeSeconds: Int = 6,
+    /** 播放页上画不画这次过渡：`Off` / `Ring` / `Outline`，见 [CrossfadeAnimation]。 */
+    val crossfadeAnimation: String = "Ring",
+    /** 交叉淡化还是智能过渡，见 [CrossfadeMode]。 */
+    val crossfadeMode: String = "Automix",
     /** 播放缓存上限（MB），0 表示按设备默认：电视 256，其他 512。 */
     val cacheLimitMb: Int = 0,
 )
@@ -636,6 +661,29 @@ data class SavedSongTombstone(
 
 @Entity(tableName = "downloads")
 data class DownloadRecord(@PrimaryKey val key: String, val payload: String, val path: String, val state: String, val updatedAt: Long)
+
+/** 切歌过渡的离线分析结果：节拍网格、响度、调性、首尾和段落，按曲目 key 存。 */
+@Entity(tableName = "automix_analysis")
+data class AutomixAnalysisEntity(
+    @PrimaryKey @ColumnInfo(name = "song_key") val songKey: String,
+    @ColumnInfo(name = "updated_at") val updatedAt: Long,
+    @ColumnInfo(name = "duration_ms") val durationMs: Long,
+    val bpm: Double,
+    @ColumnInfo(name = "beat_period_s") val beatPeriodS: Double,
+    @ColumnInfo(name = "beat_t0_s") val beatT0S: Double,
+    @ColumnInfo(name = "beat_k0") val beatK0: Long,
+    @ColumnInfo(name = "beat_confidence") val beatConfidence: Float,
+    val downbeat: Int,
+    @ColumnInfo(name = "downbeat_clear") val downbeatClear: Boolean,
+    @ColumnInfo(name = "key_index") val keyIndex: Int,
+    @ColumnInfo(name = "key_minor") val keyMinor: Boolean,
+    @ColumnInfo(name = "key_confidence") val keyConfidence: Float,
+    @ColumnInfo(name = "loudness_db") val loudnessDb: Float,
+    @ColumnInfo(name = "intro_ms") val introMs: Long,
+    @ColumnInfo(name = "outro_ms") val outroMs: Long,
+    /** `起点毫秒:能量,起点毫秒:能量`，能量 0..1；空表示没分段。 */
+    val sections: String,
+)
 
 @Entity(tableName = "playlists")
 data class PlaylistEntity(
@@ -797,6 +845,11 @@ interface MusicDao {
     @Query("SELECT * FROM downloads ORDER BY updatedAt DESC") fun downloads(): Flow<List<DownloadRecord>>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveDownload(record: DownloadRecord)
     @Query("DELETE FROM downloads WHERE key = :key") suspend fun deleteDownload(key: String)
+    @Query("SELECT * FROM automix_analysis WHERE song_key = :key LIMIT 1")
+    suspend fun automixAnalysis(key: String): AutomixAnalysisEntity?
+    @Upsert suspend fun saveAutomixAnalysis(entry: AutomixAnalysisEntity)
+    @Query("DELETE FROM automix_analysis WHERE updated_at < :cutoff")
+    suspend fun pruneAutomixAnalysis(cutoff: Long)
 }
 
 @Dao
@@ -909,8 +962,9 @@ interface AggregateDao {
         CanonicalSourceEntity::class,
         MatchCacheEntity::class,
         TrackOverrideEntity::class,
+        AutomixAnalysisEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -1129,8 +1183,37 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `automix_analysis` (
+                        `song_key` TEXT NOT NULL,
+                        `updated_at` INTEGER NOT NULL,
+                        `duration_ms` INTEGER NOT NULL,
+                        `bpm` REAL NOT NULL,
+                        `beat_period_s` REAL NOT NULL,
+                        `beat_t0_s` REAL NOT NULL,
+                        `beat_k0` INTEGER NOT NULL,
+                        `beat_confidence` REAL NOT NULL,
+                        `downbeat` INTEGER NOT NULL,
+                        `downbeat_clear` INTEGER NOT NULL,
+                        `key_index` INTEGER NOT NULL,
+                        `key_minor` INTEGER NOT NULL,
+                        `key_confidence` REAL NOT NULL,
+                        `loudness_db` REAL NOT NULL,
+                        `intro_ms` INTEGER NOT NULL,
+                        `outro_ms` INTEGER NOT NULL,
+                        `sections` TEXT NOT NULL,
+                        PRIMARY KEY(`song_key`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun create(context: Context) = Room.databaseBuilder(context, AppDatabase::class.java, "mymusic.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .build()
     }
 }

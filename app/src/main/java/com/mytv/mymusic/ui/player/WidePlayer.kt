@@ -83,6 +83,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import com.mytv.mymusic.data.CoverShapeChoice
+import com.mytv.mymusic.data.CrossfadeAnimation
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.MusicActions
@@ -141,6 +142,7 @@ internal fun WidePlayer(
     onSkip: (Int) -> Unit,
     pulse: BackdropPulse,
     coverShape: CoverShapeChoice,
+    transitionAnimation: CrossfadeAnimation,
 ) {
     val motion = MaterialTheme.motionScheme
     val reduceMotion = LocalAppearance.current.reduceMotion
@@ -270,6 +272,7 @@ internal fun WidePlayer(
                         shapeChoice = coverShape,
                         pulse = pulse,
                         collapsed = lyricsMode,
+                        transitionAnimation = transitionAnimation,
                         onSkip = onSkip,
                         onDoubleTap = onFavoriteBurst,
                         // 专注歌词里工具栏顶上的小圆就是“回到封面”按钮；图层缩放后点按范围也跟着缩到小圆

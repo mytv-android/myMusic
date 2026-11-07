@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import com.mytv.mymusic.data.CoverShapeChoice
+import com.mytv.mymusic.data.CrossfadeAnimation
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.MusicActions
@@ -118,6 +119,7 @@ internal fun TvPlayer(
     idle: IdleState,
     pulse: BackdropPulse,
     coverShape: CoverShapeChoice,
+    transitionAnimation: CrossfadeAnimation,
     ambientClock: Boolean,
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
@@ -158,6 +160,7 @@ internal fun TvPlayer(
                     playing = playing,
                     shapeChoice = coverShape,
                     pulse = pulse,
+                    transitionAnimation = transitionAnimation,
                     modifier = if (custom) Modifier.graphicsLayer { alpha = pageAlpha() } else Modifier,
                 )
             },

@@ -53,6 +53,11 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
     lateinit var secretStore: SecretStore
     lateinit var equalizer: EqualizerController
     lateinit var rhythmAnalyzer: RhythmAnalyzer
+    /** 切歌过渡的离线分析缓存；播放侧在主线程上同步读 [AutomixAnalysisStore.cached]。 */
+    lateinit var automixStore: com.mytv.mymusic.playback.AutomixAnalysisStore
+    val automixAnalyzer by lazy {
+        com.mytv.mymusic.playback.AutomixAnalyzer(this, mediaCache, automixStore)
+    }
     lateinit var sync: SyncCoordinator
     lateinit var update: UpdateRepository
     lateinit var queueStore: QueueStore
@@ -122,6 +127,7 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         secretStore = SecretStore(this)
         equalizer = EqualizerController(this, settings)
         rhythmAnalyzer = RhythmAnalyzer()
+        automixStore = com.mytv.mymusic.playback.AutomixAnalysisStore(database.dao())
         sync = SyncCoordinator(
             context = this,
             db = database,
