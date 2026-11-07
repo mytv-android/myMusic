@@ -566,46 +566,54 @@ internal fun PlaybackSettingsScreen(
                     modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
                 )
             }
-            if (state.crossfadeMode == CrossfadeMode.Fade) {
-                item(key = "crossLengthHead", contentType = "sectionHeader") { SectionLabel("过渡时长") }
-                item(key = "crossLength", contentType = "toggleGroup") {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ConnectedToggleGroup(
-                            options = listOf(4, 6, 8, 10),
-                            selected = state.crossfadeSeconds,
-                            onSelect = { actions.setCrossfadeSeconds(it) },
-                            label = { "$it 秒" },
-                            modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
-                        )
-                        SettingsNote("淡化发生在这首歌结尾的最后几秒。手动切歌、直播和带版权的整曲仍然直接切。")
+            when (state.crossfadeMode) {
+                CrossfadeMode.Fade -> {
+                    item(key = "crossLengthHead", contentType = "sectionHeader") { SectionLabel("过渡时长") }
+                    item(key = "crossLength", contentType = "toggleGroup") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ConnectedToggleGroup(
+                                options = listOf(4, 6, 8, 10),
+                                selected = state.crossfadeSeconds,
+                                onSelect = { actions.setCrossfadeSeconds(it) },
+                                label = { "$it 秒" },
+                                modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+                            )
+                            SettingsNote("淡化发生在这首歌结尾的最后几秒。手动切歌、直播和带版权的整曲仍然直接切。")
+                        }
                     }
                 }
-            } else {
-                item(key = "crossAnimHead", contentType = "sectionHeader") { SectionLabel("过渡动画") }
-                item(key = "crossAnim", contentType = "toggleGroup") {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ConnectedToggleGroup(
-                            options = CrossfadeAnimation.entries,
-                            selected = state.crossfadeAnimation,
-                            onSelect = { actions.setCrossfadeAnimation(it) },
-                            label = { it.label },
-                            modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+                CrossfadeMode.Automix -> {
+                    item(key = "crossAnimHead", contentType = "sectionHeader") { SectionLabel("过渡动画") }
+                    item(key = "crossAnim", contentType = "toggleGroup") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ConnectedToggleGroup(
+                                options = CrossfadeAnimation.entries,
+                                selected = state.crossfadeAnimation,
+                                onSelect = { actions.setCrossfadeAnimation(it) },
+                                label = { it.label },
+                                modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+                            )
+                            SettingsNote("短于 5 秒的过渡不画动画；播放页点一下圆环就消失。")
+                        }
+                    }
+                    item(key = "crossCache", contentType = "settingRow") {
+                        ListRow(
+                            title = "播放缓存 ${if (state.cacheLimitMb >= 1024) "${state.cacheLimitMb / 1024} GB" else "${state.cacheLimitMb} MB"}",
+                            index = 0,
+                            count = 1,
+                            onClick = { onOpen(SettingsSection.Storage) },
+                            icon = Icons.Filled.History,
+                            summary = "分析要完整读完两首歌；缓存不够时会退回等功率淡化",
                         )
-                        SettingsNote("短于 5 秒的过渡不画动画；播放页点一下圆环就消失。")
                     }
                 }
-                item(key = "crossCache", contentType = "settingRow") {
-                    ListRow(
-                        title = "播放缓存 ${if (state.cacheLimitMb >= 1024) "${state.cacheLimitMb / 1024} GB" else "${state.cacheLimitMb} MB"}",
-                        index = 0,
-                        count = 1,
-                        onClick = { onOpen(SettingsSection.Storage) },
-                        icon = Icons.Filled.History,
-                        summary = "分析要完整读完两首歌；缓存不够时会退回等功率淡化",
-                    )
+                CrossfadeMode.None -> {
+                    item(key = "crossNone", contentType = "infoNote") {
+                        SettingsNote("整首播完再直接切到下一首，和关掉总开关一样；下一首也不会提前准备。")
+                    }
                 }
             }
-            state.crossfadeReport?.let { report ->
+            state.crossfadeReport?.takeIf { state.crossfadeMode != CrossfadeMode.None }?.let { report ->
                 item(key = "crossLast", contentType = "settingRow") {
                     ListRow(
                         title = report.headline,

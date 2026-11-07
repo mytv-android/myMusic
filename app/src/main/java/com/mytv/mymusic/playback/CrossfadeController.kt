@@ -111,7 +111,7 @@ internal class CrossfadeController(
                     mode = nextMode
                     when {
                         !on -> cancel("总开关关掉了")
-                        changed && fade != null -> cancel("方式换了")
+                        changed && (fade != null || secondary != null) -> cancel("方式换了")
                     }
                 }
         }
@@ -134,7 +134,8 @@ internal class CrossfadeController(
 
     private fun onTick() {
         val player = primary ?: return
-        if (!enabled) return
+        // 不过渡：整首放完由播放器自己接下一首，不预载也不叠
+        if (!enabled || mode == CrossfadeMode.None) return
         if (!player.isPlaying) {
             val active = fade
             if (active == null) return
@@ -200,7 +201,8 @@ internal class CrossfadeController(
 
     /** 当前两首都分析过就按分析挑接法；没有分析结果时等功率淡化。 */
     private fun planFor(player: ExoPlayer, nextIndex: Int): TransitionPlan? {
-        if (mode != CrossfadeMode.Automix) return equalPowerPlan()
+        if (mode == CrossfadeMode.None) return null
+        if (mode == CrossfadeMode.Fade) return equalPowerPlan()
         val duration = durationOf(player)
         if (duration <= 0L) return null
         val currentKey = player.currentMediaItem?.mediaId.orEmpty()

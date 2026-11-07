@@ -233,7 +233,7 @@ footer b { color: var(--muted); font-weight: 700; }
     <div class="tile"><b>0</b><span>个新模型</span><small>节拍复用 RhythmAnalyzer / BeatTracker</small></div>
     <div class="tile"><b>1</b><span>条回退</span><small>分析不了就退回淡化，并写明原因</small></div>
   </div>
-  <div class="note"><b>一句话形态：</b>设置 › 播放与换源 › 切歌过渡，总开关 + 两档方式。智能过渡下单首第一次播时先把下一首排进分析队列；切歌时按分析结果挑接法，播放页可选画一个过渡圆环或封面描边；拿不到完整音频就退回固定淡化，设置页留一行「上一次接歌」说明用了什么、为什么退回。</div>
+  <div class="note"><b>一句话形态：</b>设置 › 播放与换源 › 切歌过渡，总开关 + 方式（智能过渡 / 交叉淡化 / 不过渡）。智能过渡下单首第一次播时先把下一首排进分析队列；切歌时按分析结果挑接法，播放页可选画一个过渡圆环或封面描边；拿不到完整音频就退回固定淡化，设置页留一行「上一次接歌」说明用了什么、为什么退回。</div>
 </section>
 
 <section class="block" id="gap">
@@ -258,7 +258,7 @@ footer b { color: var(--muted); font-weight: 700; }
 
 <section class="block" id="rules">
   <div class="block-head"><span class="kicker">02</span><h2>两档模式与行为规则</h2></div>
-  <p class="sub">总开关按功能叫「切歌过渡」，两档沿用参考里的名字：<strong>交叉淡化</strong>和<strong>智能过渡</strong>。「过渡最长时长」只在交叉淡化下出现，智能过渡自己决定每次多长。</p>
+  <p class="sub">总开关按功能叫「切歌过渡」，两档沿用参考里的名字：<strong>交叉淡化</strong>和<strong>智能过渡</strong>；另加一个<strong>不过渡</strong>，等于关掉总开关、整首播完直接切。「过渡最长时长」只在交叉淡化下出现，智能过渡自己决定每次多长。</p>
 
   <div class="scroll">
     <table>
@@ -314,7 +314,7 @@ footer b { color: var(--muted); font-weight: 700; }
         <div class="s-label">切歌过渡</div>
         <div class="s-row"><span class="s-ic pri"><svg class="ic"><use href="#i-spark"/></svg></span><div class="s-t"><b>切歌过渡</b><small>上一首还没收完就把下一首接进来；关掉则整首播完再切</small></div><span class="s-switch on"></span></div>
         <div class="s-label">方式</div>
-        <div class="tgroup"><button class="on">交叉淡化</button><button>智能过渡</button></div>
+        <div class="tgroup"><button class="on">交叉淡化</button><button>智能过渡</button><button>不过渡</button></div>
         <div class="s-label">过渡时长</div>
         <div class="tgroup"><button>4 秒</button><button class="on">6 秒</button><button>8 秒</button><button>10 秒</button></div>
         <div class="s-note">到歌尾最后这几秒做等功率淡化。手动下一首固定 1.2 秒，不跟这个时长。</div>
@@ -332,7 +332,7 @@ footer b { color: var(--muted); font-weight: 700; }
         <div class="s-label">切歌过渡</div>
         <div class="s-row"><span class="s-ic pri"><svg class="ic"><use href="#i-spark"/></svg></span><div class="s-t"><b>切歌过渡</b><small>上一首还没收完就把下一首接进来；关掉则整首播完再切</small></div><span class="s-switch on"></span></div>
         <div class="s-label">方式</div>
-        <div class="tgroup"><button>交叉淡化</button><button class="on">智能过渡</button></div>
+        <div class="tgroup"><button>交叉淡化</button><button class="on">智能过渡</button><button>不过渡</button></div>
         <div class="s-label">过渡动画</div>
         <div class="tgroup"><button>关闭</button><button class="on">屏幕圆环</button><button>封面描边</button></div>
         <div class="s-note">短于 5 秒的过渡不画动画；播放页点一下圆环就消失。</div>

@@ -3697,6 +3697,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun maybePrefetchNextForCrossfade(player: Player, position: Long, duration: Long) {
         if (!settingsState.value.crossfadeEnabled) return
+        // 选了不过渡：不用提前解析地址，也不用分析
+        if (settingsState.value.crossfadeMode == com.mytv.mymusic.data.CrossfadeMode.None.name) return
         if (duration == C.TIME_UNSET || duration <= 0) return
         if (duration - position <= 0) return
         val queue = base.value.queue
