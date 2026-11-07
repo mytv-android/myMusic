@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>切歌过渡（Automix）设计方案 · myMusic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700;800;900&family=Roboto+Flex:opsz,wght@8..144,400..900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #f4f1f2;
+  --paper: #ffffff;
+  --ink: #1d1b20;
+  --muted: #6b6772;
+  --line: #e4e0e3;
+  --red: #c8102e;
+  --soft-red: #fbe9ec;
+  --teal: #00696b;
+  --teal-soft: #e2eeec;
+  --dark: #151318;
+  --body: "Roboto Flex", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, p { margin: 0; }
+img { display: block; }
+svg { display: block; }
+.page-head, main, footer { width: min(1140px, calc(100% - 40px)); margin-inline: auto; }
+.page-head { padding: 62px 0 30px; }
+.doc-label { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .16em; }
+h1 { max-width: 900px; margin-top: 14px; font-size: clamp(40px, 6.2vw, 76px); line-height: 1.08; letter-spacing: -.045em; font-weight: 900; text-wrap: balance; }
+h1 em { font-style: normal; color: var(--red); }
+.lede { max-width: 860px; margin-top: 24px; color: var(--muted); font-size: 17px; line-height: 1.85; }
+.lede strong { color: var(--ink); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.chip2 { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 13px; }
+.chip2 b { color: var(--ink); font-weight: 700; }
+.chip2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+
+section.block { padding: 46px 0; border-top: 1px solid var(--line); }
+.block-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.kicker { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .14em; }
+h2 { font-size: clamp(24px, 3vw, 31px); line-height: 1.25; letter-spacing: -.025em; font-weight: 800; }
+.sub { margin: 10px 0 22px; color: var(--muted); font-size: 14.5px; line-height: 1.8; max-width: 880px; }
+.sub strong { color: var(--ink); font-weight: 700; }
+h3 { margin: 30px 0 12px; font-size: 18px; font-weight: 750; letter-spacing: -.01em; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 20px; }
+.tile { padding: 18px 18px 15px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.tile b { display: block; font-size: 34px; line-height: 1.15; letter-spacing: -.03em; font-weight: 900; }
+.tile span { color: var(--muted); font-size: 13px; }
+.tile small { display: block; margin-top: 6px; color: #918d97; font-size: 12px; }
+
+table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; font-size: 13.5px; }
+th, td { padding: 11px 14px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+thead th { border-top: 0; background: #faf7f8; color: var(--muted); font-size: 12.5px; font-weight: 700; }
+td code, p code, li code { font-family: var(--mono); font-size: 12px; background: #f1edf1; border-radius: 6px; padding: 1px 6px; }
+.scroll { overflow-x: auto; border-radius: 16px; }
+
+pre { margin: 12px 0 0; padding: 16px 18px; background: var(--dark); color: #d9d5df; border-radius: 16px; overflow: auto; font: 12.5px/1.75 var(--mono); }
+pre .c { color: #8c8797; }
+pre .s { color: #ffb6c1; }
+pre .k { color: #a9d8d6; }
+pre .n { color: #f2c98a; }
+
+.flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 6px; }
+.step { position: relative; padding: 16px 16px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.step:not(:last-child)::after { content: "→"; position: absolute; right: -13px; top: 50%; transform: translateY(-50%); color: #b9b4be; font-size: 15px; }
+.step b { display: block; font-size: 14px; }
+.step span { display: block; margin-top: 4px; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+
+.note { margin-top: 14px; padding: 14px 16px; border-left: 3px solid var(--red); background: #fbf6f7; border-radius: 0 14px 14px 0; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
+.note b { color: var(--ink); }
+.note.plain { border-left-color: #cfcad4; background: #f7f5f7; }
+
+ul.clean { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; line-height: 1.85; }
+ul.clean b { color: var(--ink); }
+.phases { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 8px; }
+.phase { padding: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.phase header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.phase .tag { font: 700 11px var(--mono); padding: 2px 7px; border-radius: 999px; background: var(--soft-red); color: var(--red); }
+.phase h3 { margin: 0; font-size: 15px; }
+.phase ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+
+/* ── 界面稿：直接复用 expressive-redesign.html 的手机原型样式与 M3E 令牌 ── */
+.devices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;align-items:start;margin:10px 0 6px;
+  --md-primary:#206a5f;--md-on-primary:#e2fff8;--md-primary-container:#a9f0e2;--md-on-primary-container:#095c52;
+  --md-secondary:#4b645f;--md-on-secondary:#e3fff8;--md-secondary-container:#cde8e1;--md-on-secondary-container:#3e5751;
+  --md-tertiary:#336577;--md-tertiary-container:#afe2f6;--md-on-tertiary-container:#1d5364;
+  --md-surface:#f6faf8;--md-surface-container-lowest:#ffffff;--md-surface-container-low:#eef5f2;--md-surface-container:#e7f0ec;
+  --md-surface-container-high:#e1eae7;--md-surface-container-highest:#dae5e1;
+  --md-on-surface:#2a3532;--md-on-surface-variant:#56615e;--md-outline:#727d7a;--md-outline-variant:#a9b4b1;
+  --md-error:#a83836;--md-error-container:#fa746f;--md-on-error-container:#6e0a12;
+  --bezel:#17191b;--bezel-2:#34383c;--on-image:#ffffff;
+  --spring:cubic-bezier(.34,1.56,.64,1);
+  font-family:"Roboto Flex","Noto Sans SC",sans-serif;
+}
+.dev .phone{position:relative;width:100%;aspect-ratio:380/800;padding:2.5%;border-radius:52px;background:var(--bezel);
+  box-shadow:0 40px 90px -40px color-mix(in srgb,var(--md-primary) 60%,transparent),0 18px 40px -18px rgb(0 0 0 / .45),inset 0 0 0 2px var(--bezel-2)}
+.dev .m-app{position:absolute;inset:2.5%;border-radius:44px;overflow:hidden;isolation:isolate;
+  background:var(--md-surface);color:var(--md-on-surface);font-size:14px;line-height:1.4}
+.devices .ic{width:24px;height:24px;fill:currentColor;flex:none}
+.m-app button{border:0;background:none;padding:0;color:inherit;font:inherit}
+.m-status{position:absolute;top:0;left:0;right:0;height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;font-size:13px;font-weight:600;z-index:30;pointer-events:none;color:var(--md-on-surface)}
+.m-status::after{content:"";position:absolute;left:50%;top:10px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--bezel)}
+.m-status i{display:inline-block;width:16px;height:9px;margin-left:5px;border-radius:2px;background:currentColor;opacity:.9}
+.m-status i:first-child{width:12px;clip-path:polygon(0 100%,100% 0,100% 100%)}
+.m-scroll{position:absolute;inset:0;overflow:hidden;padding-bottom:40px}
+.m-appbar{position:relative;z-index:6;height:88px;padding:32px 6px 0 6px;display:flex;align-items:center;gap:2px}
+.m-appbar-title{flex:1;min-width:0;padding-left:8px;font-size:18px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-appbar:not(.hz) .m-appbar-title{visibility:hidden}
+.m-ib{width:48px;height:48px;display:grid;place-items:center;border-radius:24px;flex:none;color:var(--md-on-surface-variant)}
+.m-big{padding:0 20px 14px}
+.m-big h5{margin:0;font-size:32px;line-height:1.15;font-weight:800;letter-spacing:-.5px}
+.m-big p{margin:4px 0 0;font-size:14px;color:var(--md-on-surface-variant)}
+
+/* 设置页：SectionLabel + ListRow（64dp、2dp 缝、外 16dp 内 4dp）+ ConnectedToggleGroup */
+.s-label{margin:20px 20px 8px;font-size:16px;font-weight:700}
+.s-row{display:flex;align-items:center;gap:14px;min-height:64px;padding:10px 16px;margin:0 16px;background:var(--md-surface-container-low);border-radius:16px}
+.s-row + .s-row{margin-top:2px}
+.s-ic{width:40px;height:40px;border-radius:50%;background:var(--md-secondary-container);color:var(--md-on-secondary-container);display:grid;place-items:center;flex:none}
+.s-ic .ic{width:22px;height:22px}
+.s-ic.pri{background:var(--md-primary-container);color:var(--md-on-primary-container)}
+.s-t{flex:1;min-width:0}
+.s-t b{display:block;font-size:15.5px;font-weight:500}
+.s-t small{display:block;margin-top:1px;font-size:13.5px;line-height:1.35;color:var(--md-on-surface-variant)}
+.s-val{color:var(--md-on-surface-variant);font-size:14px;text-align:right;flex:none}
+.s-chev{color:var(--md-on-surface-variant);flex:none}
+.s-switch{width:52px;height:32px;border-radius:16px;background:var(--md-outline-variant);position:relative;flex:none;transition:background .2s}
+.s-switch::after{content:"";position:absolute;left:6px;top:6px;width:20px;height:20px;border-radius:50%;background:var(--md-surface-container-lowest);transition:left .2s}
+.s-switch.on{background:var(--md-primary)}
+.s-switch.on::after{left:26px}
+.tgroup{display:flex;gap:2px;margin:0 16px}
+.tgroup button{flex:1;height:48px;display:grid;place-items:center;gap:6px;background:var(--md-surface-container-highest);font-size:14px;font-weight:500;border-radius:4px;color:var(--md-on-surface)}
+.tgroup button:first-child{border-radius:24px 4px 4px 24px}
+.tgroup button:last-child{border-radius:4px 24px 24px 4px}
+.tgroup button.on{background:var(--md-secondary);color:var(--md-on-secondary);border-radius:24px;font-weight:700}
+.s-note{margin:8px 20px 0;font-size:13.5px;line-height:1.55;color:var(--md-on-surface-variant)}
+.i-note{margin:10px 16px 0;padding:12px 16px;border-radius:16px;background:var(--md-tertiary-container);color:var(--md-on-tertiary-container);font-size:13.5px;line-height:1.5}
+.i-note b{font-weight:700}
+.sect{padding:0 0 8px}
+
+/* 播放页 */
+.pl-app{background:radial-gradient(120% 90% at 50% 8%,color-mix(in srgb,var(--md-primary) 16%,var(--md-surface)) 0%,var(--md-surface) 58%)}
+.pl-top{position:relative;z-index:6;height:88px;padding:32px 8px 0;display:flex;align-items:center;gap:2px}
+.pl-src{height:28px;padding:0 10px;display:inline-flex;align-items:center;gap:6px;border-radius:14px;background:var(--md-surface-container-high);color:var(--md-on-surface-variant);font-size:11.5px;font-weight:600;flex:none}
+.pl-stage{position:relative;margin:18px 40px 0;height:280px;display:grid;place-items:center}
+.blob{position:relative;width:256px;height:256px;border-radius:42% 58% 56% 44% / 48% 44% 56% 52%;overflow:hidden;
+  background:linear-gradient(140deg,#f7b267 0%,#f4845f 38%,#8b6cf6 100%)}
+.blob::after{content:"";position:absolute;inset:0;background:radial-gradient(90% 70% at 25% 15%,rgb(255 255 255 / .45),transparent 60%)}
+.blob .init{position:absolute;inset:0;display:grid;place-items:center;font-size:76px;font-weight:900;color:rgb(255 255 255 / .82);letter-spacing:-2px}
+.blob.alt{background:linear-gradient(140deg,#4cc9f0 0%,#4361ee 42%,#7209b7 100%)}
+.cover-halo{position:absolute;width:330px;height:330px;border-radius:50%;background:radial-gradient(closest-side,color-mix(in srgb,var(--md-primary) 22%,transparent),transparent 72%);filter:blur(6px)}
+.ring{position:absolute;width:300px;height:300px;pointer-events:none}
+.ring svg{width:300px;height:300px;overflow:visible}
+.ring .trk{fill:none;stroke:color-mix(in srgb,var(--md-primary) 18%,transparent);stroke-width:6}
+.ring .arc{fill:none;stroke:var(--md-primary);stroke-width:6;stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%}
+.ring-label{position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);height:28px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;border-radius:14px;
+  background:var(--md-surface-container-high);color:var(--md-on-surface-variant);font-size:12px;font-weight:700;white-space:nowrap;box-shadow:0 8px 18px -12px rgb(0 0 0 / .5)}
+.ring-label i{width:6px;height:6px;border-radius:3px;background:var(--md-primary);font-style:normal}
+.pl-meta{position:relative;z-index:2;margin:14px 24px 0;text-align:center}
+.pl-meta h4{margin:0;font-size:26px;line-height:1.2;font-weight:800;letter-spacing:-.3px}
+.pl-meta p{margin:4px 0 0;font-size:14px;color:var(--md-primary);font-weight:600}
+.pl-lyr{margin:20px 40px 0;text-align:center;font-size:15px;line-height:1.9;color:var(--md-on-surface-variant)}
+.pl-lyr .on{color:var(--md-primary);font-weight:700}
+.pl-prog{margin:22px 24px 0;height:2px;border-radius:1px;background:var(--md-surface-container-highest);position:relative}
+.pl-prog::before{content:"";position:absolute;left:0;top:0;height:2px;width:46%;border-radius:1px;background:var(--md-on-surface)}
+.pl-ctl{margin:18px 26px 0;display:flex;align-items:center;justify-content:space-between;color:var(--md-on-surface)}
+.pl-ctl button{display:grid;place-items:center}
+.pl-ctl .main{width:64px;height:64px;border-radius:32px;background:var(--md-primary);color:var(--md-on-primary)}
+.pl-ctl .main .ic{width:30px;height:30px}
+.dev{display:grid;gap:10px;margin:0}
+.dev figcaption{color:var(--muted);font-size:12.5px;line-height:1.65;padding:0 2px}
+.dev figcaption b{display:block;color:var(--ink);font-size:13.5px;margin-bottom:2px}
+@media (max-width:900px){ .devices{grid-template-columns:1fr;max-width:380px;margin-inline:auto} .phases{grid-template-columns:1fr 1fr} }
+
+footer { padding: 34px 0 70px; border-top: 1px solid var(--line); color: #8f8b95; font-size: 12.5px; line-height: 1.8; }
+footer b { color: var(--muted); font-weight: 700; }
+
+@media (max-width: 900px) {
+  .flow { grid-template-columns: 1fr 1fr; }
+  .flow .step::after { display: none; }
+}
+</style>
+</head>
+<body>
+
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18A3 3 0 1 0 19 17V8h3V6h-5z"/></symbol>
+  <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6zM4 6h5v2H4zm0 4h5v2H4zm0 4h4v2H4z"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></symbol>
+  <symbol id="i-anim" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-8-8V2zm0 4a6 6 0 1 0 6 6h-2a4 4 0 1 1-4-4V6zm0 4a2 2 0 1 0 2 2h-2v-2z"/></symbol>
+  <symbol id="i-cache" viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></symbol>
+  <symbol id="i-heart-o" viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9.29 6.71a1 1 0 0 0 0 1.42L13.17 12l-3.88 3.88a1 1 0 1 0 1.42 1.42l4.59-4.59a1 1 0 0 0 0-1.42L10.7 6.7a1 1 0 0 0-1.41.01z"/></symbol>
+</svg>
+
+<header class="page-head">
+  <div class="doc-label">设 计 方 案 · 2 0 2 6 - 1 1 - 0 7</div>
+  <h1>切歌不再<em>硬切</em></h1>
+  <p class="lede">
+    现在一首播完，下一首从第一个采样直接开始。参考 Folia 的<strong>智能过渡（Automix）</strong>，给切歌加两档：<strong>固定时长的交叉淡化</strong>，和<strong>先把两首歌分析一遍再决定怎么接的自动混音</strong>。
+    能提前拿到整首音频的用完全体，拿不到的就退回淡化，设置页写明这次为什么退回。
+  </p>
+  <div class="chips">
+    <span class="chip2"><span class="dot"></span>参考：<b>folia-site.cielaniska.top/guide/automix</b></span>
+    <span class="chip2">现状：<b>0 处过渡</b></span>
+    <span class="chip2">分析复用现有<b>节拍跟踪</b></span>
+    <span class="chip2">不引入<b>新模型</b></span>
+  </div>
+</header>
+
+<main>
+
+<section class="block" id="verdict">
+  <div class="block-head"><span class="kicker">00</span><h2>结论</h2></div>
+  <p class="sub">参考文档把过渡分成两档：永远可用的固定淡化，和依赖分析的 Automix。我们照这个分法做，但把「完全体 / 兼容模式」换成手机端更实际的条件——<strong>能不能在切歌前拿到下一首的完整音频</strong>。</p>
+  <div class="tiles">
+    <div class="tile"><b>2</b><span>档过渡</span><small>交叉淡化 · 智能过渡</small></div>
+    <div class="tile"><b>4</b><span>种接法</span><small>切拍 / 低频交接 / 尾奏承接 / 等功率淡化</small></div>
+    <div class="tile"><b>0</b><span>个新模型</span><small>节拍复用 RhythmAnalyzer / BeatTracker</small></div>
+    <div class="tile"><b>1</b><span>条回退</span><small>分析不了就退回淡化，并写明原因</small></div>
+  </div>
+  <div class="note"><b>一句话形态：</b>设置 › 播放与换源 › 切歌过渡，总开关 + 两档方式。智能过渡下单首第一次播时先把下一首排进分析队列；切歌时按分析结果挑接法，播放页可选画一个过渡圆环或封面描边；拿不到完整音频就退回固定淡化，设置页留一行「上一次接歌」说明用了什么、为什么退回。</div>
+</section>
+
+<section class="block" id="gap">
+  <div class="block-head"><span class="kicker">01</span><h2>现状：参考里的能力，我们几乎没有</h2></div>
+  <p class="sub">对照代码逐条核对，只做现在没有的部分。已有的能力不重做，只在能复用的地方复用。</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th style="width:30%">参考里的能力</th><th style="width:34%">myMusic 现状</th><th>本方案</th></tr></thead>
+      <tbody>
+        <tr><td>固定时长的交叉淡化</td><td>没有。ExoPlayer 单实例硬切；只有格式完全相同的本地曲目会靠 gapless 无缝相接，不是淡化。</td><td>做，作为永远可用的第一档</td></tr>
+        <tr><td>分析节拍、速度</td><td>有实时分析：<code>RhythmAnalyzer</code> 从 AudioSink 取 PCM，<code>BeatTracker</code> 估出拍网格。只分析正在播的歌，<strong>不能提前分析下一首</strong>。</td><td>把 DSP 改成可离线喂 PCM，复用到下一首</td></tr>
+        <tr><td>分析调性、响度、前奏、尾奏、段落结构</td><td>没有。响度只用平台给的 gain / peak 元数据做音量均衡，不测量音频本身。</td><td>新增：chroma 调性、整曲响度、首尾静音、能量分段</td></tr>
+        <tr><td>切拍 / 低频交接 / 尾奏承接 / 等功率淡化</td><td>没有，也没有任何混音路径。</td><td>做，四种接法按分析结果挑</td></tr>
+        <tr><td>速度对齐、频段交接、回声收尾</td><td>没有。</td><td>做。速度对齐 ±6% 以内才用；频段交接用 biquad；回声只在尾奏承接时才加</td></tr>
+        <tr><td>人声退场、表现模式（HTDemucs）</td><td>没有，也没有音轨分离模型。</td><td><strong>不做</strong>：手机上跑分离不现实，参考里依赖它的两项一并去掉</td></tr>
+        <tr><td>过渡动画（屏幕圆环 / 卡片描边）</td><td>没有。</td><td>做。卡片描边改成<strong>封面描边</strong>——播放页没有「歌曲信息卡片」，封面才是现成的形状</td></tr>
+        <tr><td>缓存不足时提示并给快捷入口</td><td>没有提示。媒体缓存一直开着（默认 512 MB，电视 256 MB，可选 128–1024 MB），但不知道下一首有没有缓存完。</td><td>做。设置页显示上一次接歌结果，回退时给出缓存入口</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="block" id="rules">
+  <div class="block-head"><span class="kicker">02</span><h2>两档模式与行为规则</h2></div>
+  <p class="sub">总开关按功能叫「切歌过渡」，两档沿用参考里的名字：<strong>交叉淡化</strong>和<strong>智能过渡</strong>。「过渡最长时长」只在交叉淡化下出现，智能过渡自己决定每次多长。</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th style="width:20%">模式</th><th style="width:46%">做法</th><th>什么时候用</th></tr></thead>
+      <tbody>
+        <tr><td><b>交叉淡化</b></td><td>歌尾最后 4 / 6 / 8 / 10 秒等功率淡出，下一首同时淡入。曲线固定，不分析。</td><td>任何歌、任何来源，永远可用</td></tr>
+        <tr><td><b>智能过渡</b></td><td>先分析两首歌的节拍、速度、调性、响度、首尾和段落，再从切拍、低频交接、尾奏承接、等功率淡化里挑一种；必要时做速度对齐、频段交接、回声收尾。</td><td>能在切歌前拿到下一首完整音频时</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>几条不跟参考走、但要先定下来的规则</h3>
+  <ul class="clean">
+    <li><b>手动切歌</b>固定 1.2 秒等功率淡化，不做智能过渡、不画动画——参考也说明手动切歌时过渡来不及展开。</li>
+    <li><b>睡眠定时淡出优先</b>：定时结束前的那段淡出期间不再启动过渡，避免两条音量曲线打架。</li>
+    <li><b>队列最后一首</b>不接；单曲循环不接。</li>
+    <li><b>失败即回退</b>：分析没完成、预载换源失败、主副播放器对齐误差超过 30 ms，都退回等功率淡化，不硬做切拍。</li>
+    <li><b>过渡长度</b>：交叉淡化 4–10 秒；智能过渡 1.2–12 秒，由接法决定。短于 5 秒不画动画（照参考）。</li>
+  </ul>
+  <div class="note plain"><b>和现有功能的关系：</b>音量均衡先按平台的 gain / peak 归一，再做过渡，避免交接处响度跳变；离线分析的拍网格和律动跟拍的实时网格各自独立，互不覆盖。</div>
+</section>
+
+<section class="block" id="settings">
+  <div class="block-head"><span class="kicker">03</span><h2>设置界面稿</h2></div>
+  <p class="sub">
+    位置放在<strong>设置 › 播放与换源</strong>最上面，原来的页面副标题扩成「切歌过渡、换源模式与平台顺序」。组件全部沿用现有的：<code>SectionLabel</code>、<code>SwitchRow</code>（64dp、40dp 圆形图标）、<code>ConnectedToggleGroup</code>（48dp，选中项满圆角）、<code>ListRow</code>、<code>InfoNote</code>、<code>SettingsNote</code>；颜色取 <code>#006B5F</code> 种子的 M3 浅色方案。
+  </p>
+
+  <div class="devices">
+
+    <figure class="dev"><div class="phone"><div class="m-app">
+      <div class="m-status"><span>9:41</span><span><i></i><i></i></span></div>
+      <div class="m-scroll">
+        <div class="m-appbar"><button class="m-ib" aria-label="返回"><svg class="ic"><use href="#i-back"/></svg></button><div class="m-appbar-title">播放与换源</div></div>
+        <div class="m-big"><h5>播放与换源</h5><p>切歌过渡、换源模式与平台顺序</p></div>
+        <div class="s-label">切歌过渡</div>
+        <div class="s-row"><span class="s-ic pri"><svg class="ic"><use href="#i-spark"/></svg></span><div class="s-t"><b>切歌过渡</b><small>上一首还没收完就把下一首接进来；关掉则整首播完再切</small></div><span class="s-switch"></span></div>
+        <div class="s-label">换源模式</div>
+        <div class="tgroup"><button class="on">自动</button><button>优先平台</button><button>固定平台</button></div>
+        <div class="s-note">完整音源优先，其次按平台顺序和码率选择。当前音源失败时自动换到下一个。</div>
+        <div class="s-label">匹配</div>
+        <div class="s-row"><span class="s-ic"><svg class="ic"><use href="#i-check"/></svg></span><div class="s-t"><b>严格匹配</b><small>降低 Live、伴奏、重制版被误合并的概率</small></div><span class="s-switch on"></span></div>
+        <div class="s-row"><span class="s-ic"><svg class="ic"><use href="#i-play"/></svg></span><div class="s-t"><b>允许试听片段</b><small>没有完整音源时，播放平台返回的试听片段</small></div><span class="s-switch"></span></div>
+      </div>
+    </div></div>
+    <figcaption><b>① 关着</b>整块只有一行，不占地方；下面的换源和匹配原样不动。关掉时不预载、不分析、不占流量。</figcaption></figure>
+
+    <figure class="dev"><div class="phone"><div class="m-app">
+      <div class="m-status"><span>9:41</span><span><i></i><i></i></span></div>
+      <div class="m-scroll">
+        <div class="m-appbar"><button class="m-ib" aria-label="返回"><svg class="ic"><use href="#i-back"/></svg></button><div class="m-appbar-title">播放与换源</div></div>
+        <div class="m-big"><h5>播放与换源</h5><p>切歌过渡、换源模式与平台顺序</p></div>
+        <div class="s-label">切歌过渡</div>
+        <div class="s-row"><span class="s-ic pri"><svg class="ic"><use href="#i-spark"/></svg></span><div class="s-t"><b>切歌过渡</b><small>上一首还没收完就把下一首接进来；关掉则整首播完再切</small></div><span class="s-switch on"></span></div>
+        <div class="s-label">方式</div>
+        <div class="tgroup"><button class="on">交叉淡化</button><button>智能过渡</button></div>
+        <div class="s-label">过渡时长</div>
+        <div class="tgroup"><button>4 秒</button><button class="on">6 秒</button><button>8 秒</button><button>10 秒</button></div>
+        <div class="s-note">到歌尾最后这几秒做等功率淡化。手动下一首固定 1.2 秒，不跟这个时长。</div>
+        <div class="s-label">换源模式</div>
+        <div class="tgroup"><button class="on">自动</button><button>优先平台</button><button>固定平台</button></div>
+      </div>
+    </div></div>
+    <figcaption><b>② 交叉淡化</b>选中后出现「过渡时长」，用和缓存上限一样的 <code>ConnectedToggleGroup</code>，不新造滑杆。默认 6 秒。</figcaption></figure>
+
+    <figure class="dev"><div class="phone"><div class="m-app">
+      <div class="m-status"><span>9:41</span><span><i></i><i></i></span></div>
+      <div class="m-scroll">
+        <div class="m-appbar"><button class="m-ib" aria-label="返回"><svg class="ic"><use href="#i-back"/></svg></button><div class="m-appbar-title">播放与换源</div></div>
+        <div class="m-big"><h5>播放与换源</h5><p>切歌过渡、换源模式与平台顺序</p></div>
+        <div class="s-label">切歌过渡</div>
+        <div class="s-row"><span class="s-ic pri"><svg class="ic"><use href="#i-spark"/></svg></span><div class="s-t"><b>切歌过渡</b><small>上一首还没收完就把下一首接进来；关掉则整首播完再切</small></div><span class="s-switch on"></span></div>
+        <div class="s-label">方式</div>
+        <div class="tgroup"><button>交叉淡化</button><button class="on">智能过渡</button></div>
+        <div class="s-label">过渡动画</div>
+        <div class="tgroup"><button>关闭</button><button class="on">屏幕圆环</button><button>封面描边</button></div>
+        <div class="s-note">短于 5 秒的过渡不画动画；播放页点一下圆环就消失。</div>
+        <div class="s-label">上一次接歌</div>
+        <div class="s-row"><span class="s-ic"><svg class="ic"><use href="#i-anim"/></svg></span><div class="s-t"><b>低频交接 · 5.4 秒</b><small>《晴天》→《稻香》</small></div></div>
+      </div>
+    </div></div>
+    <figcaption><b>③ 智能过渡</b>多出「过渡动画」三选一，和一行「上一次接歌」——照参考用一句话说明这次用了什么接法、多长。</figcaption></figure>
+
+    <figure class="dev"><div class="phone"><div class="m-app">
+      <div class="m-status"><span>9:41</span><span><i></i><i></i></span></div>
+      <div class="m-scroll">
+        <div class="m-appbar"><button class="m-ib" aria-label="返回"><svg class="ic"><use href="#i-back"/></svg></button><div class="m-appbar-title">播放与换源</div></div>
+        <div class="m-big"><h5>播放与换源</h5><p>切歌过渡、换源模式与平台顺序</p></div>
+        <div class="s-label">上一次接歌</div>
+        <div class="s-row"><span class="s-ic"><svg class="ic"><use href="#i-anim"/></svg></span><div class="s-t"><b>已退回交叉淡化 · 6.0 秒</b><small>《夜曲》→《七里香》· 下一首还没缓存完</small></div></div>
+        <div class="i-note"><b>下一首要先完整下载才能分析。</b>在线歌曲走播放缓存，缓存上限越小，越容易来不及。本地和 Navidrome 歌曲不受这条影响。</div>
+        <div class="s-label">缓存</div>
+        <div class="s-row"><span class="s-ic"><svg class="ic"><use href="#i-cache"/></svg></span><div class="s-t"><b>播放缓存上限</b><small>存储 › 播放缓存上限</small></div><span class="s-val">512 MB</span><svg class="ic s-chev"><use href="#i-chev"/></svg></div>
+        <div class="s-note">点这一行直接跳到存储页，调大上限。</div>
+      </div>
+    </div></div>
+    <figcaption><b>④ 退回之后</b>同样的「上一次接歌」位置换成原因，下面接一条琥珀色 <code>InfoNote</code>，再给一行直达缓存上限的入口——对应参考里「检测到缓存关闭时直接提示并给快捷按钮」。</figcaption></figure>
+
+    <figure class="dev"><div class="phone"><div class="m-app pl-app">
+      <div class="m-status"><span>9:41</span><span><i></i><i></i></span></div>
+      <div class="pl-top">
+        <button class="m-ib" aria-label="收起播放页"><svg class="ic"><use href="#i-down"/></svg></button>
+        <span class="pl-src">网易云 · 极高</span>
+        <span style="flex:1"></span>
+        <button class="m-ib" aria-label="歌词"><svg class="ic"><use href="#i-lyrics"/></svg></button>
+        <button class="m-ib" aria-label="队列"><svg class="ic"><use href="#i-queue"/></svg></button>
+        <button class="m-ib" aria-label="更多"><svg class="ic"><use href="#i-more"/></svg></button>
+      </div>
+      <div class="pl-stage">
+        <div class="cover-halo"></div>
+        <div class="ring"><svg viewBox="0 0 300 300"><circle class="trk" cx="150" cy="150" r="142"/><circle class="arc" cx="150" cy="150" r="142" stroke-dasharray="552 892"/></svg></div>
+        <div class="blob alt"><span class="init">稻</span></div>
+        <span class="ring-label"><i></i>低频交接 · 5.4 秒</span>
+      </div>
+      <div class="pl-meta"><h4>稻香</h4><p>周杰伦</p></div>
+      <div class="pl-lyr"><div>还记得你说家是唯一的城堡</div><div class="on">随着稻香河流继续奔跑</div></div>
+      <div class="pl-prog"></div>
+      <div class="pl-ctl">
+        <button aria-label="随机"><svg class="ic"><use href="#i-shuffle"/></svg></button>
+        <button aria-label="上一首"><svg class="ic"><use href="#i-prev"/></svg></button>
+        <button class="main" aria-label="暂停"><svg class="ic"><use href="#i-pause"/></svg></button>
+        <button aria-label="下一首"><svg class="ic"><use href="#i-next"/></svg></button>
+        <button aria-label="收藏"><svg class="ic"><use href="#i-heart-o"/></svg></button>
+      </div>
+    </div></div>
+    <figcaption><b>⑤ 屏幕圆环</b>圆环围着封面画，进度就是这次过渡的进度，底下小胶囊写接法和时长。点一下（电视上按任意键）消失，本次切歌内不再出现。</figcaption></figure>
+
+    <figure class="dev"><div class="phone"><div class="m-app pl-app">
+      <div class="m-status"><span>9:41</span><span><i></i><i></i></span></div>
+      <div class="pl-top">
+        <button class="m-ib" aria-label="收起播放页"><svg class="ic"><use href="#i-down"/></svg></button>
+        <span class="pl-src">本地 · FLAC</span>
+        <span style="flex:1"></span>
+        <button class="m-ib" aria-label="歌词"><svg class="ic"><use href="#i-lyrics"/></svg></button>
+        <button class="m-ib" aria-label="队列"><svg class="ic"><use href="#i-queue"/></svg></button>
+        <button class="m-ib" aria-label="更多"><svg class="ic"><use href="#i-more"/></svg></button>
+      </div>
+      <div class="pl-stage">
+        <div class="cover-halo"></div>
+        <div class="blob" style="padding:5px;background:conic-gradient(from -90deg,var(--md-primary) 0 58%,var(--md-outline-variant) 58% 100%)">
+          <div style="position:absolute;inset:5px;border-radius:inherit;background:linear-gradient(140deg,#f7b267 0%,#f4845f 38%,#8b6cf6 100%);overflow:hidden;display:grid;place-items:center"><span style="font-size:72px;font-weight:900;color:rgb(255 255 255 / .82);letter-spacing:-2px">晴</span></div>
+        </div>
+      </div>
+      <div class="pl-meta"><h4>晴天</h4><p>周杰伦</p></div>
+      <div class="pl-lyr"><div>故事的小黄花</div><div class="on">从出生那年就飘着</div></div>
+      <div class="pl-prog"></div>
+      <div class="pl-ctl">
+        <button aria-label="随机"><svg class="ic"><use href="#i-shuffle"/></svg></button>
+        <button aria-label="上一首"><svg class="ic"><use href="#i-prev"/></svg></button>
+        <button class="main" aria-label="播放"><svg class="ic"><use href="#i-play"/></svg></button>
+        <button aria-label="下一首"><svg class="ic"><use href="#i-next"/></svg></button>
+        <button aria-label="收藏"><svg class="ic"><use href="#i-heart-o"/></svg></button>
+      </div>
+    </div></div>
+    <figcaption><b>⑥ 封面描边</b>参考里的「卡片描边」在手机上落到<strong>封面外轮廓</strong>：沿封面形状走一圈，进度段用 primary，剩下是 outlineVariant。只在播放页出现，播放条上没有封面就不画。</figcaption></figure>
+
+  </div>
+
+  <div class="note plain"><b>电视和平板：</b>不另做一套。设置页同一组组件，圆环画在封面上；电视遥控器按任意键消失。减少动画打开时，两种动画都不画，过渡照常。</div>
+</section>
+
+<section class="block" id="availability">
+  <div class="block-head"><span class="kicker">04</span><h2>什么时候能做智能过渡</h2></div>
+  <p class="sub">参考里「完全体 / 兼容模式」的分界是能不能在本地解码分析。落到我们的播放链路，分界就是<strong>切歌前能不能拿到下一首的完整音频</strong>。</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>来源</th><th>切歌前拿到整首</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td>本地文件 / 已下载</td><td>能</td><td>智能过渡</td></tr>
+        <tr><td>Navidrome / OpenSubsonic</td><td>能</td><td>智能过渡</td></tr>
+        <tr><td>在线歌曲，已缓存</td><td>能</td><td>智能过渡</td></tr>
+        <tr><td>在线歌曲，未缓存</td><td>提前预取，来得及就能</td><td>来得及智能过渡；来不及退回交叉淡化</td></tr>
+        <tr><td>Apple Music 整曲（Widevine）</td><td>不能，必须边解边播</td><td>交叉淡化</td></tr>
+        <tr><td>云听等直播流</td><td>不能，也没有下一首</td><td>不接</td></tr>
+        <tr><td>试听片段（30 秒）</td><td>能，但片段本身不完整</td><td>交叉淡化</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note"><b>预取不额外多耗流量：</b>下一首本来就要播，只是提前到当前歌播放时下载。预取走现有媒体缓存；连续快速切歌时取消没用的预取。</div>
+</section>
+
+<section class="block" id="analysis">
+  <div class="block-head"><span class="kicker">05</span><h2>分析怎么跑</h2></div>
+  <p class="sub">不下载模型，也不做音轨分离。节拍、速度直接复用已经跑在播放链路上的 <code>RhythmAnalyzer</code> 和 <code>BeatTracker</code>，把输入从「AudioSink 正在播的 PCM」扩成「离线解码出来的 PCM」。</p>
+
+  <div class="flow">
+    <div class="step"><b>排进队列</b><span>当前歌开始播时，把下一首放进分析队列；切歌、换源就取消旧的。</span></div>
+    <div class="step"><b>拿音频</b><span>本地直读；在线先看缓存是否完整，不完整就后台补全整首。</span></div>
+    <div class="step"><b>离线分析</b><span>PCM 依次过 FFT、起拍、拍网格，再算响度、chroma 调性、首尾静音和能量分段。</span></div>
+    <div class="step"><b>存下来</b><span>按歌曲 key + 音频长度 / 指纹写进 Room；下次播同一首直接读。</span></div>
+  </div>
+
+  <h3>每种接法要什么数据</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>接法</th><th>用到的分析</th><th>怎么接</th></tr></thead>
+      <tbody>
+        <tr><td>切拍</td><td>两首的拍网格、小节首拍</td><td>下一首的第一个小节首拍对齐当前歌的下一个首拍，重叠只留 0.8–1.5 秒短淡化</td></tr>
+        <tr><td>低频交接</td><td>低频能量、两首的调性</td><td>出曲低通下潜、入曲高通抬起，低频在中间交接；调性差太多就只交接不叠拍</td></tr>
+        <tr><td>尾奏承接</td><td>尾奏长度、前奏长度、响度</td><td>入曲从 intro 前段接进，出曲尾奏自然收；必要时加回声收尾</td></tr>
+        <tr><td>等功率淡化</td><td>响度</td><td>余弦 / 正弦曲线，按两首的响度差补偿增益</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>分析结果的字段</h3>
+  <pre><span class="c">// AutomixAnalysis，按 song.key 存在 Room</span>
+<span class="k">val</span> bpm: Double              <span class="c">// 拍网格周期推出来</span>
+<span class="k">val</span> beatGrid: BeatGrid        <span class="c">// 复用现有类型：t0 / period / downbeat / confidence</span>
+<span class="k">val</span> key: Int                 <span class="c">// 0–11 + 大小调，来自 chroma</span>
+<span class="k">val</span> loudnessLufs: Float
+<span class="k">val</span> introMs: Int              <span class="c">// 第一个有效声音</span>
+<span class="k">val</span> outroMs: Int              <span class="c">// 最后一个有效声音</span>
+<span class="k">val</span> sections: List&lt;Section&gt;   <span class="c">// 能量分段，给尾奏承接挑位置</span>
+<span class="k">val</span> analyzedAt: Long</pre>
+
+  <div class="note plain"><b>首次要等几秒：</b>一首歌第一次播放时分析在低优先级线程上跑，不打断播放。结果存下来后同一首不再分析；音频文件变了（重新下载、换源到不同版本）才重分析。</div>
+</section>
+
+<section class="block" id="playback">
+  <div class="block-head"><span class="kicker">06</span><h2>播放侧怎么接</h2></div>
+  <p class="sub">Media3 没有内置的歌曲交叉淡化。做法是<strong>双实例</strong>：当前歌一个 ExoPlayer，下一首提前在第二个实例里预载；到过渡点同时出声，各自跟音量包络，结束后把主播放器整体换到第二个实例。</p>
+
+  <h3>关键点</h3>
+  <ul class="clean">
+    <li><b>换主播放器</b>：过渡结束后把队列剩余重建到新实例，<code>MediaSession.setPlayer()</code> 过去，睡眠定时、律动分析、DRM session 管理器一起跟过去，旧实例释放。这是本方案改动最大的一块，P1 就要先做出来。</li>
+    <li><b>两路 AudioTrack 有固定延迟差</b>：切拍前用一次静音测距校准（和跟拍校准同一个思路），误差超过 30 ms 就不做切拍，退回等功率淡化。</li>
+    <li><b>频段交接</b>：在各自的 <code>AudioProcessor</code> 链里加二阶 biquad，高通 / 低通扫频；音量均衡的 <code>VolumeGainAudioProcessor</code> 排在它前面。</li>
+    <li><b>速度对齐</b>：<code>PlaybackParameters</code> 变速不变调，两首 BPM 差在 ±6% 以内才用；超过就只淡化，不硬拉。</li>
+    <li><b>回声收尾</b>：只在尾奏承接时给出曲加反馈延迟，尾段淡出时留一条尾巴；其他接法不加。</li>
+    <li><b>预载失败就回退</b>：下一首在第二个实例里换源失败、或分析还没跑完，直接走等功率淡化，播放页的音源提示照旧。</li>
+  </ul>
+
+  <pre><span class="c">// 过渡点：两首的时间轴对齐后，同时开始各自的包络</span>
+<span class="k">val</span> plan = AutomixPlanner.decide(current, next)   <span class="c">// 返回接法 + 起止时刻 + 曲线</span>
+outgoing.playbackParameters = plan.outgoingTempo
+incoming.playbackParameters = plan.incomingTempo
+outgoing.volume = 1f; incoming.volume = 0f; incoming.play()
+
+<span class="c">// 每帧按 plan 推进两条曲线；结束时把 session 交给 incoming</span>
+onTransitionEnd { handOffSession(from = outgoing, to = incoming) }</pre>
+</section>
+
+<section class="block" id="animation">
+  <div class="block-head"><span class="kicker">07</span><h2>过渡动画</h2></div>
+  <p class="sub">照参考只做两种，外加关闭。动画只是把这次混音画出来，不参与任何决策。</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th style="width:22%">选项</th><th>表现</th></tr></thead>
+      <tbody>
+        <tr><td><b>关闭</b></td><td>不画</td></tr>
+        <tr><td><b>屏幕圆环</b></td><td>围着封面画一整圈，进度段随过渡推进；下面一个小胶囊写「接法 · 时长」。点按（电视按任意键）立刻消失，本次切歌不再出现。</td></tr>
+        <tr><td><b>封面描边</b></td><td>沿封面形状的外轮廓走一圈，进度段 primary、剩余 outlineVariant。只在播放页画；播放条上没有封面就不画。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul class="clean">
+    <li>短于 5 秒的过渡不画（参考一致）。</li>
+    <li>打开「减少动画」或系统移除动画：两种都不画，过渡本身照常。</li>
+    <li>电视 30 帧上限下按真实时间推进，和律动跟拍同一个处理方式，最多晚一帧。</li>
+  </ul>
+</section>
+
+<section class="block" id="phases">
+  <div class="block-head"><span class="kicker">08</span><h2>分四步做完</h2></div>
+  <p class="sub">先把能回退的底座做出来，再加分析，最后才是接法和动画。每一步单独可用。</p>
+  <div class="phases">
+    <div class="phase"><header><span class="tag">P1</span><h3>交叉淡化</h3></header><ul><li>设置块、总开关、两档方式</li><li>第二实例预载 + 等功率包络</li><li>换主播放器、队列与 MediaSession</li><li>手动切歌 1.2 秒淡化</li></ul></div>
+    <div class="phase"><header><span class="tag">P2</span><h3>离线分析</h3></header><ul><li>离线 PCM 解码 + 复用 BeatTracker</li><li>响度、chroma、首尾、分段</li><li>Room 缓存与预取</li><li>「上一次接歌」与回退原因</li></ul></div>
+    <div class="phase"><header><span class="tag">P3</span><h3>四种接法</h3></header><ul><li>切拍、低频交接、尾奏承接</li><li>速度对齐、频段交接、回声收尾</li><li>双路延迟校准</li><li>失败回退链路</li></ul></div>
+    <div class="phase"><header><span class="tag">P4</span><h3>动画与收尾</h3></header><ul><li>屏幕圆环、封面描边</li><li>减少动画、电视 30 帧</li><li>缓存不足提示与入口</li><li>手机 / 平板 / 电视核对</li></ul></div>
+  </div>
+</section>
+
+<section class="block" id="notdoing">
+  <div class="block-head"><span class="kicker">09</span><h2>不做的事</h2></div>
+  <ul class="clean">
+    <li><b>HTDemucs 人声分离、表现模式、人声退场</b>：手机上跑分离不现实；参考里依赖它的两项连同「表现模式」一起不做。</li>
+    <li><b>Beat This! 模型</b>：不下载、不附带模型，节拍用现有 DSP。</li>
+    <li><b>浏览器兼容模式</b>：没有浏览器端，不搬。</li>
+    <li><b>桌面端的命令面板入口</b>：设置里直接放开关和两档方式。</li>
+    <li><b>让「过渡最长时长」作用于智能过渡</b>：参考明确它只在固定淡化下生效，这里保持一致。</li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  <b>参考：</b><a href="https://folia-site.cielaniska.top/guide/automix">Folia 智能过渡（Automix）</a>。界面稿复用 <a href="expressive-redesign.html">expressive-redesign.html</a> 的 M3E 令牌与手机原型样式，设置组件按 <code>ui/components</code> 里在用的 Compose 实现复刻。<br>
+  myMusic · 2026-11-07 · 待确认后实现
+</footer>
+
+</body>
+</html>
