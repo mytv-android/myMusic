@@ -77,6 +77,14 @@ class QueueShuffleOrder private constructor(
     /** 按随机顺序排好的队列下标，测试用。 */
     internal fun toList(): List<Int> = shuffled.toList()
 
+    /** 当前的随机顺序；换主播放器时原样带过去，过渡后“下一首”不要变成另一个顺序。 */
+    internal fun order(): IntArray = shuffled.copyOf()
+
+    internal companion object {
+        /** 用一份现成的顺序建一个新的；长度必须和播放器的曲目数一致。 */
+        internal fun of(order: IntArray): QueueShuffleOrder = QueueShuffleOrder(order, Random.Default)
+    }
+
     /** 把 [index] 插到 [after] 的紧后面；[after] 不在（队列第一首之前）就排第一。 */
     private fun MutableList<Int>.placeAfter(after: Int, index: Int) = add(indexOf(after) + 1, index)
 }

@@ -18,47 +18,49 @@ import java.nio.ByteBuffer
 internal class RhythmAudioSink(
     sink: AudioSink,
     private val analyzer: RhythmAnalyzer,
+    private val source: Int,
 ) : ForwardingAudioSink(sink) {
     private val clock = analyzer.clock
 
     override fun handleBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
-        analyzer.onSinkInput(presentationTimeUs)
+        if (analyzer.isActiveSource(source)) analyzer.onSinkInput(presentationTimeUs, source)
         return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
     }
 
     override fun getCurrentPositionUs(sourceEnded: Boolean): Long {
         val position = super.getCurrentPositionUs(sourceEnded)
-        clock.onPosition(position, System.nanoTime())
+        // 预载的那一路也在报位置；不是主播放器就只出声，不碰界面的进度时钟
+        if (analyzer.isActiveSource(source)) clock.onPosition(position, System.nanoTime())
         return position
     }
 
     override fun play() {
         super.play()
-        clock.setRunning(true, System.nanoTime())
+        if (analyzer.isActiveSource(source)) clock.setRunning(true, System.nanoTime())
     }
 
     override fun pause() {
         super.pause()
-        clock.setRunning(false, System.nanoTime())
+        if (analyzer.isActiveSource(source)) clock.setRunning(false, System.nanoTime())
     }
 
     override fun flush() {
         super.flush()
-        clock.clear()
+        if (analyzer.isActiveSource(source)) clock.clear()
     }
 
     override fun reset() {
         super.reset()
-        clock.clear()
+        if (analyzer.isActiveSource(source)) clock.clear()
     }
 
     override fun setPlaybackParameters(playbackParameters: PlaybackParameters) {
         super.setPlaybackParameters(playbackParameters)
-        clock.setSpeed(playbackParameters.speed, System.nanoTime())
+        if (analyzer.isActiveSource(source)) clock.setSpeed(playbackParameters.speed, System.nanoTime())
     }
 
     override fun setOutputStreamOffsetUs(outputStreamOffsetUs: Long) {
         super.setOutputStreamOffsetUs(outputStreamOffsetUs)
-        analyzer.onOutputStreamOffset(outputStreamOffsetUs)
+        if (analyzer.isActiveSource(source)) analyzer.onOutputStreamOffset(outputStreamOffsetUs, source)
     }
 }

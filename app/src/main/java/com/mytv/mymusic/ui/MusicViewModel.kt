@@ -85,6 +85,8 @@ import com.mytv.mymusic.data.update.InstallResult
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
 import com.mytv.mymusic.playback.AppleWidevineDrmCallback
+import com.mytv.mymusic.playback.CrossfadeHandoff
+import com.mytv.mymusic.playback.MEDIA_EXTRA_DURATION_MS
 import com.mytv.mymusic.playback.NowPlayingShape
 import com.mytv.mymusic.playback.PlaybackService
 import com.mytv.mymusic.playback.SavedCursor
@@ -211,6 +213,10 @@ data class MusicUiState(
     val playReportEnabled: Boolean = true,
     val coverSeed: Int = 0,
     val sleepFade: Boolean = true,
+    /** 切歌过渡总开关，见 [AppSettings.crossfadeEnabled]。 */
+    val crossfadeEnabled: Boolean = false,
+    /** 交叉淡化时长（秒），见 [AppSettings.crossfadeSeconds]。 */
+    val crossfadeSeconds: Int = 6,
     val cacheLimitMb: Int = 512,
     val reduceMotion: Boolean = false,
     val volumeNormalization: Boolean = false,
@@ -290,6 +296,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _settingsReady = MutableStateFlow(false)
     val settingsReady: StateFlow<Boolean> = _settingsReady.asStateFlow()
     private var controller: MediaController? = null
+    /** 交叉淡化：已经提前解析过的下一首（下标 + 曲目 id），同一首不重复解析。 */
+    private var prefetchIndex = -1
+    private var prefetchKey = ""
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private val connected = MutableStateFlow<MediaController?>(null)
     private var progressJob: Job? = null
@@ -504,6 +513,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             miniPlayerTarget = settings.miniPlayerTarget,
             playReportEnabled = settings.playReportEnabled,
             sleepFade = settings.sleepFade,
+            crossfadeEnabled = settings.crossfadeEnabled,
+            crossfadeSeconds = settings.crossfadeSeconds,
             cacheLimitMb = settings.cacheLimitMb.takeIf { it > 0 } ?: app.defaultCacheLimitMb(),
             reduceMotion = settings.reduceMotion,
             volumeNormalization = settings.volumeNormalization,
@@ -3162,8 +3173,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // Apple 整曲开头那段用的是另一把 key，Provider 单独成了一份清单；地址搭在
         // mediaMetadata.extras 上送到播放侧（tag 过不了 MediaSession 的序列化）
         val introUrl = song.extra[AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL].orEmpty()
-        val introExtras = introUrl.takeIf { it.isNotBlank() }?.let {
-            android.os.Bundle().apply { putString(AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL, it) }
+        // 时长也带上：在线 Progressive 流常常没有 Content-Length，播放器自己给的时长是未知的，
+        // 交叉淡化要靠它算“还差几秒”
+        val extras = android.os.Bundle().apply {
+            putLong(MEDIA_EXTRA_DURATION_MS, song.duration * 1000L)
+            if (introUrl.isNotBlank()) putString(AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL, introUrl)
         }
         val builder = MediaItem.Builder().setMediaId(song.key).setUri(song.url).setMediaMetadata(
             MediaMetadata.Builder()
@@ -3171,7 +3185,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 .setArtist(song.artist)
                 .setAlbumTitle(song.album)
                 .setArtworkUri(song.cover.takeIf { it.isNotBlank() }?.let(Uri::parse))
-                .apply { introExtras?.let { setExtras(it) } }
+                .setExtras(extras)
                 .build()
         )
         // Apple Music 整曲是 Widevine 加密的 HLS。adamId 和 PSSH 由 AppleProvider.playableStream
@@ -3259,9 +3273,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
+            // 交叉淡化换主播放器时控制器报的是 REPEAT，实际是自然播完：按换主前记下的那首认出来
+            val crossfaded = CrossfadeHandoff.consume(base.value.current?.key)
+            val effectiveReason =
+                if (crossfaded && reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
+                    Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
+                } else {
+                    reason
+                }
+            AppLog.d("Player", "换歌 reason=$reason${if (crossfaded) "(交叉淡化)" else ""} index=${controller?.currentMediaItemIndex}")
             // 上报要知道上一首是怎么结束的：自动接下一首是自然播完，换了队列是 change_queue。
             // base.value.current 此刻还是上一首（onEvents 之后才更新），正好是要结束的那首
-            val finishedBy = when (reason) {
+            val finishedBy = when (effectiveReason) {
                 Player.MEDIA_ITEM_TRANSITION_REASON_AUTO -> PlayEndReason.Finished
                 Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED -> PlayEndReason.ChangeQueue
                 else -> null
@@ -3608,6 +3631,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     progressJumpAllowed = false
                     val duration = it.duration
                     val bounded = if (duration != C.TIME_UNSET && duration > 0) position.coerceAtMost(duration) else position
+                    // 在线 Progressive 流没有 Content-Length 时播放器给不出时长，用歌曲信息里的时长算还差几秒
+                    val effectiveDuration = if (duration != C.TIME_UNSET && duration > 0) duration else base.value.duration
+                    if (it.isPlaying) maybePrefetchNextForCrossfade(it, bounded, effectiveDuration)
                     _position.value = bounded
                     syncNotificationLyrics(bounded)
                     if (duration != C.TIME_UNSET && base.value.duration != duration.coerceAtLeast(0)) {
@@ -3638,6 +3664,49 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 delay(PROGRESS_TICK_MS)
             }
+        }
+    }
+
+    /**
+     * 交叉淡化要提前把下一首的地址解析出来：队列里除当前这首以外通常还是空地址，等切过去才解析就来不及叠了。
+     * 只补地址、不动播放器状态；解析失败就这一首放弃，下一首再试。
+     */
+    private fun maybePrefetchNextForCrossfade(player: Player, position: Long, duration: Long) {
+        if (!settingsState.value.crossfadeEnabled) return
+        if (duration == C.TIME_UNSET || duration <= 0) return
+        val remaining = duration - position
+        if (remaining !in 1..CROSSFADE_PREFETCH_AHEAD_MS) return
+        val nextIndex = player.nextMediaItemIndex
+        if (nextIndex == C.INDEX_UNSET || nextIndex == player.currentMediaItemIndex) return
+        val queue = base.value.queue
+        val song = queue.getOrNull(nextIndex) ?: return
+        if (song.url.isNotBlank()) return
+        val track = base.value.canonicalQueue.getOrNull(nextIndex) ?: return
+        if (prefetchIndex == nextIndex && prefetchKey == track.id) return
+        prefetchIndex = nextIndex
+        prefetchKey = track.id
+        AppLog.i("Crossfade", "提前解析下一首 index=$nextIndex ${track.title}")
+        viewModelScope.launch {
+            val local = localFileFor(track)
+            val resolved: Song
+            var resolvedTrack = track
+            if (local != null) {
+                resolved = local.first.song.copy(url = Uri.fromFile(local.second).toString())
+            } else {
+                val result = resolvePlayable(track, pinnedProviders[track.id])
+                val ready = result.resolution as? Resolution.Ready ?: return@launch
+                resolved = ready.source.song.copy(url = ready.url)
+                resolvedTrack = result.track
+            }
+            val playerNow = controller ?: return@launch
+            // 解析期间队列变了或已经切走：别把别的歌覆盖掉
+            if (playerNow.nextMediaItemIndex != nextIndex) return@launch
+            if (base.value.queue.getOrNull(nextIndex)?.key != song.key) return@launch
+            playerNow.replaceMediaItem(nextIndex, mediaItem(resolved))
+            base.value = base.value.copy(
+                queue = base.value.queue.mapIndexed { i, queued -> if (i == nextIndex) resolved else queued },
+                canonicalQueue = base.value.canonicalQueue.mapIndexed { i, queued -> if (i == nextIndex) resolvedTrack else queued },
+            )
         }
     }
 
@@ -4173,6 +4242,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun sleepAfterCurrent() = app.sleepTimer.stopAfterCurrent()
     fun cancelSleepTimer() = app.sleepTimer.cancel()
     fun setSleepFade(value: Boolean) = viewModelScope.launch { app.settings.sleepFade(value) }
+    fun setCrossfadeEnabled(value: Boolean) = viewModelScope.launch { app.settings.crossfadeEnabled(value) }
+    fun setCrossfadeSeconds(value: Int) = viewModelScope.launch { app.settings.crossfadeSeconds(value) }
     fun setReduceMotion(value: Boolean) = viewModelScope.launch { app.settings.reduceMotion(value) }
     fun setVolumeNormalization(value: Boolean) =
         viewModelScope.launch { app.settings.volumeNormalization(value) }
@@ -4799,6 +4870,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 进度循环 100ms 一圈：歌词换行、系统媒体条和进度条都靠它，越密跟得越紧。100 圈（10 秒）存一次位置。 */
         const val PROGRESS_TICK_MS = 100L
+
+        /** 距歌尾这么远开始解析下一首地址，给解析和预载留够时间。 */
+        const val CROSSFADE_PREFETCH_AHEAD_MS = 30_000L
         const val CURSOR_SAVE_TICKS = 100
         /** 听歌计时累计这么久才落一次盘（福利中心任务用）。 */
         const val LISTEN_FLUSH_MS = 10_000L

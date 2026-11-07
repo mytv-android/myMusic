@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Animation
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -540,6 +541,33 @@ internal fun PlaybackSettingsScreen(
     val searchable = state.providers.filter { it.search }
     val priority = aggregation.priorityFor(searchable.map { it.id })
     SettingsPage(SettingsSection.Playback, embedded, onBack) {
+        item(key = "crossHead", contentType = "sectionHeader") { SectionLabel("切歌过渡") }
+        item(key = "crossSwitch", contentType = "switch") {
+            SwitchRow(
+                title = "切歌过渡",
+                checked = state.crossfadeEnabled,
+                onCheckedChange = { actions.setCrossfadeEnabled(it) },
+                index = 0,
+                count = 1,
+                summary = "上一首还没放完就把下一首接进来，两首叠着做等功率淡化",
+                icon = Icons.Filled.AutoAwesome,
+            )
+        }
+        if (state.crossfadeEnabled) {
+            item(key = "crossLengthHead", contentType = "sectionHeader") { SectionLabel("过渡时长") }
+            item(key = "crossLength", contentType = "toggleGroup") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ConnectedToggleGroup(
+                        options = listOf(4, 6, 8, 10),
+                        selected = state.crossfadeSeconds,
+                        onSelect = { actions.setCrossfadeSeconds(it) },
+                        label = { "$it 秒" },
+                        modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+                    )
+                    SettingsNote("淡化发生在这首歌结尾的最后几秒。手动切歌、直播和带版权的整曲仍然直接切。")
+                }
+            }
+        }
         item(key = "modeHead", contentType = "sectionHeader") { SectionLabel("换源模式") }
         item(key = "mode", contentType = "toggleGroup") {
             ConnectedToggleGroup(

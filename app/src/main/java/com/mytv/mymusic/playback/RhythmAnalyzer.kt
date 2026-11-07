@@ -15,6 +15,10 @@ import java.util.concurrent.atomic.AtomicInteger
 
 internal const val RHYTHM_TARGET_FPS = 30
 
+/** 两路播放器的来源编号：交叉淡化时一路出声、一路在预载，分析只认当前的主播放器。 */
+internal const val SOURCE_PRIMARY = 0
+internal const val SOURCE_SECONDARY = 1
+
 /** A hop larger than the FFT window would leave short transients unanalysed. */
 internal fun rhythmHopSamples(sampleRateHz: Int): Int =
     (sampleRateHz / RHYTHM_TARGET_FPS).coerceIn(1, RHYTHM_FFT_SIZE)
@@ -103,6 +107,25 @@ class RhythmAnalyzer {
     private var previousGrid: BeatGrid? = null
     private var previousUntilS = Double.NEGATIVE_INFINITY
 
+    /**
+     * 哪个播放器在出声。切歌过渡时会同时有两个 ExoPlayer 在解码，只有当前主播放器的那一路能喂分析：
+     * 两路 pts 各从自己的 0 开始，混在一起节拍和进度都会错。过渡结束、主播放器换人时用 [useSource] 切过来。
+     */
+    @Volatile
+    private var activeSource = SOURCE_PRIMARY
+
+    /** 音频线程发现来源刚切过来时重新取锚。只在音频线程上读写。 */
+    @Volatile
+    private var pendingReanchor = false
+
+    // 两路各自的输出格式：预载那一路的 flush 会被丢掉，换主时得按它自己的采样率重新起算
+    private val formatLock = Any()
+    private val sourceRate = IntArray(2)
+    private val sourceChannels = IntArray(2)
+    private val sourceEncoding = IntArray(2) { C.ENCODING_PCM_16BIT }
+
+    internal fun isActiveSource(source: Int): Boolean = source == activeSource
+
     // 谁在要分析：播放页的律动背景、海报墙大卡的跟拍可能同时在组合里，一处退出不能把另一处的也关掉
     private val holders = HashSet<Any>()
 
@@ -118,6 +141,19 @@ class RhythmAnalyzer {
     fun capture(owner: Any, on: Boolean) {
         if (on) holders.add(owner) else holders.remove(owner)
         setActive(holders.isNotEmpty())
+    }
+
+    /**
+     * 主播放器换到另一路（交叉淡化结束）。新来源的下一个缓冲会重新取锚，旧网格和速度一起清掉，
+     * 界面最多丢一小段跟拍，不会拿上一路的 pts 继续算。
+     */
+    fun useSource(source: Int) {
+        if (source == activeSource) return
+        activeSource = source
+        pendingReanchor = true
+        song.incrementAndGet()
+        reset()
+        clock.clear()
     }
 
     /** Drops the previous track's gain history and any queued visual result. */
@@ -139,7 +175,16 @@ class RhythmAnalyzer {
     }
 
     /** [RhythmAudioSink]：AudioSink 正要处理 pts 为 [ptsUs] 的缓冲（同一个缓冲分几次交时每次都报）。 */
-    internal fun onSinkInput(ptsUs: Long) {
+    internal fun onSinkInput(ptsUs: Long, source: Int) {
+        if (source != activeSource) return
+        if (pendingReanchor) {
+            // 刚从另一路切过来：这一路已经在播到中间了，之前的 pts 不连续，从这一个缓冲重新取锚
+            pendingReanchor = false
+            applyFormat(source)
+            needAnchor = true
+            streamChanged = true
+            streamFrames = 0L
+        }
         inputPtsUs = ptsUs
         // 输出换到了下一段（无缝接到下一首、单曲循环），而且这次没有清空：这个缓冲就是新一段的开头
         if (streamChanged && !needAnchor) {
@@ -149,18 +194,35 @@ class RhythmAnalyzer {
     }
 
     /** [RhythmAudioSink]：渲染器换了输出段的偏移。第一次和换到另一项时偏移会变，同一项里跳转不变。 */
-    internal fun onOutputStreamOffset(offsetUs: Long) {
+    internal fun onOutputStreamOffset(offsetUs: Long, source: Int) {
+        if (source != activeSource) return
         if (offsetUs == outputOffsetUs) return
         outputOffsetUs = offsetUs
         streamChanged = true
     }
 
-    val audioBufferSink = object : TeeAudioProcessor.AudioBufferSink {
+    /** 把 [source] 记下的输出格式套到共享字段上；这个来源还没报过格式就保持原样。 */
+    private fun applyFormat(source: Int) {
+        val (rate, channels, encoding) = synchronized(formatLock) {
+            Triple(sourceRate[source], sourceChannels[source], sourceEncoding[source])
+        }
+        if (rate <= 0 || channels <= 0) return
+        sampleRateHz = rate
+        channelCount = channels
+        this.encoding = encoding
+        hopSamples = rhythmHopSamples(rate)
+    }
+
+    /** 每一路播放器各拿一个；非当前来源的缓冲在音频线程上直接丢掉，不碰共享的分析状态。 */
+    fun sink(source: Int): TeeAudioProcessor.AudioBufferSink = object : TeeAudioProcessor.AudioBufferSink {
         override fun flush(sampleRateHz: Int, channelCount: Int, encoding: Int) {
-            this@RhythmAnalyzer.sampleRateHz = sampleRateHz
-            this@RhythmAnalyzer.channelCount = channelCount
-            this@RhythmAnalyzer.encoding = encoding
-            hopSamples = rhythmHopSamples(sampleRateHz)
+            synchronized(formatLock) {
+                sourceRate[source] = sampleRateHz
+                sourceChannels[source] = channelCount
+                sourceEncoding[source] = encoding
+            }
+            if (source != activeSource) return
+            applyFormat(source)
             // 处理链清空了：下一个样本是那时交给 AudioSink 的缓冲的第一个样本，重新取锚
             needAnchor = true
             streamFrames = 0L
@@ -168,6 +230,7 @@ class RhythmAnalyzer {
         }
 
         override fun handleBuffer(buffer: ByteBuffer) {
+            if (source != activeSource) return
             if (sampleRateHz <= 0 || channelCount <= 0) return
             val bytesPerSample = when (encoding) {
                 C.ENCODING_PCM_16BIT -> 2

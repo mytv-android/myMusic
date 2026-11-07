@@ -247,6 +247,8 @@ class MusicActions(private val model: MusicViewModel) {
     fun sleepAfterCurrent() = model.sleepAfterCurrent()
     fun cancelSleepTimer() = model.cancelSleepTimer()
     fun setSleepFade(value: Boolean) = model.setSleepFade(value)
+    fun setCrossfadeEnabled(value: Boolean) = model.setCrossfadeEnabled(value)
+    fun setCrossfadeSeconds(value: Int) = model.setCrossfadeSeconds(value)
     fun setReduceMotion(value: Boolean) = model.setReduceMotion(value)
     fun setVolumeNormalization(value: Boolean) = model.setVolumeNormalization(value)
     fun toggleAggregateProvider(id: String) = model.toggleAggregateProvider(id)

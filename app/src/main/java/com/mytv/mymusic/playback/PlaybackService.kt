@@ -50,6 +50,9 @@ import kotlinx.coroutines.launch
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private var equalizer: EqualizerController? = null
+    private var player: ExoPlayer? = null
+    private var crossfade: CrossfadeController? = null
+    private lateinit var mediaSourceFactory: MediaSource.Factory
     private val handler = Handler(Looper.getMainLooper())
     private val foregroundGuard = Runnable { ensureForegroundOrStop() }
 
@@ -61,13 +64,6 @@ class PlaybackService : MediaSessionService() {
         )
         val app = application as? MyMusicApp
         val cache = app?.mediaCache
-        val builder = ExoPlayer.Builder(this).setAudioAttributes(
-            AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
-            true,
-        ).setHandleAudioBecomingNoisy(true)
-            // 息屏后在线播放也要保持网络和 CPU，避免 Wi-Fi 休眠导致卡住
-            .setWakeMode(C.WAKE_MODE_NETWORK)
-        app?.let { builder.setRenderersFactory(RhythmRenderersFactory(this, it.rhythmAnalyzer)) }
         // 冷启动竞态：媒体按键 / 续播可以在设置流首帧到达前把服务拉起来，那时候
         // AppleSession 还是空的，授权会白跑一次。先主动取一次。
         app?.appScope?.let { AppleSession.refreshAsync(app.settings, it) }
@@ -144,42 +140,14 @@ class PlaybackService : MediaSessionService() {
                     }
                 }
             }
-        builder.setMediaSourceFactory(AppleIntroMediaSourceFactory(baseFactory))
-        val player = builder.build()
-        // 随机顺序跟着队列改动走：随机时“下一首播放”照样下一首放，解析完换地址也不会跳到别的歌
-        player.setShuffleOrder(QueueShuffleOrder())
-        player.addListener(object : Player.Listener {
-            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                // 打开随机时从正在放的这首重新打乱；不然它可能排在随机顺序中间，不循环时排在它前面的就轮不到了
-                if (shuffleModeEnabled) {
-                    player.setShuffleOrder(QueueShuffleOrder().cloneAndSet(player.mediaItemCount, player.currentMediaItemIndex))
-                }
-            }
-        })
-        app?.rhythmAnalyzer?.let { analyzer ->
-            player.addListener(object : Player.Listener {
-                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                    // 点歌、上一首 / 下一首、换了队列：渲染器的偏移不变，音频这边看着和同一首里跳转一样，得从这里告诉节拍跟踪。
-                    // 自动接下一首由输出段偏移判断；单曲循环本来就该留着速度
-                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK ||
-                        reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED
-                    ) {
-                        analyzer.onNewSong()
-                    }
-                }
-            })
-        }
+        mediaSourceFactory = AppleIntroMediaSourceFactory(baseFactory)
+        val primary = newPlayer(SOURCE_PRIMARY)
+        primary.setAudioAttributes(MEDIA_ATTRIBUTES, true)
+        player = primary
         equalizer = app?.equalizer
-        equalizer?.let { controller ->
-            val sessionId = player.audioSessionId
-            if (sessionId != C.AUDIO_SESSION_ID_UNSET) controller.attach(sessionId)
-            player.addListener(object : Player.Listener {
-                override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                    if (audioSessionId != C.AUDIO_SESSION_ID_UNSET) controller.attach(audioSessionId)
-                }
-            })
-        }
-        app?.sleepTimer?.attach(player)
+        equalizer?.let { controller -> attachEqualizer(primary, controller) }
+        app?.sleepTimer?.attach(primary)
+        app?.let { crossfade = CrossfadeController(it, ::newPlayer) { next, slot -> promoteTo(next, slot) }.also { it.attach(primary) } }
         // 通知栏卡片、锁屏和系统媒体面板点一下要能回到播放页；不给内容意图的话点了没反应
         val openPlayer = PendingIntent.getActivity(
             this,
@@ -187,10 +155,77 @@ class PlaybackService : MediaSessionService() {
             WidgetLinks.intent(this, WidgetTarget.Player),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        session = MediaSession.Builder(this, player)
+        session = MediaSession.Builder(this, primary)
             .setCallback(ResumptionCallback())
             .setSessionActivity(openPlayer)
             .build()
+    }
+
+    /**
+     * 每个播放器都按同一套配置建：随机顺序、节拍分析的换歌通知、缓存 / 换源 / DRM 都一致。
+     * [source] 决定哪一路的音频可以喂给律动分析——同时有两路在解时只能认当前出声的那一路。
+     */
+    private fun newPlayer(source: Int): ExoPlayer {
+        val app = application as? MyMusicApp
+        val builder = ExoPlayer.Builder(this).setAudioAttributes(
+            MEDIA_ATTRIBUTES,
+            // 预载的下一首不抢音频焦点：两路都申请的话，后起的那一路会把正在放的那一路暂停。
+            // 换主播放器时再在 [promoteTo] 里打开。
+            false,
+        ).setHandleAudioBecomingNoisy(true)
+            // 息屏后在线播放也要保持网络和 CPU，避免 Wi-Fi 休眠导致卡住
+            .setWakeMode(C.WAKE_MODE_NETWORK)
+            .setMediaSourceFactory(mediaSourceFactory)
+        app?.let { builder.setRenderersFactory(RhythmRenderersFactory(this, it.rhythmAnalyzer, source)) }
+        val created = builder.build()
+        // 随机顺序跟着队列改动走：随机时“下一首播放”照样下一首放，解析完换地址也不会跳到别的歌
+        created.setShuffleOrder(QueueShuffleOrder())
+        created.addListener(object : Player.Listener {
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                // 打开随机时从正在放的这首重新打乱；不然它可能排在随机顺序中间，不循环时排在它前面的就轮不到了
+                if (shuffleModeEnabled) {
+                    created.setShuffleOrder(QueueShuffleOrder().cloneAndSet(created.mediaItemCount, created.currentMediaItemIndex))
+                }
+            }
+        })
+        app?.rhythmAnalyzer?.let { analyzer ->
+            created.addListener(object : Player.Listener {
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    // 点歌、上一首 / 下一首、换了队列：渲染器的偏移不变，音频这边看着和同一首里跳转一样，得从这里告诉节拍跟踪。
+                    // 自动接下一首由输出段偏移判断；单曲循环本来就该留着速度。
+                    // 预载的那一路也在建队列，别拿它的换歌去清正在播的那一路的速度。
+                    if (analyzer.isActiveSource(source) &&
+                        (reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK ||
+                            reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)
+                    ) {
+                        analyzer.onNewSong()
+                    }
+                }
+            })
+        }
+        return created
+    }
+
+    /** 交叉淡化结束：会话整体换到新播放器，音效、睡眠定时和律动分析跟着换过去。 */
+    private fun promoteTo(next: ExoPlayer, slot: Int) {
+        val previous = player
+        player = next
+        next.setAudioAttributes(MEDIA_ATTRIBUTES, true)
+        session?.setPlayer(next)
+        (application as? MyMusicApp)?.rhythmAnalyzer?.useSource(slot)
+        equalizer?.let { controller -> attachEqualizer(next, controller) }
+        (application as? MyMusicApp)?.sleepTimer?.attach(next)
+        previous?.release()
+    }
+
+    private fun attachEqualizer(player: ExoPlayer, controller: EqualizerController) {
+        val sessionId = player.audioSessionId
+        if (sessionId != C.AUDIO_SESSION_ID_UNSET) controller.attach(sessionId)
+        player.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                if (audioSessionId != C.AUDIO_SESSION_ID_UNSET) controller.attach(audioSessionId)
+            }
+        })
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = session
@@ -245,12 +280,16 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         handler.removeCallbacks(foregroundGuard)
+        crossfade?.release()
+        crossfade = null
         (application as? MyMusicApp)?.sleepTimer?.detach()
         equalizer?.detach()
         equalizer = null
         (application as? MyMusicApp)?.rhythmAnalyzer?.setActive(false)
-        session?.run { player.release(); release() }
+        session?.release()
         session = null
+        player?.release()
+        player = null
         super.onDestroy()
     }
 
@@ -273,6 +312,10 @@ class PlaybackService : MediaSessionService() {
     }
 
     private companion object {
+        val MEDIA_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
         const val FOREGROUND_GUARD_MS = 8_000L
         const val GUARD_CHANNEL = "playback_resume"
         const val GUARD_NOTIFICATION_ID = 0x6d6d
@@ -343,6 +386,7 @@ private class AppleIntroMediaSourceFactory(
 private class RhythmRenderersFactory(
     context: Context,
     private val analyzer: RhythmAnalyzer,
+    private val source: Int,
 ) : DefaultRenderersFactory(context) {
     override fun buildAudioSink(
         context: Context,
@@ -354,11 +398,12 @@ private class RhythmRenderersFactory(
             .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
             .setAudioProcessors(
                 arrayOf(
-                    TeeAudioProcessor(analyzer.audioBufferSink),
+                    TeeAudioProcessor(analyzer.sink(source)),
                     VolumeGainAudioProcessor(),
                 )
             )
             .build(),
         analyzer,
+        source,
     )
 }

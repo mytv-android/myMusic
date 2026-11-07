@@ -116,4 +116,17 @@ class QueueShuffleOrderTest {
     fun `clearing empties the order`() {
         assertEquals(0, start(5, 1).cloneAndClear().length)
     }
+
+    @Test
+    fun `a copied order walks the same way so a handoff does not reshuffle`() {
+        val source = start(12, 4)
+        val copy = QueueShuffleOrder.of((source as QueueShuffleOrder).order())
+        for (index in 0 until 12) {
+            assertEquals(source.order().toList(), copy.order().toList())
+            assertEquals(source.getNextIndex(index), copy.getNextIndex(index))
+            assertEquals(source.getPreviousIndex(index), copy.getPreviousIndex(index))
+        }
+        assertEquals(source.firstIndex, copy.firstIndex)
+        assertEquals(source.lastIndex, copy.lastIndex)
+    }
 }

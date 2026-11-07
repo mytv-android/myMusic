@@ -175,6 +175,8 @@ class SettingsStore(private val context: Context) {
     private val blurModeKey = stringPreferencesKey("blur_mode")
     private val lastSeedKey = intPreferencesKey("last_seed")
     private val sleepFadeKey = booleanPreferencesKey("sleep_fade")
+    private val crossfadeEnabledKey = booleanPreferencesKey("crossfade_enabled")
+    private val crossfadeSecondsKey = intPreferencesKey("crossfade_seconds")
     private val cacheLimitKey = intPreferencesKey("cache_limit_mb")
     private val lyricsBackgroundKey = stringPreferencesKey("lyrics_background")
     private val notificationLyricsKey = booleanPreferencesKey("notification_lyrics")
@@ -284,6 +286,8 @@ class SettingsStore(private val context: Context) {
             blurMode = values[blurModeKey] ?: "Auto",
             lastSeed = values[lastSeedKey] ?: 0,
             sleepFade = values[sleepFadeKey] ?: true,
+            crossfadeEnabled = values[crossfadeEnabledKey] ?: false,
+            crossfadeSeconds = (values[crossfadeSecondsKey] ?: 6).coerceIn(4, 10),
             cacheLimitMb = values[cacheLimitKey] ?: 0,
         )
     }
@@ -336,6 +340,8 @@ class SettingsStore(private val context: Context) {
     }
     suspend fun lastSeed(value: Int) = context.dataStore.edit { it[lastSeedKey] = value }
     suspend fun sleepFade(value: Boolean) = context.dataStore.edit { it[sleepFadeKey] = value }
+    suspend fun crossfadeEnabled(value: Boolean) = context.dataStore.edit { it[crossfadeEnabledKey] = value }
+    suspend fun crossfadeSeconds(value: Int) = context.dataStore.edit { it[crossfadeSecondsKey] = value.coerceIn(4, 10) }
     suspend fun cacheLimitMb(value: Int) = context.dataStore.edit { it[cacheLimitKey] = value }
 
     /** 墙内设置：在同一次 edit 里读出当前值再写回，连着点两个开关也不会互相覆盖。 */
@@ -608,6 +614,10 @@ data class AppSettings(
     val blurMode: String = "Auto",
     val lastSeed: Int = 0,
     val sleepFade: Boolean = true,
+    /** 切歌过渡总开关：自动接下一首时把上一首的结尾和下一首的开头叠起来。 */
+    val crossfadeEnabled: Boolean = false,
+    /** 交叉淡化的时长（秒），只在这一步用；智能过渡在后续阶段自己决定长度。 */
+    val crossfadeSeconds: Int = 6,
     /** 播放缓存上限（MB），0 表示按设备默认：电视 256，其他 512。 */
     val cacheLimitMb: Int = 0,
 )

@@ -3,6 +3,7 @@ package com.mytv.mymusic
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import com.mytv.mymusic.playback.PlaybackClock
+import com.mytv.mymusic.playback.SOURCE_PRIMARY
 import com.mytv.mymusic.playback.RhythmAnalyzer
 import com.mytv.mymusic.playback.RhythmFrame
 import com.mytv.mymusic.playback.RhythmTimeline
@@ -77,18 +78,18 @@ class RhythmTimingTest {
     fun framePtsCountsSamplesFromTheBufferHandedToTheSinkAfterAFlush() = runBlocking {
         val analyzer = RhythmAnalyzer()
         val rate = 44_100
-        val sink = analyzer.audioBufferSink
+        val sink = analyzer.sink(SOURCE_PRIMARY)
         analyzer.setActive(true)
         sink.flush(rate, 1, C.ENCODING_PCM_16BIT)
         // 第一个缓冲分两次才交完（AudioTrack 满了）：两次报的是同一个 pts
         val start = 7_000_000L
-        analyzer.onSinkInput(start)
+        analyzer.onSinkInput(start, SOURCE_PRIMARY)
         sink.handleBuffer(silence(1_000))
-        analyzer.onSinkInput(start)
+        analyzer.onSinkInput(start, SOURCE_PRIMARY)
         sink.handleBuffer(silence(1_500))
         var fed = 2_500
         while (fed < 2_048 + 1_470 * 6) {
-            analyzer.onSinkInput(start + fed * 1_000_000L / rate)
+            analyzer.onSinkInput(start + fed * 1_000_000L / rate, SOURCE_PRIMARY)
             sink.handleBuffer(silence(1_470))
             fed += 1_470
             delay(15)
@@ -109,7 +110,7 @@ class RhythmTimingTest {
         val seek = 60_000_000L
         var after = 0
         while (after < 2_048 + 1_470 * 3) {
-            analyzer.onSinkInput(seek + after * 1_000_000L / rate)
+            analyzer.onSinkInput(seek + after * 1_000_000L / rate, SOURCE_PRIMARY)
             sink.handleBuffer(silence(1_470))
             after += 1_470
             delay(15)
