@@ -3,6 +3,7 @@ package com.mytv.mymusic.data.update
 import android.app.PendingIntent
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -391,16 +392,14 @@ class UpdateRepository(
     }
 
     /**
-     * 唤起系统安装器。小米电视等部分 ROM 没有为 content:// 的 ACTION_VIEW 注册安装器，
-     * startActivity 会直接抛 ActivityNotFoundException，因此按
-     * ACTION_VIEW → ACTION_INSTALL_PACKAGE → PackageInstaller 会话依次尝试，
-     * 全部不可用时把更新包导出到外部目录并提示手动安装。
+     * 唤起系统安装器，不拿 `PackageManager.canRequestPackageInstalls` 当门槛：
+     * 部分电视盒子这个接口恒返回 false，安装器却能正常安装，拦在门上只会把用户送去一个不存在的设置页。
+     *
+     * 依次尝试 ACTION_VIEW → ACTION_INSTALL_PACKAGE → PackageInstaller 会话；只有全都起不来时才认为
+     * 真的缺“安装未知来源”授权，返回 [InstallResult.NeedsPermission]。连授权页都没有的 ROM
+     * 由调用方转到手动安装，见 [exportForManualInstall]。
      */
     suspend fun install(file: File): InstallResult {
-        if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
-            _state.update { it.copy(permissionRequired = true, error = "请先允许本应用安装未知来源的应用") }
-            return InstallResult.NeedsPermission
-        }
         _state.update { it.copy(permissionRequired = false, error = "") }
         val uri = runCatching {
             FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
@@ -412,22 +411,17 @@ class UpdateRepository(
             if (startInstallerActivity(Intent.ACTION_INSTALL_PACKAGE, uri)) return InstallResult.Launched
         }
         if (withContext(Dispatchers.IO) { commitInstallSession(file) }) return InstallResult.Launched
-        val savedPath = withContext(Dispatchers.IO) { exportApkForManualInstall(file) }
-        val tip = if (savedPath != null) {
-            "系统没有可用的安装器，更新包已保存到 $savedPath，请用文件管理器安装"
-        } else {
-            "系统没有可用的安装器，请通过应用市场或 U 盘安装更新包"
-        }
-        _state.update { state -> state.copy(error = tip) }
-        return InstallResult.Failed
+        _state.update { it.copy(permissionRequired = true, error = "请先允许本应用安装未知来源的应用") }
+        return InstallResult.NeedsPermission
     }
 
     /** 用隐式 Action 唤起系统安装器；没有任何 Activity 能承接时返回 false。 */
     private fun startInstallerActivity(action: String, apkUri: Uri): Boolean = try {
         val intent = Intent(action)
-            .addCategory(Intent.CATEGORY_DEFAULT)
             .setDataAndType(apkUri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        // 有 clipData 时授权按 clipData 走，个别 ROM 只认这里不看 setData
+        intent.clipData = ClipData.newRawUri("", apkUri)
         context.startActivity(intent)
         true
     } catch (error: ActivityNotFoundException) {
@@ -436,6 +430,53 @@ class UpdateRepository(
     } catch (error: Exception) {
         Log.w(TAG, "$action 唤起安装器失败", error)
         false
+    }
+
+    /**
+     * 打开“安装未知应用”授权页。各 ROM 的设置页面不一样，按带包名的专用页 → 不带包名的同名页
+     * → 应用详情页逐级退，全部没有时导出更新包并提示手动安装，不再只丢一条无法打开的报错。
+     */
+    /** 返回是否真的打开了授权页；一个都打不开时已改为提示手动安装，调用方不必再等用户回来。 */
+    suspend fun openInstallPermissionSettings(): Boolean {
+        for (intent in installPermissionIntents()) {
+            if (tryStartActivity(intent)) return true
+        }
+        manualInstallTip()
+        return false
+    }
+
+    private fun installPermissionIntents(): List<Intent> {
+        val packageUri = Uri.parse("package:${context.packageName}")
+        fun setting(action: String, data: Uri?) = Intent(action, data).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val intents = mutableListOf<Intent>()
+        if (Build.VERSION.SDK_INT >= 26) {
+            intents += setting(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, packageUri)
+            intents += setting(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, null)
+        }
+        intents += setting(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
+        return intents
+    }
+
+    private fun tryStartActivity(intent: Intent): Boolean = try {
+        context.startActivity(intent)
+        true
+    } catch (error: Exception) {
+        Log.w(TAG, "打开 ${intent.action} 失败", error)
+        false
+    }
+
+    /** 授权页和安装器都不可用时的最后一级：把更新包放到外部目录，让用户用文件管理器装。 */
+    suspend fun exportForManualInstall() = manualInstallTip()
+
+    private suspend fun manualInstallTip() {
+        val file = _state.value.file ?: return
+        val savedPath = withContext(Dispatchers.IO) { exportApkForManualInstall(file) }
+        val tip = if (savedPath != null) {
+            "这个系统没有可用的安装器，更新包已保存到 $savedPath，请用文件管理器安装"
+        } else {
+            "这个系统没有可用的安装器，请通过应用市场或 U 盘安装更新包"
+        }
+        _state.update { state -> state.copy(permissionRequired = false, error = tip) }
     }
 
     /**
@@ -537,19 +578,6 @@ class UpdateRepository(
     } catch (error: Exception) {
         Log.w(TAG, "导出更新包失败", error)
         null
-    }
-
-    fun openInstallPermissionSettings() {
-        if (Build.VERSION.SDK_INT < 26) return
-        runCatching {
-            val intent = Intent(
-                android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                Uri.parse("package:${context.packageName}"),
-            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
-        }.onFailure {
-            _state.update { state -> state.copy(error = "无法打开安装权限设置：${it.message}") }
-        }
     }
 
     fun openReleasePage() {

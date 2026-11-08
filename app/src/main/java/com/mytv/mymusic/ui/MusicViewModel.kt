@@ -380,6 +380,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var updateDownloadJob: Job? = null
     private var pendingUpdateInstall = false
     private var installLaunching = false
+    private var installPermissionAttempts = 0
     private var lastInstallOutcome: InstallResult? = null
     private var lastUpdateAttemptAt = 0L
     private var splitOverrideKeys: Set<String> = emptySet()
@@ -4702,8 +4703,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 打开系统安装器。缺少“安装未知来源”权限时直接跳到授权页，授权返回后由
-     * [onAppForeground] 继续安装；安装器被退出时回到应用会再次拉起，不能跳过更新。
+     * 打开系统安装器。安装器和“安装未知来源”授权页都起不来时，
+     * [UpdateRepository.install] 已经把更新包导出并给出手动安装路径，不再反复重试。
+     * 授权页能打开时，授权返回后由 [onAppForeground] 继续安装；授权页对这一版固件
+     * 不起作用的话最多再去一次，之后转手动安装，免得在设置页和弹窗之间来回打转。
      */
     private suspend fun launchUpdateInstaller() {
         if (installLaunching) return
@@ -4712,14 +4715,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val result = app.update.install(file)
             lastInstallOutcome = result
-            pendingUpdateInstall = result == InstallResult.NeedsPermission
-            if (result == InstallResult.NeedsPermission) app.update.openInstallPermissionSettings()
+            pendingUpdateInstall = false
+            if (result == InstallResult.NeedsPermission) {
+                if (installPermissionAttempts++ < MAX_INSTALL_PERMISSION_ATTEMPTS) {
+                    pendingUpdateInstall = app.update.openInstallPermissionSettings()
+                } else {
+                    // 授权过仍然装不上，说明这条路对这台设备走不通，让用户用文件管理器装
+                    app.update.exportForManualInstall()
+                }
+            }
         } finally {
             installLaunching = false
         }
     }
 
-    fun openInstallPermission() = app.update.openInstallPermissionSettings()
+    fun openInstallPermission() {
+        viewModelScope.launch {
+            if (installPermissionAttempts++ < MAX_INSTALL_PERMISSION_ATTEMPTS) {
+                app.update.openInstallPermissionSettings()
+            } else {
+                app.update.exportForManualInstall()
+            }
+        }
+    }
 
     fun openReleasePage() = app.update.openReleasePage()
 
@@ -4741,8 +4759,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun onAppForeground() {
         app.sync.syncIfStaleOnForeground()
         val update = updateState.value
-        if (pendingUpdateInstall && canInstallPackages()) {
-            // 从“安装未知来源”设置页返回：已授权就直接继续安装，不用再点按钮
+        if (pendingUpdateInstall) {
+            // 从“安装未知来源”设置页返回：直接再试一次安装。不查 canRequestPackageInstalls，
+            // 部分盒子它恒为 false，拿它当条件会把用户卡在设置页和弹窗之间来回打转
             pendingUpdateInstall = false
             viewModelScope.launch { launchUpdateInstaller() }
         } else if (update.phase == UpdatePhase.Ready && update.file != null &&
@@ -4759,11 +4778,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             checkUpdatesInBackground()
         }
         resumeIfInterrupted()
-    }
-
-    private fun canInstallPackages(): Boolean {
-        if (android.os.Build.VERSION.SDK_INT < 26) return true
-        return getApplication<Application>().packageManager.canRequestPackageInstalls()
     }
 
     /** 进入同步、音乐库或平台账号页面时拉取一次，避免两台设备停在不同版本。 */
@@ -4895,6 +4909,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val BROWSE_CACHE_MS = 10L * 60 * 1000
+
+        /** 授权页最多打开两次还装不上，就认定这台设备走不通那条路，转手动安装。 */
+        const val MAX_INSTALL_PERMISSION_ATTEMPTS = 2
 
         /**
          * 切歌时必须重新走一遍解析的来源：这些平台列表里给的 url 不是能直接放的流。
