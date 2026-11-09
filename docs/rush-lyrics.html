@@ -1,0 +1,998 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>歌词动画「Rush」设计方案 · myMusic</title>
+<meta name="description" content="把 shub39/Rush 的歌词页做成 myMusic 全屏歌词的第 10 种动画：封面取色底、左对齐大字、景深模糊、逐字羽化扫光、间奏三点和跟着音乐动的背景。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=Roboto+Flex:opsz,wdth,wght@8..144,100..125,300..900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #f4f1f2; --paper: #ffffff; --ink: #1d1b20; --muted: #6b6772; --line: #e4e0e3;
+  --red: #c8102e; --soft-red: #fbe9ec; --dark: #151318;
+  --body: "Roboto Flex", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  --spring: cubic-bezier(.3,1.35,.4,1);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, p { margin: 0; }
+svg { display: block; }
+.page-head, main, footer { width: min(1180px, calc(100% - 40px)); margin-inline: auto; }
+.page-head { padding: 62px 0 30px; }
+.doc-label { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .16em; }
+h1 { max-width: 920px; margin-top: 14px; font-size: clamp(40px, 6.2vw, 76px); line-height: 1.08; letter-spacing: -.045em; font-weight: 900; text-wrap: balance; }
+h1 em { font-style: normal; color: var(--red); }
+.lede { max-width: 880px; margin-top: 24px; color: var(--muted); font-size: 17px; line-height: 1.85; }
+.lede strong { color: var(--ink); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.chip2 { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 13px; }
+.chip2 b { color: var(--ink); font-weight: 700; }
+.chip2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+section.block { padding: 46px 0; border-top: 1px solid var(--line); }
+.block-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.kicker { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .14em; }
+h2 { font-size: clamp(24px, 3vw, 31px); line-height: 1.25; letter-spacing: -.025em; font-weight: 800; }
+.sub { margin: 10px 0 22px; color: var(--muted); font-size: 14.5px; line-height: 1.8; max-width: 900px; }
+.sub strong { color: var(--ink); font-weight: 700; }
+h3 { margin: 30px 0 12px; font-size: 18px; font-weight: 750; letter-spacing: -.01em; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-top: 20px; }
+.tile { padding: 18px 18px 15px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.tile b { display: block; font-size: 34px; line-height: 1.15; letter-spacing: -.03em; font-weight: 900; }
+.tile span { color: var(--muted); font-size: 13px; }
+.tile small { display: block; margin-top: 6px; color: #918d97; font-size: 12px; }
+table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; font-size: 13.5px; }
+th, td { padding: 11px 14px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+thead th { border-top: 0; background: #faf7f8; color: var(--muted); font-size: 12.5px; font-weight: 700; }
+td code, p code, li code, .sub code, figcaption code { font-family: var(--mono); font-size: 12px; background: #f1edf1; border-radius: 6px; padding: 1px 6px; }
+.scroll { overflow-x: auto; border-radius: 16px; }
+pre { margin: 12px 0 0; padding: 16px 18px; background: var(--dark); color: #d9d5df; border-radius: 16px; overflow: auto; font: 12.5px/1.75 var(--mono); }
+pre .c { color: #8c8797; } pre .s { color: #ffb6c1; } pre .k { color: #a9d8d6; } pre .n { color: #f2c98a; }
+.note { margin-top: 14px; padding: 14px 16px; border-left: 3px solid var(--red); background: #fbf6f7; border-radius: 0 14px 14px 0; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
+.note b { color: var(--ink); }
+.note.plain { border-left-color: #cfcad4; background: #f7f5f7; }
+ul.clean { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; line-height: 1.85; }
+ul.clean b { color: var(--ink); }
+.yes { color: #1b6b3a; font-weight: 700; } .no { color: var(--red); font-weight: 700; } .adj { color: #8a5a00; font-weight: 700; }
+.phases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
+.phase { padding: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.phase header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.phase .tag { font: 700 11px var(--mono); padding: 2px 7px; border-radius: 999px; background: var(--soft-red); color: var(--red); }
+.phase h3 { margin: 0; font-size: 15px; }
+.phase ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+footer { padding: 34px 0 70px; border-top: 1px solid var(--line); color: #8f8b95; font-size: 12.5px; line-height: 1.8; }
+footer b { color: var(--muted); font-weight: 700; }
+
+/* ── 演示控制条 ── */
+.demo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 4px 0 18px; padding: 12px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; font-size: 13px; color: var(--muted); }
+.demo-bar .grp { display: flex; align-items: center; gap: 6px; }
+.demo-bar button { height: 32px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font: 600 12.5px/1 var(--body); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.demo-bar button.on { background: var(--ink); color: #fff; border-color: var(--ink); border-radius: 16px; }
+.demo-bar button i { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+.demo-bar .sep { width: 1px; height: 22px; background: var(--line); }
+
+/* ── 手机：播放页（PlayerTheme 深色，令牌随封面色相换） ── */
+.demo { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+.demo > figure { margin: 0; display: grid; gap: 10px; }
+.demo figcaption, .devices figcaption { color: var(--muted); font-size: 12.5px; line-height: 1.65; max-width: 380px; }
+.demo figcaption b, .devices figcaption b { display: block; color: var(--ink); font-size: 13.5px; margin-bottom: 2px; }
+.phone { position: relative; width: 380px; height: 800px; padding: 10px; border-radius: 52px; background: #080b0b; box-shadow: 0 30px 70px -36px rgb(0 0 0 / .6); flex: none; }
+.scr { position: relative; width: 360px; height: 780px; border-radius: 43px; overflow: hidden; background: var(--pl-surface); color: var(--pl-on-surface); font-family: var(--body); user-select: none; }
+.scr canvas.bg { position: absolute; left: 0; top: 0; z-index: 0; }
+.status { position: absolute; left: 0; right: 0; top: 0; height: 28px; display: flex; justify-content: space-between; align-items: center; padding: 0 26px; font: 600 12px/1 var(--body); color: rgb(255 255 255 / .9); z-index: 8; }
+.p-cover { position: absolute; left: 20px; top: 40px; width: 52px; height: 52px; border-radius: 50%; background-size: cover; box-shadow: 0 4px 16px rgb(0 0 0 / .35); z-index: 6; }
+.p-head { position: absolute; left: 86px; right: 8px; top: 40px; height: 52px; display: flex; align-items: center; z-index: 6; }
+.p-titles { flex: 1; min-width: 0; }
+.p-title { font-size: 17px; font-weight: 700; line-height: 22px; color: var(--pl-on-surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-artist { font-size: 14px; font-weight: 500; line-height: 19px; color: var(--pl-primary); }
+.ib { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--pl-on-surface); flex: none; border: 0; background: transparent; cursor: pointer; }
+.ib svg, .tb svg { width: 24px; height: 24px; fill: currentColor; }
+.p-bottom { position: absolute; left: 20px; right: 16px; bottom: 32px; z-index: 6; }
+.wave { height: 28px; margin: 0 8px 0 4px; }
+.wave svg { width: 100%; height: 28px; overflow: visible; }
+.p-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+.ptg { display: flex; align-items: center; gap: 8px; height: 56px; }
+.ptg .side { width: 50px; height: 56px; display: grid; place-items: center; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); }
+.ptg .side.l { border-radius: 28px 14px 14px 28px; } .ptg .side.r { border-radius: 14px 28px 28px 14px; }
+.ptg .side svg { width: 26px; height: 26px; fill: currentColor; }
+.cookie { position: relative; width: 56px; height: 56px; border: 0; padding: 0; background: none; cursor: pointer; flex: none; }
+.cookie > svg { position: absolute; inset: 0; width: 56px; height: 56px; fill: var(--pl-primary); }
+.cookie i { position: absolute; inset: 0; display: grid; place-items: center; color: var(--pl-on-primary); }
+.cookie i svg { width: 32px; height: 32px; fill: currentColor; }
+.toolbar { height: 60px; display: flex; align-items: center; padding: 0 6px; border-radius: 30px; background: color-mix(in srgb, var(--pl-surface-container-high) 84%, transparent); box-shadow: 0 6px 18px rgb(0 0 0 / .3); }
+.tb { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--pl-on-surface); border: 0; background: transparent; }
+.tb.sel { border-radius: 16px; background: var(--pl-primary-container); color: var(--pl-on-primary-container); }
+.navpill { position: absolute; left: 50%; bottom: 9px; width: 108px; height: 4px; margin-left: -54px; border-radius: 2px; background: rgb(255 255 255 / .45); z-index: 8; }
+
+/* ── Rush 舞台 ── */
+.rs { position: absolute; left: 0; overflow: hidden; z-index: 3; cursor: grab;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 44px, #000 calc(100% - 60px), transparent 100%);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 44px, #000 calc(100% - 60px), transparent 100%); }
+.rs.drag { cursor: grabbing; }
+.rs-list { position: absolute; left: 0; right: 0; top: 0; display: flex; flex-direction: column; will-change: transform; }
+.rs-list.anim { transition: transform .55s cubic-bezier(.2,.9,.25,1); }
+.rl { display: flex; }
+.rl-in { padding: 6px 4px; border-radius: 12px; cursor: pointer; transition: transform .38s var(--spring), filter .3s ease; will-change: transform, filter; }
+.rl-in:hover { background: rgb(255 255 255 / .06); }
+.rl-main { font-weight: 700; display: flex; flex-wrap: wrap; column-gap: 0; }
+.rl-main .w { position: relative; display: inline-block; white-space: pre; transition: transform .3s var(--spring); }
+.rl-main .w .sk { visibility: hidden; }
+.rl-main .w .u, .rl-main .w .s { position: absolute; left: 0; top: 0; white-space: pre; }
+.rl-sub { font-weight: 400; margin-top: 4px; }
+.dots { display: flex; gap: 16px; padding: 12px; align-items: center; height: 44px; }
+.dots i { width: 8px; height: 8px; border-radius: 50%; display: block; }
+.reduce .rl-in, .reduce .rl-main .w { transition: none !important; }
+
+/* ── 动画面板（AdaptiveSheet，手机底部面板，PlayerTheme 深色）── */
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; top: 64px; z-index: 20; background: var(--pl-surface-container-low); color: var(--pl-on-surface); border-radius: 28px 28px 0 0; display: flex; flex-direction: column; }
+.scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .32); z-index: 19; }
+.grab { width: 32px; height: 4px; border-radius: 2px; background: var(--pl-on-surface-variant); opacity: .6; margin: 12px auto 4px; flex: none; }
+.sh-head { padding: 6px 24px 6px; flex: none; }
+.sh-head h5 { margin: 0; font-size: 22px; font-weight: 600; line-height: 28px; }
+.sh-head p { margin: 2px 0 0; font-size: 14px; color: var(--pl-on-surface-variant); }
+.sh-body { overflow-y: auto; padding: 4px 16px 28px; flex: 1; scrollbar-width: thin; }
+.lbl { font-size: 16px; font-weight: 700; line-height: 24px; padding: 20px 4px 8px; display: flex; align-items: center; justify-content: space-between; }
+.txtbtn { border: 0; background: none; color: var(--pl-primary); font: 600 14px/1 var(--body); height: 40px; padding: 0 12px; border-radius: 20px; cursor: pointer; }
+.txtbtn:disabled { color: var(--pl-on-surface-variant); opacity: .5; cursor: default; }
+.ctg { display: flex; gap: 2px; }
+.ctg button { flex: 1; min-width: 0; height: 48px; border: 0; background: var(--pl-surface-container); color: var(--pl-on-surface-variant); font: 600 14px/1 var(--body); border-radius: 8px; cursor: pointer; transition: border-radius .35s var(--spring), background .2s; padding: 0 4px; white-space: nowrap; }
+.ctg button:first-child { border-radius: 24px 8px 8px 24px; } .ctg button:last-child { border-radius: 8px 24px 24px 8px; }
+.ctg button.on { background: var(--pl-primary); color: var(--pl-on-primary); border-radius: 24px; }
+.mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mcard { border: 0; padding: 4px; background: none; color: var(--pl-on-surface-variant); text-align: left; cursor: pointer; border-radius: 14px; display: grid; gap: 6px; font: inherit; }
+.mcard .th { position: relative; aspect-ratio: 1.5; border-radius: 14px; overflow: hidden; transition: border-radius .35s var(--spring), padding .2s; }
+.mcard .th canvas { width: 100%; height: 100%; display: block; border-radius: inherit; }
+.mcard.on .th { padding: 4px; border-radius: 22px; box-shadow: inset 0 0 0 2.5px var(--pl-primary); }
+.mcard.on .th canvas { border-radius: 18px; }
+.mcard .ck { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--pl-primary); color: var(--pl-on-primary); display: none; place-items: center; font-size: 12px; font-weight: 900; }
+.mcard.on .ck { display: grid; }
+.mcard .nm { padding-left: 4px; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+.mcard.on .nm { color: var(--pl-on-surface); font-weight: 700; }
+.mcard .new { font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 6px; background: var(--pl-tertiary); color: #102030; }
+.seg { display: flex; flex-direction: column; gap: 2px; }
+.row { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 8px 10px 16px; background: var(--pl-surface-container); border-radius: 4px; }
+.row.col { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 16px 12px; }
+.seg > :first-child { border-top-left-radius: 16px; border-top-right-radius: 16px; }
+.seg > :last-child { border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; }
+.row .t { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; line-height: 22px; }
+.row .t small { display: block; font-size: 13.5px; font-weight: 400; line-height: 19px; color: var(--pl-on-surface-variant); }
+.row .t.inl { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.row .t.inl small { display: inline; }
+.sw { width: 52px; height: 32px; border-radius: 16px; flex: none; position: relative; background: var(--pl-surface-container-highest); box-shadow: inset 0 0 0 2px var(--pl-outline); cursor: pointer; transition: background .2s; margin-right: 8px; }
+.sw::after { content: ""; position: absolute; left: 8px; top: 8px; width: 16px; height: 16px; border-radius: 50%; background: var(--pl-outline); transition: all .25s var(--spring); }
+.sw.on { background: var(--pl-primary); box-shadow: none; }
+.sw.on::after { left: 24px; top: 4px; width: 24px; height: 24px; background: var(--pl-on-primary); }
+.stp { display: flex; align-items: center; gap: 6px; }
+.stp button { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); font: 700 20px/1 var(--body); cursor: pointer; }
+.stp b { min-width: 56px; text-align: center; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sh-note { font-size: 14px; line-height: 1.55; color: var(--pl-on-surface-variant); padding: 8px 4px 4px; }
+
+/* ── 电视 ── */
+.tv { position: relative; width: 680px; max-width: 100%; padding: 10px; border-radius: 14px; background: #080b0b; box-shadow: 0 26px 60px -34px rgb(0 0 0 / .6); }
+.tv .scr { width: 660px; height: 371px; border-radius: 6px; }
+.tv-bar { position: absolute; left: 40px; right: 40px; bottom: 22px; z-index: 6; display: flex; align-items: center; gap: 12px; }
+.tv-bar .pg { flex: 1; height: 4px; border-radius: 2px; background: rgb(255 255 255 / .2); position: relative; }
+.tv-bar .pg i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--pl-primary); }
+.tv-bar .bt { width: 36px; height: 36px; border-radius: 18px; display: grid; place-items: center; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); }
+.tv-bar .bt.main { background: var(--pl-primary); color: var(--pl-on-primary); }
+.tv-bar .bt svg { width: 20px; height: 20px; fill: currentColor; }
+.tv-head { position: absolute; left: 40px; top: 22px; z-index: 6; display: flex; align-items: center; gap: 12px; }
+.tv-head .cv { width: 40px; height: 40px; border-radius: 10px; background-size: cover; }
+.tv-head b { display: block; font-size: 14px; } .tv-head small { font-size: 12px; color: var(--pl-primary); }
+
+/* ── 浅色设置页手机（开源许可 / 关于），沿用 expressive-redesign 的 M3E 令牌 ── */
+.devices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; align-items: start; margin: 10px 0 6px;
+  --md-primary:#206a5f;--md-on-primary:#e2fff8;--md-primary-container:#a9f0e2;--md-on-primary-container:#095c52;
+  --md-secondary:#4b645f;--md-on-secondary:#e3fff8;--md-secondary-container:#cde8e1;--md-on-secondary-container:#3e5751;
+  --md-tertiary:#336577;--md-tertiary-container:#afe2f6;--md-on-tertiary-container:#1d5364;
+  --md-surface:#f6faf8;--md-surface-container-lowest:#ffffff;--md-surface-container-low:#eef5f2;--md-surface-container:#e7f0ec;
+  --md-surface-container-high:#e1eae7;--md-surface-container-highest:#dae5e1;
+  --md-on-surface:#2a3532;--md-on-surface-variant:#56615e;--md-outline:#727d7a;--md-outline-variant:#a9b4b1; }
+.dev { margin: 0; display: grid; gap: 10px; }
+.dev .lphone { position: relative; width: 100%; aspect-ratio: 380/800; padding: 2.5%; border-radius: 52px; background: #17191b; box-shadow: 0 18px 40px -18px rgb(0 0 0 / .45), inset 0 0 0 2px #34383c; }
+.dev .m-app { position: absolute; inset: 2.5%; border-radius: 44px; overflow: hidden; background: var(--md-surface); color: var(--md-on-surface); font-size: 14px; line-height: 1.4; }
+.m-status { position: absolute; top: 0; left: 0; right: 0; height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 26px; font-size: 13px; font-weight: 600; z-index: 30; color: var(--md-on-surface); background: var(--md-surface); }
+.m-scroll { position: absolute; inset: 0; overflow: hidden; }
+.m-appbar { height: 88px; padding: 32px 6px 0; display: flex; align-items: center; }
+.m-ib { width: 48px; height: 48px; display: grid; place-items: center; color: var(--md-on-surface-variant); }
+.m-ib svg { width: 24px; height: 24px; fill: currentColor; }
+.m-big { padding: 0 20px 14px; }
+.m-big h5 { margin: 0; font-size: 30px; line-height: 1.15; font-weight: 800; letter-spacing: -.5px; }
+.m-big p { margin: 4px 0 0; font-size: 14px; color: var(--md-on-surface-variant); }
+.s-label { margin: 18px 20px 8px; font-size: 16px; font-weight: 700; }
+.s-seg { display: flex; flex-direction: column; gap: 2px; margin: 0 16px; }
+.s-seg > * { background: var(--md-surface-container-low); border-radius: 4px; }
+.s-seg > :first-child { border-top-left-radius: 16px; border-top-right-radius: 16px; }
+.s-seg > :last-child { border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; }
+.tcard { padding: 13px 16px; }
+.tcard b { display: block; font-size: 14px; font-weight: 700; }
+.tcard span { display: block; margin-top: 3px; font-size: 13px; line-height: 1.5; color: var(--md-on-surface-variant); }
+.tcard .lnk { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--md-primary); font-weight: 600; font-size: 13.5px; }
+.tcard .lnk svg { width: 16px; height: 16px; fill: currentColor; }
+.s-row { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 10px 16px; }
+.s-ic { width: 40px; height: 40px; border-radius: 50%; background: var(--md-secondary-container); color: var(--md-on-secondary-container); display: grid; place-items: center; flex: none; }
+.s-ic svg { width: 22px; height: 22px; fill: currentColor; }
+.s-t { flex: 1; min-width: 0; }
+.s-t b { display: block; font-size: 15.5px; font-weight: 500; }
+.s-t small { display: block; margin-top: 1px; font-size: 13px; line-height: 1.35; color: var(--md-on-surface-variant); }
+.s-chev { color: var(--md-on-surface-variant); }
+.s-chev svg { width: 24px; height: 24px; fill: currentColor; }
+.newmark { position: relative; outline: 2px dashed var(--red); outline-offset: 2px; }
+.newmark::after { content: "新增"; position: absolute; right: 8px; top: -9px; background: var(--red); color: #fff; font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 6px; }
+.app-head { display: flex; flex-direction: column; align-items: center; padding: 2px 0 8px; }
+.app-head .ic { width: 64px; height: 64px; border-radius: 21px; overflow: hidden; background: linear-gradient(135deg, #1e9483, #006b5f 50%, #00524a); }
+.app-head .ic svg { width: 100%; height: 100%; }
+.app-head b { margin-top: 8px; font-size: 20px; }
+.app-head small { color: var(--md-on-surface-variant); font-size: 13px; }
+
+@media (max-width: 900px) { .devices { grid-template-columns: 1fr; max-width: 380px; margin-inline: auto; } .phases { grid-template-columns: 1fr; } }
+@media (max-width: 420px) { .phone { transform: scale(.86); transform-origin: top left; margin-bottom: -112px; } }
+</style>
+</head>
+<body>
+
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0 4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></symbol>
+  <symbol id="i-privacy" viewBox="0 0 24 24"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></symbol>
+  <!-- 应用图标前景，取自 res/drawable/ic_launcher_foreground.xml（108 画布，可见区 18–90） -->
+  <symbol id="i-logo" viewBox="0 0 108 108"><path d="M39,34.5H69A9.5,9.5 0 0 1 78.5,44V64A9.5,9.5 0 0 1 69,73.5H39A9.5,9.5 0 0 1 29.5,64V44A9.5,9.5 0 0 1 39,34.5Z" fill="none" stroke="#62e8cf" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path fill="#fff" d="M45.14,63.89A7.4,5.6 -22 1 0 58.86,58.34A7.4,5.6 -22 1 0 45.14,63.89Z"/><path d="M56.67,59.98V43.5" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9.29 6.71a1 1 0 0 0 0 1.42L13.17 12l-3.88 3.88a1 1 0 1 0 1.42 1.42l4.59-4.59a1 1 0 0 0 0-1.42L10.7 6.7a1 1 0 0 0-1.41.01z"/></symbol>
+</svg>
+
+<header class="page-head">
+  <div class="doc-label">设 计 方 案 · 2 0 2 6 - 1 1 - 0 9</div>
+  <h1>歌词动画加一种：<em>Rush</em></h1>
+  <p class="lede">
+    <strong>Rush</strong>（shub39/Rush，GPL-3.0，7.2.1）是一个照 Spotify 歌词页做的歌词应用。它的歌词页有几个特点：底色从封面取，<strong>左对齐的粗体大字</strong>，当前句停在上三分之一处，<strong>离当前句越远的句子越模糊</strong>，逐字唱到时有一道<strong>羽化扫光</strong>，间奏用三个点表示进度，背景有六种，其中三种会跟着音乐动。
+    这里把这套歌词页做成全屏歌词的第 10 种动画「Rush」，放在动画面板里经典的旁边。页头、进度条和播放控件仍是 myMusic 自己的，不换。
+  </p>
+  <div class="chips">
+    <span class="chip2"><span class="dot"></span>参考：<b>github.com/shub39/Rush</b> @ 9fa1391</span>
+    <span class="chip2">新模式 <b>1</b> 个 · 设置 <b>7</b> 项</span>
+    <span class="chip2">新依赖 <b>0</b> 个</span>
+    <span class="chip2">许可：<b>GPL-3.0</b>，与本项目 AGPL-3.0 组合分发</span>
+  </div>
+</header>
+
+<main>
+
+<section class="block" id="verdict">
+  <div class="block-head"><span class="kicker">00</span><h2>结论</h2></div>
+  <p class="sub">只移植 Rush <strong>歌词页里画歌词和背景的部分</strong>，按现有的 <code>LyricVisualizer</code> 接口写成一个模式。分享卡片、LRCLIB 纠错、Genius 纯文本歌词、自定义取色器这些不属于全屏歌词，不搬。律动背景用 myMusic 自己从解码后的 PCM 算出的低中高频，不像 Rush 那样用系统 Visualizer，所以<strong>不需要录音权限</strong>。</p>
+  <div class="tiles">
+    <div class="tile"><b>10</b><span>种歌词动画</span><small>Rush 排在经典后面，面板第一行</small></div>
+    <div class="tile"><b>6</b><span>种背景</span><small>纯色 · 封面 · 流光 · 波浪 / 渐变 / 条纹</small></div>
+    <div class="tile"><b>2</b><span>处接口改动</span><small>舞台可点按跳转、按设置决定要不要律动</small></div>
+    <div class="tile"><b>0</b><span>新权限、新依赖</span><small>AGSL 着色器用系统 RuntimeShader</small></div>
+  </div>
+  <div class="note"><b>一句话：</b>全屏歌词页右上角 ✦ 打开动画面板，选「Rush」。整页铺上封面主色，歌词靠左排、当前句在上三分之一处放大，前后的句子缩到 80% 并按距离模糊，正在唱的那句逐字扫亮；手指拖动歌词时暂停跟随、去掉模糊，3 秒后回到当前句；点一句跳过去播放。</div>
+</section>
+
+<section class="block" id="phone">
+  <div class="block-head"><span class="kicker">01</span><h2>交互稿：全屏歌词页和动画面板</h2></div>
+  <p class="sub">左边是正在播放的全屏歌词页，右边是同一时刻打开的动画面板。<strong>右边面板里的设置可以直接点</strong>，左边会跟着变。左边的歌词能用鼠标拖动或滚轮滚动，点一句会跳过去。歌名、歌词和封面都是为这份稿子写的示例。</p>
+
+  <div class="demo-bar" id="demoBar">
+    <div class="grp"><span>封面</span><span id="coverBtns"></span></div>
+    <span class="sep"></span>
+    <div class="grp"><button id="btnPlayDemo" class="on">播放中</button><button id="btnReduce">减少动画</button></div>
+    <span class="sep"></span>
+    <div class="grp"><span>副行</span><button data-sub="tr" class="on">翻译</button><button data-sub="off">不显示</button></div>
+  </div>
+
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr" id="phA"></div></div>
+      <figcaption><b>① 全屏歌词页 · Rush</b>背景铺到状态栏和导航条下面。歌词只排在页头和控件之间的安全区里，上下两端渐隐。页头和控件颜色本来就跟随封面，换封面时和 Rush 的底色一起变。</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr" id="phB"></div></div>
+      <figcaption><b>② 动画面板 · 选中 Rush</b>已经滚到「Rush」的设置，往上滚是模式卡片。沿用现有 <code>AnimationSheet</code>：两列模式卡片（缩略图是减少动画时的那一帧）、每首歌换动画、频谱叠加，然后是「Rush」的 7 项设置。七项都用现有的三种设置控件，不新造。</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="block" id="settings">
+  <div class="block-head"><span class="kicker">02</span><h2>七项设置</h2></div>
+  <p class="sub">Rush 原版的歌词页偏好有 14 项，跟全屏歌词有关的是下面这些。设置表只有数字、选项、开关三种控件，Rush 的六种背景放在一个连接按钮组里太挤，拆成「背景」和「律动样式」两行。Rush 的自定义颜色要取色器，现有设置表没有颜色项，改成「播放页」配色（直接用播放页那套深色）。</p>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:15%">设置</th><th style="width:25%">选项（默认加粗）</th><th style="width:26%">对应 Rush</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>背景</td><td><b>纯色</b> · 封面 · 流光 · 律动</td><td><code>LyricsBackground</code> 的 SOLID_COLOR / ALBUM_ART / HYPNOTIC，律动三种合成一项</td><td>封面＝封面图模糊后盖一层 50% 底色；流光是 AGSL 着色器，Android 13 以下退回上下渐变（Rush 自己也这样退）。</td></tr>
+      <tr><td>律动样式</td><td><b>波浪</b> · 渐变 · 条纹</td><td>WAVE / GRADIENT / CURVE</td><td>背景选「律动」时才起作用，行内写明。条纹是 AGSL，Android 13 以下退回纯色波浪色。</td></tr>
+      <tr><td>配色</td><td><b>鲜艳</b> · 柔和 · 播放页</td><td><code>CardColors</code> VIBRANT / MUTED，CUSTOM 改成播放页</td><td>鲜艳＝封面占比最大的颜色；柔和＝同色降饱和、压暗；播放页＝PlayerTheme 的 surface。文字取黑白里对比度高的那个，至少 4.5:1。</td></tr>
+      <tr><td>对齐</td><td><b>左</b> · 中 · 右</td><td><code>LyricsAlignment</code></td><td>缩放原点跟着对齐边走，左对齐时缩小的句子贴左边缩。</td></tr>
+      <tr><td>字号</td><td>×0.8 – ×1.4，步进 0.1，默认 <b>×1</b></td><td><code>fontSize</code> 28、<code>lineHeight</code> 32</td><td>×1 时手机 28sp（宿主基准 30sp × 0.93），平板、电视按宿主基准等比放大。行高和句间距跟着字号走。</td></tr>
+      <tr><td>景深模糊</td><td><b>开</b> / 关</td><td><code>blurSyncedLyrics</code></td><td>每离当前句一行多 3dp，最多 10dp；拖动歌词时取消。需要 Android 12；电视和低内存设备默认关，和应用里其它实时模糊的规则一致。</td></tr>
+      <tr><td>逐字粗细</td><td>开 / <b>关</b></td><td><code>expressiveSyllables</code></td><td>唱过的字按这个字的时长加粗、加宽（见第 03 节）。拉丁字母用内置 Roboto Flex 的字重轴；中文系统字体没有字重轴时只保留缩放。</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note plain"><b>没放进面板的：</b>行高、字距保持 Rush 默认（32sp / 0），面板底部写「原应用另有 2 项保持默认值」，和其它移植模式的写法一样。翻译、罗马音不单独设，跟应用里「歌词下面那一行」走；Rush 原版把罗马音放在每句下面，这里翻译也这样排，所以这个模式自己排副行（<code>hostSubtitles = false</code>）。</div>
+</section>
+
+<section class="block" id="motion">
+  <div class="block-head"><span class="kicker">03</span><h2>参数和时序</h2></div>
+  <p class="sub">下面的数都取自 Rush 的 <code>BaseSyncedLyrics</code>、<code>SyllableSyncedLyrics</code>、<code>LineSyncedLyrics</code>、<code>DotLoadingProgress</code> 和四个背景组件，交互稿里也按这些数做。</p>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:22%">项目</th><th style="width:38%">Rush 原值</th><th>移植时</th></tr></thead>
+    <tbody>
+      <tr><td>当前句位置</td><td>视口高度的 1/3 处，句子中心对齐</td><td>安全区高度的 1/3。距离超过 10 句直接跳，否则滚动过去</td></tr>
+      <tr><td>句子缩放</td><td>当前 1.0，其余 0.8；原点在对齐边</td><td>同。动画用 MotionScheme 的 fastSpatial</td></tr>
+      <tr><td>模糊</td><td>|序号差| × 3dp，最多 10dp；拖动时为 0</td><td>同。Android 12 以下不模糊，只靠透明度</td></tr>
+      <tr><td>文字透明度</td><td>唱过和正在唱 100%；还没唱的部分：当前句 50%，其它句 20%</td><td>同</td></tr>
+      <tr><td>逐字扫光</td><td>每个词两层：底层是未唱色，上层是满色；用 DstIn 遮罩按进度往右推，交界处 16dp 羽化</td><td>同。只有当前句的词每帧重画，其它句是静态的</td></tr>
+      <tr><td>唱到的字</td><td>没唱到时缩到 0.95，唱到回 1.0；底层再加 2dp 模糊当光晕</td><td>同</td></tr>
+      <tr><td>词间距</td><td>每个词左右各 4dp 内边距</td><td>拉丁词保留；中文逐字歌词是一字一段，照搬会字字拉开，中文不加</td></tr>
+      <tr><td>逐字粗细</td><td>未唱 300；唱过按时长：≤0.5 秒 300、≤1 秒 500、≤1.5 秒 700、更长 900；宽度 100 → 120</td><td>同；只在字体有可变轴时生效</td></tr>
+      <tr><td>间奏</td><td>空句画三个 8dp 圆点，间距 16dp；第 i 个点的进度 = (句进度 − 0.15 i) × 1.4，大小 1 → 1.8 倍，透明度 30% → 100%</td><td>同。句进度＝(现在 − 句首) / (下一句 − 句首)</td></tr>
+      <tr><td>副行</td><td>罗马音在句下，0.75 倍字号、常规字重、70% 透明度</td><td>翻译 / 罗马音 / 都显示，按应用设置；样式同</td></tr>
+      <tr><td>句间距</td><td>行高的一半（16dp）</td><td>随字号缩放</td></tr>
+      <tr><td>手动滚动</td><td>拖动时暂停跟随、去掉模糊；松手 3 秒后回到当前句</td><td>同，和经典模式的 3 秒一致</td></tr>
+      <tr><td>点按一句</td><td>跳到这句开头，带一下触感反馈</td><td>同。点在句子外面仍归宿主（唤醒控件）</td></tr>
+      <tr><td>暂停</td><td>速度为 0 时不自动滚</td><td>舞台时钟本来就停，自然不滚</td></tr>
+      <tr><td>律动输入</td><td>系统 Visualizer 的波形字节，按低 / 中 / 高三段取最大值，弹簧平滑</td><td>改用 <code>StageAudio</code> 的 bass / mid / treble（0–1），按原版的弹簧刚度平滑</td></tr>
+      <tr><td>减少动画</td><td>—</td><td>静帧：当前句整句亮、不扫光、不滚动动画，背景停住</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="block" id="tv">
+  <div class="block-head"><span class="kicker">04</span><h2>平板、折叠屏和电视</h2></div>
+  <p class="sub">Rush 横屏时会把封面和歌名挪到左边 30%。myMusic 的平板、桌面姿态、电视都有自己的页头和工具栏，舞台只拿到安全区，所以<strong>不照搬它的横屏布局</strong>：歌词仍靠左排，句子最宽 720dp，安全区更宽时留在左侧。电视上没有触摸，不接收拖动和点按；景深模糊默认关；帧率按宿主的 30fps。窗口太矮时和其它模式一样回到经典。</p>
+  <figure class="demo" style="margin:0">
+    <div class="tv"><div class="scr" id="tvScr"></div></div>
+  </figure>
+</section>
+
+<section class="block" id="compare">
+  <div class="block-head"><span class="kicker">05</span><h2>Rush 原版里有什么，搬了哪些</h2></div>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:26%">Rush 歌词页的部分</th><th style="width:12%">处理</th><th>做法 / 原因</th></tr></thead>
+    <tbody>
+      <tr><td>逐字歌词列表（SyllableSyncedLyrics）</td><td class="yes">移植</td><td>myMusic 的同步歌词大多带逐字时间，走这一套；没有逐字时间的句子按 <code>charTimings</code> 均分，和其它模式一致</td></tr>
+      <tr><td>逐句歌词列表（LineSyncedLyrics）</td><td class="adj">合并</td><td>它和逐字版差别只在没有逐字遮罩，合进同一个列表，没逐字时间就整句亮</td></tr>
+      <tr><td>六种背景</td><td class="yes">移植</td><td>两个 AGSL 着色器原样搬，参数接到 <code>StageAudio</code></td></tr>
+      <tr><td>鲜艳 / 柔和配色</td><td class="adj">改写</td><td>Rush 用 kmpalette 取色；这里用现有的封面量化色，按 HCT 算柔和色和文字色</td></tr>
+      <tr><td>自定义颜色（取色器）</td><td class="no">不搬</td><td>设置表没有颜色项，换成「播放页」配色</td></tr>
+      <tr><td>页头（封面、歌名、操作按钮）</td><td class="no">不搬</td><td>全屏歌词页已有页头和 ✦、收藏</td></tr>
+      <tr><td>底部播放键随中高频发光</td><td class="no">不搬</td><td>播放控件属于宿主，所有模式共用，不为一个模式改</td></tr>
+      <tr><td>Rush 模式（自动识别正在播的歌）、LRCLIB 纠错、Genius 纯文本、分享卡片</td><td class="no">不搬</td><td>和全屏歌词无关；歌词来源仍是 myMusic 自己的</td></tr>
+      <tr><td>Google Sans Flex 等 11 种字体</td><td class="no">不搬</td><td>不打包任何 Rush 的字体、图标和文案；用应用现有的 Roboto Flex 子集和系统中文字体</td></tr>
+      <tr><td>5 秒无操作隐藏控件</td><td class="no">不搬</td><td>宿主已经有 4 秒自动隐藏</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="block" id="arch">
+  <div class="block-head"><span class="kicker">06</span><h2>实现：一个新模式，两处小改接口</h2></div>
+  <p class="sub">照现有 <code>modes/</code> 的写法加文件，名字带 <code>Rush</code> 前缀防撞名；注册进 <code>LyricVisualizers.all</code>，<code>order = 1</code>，排在经典后面。</p>
+<pre><span class="c">// ui/player/stage/modes/</span>
+RushVisualizer.kt     <span class="c">// object RushVisualizer : LyricVisualizer —— id "rush"、7 项设置、hiddenSettings = 2</span>
+RushLyricList.kt      <span class="c">// LazyColumn：锚点 1/3、缩放 / 模糊 / 透明度、拖动暂停 3 秒、点按跳转</span>
+RushSyllable.kt       <span class="c">// 一个词两层 + DstIn 羽化遮罩、逐字粗细、三点间奏</span>
+RushBackgrounds.kt    <span class="c">// 纯色 / 封面 / 流光 / 波浪 / 渐变 / 条纹；流光和条纹是 AGSL（API 33+）</span>
+RushPalette.kt        <span class="c">// 鲜艳 / 柔和 / 播放页三套底色与文字色</span></pre>
+
+  <h3>接口改动</h3>
+<pre><span class="k">interface</span> LyricVisualizer {
+    …
+    <span class="c">/** true：舞台接收拖动和点按（宿主仍处理点在空白处唤醒控件）。现有模式都是 false。 */</span>
+    <span class="k">val</span> interactive: Boolean <span class="k">get</span>() = <span class="n">false</span>
+
+    <span class="c">/** 按当前设置决定要不要律动分析。默认返回原来的 wantsAudio；Rush 只在背景选「律动」时要。 */</span>
+    <span class="k">fun</span> wantsAudio(settings: SettingValues): Boolean = wantsAudio
+}
+
+<span class="k">class</span> LyricStageContext(…) {
+    …
+    <span class="c">/** 跳到某个时间播放；只给 interactive 的模式用。 */</span>
+    <span class="k">val</span> seek: (Long) -> Unit
+}
+
+<span class="k">data class</span> StageColors(…,
+    <span class="c">/** 封面占比最大的颜色与降饱和压暗后的颜色，以及各自上面的文字色（对比度 ≥ 4.5:1）。 */</span>
+    <span class="k">val</span> coverVibrant: Color, <span class="k">val</span> onCoverVibrant: Color,
+    <span class="k">val</span> coverMuted: Color,   <span class="k">val</span> onCoverMuted: Color,
+)</pre>
+  <ul class="clean">
+    <li><b>背景：</b><code>hostBackground = false</code>，自己的 <code>Background</code> 铺到系统栏下面（<code>bleedToWindowEdges</code>），和动感波光一样。</li>
+    <li><b>边缘：</b>列表上下两端用离屏 <code>saveLayer</code> + DstIn 渐变渐隐，和其它铺满的模式一致。</li>
+    <li><b>频谱叠加：</b>宿主的 <code>reserveBottom</code> 照常生效，列表底部让出频谱卡片那一截。</li>
+    <li><b>缩略图：</b><code>StagePreview</code> 走减少动画分支：底色 + 三句（上句模糊、当前句满色、下句 20%），卡片窄时按 <code>CARD_DP_PER_TEXT_SP</code> 缩字号。</li>
+    <li><b>换歌：</b>按 <code>lyricsKey == song.key</code> 对歌，新歌词没到之前显示三点，不显示上一首的词。</li>
+    <li><b>性能：</b>只有当前句的词每帧重画；其它句的缩放和模糊在换句时动画一次。模糊用 RenderEffect，只画可见的十来句。AGSL 着色器每帧只更新 uniform，不重建 <code>RuntimeShader</code>（Rush 原版每次重组都新建一个，移植时修掉）。</li>
+  </ul>
+</section>
+
+<section class="block" id="license">
+  <div class="block-head"><span class="kicker">07</span><h2>许可、关于页和 README</h2></div>
+  <p class="sub">Rush 的 LICENSE 是 GPL-3.0，每个源文件头写的是「GPL 第 3 版或（由你选择）任何更新的版本」，版权人 Shubham Gorai。GPLv3 和 AGPLv3 的第 13 条都允许把两种许可的代码合成一个作品分发：<strong>从 Rush 改写来的文件保留 GPL-3.0-or-later 文件头和原版权行，再加一行修改说明和日期</strong>；整个应用仍按 AGPL-3.0 分发。不打包 Rush 的字体、图标、文案。</p>
+
+  <div class="devices">
+    <figure class="dev"><div class="lphone"><div class="m-app">
+      <div class="m-status"><span>9:41</span><span>▮▮ 86%</span></div>
+      <div class="m-scroll">
+        <div class="m-appbar"><span class="m-ib"><svg><use href="#i-back"/></svg></span></div>
+        <div class="m-big"><h5>关于与更新</h5><p>版本 1.0（构建 99999）</p></div>
+        <div class="app-head"><span class="ic"><svg viewBox="18 18 72 72" aria-hidden="true"><use href="#i-logo" x="0" y="0" width="108" height="108"/></svg></span><b>myMusic</b><small>版本 1.0（构建 99999） · AGPL-3.0</small></div>
+        <div class="s-seg" style="margin-top:8px">
+          <div class="s-row"><span class="s-ic"><svg><use href="#i-refresh"/></svg></span><div class="s-t"><b>检查更新</b><small>下载后校验 SHA-256</small></div></div>
+          <div class="s-row"><span class="s-ic"><svg><use href="#i-privacy"/></svg></span><div class="s-t"><b>隐私说明</b><small>哪些数据留在本机，哪些会离开</small></div><span class="s-chev"><svg><use href="#i-chev"/></svg></span></div>
+          <div class="s-row newmark"><span class="s-ic"><svg><use href="#i-code"/></svg></span><div class="s-t"><b>开源许可</b><small>AGPL-3.0 · music-lib、Folia 模组、Rush 与第三方依赖</small></div><span class="s-chev"><svg><use href="#i-chev"/></svg></span></div>
+          <div class="s-row"><span class="s-ic"><svg><use href="#i-open"/></svg></span><div class="s-t"><b>项目主页</b><small>github.com/mytv-android/myMusic</small></div></div>
+        </div>
+      </div>
+    </div></div>
+    <figcaption><b>① 关于与更新</b>只改「开源许可」那行的说明，点进去是下一张图。</figcaption></figure>
+
+    <figure class="dev"><div class="lphone"><div class="m-app">
+      <div class="m-status"><span>9:41</span><span>▮▮ 86%</span></div>
+      <div class="m-scroll" style="top:-250px">
+        <div class="m-appbar"><span class="m-ib"><svg><use href="#i-back"/></svg></span></div>
+        <div class="m-big"><h5>开源许可</h5></div>
+        <div class="s-seg"><div class="tcard"><b>GNU Affero General Public License v3.0</b><span>myMusic 的应用代码与移植的平台层均以 AGPL-3.0 发布。</span><span class="lnk">查看完整文本 <svg><use href="#i-open"/></svg></span></div></div>
+        <div class="s-label">上游与第三方</div>
+        <div class="s-seg">
+          <div class="tcard"><b>music-lib</b><span>平台能力来源。当前纳入 commit 7cc4467，保留 Go 源码用于移植参考与许可证说明。</span></div>
+          <div class="tcard"><b>folia-major（Folia）</b><span>全屏歌词动画的模式接口照 Folium v1.x 文档设计；虹光、52Hz 移植自它的官方样例模组……均为 AGPL-3.0。</span></div>
+          <div class="tcard"><b>Folia 社区歌词动画模组</b><span>巨幕、跳一跳移植自 tumuyan 的 cinerama、visualizer-jump（AGPL-3.0）；MiSide 掉落、动感波光、黑胶唱片、星潮·银河……（MIT）。</span></div>
+          <div class="tcard newmark"><b>Rush（shub39）</b><span>歌词动画「Rush」照 Rush 7.2.1 的歌词页用 Kotlin 改写：封面取色底、左对齐大字、景深模糊、逐字羽化扫光、间奏三点和六种背景。GPL-3.0-or-later，与本应用的 AGPL-3.0 代码按两份许可的第 13 条组合分发。不打包它的字体和图标。</span></div>
+        </div>
+        <div class="s-label">GPL-3.0 许可</div>
+        <div class="s-seg newmark"><div class="tcard"><b>GNU General Public License v3.0（Rush 歌词样式）</b><span>Copyright (C) 2026 Shubham Gorai。改写的文件保留原文件头和版权行，注明修改内容和日期，按 GPL 第 3 版或更新版本分发。</span><span class="lnk">查看完整文本 <svg><use href="#i-open"/></svg></span></div></div>
+        <div class="s-label">MIT 许可原文</div>
+        <div class="s-seg"><div class="tcard"><b>MIT License（MiSide 掉落、动感波光、黑胶唱片、星潮·银河、按速度）</b><span>Copyright (c) 2026 baiyangmuzz（miside-drop）…</span></div></div>
+      </div>
+    </div></div>
+    <figcaption><b>② 开源许可（往下滚了一段）</b>「上游与第三方」加一张 Rush 的卡片；在 MIT 原文前面加一节「GPL-3.0 许可」，卡片底部是「查看完整文本」，打开 GPL-3.0 原文。都是现有的 <code>TextCard</code>。</figcaption></figure>
+
+    <figure class="dev" style="align-self:stretch">
+      <div style="background:var(--paper);border:1px solid var(--line);border-radius:22px;padding:18px 18px 8px;font-size:13px;color:var(--muted);line-height:1.75">
+        <b style="color:var(--ink);font-size:14px">README（只加用户能看懂的两处）</b>
+        <p style="margin-top:8px">「播放」那条里，动画列表加上 Rush：</p>
+        <p style="margin-top:6px;padding:10px 12px;background:#f7f5f7;border-radius:12px;color:var(--ink)">…除了原来的整页歌词（经典），还有 <b>Rush</b>、虹光、52Hz、动感波光、黑胶唱片、MiSide 掉落、巨幕、星潮·银河、跳一跳几种…</p>
+        <p style="margin-top:10px">「来源与许可」里，Folia 那句下面加一行：</p>
+        <p style="margin-top:6px;padding:10px 12px;background:#f7f5f7;border-radius:12px;color:var(--ink)">歌词动画「Rush」照 <u>Rush</u>（GPL-3.0）的歌词页重写，许可说明见 THIRD_PARTY_NOTICES.md。</p>
+        <p style="margin-top:10px">接口、着色器、文件名这些不写进 README。</p>
+      </div>
+      <figcaption><b>③ README</b>按 README 只写功能的规矩，只加一个名字和一行带链接的出处。</figcaption>
+    </figure>
+  </div>
+
+  <h3>THIRD_PARTY_NOTICES.md 新增一节</h3>
+<pre>## Rush (full-screen lyric animation "Rush")
+
+- Upstream: https://github.com/shub39/Rush
+- Revision checked: 9fa1391c4b4b472f7d03c9bfbd47612330574463 (master on 2026-11-09, app version 7.2.1)
+- Copyright (C) 2026 Shubham Gorai
+- License: GNU General Public License v3.0 or (at your option) any later version
+- Location: `app/src/main/java/com/mytv/mymusic/ui/player/stage/modes/Rush*.kt`
+- Usage: the "Rush" lyric animation is a Kotlin rewrite of Rush's lyrics page:
+  the synced lyric list (current line anchored at one third of the viewport,
+  0.8 scale and distance blur for other lines, auto-scroll pause after dragging),
+  the per-word feathered highlight with optional duration-based font weight,
+  the three-dot interlude indicator, and the six lyric backgrounds (solid, blurred
+  album art, the "hypnotic" and "curve" AGSL shaders, the wave and gradient
+  visualizers). Audio input comes from myMusic's own PCM analysis instead of
+  android.media.audiofx.Visualizer. No fonts, icons, strings or other assets
+  from Rush are bundled.
+- These files keep the upstream GPL-3.0-or-later header and copyright line and
+  carry a notice of the changes made and the date. They are combined with the
+  AGPL-3.0 code of myMusic under section 13 of both licenses; the combined
+  work is distributed under AGPL-3.0, and the Rush-derived files remain
+  available under GPL-3.0-or-later.</pre>
+</section>
+
+<section class="block" id="phases">
+  <div class="block-head"><span class="kicker">08</span><h2>落地和验收</h2></div>
+  <div class="phases">
+    <div class="phase"><header><span class="tag">1</span><h3>列表与逐字</h3></header><ul>
+      <li>接口两处改动 + <code>seek</code></li>
+      <li>RushLyricList / RushSyllable，纯色背景</li>
+      <li>对齐、字号、景深模糊、逐字粗细</li>
+      <li>减少动画静帧、缩略图</li>
+    </ul></div>
+    <div class="phase"><header><span class="tag">2</span><h3>背景与配色</h3></header><ul>
+      <li>封面 / 流光 / 波浪 / 渐变 / 条纹</li>
+      <li>鲜艳、柔和、播放页三套配色，对比度测试</li>
+      <li>API 33 以下的着色器退路</li>
+      <li>按设置开关律动分析</li>
+    </ul></div>
+    <div class="phase"><header><span class="tag">3</span><h3>收尾</h3></header><ul>
+      <li>平板、桌面姿态、电视截图验收</li>
+      <li>THIRD_PARTY_NOTICES、开源许可页、关于页说明、README</li>
+      <li>单测：锚点、模糊阶梯、间奏点进度、配色对比度</li>
+    </ul></div>
+  </div>
+  <ul class="clean" style="margin-top:18px">
+    <li><b>验收：</b>手机 28sp 下当前句中心落在安全区 1/3 处（误差 ±2dp）；拖动后 3 秒回位；点一句后从这句开头播放；Android 12 以下没有模糊但透明度层次相同；减少动画时整页静止。</li>
+    <li><b>不做：</b>Rush 的横屏页头、取色器、分享卡片、LRCLIB 纠错、播放键发光；不打包它的字体。</li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  <b>依据</b>：shub39/Rush @ 9fa1391c（2026-11-09 的 master，7.2.1）中 <code>shared/ui/…/lyrics/</code> 与 <code>component/*Visualizer*</code> 的源码、fastlane 截图；myMusic 当前的 <code>ui/player/stage</code>、<code>AnimationSheet.kt</code>、<code>AboutScreen.kt</code>、<code>SettingsSubScreens.kt</code>（LicensesScreen）。交互稿里的歌名、歌词、封面为示例。<br>
+  交互稿里的律动数据是按 96 BPM 模拟的，不是真实分析结果。
+</footer>
+
+<script>
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+
+/* ---------- 示例歌曲（为本稿编写）---------- */
+// 每句：[开始毫秒, "词|词|词"（| 分词）, 翻译]；空句是间奏
+const RAW = [
+  [0, '', ''],
+  [3200, '城市的|灯 |一盏|一盏|熄灭', 'The city lights go out one by one'],
+  [7600, '我把|耳机里|的海 |调到|最大', 'I turn the sea in my headphones all the way up'],
+  [12000, '风从|楼顶|经过', 'The wind passes over the rooftop'],
+  [15200, '顺手|带走|一句|晚安', 'and carries off a goodnight'],
+  [19000, '', ''],
+  [24000, '你说过|的话 |还在|轨道上|回旋', 'What you said still circles on the tracks'],
+  [29000, '等到|天亮|以前', 'Before the sky turns light'],
+  [32400, '我们|再唱|一遍', "let's sing it one more time"],
+  [36400, 'Signal |in |the |evening |wind', '晚风里的信号'],
+];
+const LOOP = 41500;
+const LINES = RAW.map(([t, text, tr], i) => {
+  const next = i + 1 < RAW.length ? RAW[i + 1][0] : LOOP;
+  const parts = text ? text.split('|') : [];
+  const span = (next - t) * 0.82;
+  const weights = parts.map((p, k) => p.trim().length * (k === parts.length - 1 ? 1.9 : 1));
+  const sum = weights.reduce((a, b) => a + b, 0) || 1;
+  let c = t;
+  const words = parts.map((p, k) => { const d = span * weights[k] / sum; const w = { text: p, s: c, e: c + d }; c += d; return w; });
+  return { t, next, words, tr };
+});
+const SONG = { title: '晚风信号', artist: '示例歌手 · 示例专辑' };
+
+/* ---------- 封面与配色 ---------- */
+const COVERS = [
+  { id: 'ember', name: '晚霞', hue: 352, vibrant: '#7d1a2a', muted: '#3a2a2d', stops: ['#ffb36b', '#e0485a', '#521437'] },
+  { id: 'tide', name: '青潮', hue: 172, vibrant: '#0e4f48', muted: '#253230', stops: ['#9af0d6', '#1f9c8e', '#0b3742'] },
+  { id: 'iris', name: '鸢尾', hue: 224, vibrant: '#3462c8', muted: '#2c3448', stops: ['#c3d6ff', '#5b7cf0', '#2a2678'] },
+];
+for (const cv of COVERS) {
+  const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
+  const lg = g.createLinearGradient(0, 0, 256, 256); cv.stops.forEach((s, i) => lg.addColorStop(i / (cv.stops.length - 1), s));
+  g.fillStyle = lg; g.fillRect(0, 0, 256, 256);
+  g.globalAlpha = .55; g.fillStyle = cv.stops[0]; g.beginPath(); g.arc(70, 78, 46, 0, 7); g.fill();
+  g.globalAlpha = .35; g.fillStyle = '#fff'; g.fillRect(0, 168, 256, 3);
+  g.globalAlpha = .4; g.fillStyle = cv.stops[2]; g.beginPath(); g.moveTo(0, 256); g.lineTo(0, 190); g.quadraticCurveTo(110, 140, 256, 200); g.lineTo(256, 256); g.fill();
+  g.globalAlpha = 1; cv.img = c; cv.url = c.toDataURL();
+}
+const hex = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+const rgb = (a, al = 1) => `rgba(${a[0] | 0},${a[1] | 0},${a[2] | 0},${al})`;
+const mix = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
+const hsl = (h, s, l) => { s /= 100; l /= 100; const f = n => { const k = (n + h / 30) % 12; return l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }; return [f(0) * 255, f(8) * 255, f(4) * 255]; };
+
+/* 播放页令牌：PlayerTheme 以封面色为种子的深色方案，稿子里按色相近似 */
+function plTokens(h) {
+  const t = (s, l) => rgb(hsl(h, s, l));
+  return {
+    '--pl-primary': t(90, 84), '--pl-on-primary': t(100, 18), '--pl-primary-container': t(70, 66), '--pl-on-primary-container': t(90, 13),
+    '--pl-secondary-container': t(45, 24), '--pl-on-secondary-container': t(70, 90), '--pl-tertiary': rgb(hsl((h + 70) % 360, 90, 76)),
+    '--pl-surface': t(55, 5), '--pl-surface-container-low': t(42, 8), '--pl-surface-container': t(36, 11), '--pl-surface-container-high': t(32, 14), '--pl-surface-container-highest': t(28, 18),
+    '--pl-on-surface': t(40, 91), '--pl-on-surface-variant': t(16, 72), '--pl-outline': t(14, 52), '--pl-outline-variant': t(18, 28),
+  };
+}
+
+/* ---------- 状态 ---------- */
+const DEF = { bg: 'solid', rhythm: 'wave', palette: 'vibrant', align: 'start', size: 1, blur: true, expressive: false };
+const S = { ...DEF };
+let cover = COVERS[0], playing = true, reduce = false, subMode = 'tr';
+let songMs = 2400, lastWall = performance.now();
+
+function palette() {
+  const v = hex(cover.vibrant), m = hex(cover.muted), pl = hsl(cover.hue, 55, 6), plOn = hsl(cover.hue, 40, 91);
+  let bg, fg, wave;
+  if (S.palette === 'muted') { bg = m; fg = [255, 255, 255]; wave = mix(mix(m, v, .25), [0, 0, 0], .3); }
+  else if (S.palette === 'player') { bg = pl; fg = plOn; wave = mix(pl, plOn, .25); }
+  else { bg = v; fg = [255, 255, 255]; wave = mix(mix(v, m, .25), [255, 255, 255], .22); }
+  return { bg, fg, wave, hyp1: mix(bg, [255, 255, 255], .28), hyp2: mix(bg, [0, 0, 0], .5) };
+}
+
+/* ---------- 模拟律动（96 BPM）---------- */
+const AUD = { bass: 0, mid: 0, treble: 0, wb: 0, wm: 0, wt: 0, cb: 0, cm: 0, ct: 0, gb: 0 };
+function stepAudio(ms, dt) {
+  const beat = 60000 / 96, ph = (ms % beat) / beat, kick = Math.exp(-ph * 7);
+  const bass = clamp(.16 + .62 * kick + .06 * Math.sin(ms / 700));
+  const mid = clamp(.24 + .16 * Math.sin(ms / 430 + 1) + .12 * kick);
+  const treble = clamp(.2 + .12 * Math.sin(ms / 260 + 2) + .06 * Math.sin(ms / 53));
+  const k = (s) => 1 - Math.exp(-dt * s);
+  // 波浪：StiffnessVeryLow；条纹：StiffnessLow；渐变：stiffness 25
+  AUD.wb += (bass - AUD.wb) * k(3); AUD.wm += (mid - AUD.wm) * k(3); AUD.wt += (treble - AUD.wt) * k(3);
+  AUD.cb += (bass - AUD.cb) * k(8); AUD.cm += (mid - AUD.cm) * k(8); AUD.ct += (treble - AUD.ct) * k(8);
+  AUD.gb += (bass - AUD.gb) * k(4);
+}
+
+/* ---------- 背景（照 Rush 的六种）---------- */
+const hypCol = document.createElement('canvas');
+function drawBg(g, W, H, ms, P) {
+  const bgKind = S.bg === 'rhythm' ? S.rhythm : S.bg;
+  const uTime = reduce ? 0 : (ms / 16.6) / 10;
+  g.save();
+  g.fillStyle = rgb(P.bg); g.fillRect(0, 0, W, H);
+  if (bgKind === 'cover') {
+    g.filter = 'blur(40px)'; const s = Math.max(W, H) + 120; g.drawImage(cover.img, (W - s) / 2, (H - s) / 2, s, s); g.filter = 'none';
+    g.fillStyle = rgb(P.bg, .5); g.fillRect(0, 0, W, H);
+  } else if (bgKind === 'hypnotic') {
+    const N = 6, cols = Array.from({ length: N }, (_, i) => mix(P.hyp1, P.hyp2, i / (N - 1)));
+    const rows = 160; hypCol.width = 1; hypCol.height = rows; const hc = hypCol.getContext('2d'); const img = hc.createImageData(1, rows);
+    const t = uTime * .1;
+    for (let y = 0; y < rows; y++) {
+      const uv = y / rows; let c = [0, 0, 0], tw = 0;
+      for (let i = 0; i < N; i++) { let w = (Math.sin(uv * 3 + t + i * 2 * Math.PI / N) + 1) * .5; w = w ** 4; c = c.map((v, j) => v + cols[i][j] * w); tw += w; }
+      img.data.set([c[0] / tw, c[1] / tw, c[2] / tw, 255], y * 4);
+    }
+    hc.putImageData(img, 0, 0); g.imageSmoothingEnabled = true; g.drawImage(hypCol, 0, 0, W, H);
+  } else if (bgKind === 'wave') {
+    const h = H / 2, b = AUD.wb * 100, m = AUD.wm * 100, tr = AUD.wt * 100;
+    const Y = v => h * (1 - v / 128);
+    g.beginPath(); g.moveTo(0, H); g.lineTo(0, Y(m));
+    g.bezierCurveTo(W / 4, Y(m), W / 4, Y(b), W / 2, Y(b));
+    g.bezierCurveTo(W * 3 / 4, Y(b), W * 3 / 4, Y(tr), W, Y(tr));
+    g.lineTo(W, H); g.closePath(); g.fillStyle = rgb(P.wave); g.fill();
+  } else if (bgKind === 'gradient') {
+    const stop = clamp(1 - AUD.gb * 100 / 128, 0, 1);
+    const lg = g.createLinearGradient(0, 0, 0, H); lg.addColorStop(0, rgb(P.bg)); lg.addColorStop(stop, rgb(P.wave)); lg.addColorStop(1, rgb(P.wave));
+    g.fillStyle = lg; g.fillRect(0, 0, W, H);
+  } else if (bgKind === 'curve') {
+    const lw = .1 + AUD.cb * 60 * .005, amp = (AUD.cm * 60 + AUD.ct * 60) * .001;
+    const d = x => { const u = x / W; return Math.sin(u * 10 + uTime * .2) * amp + Math.sin(u * 25 + uTime * .5) * amp * .5; };
+    g.fillStyle = rgb(P.wave);
+    for (let k = -1; k <= 3; k++) {
+      g.beginPath();
+      for (let x = 0; x <= W; x += 4) { const y = ((k + 1 - lw) / 3 - d(x)) * H; x ? g.lineTo(x, y) : g.moveTo(x, y); }
+      for (let x = W; x >= 0; x -= 4) g.lineTo(x, ((k + 1) / 3 - d(x)) * H);
+      g.closePath(); g.fill();
+    }
+  }
+  g.restore();
+}
+
+/* ---------- Rush 歌词列表 ---------- */
+class RushStage {
+  constructor(host, o) {
+    this.o = o; this.items = []; this.cur = -2; this.manualUntil = 0; this.offset = 0; this.drag = null; this.target = 0;
+    this.el = document.createElement('div'); this.el.className = 'rs';
+    Object.assign(this.el.style, { top: o.top + 'px', height: (o.bottom - o.top) + 'px', width: o.w + 'px' });
+    this.list = document.createElement('div'); this.list.className = 'rs-list';
+    this.list.style.padding = `0 ${o.padX - 4}px`;
+    this.el.appendChild(this.list); host.appendChild(this.el);
+    this.build();
+    if (o.interactive) this.bindInput();
+    else this.el.style.cursor = 'default';
+  }
+  fontPx() { return this.o.font * S.size; }
+  build() {
+    this.list.innerHTML = ''; this.items = [];
+    const f = this.fontPx(), lh = f * 32 / 28;
+    this.list.style.gap = (lh / 2) + 'px';
+    LINES.forEach((L, i) => {
+      const row = document.createElement('div'); row.className = 'rl';
+      row.style.justifyContent = { start: 'flex-start', center: 'center', end: 'flex-end' }[S.align];
+      const inn = document.createElement('div'); inn.className = 'rl-in';
+      inn.style.maxWidth = this.o.maxW + 'px';
+      inn.style.transformOrigin = { start: '0% 50%', center: '50% 50%', end: '100% 50%' }[S.align];
+      const words = [];
+      if (L.words.length) {
+        const main = document.createElement('div'); main.className = 'rl-main';
+        Object.assign(main.style, { fontSize: f + 'px', lineHeight: lh + 'px', justifyContent: { start: 'flex-start', center: 'center', end: 'flex-end' }[S.align] });
+        L.words.forEach(W => {
+          const dur = W.e - W.s;
+          const wt = !S.expressive ? 700 : dur <= 500 ? 300 : dur <= 1000 ? 500 : dur <= 1500 ? 700 : 900;
+          const wd = !S.expressive ? 100 : dur <= 500 ? 100 : dur <= 1000 ? 105 : dur <= 1500 ? 110 : dur <= 2000 ? 115 : 120;
+          const sp = document.createElement('span'); sp.className = 'w';
+          const top = `font-weight:${wt};font-variation-settings:"wght" ${wt},"wdth" ${wd}`;
+          const under = S.expressive ? 'font-weight:300;font-variation-settings:"wght" 300,"wdth" 100' : top;
+          sp.innerHTML = `<span class="sk" style='${top}'>${W.text}</span><span class="u" style='${under}'>${W.text}</span><span class="s" style='${top}'>${W.text}</span>`;
+          main.appendChild(sp);
+          words.push({ W, el: sp, u: sp.children[1], s: sp.children[2], last: '' });
+        });
+        inn.appendChild(main);
+      } else {
+        const dots = document.createElement('div'); dots.className = 'dots';
+        dots.innerHTML = '<i></i><i></i><i></i>'; inn.appendChild(dots);
+      }
+      let sub = null;
+      if (L.tr && subMode === 'tr') {
+        sub = document.createElement('div'); sub.className = 'rl-sub'; sub.textContent = L.tr;
+        Object.assign(sub.style, { fontSize: f * .75 + 'px', lineHeight: lh * .75 + 'px', textAlign: { start: 'left', center: 'center', end: 'right' }[S.align] });
+        inn.appendChild(sub);
+      }
+      inn.addEventListener('click', e => { if (this.o.interactive && !this.moved) seekTo(L.t); });
+      row.appendChild(inn); this.list.appendChild(row);
+      this.items.push({ L, row, inn, words, sub, dots: inn.querySelector('.dots'), state: '' });
+    });
+    this.cur = -2;
+  }
+  bindInput() {
+    const el = this.el;
+    el.addEventListener('wheel', e => { e.preventDefault(); this.manual(e.deltaY * -.8); }, { passive: false });
+    el.addEventListener('pointerdown', e => { this.drag = { y: e.clientY, start: this.offset }; this.moved = false; el.setPointerCapture(e.pointerId); el.classList.add('drag'); });
+    el.addEventListener('pointermove', e => { if (!this.drag) return; const dy = e.clientY - this.drag.y; if (Math.abs(dy) > 4) this.moved = true; if (this.moved) { this.offset = this.drag.start + dy; this.manualUntil = performance.now() + 3000; this.apply(false); } });
+    const up = () => { this.drag = null; el.classList.remove('drag'); setTimeout(() => this.moved = false, 0); };
+    el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  }
+  manual(dy) { this.offset += dy; this.manualUntil = performance.now() + 3000; this.apply(false); }
+  isManual() { return this.manualUntil > performance.now(); }
+  apply(anim) {
+    this.list.classList.toggle('anim', anim && !reduce);
+    this.list.style.transform = `translateY(${(this.target + this.offset).toFixed(1)}px)`;
+  }
+  frame(ms) {
+    const items = this.items;
+    let cur = 0; for (let i = 0; i < items.length; i++) if (items[i].L.t <= ms) cur = i;
+    const manual = this.isManual();
+    const fg = palette().fg;
+    if (cur !== this.cur || this.wasManual !== manual) {
+      const jump = Math.abs(cur - this.cur) > 10;
+      this.cur = cur;
+      const it = items[cur], H = this.o.bottom - this.o.top;
+      if (!manual) {
+        this.target = H / 3 - (it.row.offsetTop + it.row.offsetHeight / 2);
+        const back = this.wasManual && !manual;
+        this.offset = 0; this.apply(!jump || back);
+      }
+      this.wasManual = manual;
+      items.forEach((x, i) => {
+        const isCur = i === cur, dist = Math.abs(i - cur);
+        const blur = (S.blur && !this.o.noBlur && !manual) ? Math.min(dist * 3, 10) : 0;
+        x.inn.style.transform = `scale(${isCur ? 1 : .8})`;
+        x.inn.style.filter = blur ? `blur(${blur}px)` : 'none';
+      });
+    }
+    // 颜色与逐字
+    items.forEach((x, i) => {
+      const isCur = i === cur, started = x.L.t <= ms;
+      const under = isCur ? .5 : .2;
+      if (x.sub) x.sub.style.color = rgb(fg, .7);
+      if (x.dots) {
+        const p = reduce ? (started ? 1 : 0) : clamp((ms - x.L.t) / (x.L.next - x.L.t));
+        const col = started ? rgb(fg) : rgb(fg, .3);
+        [...x.dots.children].forEach((d, k) => {
+          const dp = (isCur || reduce) ? clamp((p - k * .15) * 1.4) : (started ? 1 : 0);
+          d.style.background = col; d.style.transform = `scale(${1 + .8 * dp})`; d.style.opacity = (.3 + .7 * dp).toFixed(3);
+        });
+        return;
+      }
+      x.words.forEach(w => {
+        let p = ms < w.W.s ? 0 : ms > w.W.e ? 1 : (ms - w.W.s) / (w.W.e - w.W.s);
+        if (reduce && isCur) p = 1;
+        if (!isCur && !started) p = 0;
+        if (!isCur && started) p = 1;
+        const key = isCur ? (p * 200 | 0) + ':' + under : (p ? 'done' : 'todo');
+        if (key === w.last && !this.dirtyColor) return;
+        w.last = key;
+        const width = w.el.offsetWidth || 1, feather = 16;
+        const x2 = (width + feather) * p, a = clamp((x2 - feather) / width) * 100, b = clamp(x2 / width) * 100;
+        w.u.style.color = rgb(fg, under);
+        w.s.style.color = rgb(fg);
+        const showU = `linear-gradient(90deg, transparent ${a}%, #000 ${b}%)`;
+        const showS = p >= 1 ? 'none' : `linear-gradient(90deg, #000 ${a}%, transparent ${b}%)`;
+        w.u.style.webkitMaskImage = w.u.style.maskImage = p > 0 ? showU : 'none';
+        w.s.style.visibility = p > 0 ? 'visible' : 'hidden';
+        w.s.style.webkitMaskImage = w.s.style.maskImage = showS;
+        const hi = isCur && p > 0;
+        w.u.style.filter = hi ? 'blur(2px)' : 'none';
+        w.el.style.transform = isCur && p === 0 ? 'scale(.95)' : 'none';
+        w.s.style.textShadow = hi ? `0 0 6px ${rgb(fg, .35)}` : 'none';
+      });
+    });
+    this.dirtyColor = false;
+  }
+  relayout() { this.build(); this.dirtyColor = true; }
+}
+
+/* ---------- 图标 ---------- */
+const P = {
+  back: 'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z',
+  heart: 'M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z',
+  spark: 'M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z',
+  lyrics: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z',
+  queue: 'M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z',
+  prev: 'M6 6h2v12H6zm3.5 6 8.5 6V6z', next: 'M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z',
+  play: 'M8 5v14l11-7z', pause: 'M6 19h4V5H6v14zm8-14v14h4V5h-4z',
+};
+const ico = k => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${P[k]}"/></svg>`;
+const cookiePath = (() => { let d = ''; for (let i = 0; i <= 120; i++) { const a = i / 120 * Math.PI * 2, r = 28 * (0.93 + 0.07 * Math.cos(12 * a)); d += (i ? 'L' : 'M') + (28 + r * Math.cos(a)).toFixed(2) + ' ' + (28 + r * Math.sin(a)).toFixed(2); } return d + 'Z'; })();
+
+function fitCanvas(c, w, h) { c.width = Math.round(w * DPR); c.height = Math.round(h * DPR); c.style.width = w + 'px'; c.style.height = h + 'px'; const g = c.getContext('2d'); g.setTransform(DPR, 0, 0, DPR, 0, 0); return g; }
+
+/* ---------- 手机 A：全屏歌词页 ---------- */
+const SW = 360, SH = 780;
+const phA = $('#phA');
+phA.innerHTML = `
+  <canvas class="bg" id="bgA"></canvas>
+  <div class="status"><span>9:41</span><span>5G ▮▮▮ 86%</span></div>
+  <div class="p-cover" id="coverA"></div>
+  <div class="p-head"><div class="p-titles"><div class="p-title">${SONG.title}</div><div class="p-artist">${SONG.artist}</div></div>
+    <button class="ib" aria-label="歌词动画">${ico('spark')}</button><button class="ib" aria-label="收藏">${ico('heart')}</button></div>
+  <div class="p-bottom">
+    <div class="wave"><svg viewBox="0 0 312 28" preserveAspectRatio="none"><path id="wvP" fill="none" stroke="var(--pl-primary)" stroke-width="4" stroke-linecap="round"/><line id="wvR" y1="14" y2="14" x2="312" stroke="var(--pl-outline-variant)" stroke-width="4" stroke-linecap="round"/><rect id="wvT" width="4" height="22" y="3" rx="2" fill="var(--pl-primary)"/></svg></div>
+    <div class="p-row">
+      <div class="ptg"><span class="side l">${ico('prev')}</span><button class="cookie" id="btnPlay" aria-label="暂停"><svg viewBox="0 0 56 56"><path d="${cookiePath}"/></svg><i id="playIco">${ico('pause')}</i></button><span class="side r">${ico('next')}</span></div>
+      <div class="toolbar"><span class="tb sel" aria-label="退出全屏歌词">${ico('lyrics')}</span><span class="tb" aria-label="播放队列">${ico('queue')}</span></div>
+    </div>
+  </div>
+  <div class="navpill"></div>`;
+const gA = fitCanvas($('#bgA'), SW, SH);
+const stageA = new RushStage(phA, { w: SW, h: SH, top: 100, bottom: 640, padX: 20, font: 28, maxW: 330, interactive: true });
+
+/* ---------- 电视 ---------- */
+const TW = 660, TH = 371;
+const tvScr = $('#tvScr');
+tvScr.innerHTML = `<canvas class="bg" id="bgT"></canvas>
+  <div class="tv-head"><span class="cv" id="coverT"></span><div><b>${SONG.title}</b><small>${SONG.artist}</small></div></div>
+  <div class="tv-bar"><span class="bt">${ico('prev')}</span><span class="bt main" id="tvPlay">${ico('pause')}</span><span class="bt">${ico('next')}</span><span class="pg"><i id="tvPg"></i></span><span class="bt">${ico('spark')}</span></div>`;
+const gT = fitCanvas($('#bgT'), TW, TH);
+const stageT = new RushStage(tvScr, { w: TW, h: TH, top: 80, bottom: 300, padX: 40, font: 24, maxW: 470, interactive: false, noBlur: true });
+
+/* ---------- 手机 B：动画面板 ---------- */
+const MODES = [
+  ['classic', '经典'], ['rush', 'Rush'], ['aurora', '虹光'], ['rings', '52Hz'], ['miside', 'MiSide 掉落'],
+  ['wave', '动感波光'], ['vinyl', '黑胶唱片'], ['cinerama', '巨幕'], ['stardrift', '星潮·银河'], ['jump', '跳一跳'],
+];
+const phB = $('#phB');
+phB.innerHTML = `
+  <canvas class="bg" id="bgB"></canvas>
+  <div class="status"><span>9:41</span><span>5G ▮▮▮ 86%</span></div>
+  <div class="scrim"></div>
+  <div class="sheet" role="dialog" aria-label="歌词动画">
+    <div class="grab"></div>
+    <div class="sh-head"><h5>歌词动画</h5><p>只在全屏歌词页生效</p></div>
+    <div class="sh-body" id="shBody">
+      <div class="mgrid" id="mgrid"></div>
+      <div class="lbl">每首歌换动画</div>
+      <div class="ctg big"><button class="on">固定</button><button>随机</button><button>按速度</button></div>
+      <div class="sh-note">所有歌都用上面选中的动画。</div>
+      <div class="lbl">叠加</div>
+      <div class="seg"><div class="row"><div class="t">频谱<small>全屏歌词页左下角显示 48 段频谱、响度和峰值频率；经典模式不显示</small></div><span class="sw"></span></div></div>
+      <div class="lbl"><span>“Rush”的设置</span><button class="txtbtn" id="resetBtn">恢复默认</button></div>
+      <div class="seg" id="form"></div>
+      <div class="sh-note">移植自 Rush 7.2.1（shub39，GPL-3.0）。原应用另有 2 项保持默认值。</div>
+    </div>
+  </div>`;
+const gB = fitCanvas($('#bgB'), SW, SH);
+
+const mgrid = $('#mgrid');
+MODES.forEach(([id, name]) => {
+  const b = document.createElement('button'); b.className = 'mcard' + (id === 'rush' ? ' on' : ''); b.dataset.m = id;
+  b.innerHTML = `<span class="th"><canvas></canvas><span class="ck">✓</span></span><span class="nm">${name}${id === 'rush' ? '<span class="new">新</span>' : ''}</span>`;
+  b.onclick = () => { $$('.mcard').forEach(x => x.classList.toggle('on', x === b)); };
+  mgrid.appendChild(b);
+});
+
+function thumb(id, cvs) {
+  const w = 146, h = 97; const g = fitCanvas(cvs, w, h); cvs.style.width = '100%'; cvs.style.height = '100%';
+  const pl = hsl(cover.hue, 55, 7), plOn = hsl(cover.hue, 40, 91), pri = hsl(cover.hue, 90, 84);
+  g.fillStyle = rgb(pl); g.fillRect(0, 0, w, h);
+  const txt = (s, x, y, size, col, weight = 700, align = 'center', blur = 0) => { g.save(); if (blur) g.filter = `blur(${blur}px)`; g.font = `${weight} ${size}px "Noto Sans SC",sans-serif`; g.textAlign = align; g.fillStyle = col; g.fillText(s, x, y); g.restore(); };
+  if (id === 'rush') {
+    const Pp = palette(); drawBg(g, w, h, 0, Pp);
+    const al = S.align === 'center' ? 'center' : S.align === 'end' ? 'right' : 'left', x = al === 'left' ? 10 : al === 'right' ? w - 10 : w / 2;
+    txt('城市的灯 一盏', x, 26, 10, rgb(Pp.fg), 700, al, S.blur ? 1.2 : 0);
+    txt('我把耳机里的海', x, 50, 14, rgb(Pp.fg), 800, al);
+    txt('调到最大', x, 68, 14, rgb(Pp.fg), 800, al);
+    txt('风从楼顶经过', x, 88, 10, rgb(Pp.fg, .25), 700, al, S.blur ? 1.2 : 0);
+    return;
+  }
+  if (id === 'classic') { txt('城市的灯 一盏一盏', w / 2, 34, 10, rgb(plOn, .5), 600); txt('我把耳机里的海', w / 2, 54, 13, rgb(pri), 800); txt('风从楼顶经过', w / 2, 74, 10, rgb(plOn, .5), 600); return; }
+  if (id === 'aurora') { for (let i = 0; i < 3; i++) { g.strokeStyle = rgb(hsl((cover.hue + i * 50) % 360, 80, 60), .5); g.lineWidth = 10 - i * 2; g.beginPath(); for (let x = 0; x <= w; x += 4) { const y = 30 + i * 12 + Math.sin(x / 18 + i) * 8; x ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); } txt('我把耳机里的海', w / 2, 76, 13, rgb(plOn), 800); return; }
+  if (id === 'rings') { for (let r = 8; r < 70; r += 7) { g.strokeStyle = rgb(pri, .5 - r / 160); g.lineWidth = 1.2; g.beginPath(); g.arc(w / 2, h / 2, r, 0, 7); g.stroke(); } txt('我把耳机里的海', w / 2, h / 2 + 4, 12, rgb(plOn), 800); return; }
+  if (id === 'miside') { '我把耳机里的海'.split('').forEach((c, i) => txt(c, 16 + i * 18, 30 + (i % 3) * 18 + i * 3, 14, rgb(plOn), 800)); return; }
+  if (id === 'wave') { g.fillStyle = rgb(hsl(cover.hue, 70, 30)); g.beginPath(); g.moveTo(0, h); for (let x = 0; x <= w; x += 4) g.lineTo(x, 66 + Math.sin(x / 14) * 7); g.lineTo(w, h); g.fill(); txt('我把耳机里的海', w / 2, 44, 13, rgb(plOn), 800); return; }
+  if (id === 'vinyl') { g.fillStyle = '#111'; g.beginPath(); g.arc(104, 48, 34, 0, 7); g.fill(); g.drawImage(cover.img, 92, 36, 24, 24); txt('我把耳机', 12, 44, 12, rgb(plOn), 800, 'left'); txt('里的海', 12, 62, 12, rgb(plOn), 800, 'left'); return; }
+  if (id === 'cinerama') { g.fillStyle = rgb(pri, .9); g.fillRect(0, 30, w, 34); txt('我把耳机里的海', w / 2, 52, 15, rgb(pl), 900); return; }
+  if (id === 'stardrift') { for (let i = 0; i < 60; i++) { g.fillStyle = rgb(plOn, (i * 37 % 10) / 12); g.fillRect((i * 53) % w, (i * 29) % h, 1.4, 1.4); } txt('我把耳机里的海', w / 2, 54, 12, rgb(plOn), 700); return; }
+  if (id === 'jump') { for (let i = 0; i < 5; i++) { g.fillStyle = rgb(hsl(cover.hue, 50, 30 + i * 6)); g.fillRect(14 + i * 26, 60 - i * 6, 18, 40); } g.fillStyle = rgb(pri); g.beginPath(); g.arc(75, 34, 5, 0, 7); g.fill(); txt('我把耳机里的海', w / 2, 20, 11, rgb(plOn), 800); return; }
+}
+function drawThumbs() { $$('.mcard').forEach(b => thumb(b.dataset.m, b.querySelector('canvas'))); }
+
+/* 设置表单（ChoiceRow / NumberRow / SwitchRow） */
+const FORM = [
+  { k: 'bg', type: 'choice', label: '背景', opts: [['solid', '纯色'], ['cover', '封面'], ['hypnotic', '流光'], ['rhythm', '律动']] },
+  { k: 'rhythm', type: 'choice', label: '律动样式', summary: '背景选“律动”时生效', opts: [['wave', '波浪'], ['gradient', '渐变'], ['curve', '条纹']] },
+  { k: 'palette', type: 'choice', label: '配色', opts: [['vibrant', '鲜艳'], ['muted', '柔和'], ['player', '播放页']] },
+  { k: 'align', type: 'choice', label: '对齐', opts: [['start', '左'], ['center', '中'], ['end', '右']] },
+  { k: 'size', type: 'num', label: '字号', min: .8, max: 1.4, step: .1 },
+  { k: 'blur', type: 'sw', label: '景深模糊', summary: '离当前句越远越模糊，拖动歌词时取消；Android 12 起' },
+  { k: 'expressive', type: 'sw', label: '逐字粗细', summary: '唱得越长的字越粗越宽；需要字体有字重轴' },
+];
+function renderForm() {
+  const f = $('#form'); f.innerHTML = '';
+  FORM.forEach(it => {
+    const row = document.createElement('div');
+    if (it.type === 'choice') {
+      row.className = 'row col';
+      row.innerHTML = `<div class="t inl">${it.label}${it.summary ? `<small>${it.summary}</small>` : ''}</div><div class="ctg">${it.opts.map(([v, n]) => `<button data-v="${v}" class="${S[it.k] === v ? 'on' : ''}">${n}</button>`).join('')}</div>`;
+      row.querySelectorAll('button').forEach(b => b.onclick = () => set(it.k, b.dataset.v));
+    } else if (it.type === 'num') {
+      row.className = 'row';
+      row.innerHTML = `<div class="t">${it.label}</div><div class="stp"><button aria-label="字号减小">−</button><b>×${(+S.size.toFixed(1))}</b><button aria-label="字号增大">+</button></div>`;
+      const [m, p] = row.querySelectorAll('button');
+      m.onclick = () => set('size', Math.max(it.min, Math.round((S.size - it.step) * 10) / 10));
+      p.onclick = () => set('size', Math.min(it.max, Math.round((S.size + it.step) * 10) / 10));
+    } else {
+      row.className = 'row';
+      row.innerHTML = `<div class="t">${it.label}<small>${it.summary}</small></div><span class="sw ${S[it.k] ? 'on' : ''}" role="switch" aria-checked="${S[it.k]}"></span>`;
+      row.querySelector('.sw').onclick = () => set(it.k, !S[it.k]);
+    }
+    f.appendChild(row);
+  });
+  $('#resetBtn').disabled = Object.keys(DEF).every(k => DEF[k] === S[k]);
+}
+function set(k, v) {
+  S[k] = v; renderForm(); drawThumbs();
+  if (['align', 'size', 'expressive'].includes(k)) { stageA.relayout(); stageT.relayout(); }
+  stageA.cur = stageT.cur = -2; stageA.dirtyColor = stageT.dirtyColor = true;
+}
+$('#resetBtn').onclick = () => { Object.assign(S, DEF); renderForm(); drawThumbs(); stageA.relayout(); stageT.relayout(); };
+
+/* ---------- 演示控制 ---------- */
+function applyCover() {
+  const tok = plTokens(cover.hue);
+  [phA, phB, tvScr].forEach(el => Object.entries(tok).forEach(([k, v]) => el.style.setProperty(k, v)));
+  $('#coverA').style.backgroundImage = `url(${cover.url})`; $('#coverT').style.backgroundImage = `url(${cover.url})`;
+  drawThumbs(); stageA.dirtyColor = stageT.dirtyColor = true; stageA.cur = stageT.cur = -2;
+}
+const cb = $('#coverBtns');
+COVERS.forEach((c, i) => {
+  const b = document.createElement('button'); b.innerHTML = `<i style="background:url(${c.url}) center/cover"></i>${c.name}`; if (!i) b.classList.add('on');
+  b.onclick = () => { cover = c; $$('#coverBtns button').forEach(x => x.classList.toggle('on', x === b)); applyCover(); };
+  cb.appendChild(b);
+});
+function setPlaying(v) {
+  playing = v; $('#btnPlayDemo').classList.toggle('on', v); $('#btnPlayDemo').textContent = v ? '播放中' : '已暂停';
+  $('#playIco').innerHTML = ico(v ? 'pause' : 'play'); $('#tvPlay').innerHTML = ico(v ? 'pause' : 'play');
+}
+$('#btnPlayDemo').onclick = () => setPlaying(!playing);
+$('#btnPlay').onclick = () => setPlaying(!playing);
+$('#btnReduce').onclick = () => { reduce = !reduce; $('#btnReduce').classList.toggle('on', reduce); [phA, tvScr].forEach(e => e.classList.toggle('reduce', reduce)); stageA.cur = stageT.cur = -2; stageA.dirtyColor = stageT.dirtyColor = true; };
+$$('[data-sub]').forEach(b => b.onclick = () => { subMode = b.dataset.sub; $$('[data-sub]').forEach(x => x.classList.toggle('on', x === b)); stageA.relayout(); stageT.relayout(); });
+function seekTo(ms) { songMs = ms; stageA.manualUntil = 0; stageA.offset = 0; stageA.cur = -2; stageT.cur = -2; }
+
+/* ---------- 进度条（波浪进度，和现有播放页一样）---------- */
+function drawProgress(frac, ms) {
+  const x = 312 * frac;
+  let d = ''; for (let i = 0; i <= x; i += 3) { const y = 14 + Math.sin(i / 7 - ms / 300) * (playing ? 4 : 0); d += (i ? 'L' : 'M') + i.toFixed(1) + ' ' + y.toFixed(1); }
+  $('#wvP').setAttribute('d', d); $('#wvR').setAttribute('x1', Math.min(312, x + 8)); $('#wvT').setAttribute('x', x - 2);
+  $('#tvPg').style.width = (frac * 100) + '%';
+}
+
+/* ---------- 帧循环 ---------- */
+applyCover(); renderForm();
+// 面板一打开先停在 Rush 的设置上，往上滚是模式卡片
+function scrollSheetToSettings() { const b = $('#shBody'), l = b.querySelectorAll('.lbl')[2]; b.scrollTop = l.offsetTop - b.offsetTop - 4; }
+scrollSheetToSettings();
+let tvAcc = 0;
+function tick(now) {
+  const dt = Math.min(.1, (now - lastWall) / 1000); lastWall = now;
+  if (playing && !reduce) songMs = (songMs + dt * 1000) % LOOP;
+  if (playing && !reduce) stepAudio(songMs, dt);
+  const Pp = palette();
+  drawBg(gA, SW, SH, songMs, Pp);
+  stageA.frame(songMs);
+  drawProgress(songMs / LOOP, now);
+  // 面板背后是同一页，被遮罩压暗
+  drawBg(gB, SW, SH, songMs, Pp);
+  // 电视 30fps
+  tvAcc += dt; if (tvAcc >= 1 / 30) { tvAcc = 0; drawBg(gT, TW, TH, songMs, Pp); stageT.frame(songMs); }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(t => { lastWall = t; tick(t); });
+// 字体加载完成后重新量一次词宽和行高
+if (document.fonts) document.fonts.ready.then(() => { stageA.relayout(); stageT.relayout(); drawThumbs(); scrollSheetToSettings(); });
+</script>
+</body>
+</html>

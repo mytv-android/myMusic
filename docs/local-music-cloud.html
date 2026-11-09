@@ -1,0 +1,882 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>本地音乐与 WebDAV 设计方案 · myMusic</title>
+<meta name="description" content="扫描本机音乐并匹配封面歌词；上传到网易云盘或 WebDAV，让加进歌单的本地歌换设备也能播；同步位置新增 WebDAV。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Roboto+Flex:opsz,wdth,wght@8..144,100..125,300..900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #f4f1f2; --paper: #ffffff; --ink: #1d1b20; --muted: #6b6772; --line: #e4e0e3;
+  --red: #c8102e; --soft-red: #fbe9ec; --dark: #151318;
+  --body: "Roboto Flex", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  --spring: cubic-bezier(.3,1.35,.4,1);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, h5, p { margin: 0; }
+svg { display: block; }
+button { font: inherit; }
+.page-head, main, footer { width: min(1180px, calc(100% - 40px)); margin-inline: auto; }
+.page-head { padding: 62px 0 30px; }
+.doc-label { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .16em; }
+h1 { max-width: 960px; margin-top: 14px; font-size: clamp(38px, 6vw, 72px); line-height: 1.1; letter-spacing: -.045em; font-weight: 900; text-wrap: balance; }
+h1 em { font-style: normal; color: var(--red); }
+.lede { max-width: 900px; margin-top: 24px; color: var(--muted); font-size: 17px; line-height: 1.85; }
+.lede strong { color: var(--ink); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.chip2 { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 13px; }
+.chip2 b { color: var(--ink); font-weight: 700; }
+.chip2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+section.block { padding: 46px 0; border-top: 1px solid var(--line); }
+.block-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.kicker { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .14em; }
+h2 { font-size: clamp(24px, 3vw, 31px); line-height: 1.25; letter-spacing: -.025em; font-weight: 800; }
+.sub { margin: 10px 0 22px; color: var(--muted); font-size: 14.5px; line-height: 1.8; max-width: 920px; }
+.sub strong { color: var(--ink); font-weight: 700; }
+h3 { margin: 30px 0 12px; font-size: 18px; font-weight: 750; letter-spacing: -.01em; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 20px; }
+.tile { padding: 18px 18px 15px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.tile b { display: block; font-size: 22px; line-height: 1.25; letter-spacing: -.02em; font-weight: 850; }
+.tile span { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; font-size: 13.5px; }
+th, td { padding: 11px 14px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+thead th { border-top: 0; background: #faf7f8; color: var(--muted); font-size: 12.5px; font-weight: 700; }
+td code, p code, li code, .sub code, figcaption code, .note code { font-family: var(--mono); font-size: 12px; background: #f1edf1; border-radius: 6px; padding: 1px 6px; }
+.scroll { overflow-x: auto; border-radius: 16px; }
+pre { margin: 12px 0 0; padding: 16px 18px; background: var(--dark); color: #d9d5df; border-radius: 16px; overflow: auto; font: 12.5px/1.75 var(--mono); }
+pre .c { color: #8c8797; } pre .s { color: #ffb6c1; } pre .k { color: #a9d8d6; } pre .n { color: #f2c98a; }
+.note { margin-top: 14px; padding: 14px 16px; border-left: 3px solid var(--red); background: #fbf6f7; border-radius: 0 14px 14px 0; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
+.note b { color: var(--ink); }
+.note.plain { border-left-color: #cfcad4; background: #f7f5f7; }
+ul.clean { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; line-height: 1.85; }
+ul.clean b { color: var(--ink); }
+.yes { color: #1b6b3a; font-weight: 700; } .no { color: var(--red); font-weight: 700; } .adj { color: #8a5a00; font-weight: 700; }
+.flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 18px; counter-reset: s; }
+.step { position: relative; padding: 16px 14px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.step::before { counter-increment: s; content: counter(s); display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--ink); color: #fff; font: 800 12px/1 var(--body); margin-bottom: 10px; }
+.step b { display: block; font-size: 15px; }
+.step span { display: block; margin-top: 4px; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+.step small { display: block; margin-top: 8px; font-size: 11.5px; color: #8f8b95; }
+.phases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
+.phase { padding: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.phase header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.phase .tag { font: 700 11px var(--mono); padding: 2px 7px; border-radius: 999px; background: var(--soft-red); color: var(--red); }
+.phase h3 { margin: 0; font-size: 15px; }
+.phase ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+footer { padding: 34px 0 70px; border-top: 1px solid var(--line); color: #8f8b95; font-size: 12.5px; line-height: 1.8; }
+footer b { color: var(--muted); font-weight: 700; }
+
+/* ═════════ 手机：M3E 浅色令牌（与 expressive-redesign 相同的种子色 #006b5f）═════════ */
+.devices { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; margin: 10px 0 6px;
+  --md-primary:#206a5f;--md-on-primary:#e2fff8;--md-primary-container:#a9f0e2;--md-on-primary-container:#095c52;
+  --md-secondary:#4b645f;--md-on-secondary:#e3fff8;--md-secondary-container:#cde8e1;--md-on-secondary-container:#3e5751;
+  --md-tertiary:#336577;--md-tertiary-container:#afe2f6;--md-on-tertiary-container:#1d5364;
+  --md-error:#a83836;--md-error-container:#fa746f;--md-on-error-container:#6e0a12;
+  --md-surface:#f6faf8;--md-surface-container-lowest:#ffffff;--md-surface-container-low:#eef5f2;--md-surface-container:#e7f0ec;
+  --md-surface-container-high:#e1eae7;--md-surface-container-highest:#dae5e1;
+  --md-on-surface:#2a3532;--md-on-surface-variant:#56615e;--md-outline:#727d7a;--md-outline-variant:#a9b4b1;
+  --md-inverse-surface:#0c0f0e;--md-inverse-on-surface:#9c9e9d;--md-inverse-primary:#b6fdef;
+  --nm: #e60026; --qq: #31c27c; }
+.dev { margin: 0; display: grid; gap: 10px; width: 372px; max-width: 100%; }
+.dev figcaption { color: var(--muted); font-size: 12.5px; line-height: 1.65; }
+.dev figcaption b { display: block; color: var(--ink); font-size: 13.5px; margin-bottom: 2px; }
+.lp { position: relative; width: 372px; height: 780px; padding: 10px; border-radius: 50px; background: #17191b; box-shadow: 0 18px 40px -18px rgb(0 0 0 / .45), inset 0 0 0 2px #34383c; flex: none; }
+.ls { position: relative; width: 352px; height: 760px; border-radius: 41px; overflow: hidden; background: var(--md-surface); color: var(--md-on-surface); font-size: 14px; line-height: 1.4; }
+.st { position: absolute; top: 0; left: 0; right: 0; height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 26px; font-size: 13px; font-weight: 600; z-index: 30; background: var(--md-surface); }
+.sc { position: absolute; inset: 32px 0 0 0; overflow-y: auto; scrollbar-width: none; padding-bottom: 28px; }
+.sc::-webkit-scrollbar { display: none; }
+.navpill { position: absolute; left: 50%; bottom: 8px; width: 108px; height: 4px; margin-left: -54px; border-radius: 2px; background: var(--md-on-surface); opacity: .4; z-index: 40; }
+.bar { height: 56px; padding: 0 4px; display: flex; align-items: center; }
+.bar .sp { flex: 1; }
+.ib { width: 48px; height: 48px; display: grid; place-items: center; color: var(--md-on-surface-variant); border-radius: 50%; position: relative; flex: none; border: 0; background: none; }
+.ib svg { width: 24px; height: 24px; fill: currentColor; }
+.ib .bdg { position: absolute; top: 12px; right: 12px; width: 6px; height: 6px; border-radius: 50%; background: var(--md-error); }
+.big { padding: 4px 20px 14px; }
+.big h5 { font-size: 30px; line-height: 1.15; font-weight: 800; letter-spacing: -.5px; }
+.big p { margin-top: 4px; font-size: 14px; color: var(--md-on-surface-variant); }
+.gut { padding: 0 16px; }
+.lbl { font-size: 16px; font-weight: 700; padding: 20px 4px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.day { font-size: 14px; font-weight: 700; color: var(--md-on-surface-variant); padding: 16px 4px 6px; }
+.seg { display: flex; flex-direction: column; gap: 2px; }
+.seg > * { border-radius: 4px; }
+.seg > :first-child { border-top-left-radius: 16px; border-top-right-radius: 16px; }
+.seg > :last-child { border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; }
+.one { border-radius: 16px !important; }
+/* ListRow */
+.lr { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 10px 12px 10px 16px; background: var(--md-surface-container-low); }
+.lr.sel { background: var(--md-secondary-container); border-radius: 999px !important; }
+.lr.dis { opacity: .45; }
+.ti { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.ti svg { width: 22px; height: 22px; fill: currentColor; }
+.ti.pri { background: var(--md-primary-container); color: var(--md-on-primary-container); }
+.ti.ter { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+.ti.err { background: var(--md-error-container); color: var(--md-on-error-container); }
+.ti.nm { background: var(--nm); color: #fff; font-weight: 900; font-size: 15px; border-radius: 12px; }
+.ti.qq { background: var(--qq); color: #fff; font-weight: 900; font-size: 13px; border-radius: 12px; }
+.ti.dav { background: #3d5a80; color: #fff; border-radius: 12px; }
+.tx { flex: 1; min-width: 0; }
+.tx b { display: block; font-size: 16px; font-weight: 500; line-height: 22px; }
+.tx small { display: block; font-size: 13.5px; line-height: 19px; color: var(--md-on-surface-variant); }
+.chev { color: var(--md-on-surface-variant); flex: none; }
+.chev svg { width: 24px; height: 24px; fill: currentColor; }
+/* SongRow */
+.sr { display: flex; align-items: center; min-height: 64px; padding: 8px 0 8px 12px; background: var(--md-surface-container-low); }
+.sr.pl { background: var(--md-secondary-container); }
+.sr.gone .cv, .sr.gone .tx b { opacity: .5; }
+.cv { width: 48px; height: 48px; border-radius: 12px; flex: none; display: grid; place-items: center; color: var(--md-on-surface-variant); background: var(--md-surface-container-highest); }
+.cv svg { width: 22px; height: 22px; fill: currentColor; opacity: .7; }
+.sr .tx { padding: 0 8px 0 14px; }
+.sr .tx b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub2 { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--md-on-surface-variant); white-space: nowrap; overflow: hidden; }
+.sub2 > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.bdgs { display: flex; gap: 6px; flex: none; }
+.pb { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 500; color: var(--md-on-surface); }
+.pb i { width: 8px; height: 8px; border-radius: 50%; background: var(--md-primary); display: block; }
+.pb.pre i { background: none; box-shadow: inset 0 0 0 1.5px var(--md-tertiary); }
+.pb.un { color: var(--md-on-surface-variant); text-decoration: line-through; }
+.pb.un i { border-radius: 0; height: 1.5px; background: var(--md-on-surface-variant); }
+.more { width: 48px; height: 48px; display: grid; place-items: center; color: var(--md-on-surface-variant); flex: none; }
+.more svg { width: 24px; height: 24px; fill: currentColor; }
+.trail { padding-right: 16px; flex: none; display: flex; align-items: center; gap: 8px; }
+.ring { width: 28px; height: 28px; }
+/* Tag / CountTag */
+.tag { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 2px 8px; border-radius: 8px; font-size: 12px; font-weight: 700; white-space: nowrap; background: var(--md-secondary-container); color: var(--md-on-secondary-container); flex: none; }
+.tag svg { width: 14px; height: 14px; fill: currentColor; }
+.tag.ter { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+.tag.pri { background: var(--md-primary-container); color: var(--md-on-primary-container); }
+.tag.gry { background: var(--md-surface-container-highest); color: var(--md-on-surface-variant); }
+.tag.err { background: var(--md-error-container); color: var(--md-on-error-container); }
+/* 按钮 */
+.btn { height: 40px; padding: 0 16px; border-radius: 20px; border: 0; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 14px; font-weight: 600; background: var(--md-primary); color: var(--md-on-primary); white-space: nowrap; }
+.btn.h48 { height: 48px; border-radius: 24px; padding: 0 22px; }
+.btn.ton { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.btn.out { background: none; color: var(--md-on-surface-variant); box-shadow: inset 0 0 0 1px var(--md-outline-variant); }
+.btn.txt { background: none; color: var(--md-primary); padding: 0 12px; }
+.btn.wide { width: 100%; }
+.btn svg { width: 18px; height: 18px; fill: currentColor; }
+.split { display: inline-flex; gap: 2px; }
+.split .btn:first-child { border-radius: 20px 4px 4px 20px; padding: 0 16px 0 12px; }
+.split .btn:last-child { border-radius: 4px 20px 20px 4px; width: 40px; padding: 0; }
+/* ConnectedToggleGroup / FilterChip / Switch */
+.ctg { display: flex; gap: 2px; }
+.ctg button { flex: 1; min-width: 0; height: 48px; border: 0; background: var(--md-surface-container); color: var(--md-on-surface-variant); font-size: 14px; font-weight: 600; border-radius: 8px; transition: border-radius .35s var(--spring), background .2s; white-space: nowrap; padding: 0 6px; cursor: pointer; }
+.ctg button:first-child { border-radius: 24px 8px 8px 24px; } .ctg button:last-child { border-radius: 8px 24px 24px 8px; }
+.ctg button.on { background: var(--md-primary); color: var(--md-on-primary); border-radius: 24px; }
+.chipsrow { display: flex; gap: 8px; overflow: hidden; padding: 12px 0 4px; }
+.fc { height: 32px; padding: 0 12px; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--md-on-surface-variant); box-shadow: inset 0 0 0 1px var(--md-outline-variant); white-space: nowrap; flex: none; cursor: pointer; border: 0; background: none; }
+.fc svg { width: 18px; height: 18px; fill: currentColor; }
+.fc.on { background: var(--md-secondary-container); color: var(--md-on-secondary-container); box-shadow: none; }
+.sw { width: 52px; height: 32px; border-radius: 16px; flex: none; position: relative; background: var(--md-surface-container-highest); box-shadow: inset 0 0 0 2px var(--md-outline); }
+.sw::after { content: ""; position: absolute; left: 8px; top: 8px; width: 16px; height: 16px; border-radius: 50%; background: var(--md-outline); }
+.sw.on { background: var(--md-primary); box-shadow: none; }
+.sw.on::after { left: 24px; top: 4px; width: 24px; height: 24px; background: var(--md-on-primary); }
+.rd { width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--md-on-surface-variant); flex: none; margin: 0 6px; position: relative; }
+.rd.on { box-shadow: inset 0 0 0 2px var(--md-primary); }
+.rd.on::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--md-primary); }
+/* InfoNote */
+.info { padding: 12px 16px; border-radius: 16px; background: var(--md-surface-container-high); color: var(--md-on-surface-variant); font-size: 14px; line-height: 1.5; }
+.info.amber { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+.info.green { background: var(--md-primary-container); color: var(--md-on-primary-container); }
+/* 卡片 */
+.card { border-radius: 28px; padding: 18px; background: var(--md-surface-container-high); }
+.card h6 { margin: 0; font-size: 22px; font-weight: 800; line-height: 1.25; }
+.card p { margin-top: 2px; font-size: 14px; color: var(--md-on-surface-variant); }
+.sbar { display: flex; gap: 2px; height: 14px; margin-top: 14px; }
+.sbar i { display: block; border-radius: 3px; }
+.sbar i:first-child { border-radius: 7px 3px 3px 7px; } .sbar i:last-child { border-radius: 3px 7px 7px 3px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; font-size: 12.5px; color: var(--md-on-surface-variant); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.pc { border-radius: 28px; padding: 18px; background: var(--md-primary-container); color: var(--md-on-primary-container); }
+.pc h6 { margin: 12px 0 0; font-size: 22px; font-weight: 800; line-height: 1.3; }
+.pc p { margin-top: 4px; font-size: 14px; line-height: 1.5; }
+.pc .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.cookie9 { width: 56px; height: 56px; display: grid; place-items: center; background: var(--md-primary); color: var(--md-on-primary); }
+.cookie9 svg { width: 28px; height: 28px; fill: currentColor; }
+.wc { border-radius: 24px; padding: 16px; background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+.wc b { display: block; font-size: 16px; } .wc p { margin-top: 4px; font-size: 14px; line-height: 1.5; }
+/* Bento */
+.bento { display: flex; gap: 8px; }
+.bento .fav { flex: 1.2; border-radius: 28px; padding: 14px 16px; background: var(--md-primary-container); color: var(--md-on-primary-container); display: flex; flex-direction: column; justify-content: space-between; min-height: 208px; position: relative; }
+.bento .hb { width: 56px; height: 56px; border-radius: 50%; background: var(--md-primary); color: var(--md-on-primary); display: grid; place-items: center; }
+.bento .hb svg { width: 28px; height: 28px; fill: currentColor; }
+.bento .fav b { display: block; font-size: 36px; font-weight: 800; line-height: 1.1; }
+.bento .fav .pl { position: absolute; right: 8px; bottom: 8px; width: 40px; height: 40px; border-radius: 50%; background: var(--md-primary); color: var(--md-on-primary); display: grid; place-items: center; }
+.bento .fav .pl svg { width: 24px; height: 24px; fill: currentColor; }
+.bento .col { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.bento .sm { flex: 1; border-radius: 28px; padding: 14px 16px; display: flex; flex-direction: column; justify-content: space-between; }
+.bento .sm b { font-size: 16px; font-weight: 700; }
+.bento .sm span { font-size: 14px; }
+/* 歌单行 */
+.plr { display: flex; align-items: center; gap: 14px; min-height: 72px; padding: 10px 12px; background: var(--md-surface-container-low); }
+.plc { width: 52px; height: 52px; border-radius: 14px; display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; gap: 1px; flex: none; }
+.plc i { display: block; }
+/* 表单 */
+.tf { position: relative; height: 56px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--md-outline); display: flex; align-items: center; padding: 0 12px 0 16px; gap: 12px; font-size: 16px; margin-top: 16px; }
+.tf.focus { box-shadow: inset 0 0 0 2px var(--md-primary); }
+.tf label { position: absolute; left: 12px; top: -9px; padding: 0 4px; background: var(--md-surface); font-size: 12px; color: var(--md-on-surface-variant); }
+.tf.focus label { color: var(--md-primary); }
+.tf .v { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf .ph { color: var(--md-on-surface-variant); }
+.tf svg { width: 24px; height: 24px; fill: var(--md-on-surface-variant); flex: none; }
+.tf-sup { font-size: 12px; color: var(--md-on-surface-variant); padding: 4px 16px 0; line-height: 1.45; }
+/* 底部面板 */
+.scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .32); z-index: 25; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 26; background: var(--md-surface-container-low); border-radius: 28px 28px 0 0; display: flex; flex-direction: column; max-height: 700px; }
+.sheet .grab { width: 32px; height: 4px; border-radius: 2px; background: var(--md-on-surface-variant); opacity: .6; margin: 12px auto 4px; flex: none; }
+.sheet .hd { padding: 6px 24px 8px; flex: none; }
+.sheet .hd h5 { font-size: 22px; font-weight: 600; line-height: 28px; }
+.sheet .hd p { margin-top: 2px; font-size: 14px; color: var(--md-on-surface-variant); }
+.sheet .bd { overflow-y: auto; padding: 4px 16px 30px; scrollbar-width: none; }
+.sheet .bd::-webkit-scrollbar { display: none; }
+.sheet .lr, .sheet .sr { background: var(--md-surface-container); }
+.snack { position: absolute; left: 12px; right: 12px; bottom: 26px; z-index: 35; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 8px 8px 16px; border-radius: 12px; background: var(--md-inverse-surface); color: #eef1f0; font-size: 14px; line-height: 1.45; box-shadow: 0 6px 16px rgb(0 0 0 / .25); }
+.snack span { flex: 1; }
+.snack b { color: var(--md-inverse-primary); font-weight: 600; padding: 0 8px; white-space: nowrap; }
+.fab { position: absolute; right: 16px; bottom: 28px; width: 56px; height: 56px; border-radius: 16px; background: var(--md-primary-container); color: var(--md-on-primary-container); display: grid; place-items: center; box-shadow: 0 4px 10px rgb(0 0 0 / .18); z-index: 20; }
+.fab svg { width: 24px; height: 24px; fill: currentColor; }
+.bnav { position: absolute; left: 0; right: 0; bottom: 0; height: 80px; background: var(--md-surface-container); display: flex; justify-content: space-around; padding: 10px 8px 0; z-index: 22; }
+.bnav span { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--md-on-surface-variant); width: 72px; }
+.bnav span i { width: 56px; height: 32px; border-radius: 16px; display: grid; place-items: center; }
+.bnav span i svg { width: 24px; height: 24px; fill: currentColor; }
+.bnav span.on { color: var(--md-on-surface); font-weight: 700; }
+.bnav span.on i { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.newmark { position: relative; outline: 2px dashed var(--red); outline-offset: 2px; }
+.newmark::after { content: "新增"; position: absolute; right: 10px; top: -9px; background: var(--red); color: #fff; font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 6px; z-index: 3; }
+.chg { position: relative; outline: 2px dashed #b07a00; outline-offset: 2px; }
+.chg::after { content: "改动"; position: absolute; right: 10px; top: -9px; background: #b07a00; color: #fff; font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 6px; z-index: 3; }
+.hd2 { display: flex; align-items: center; gap: 12px; padding: 4px 4px 4px; }
+.hd2 .cv { width: 64px; height: 64px; border-radius: 16px; }
+.hd2 b { display: block; font-size: 18px; font-weight: 700; } .hd2 small { display: block; font-size: 14px; color: var(--md-on-surface-variant); }
+.pct { font-size: 13px; font-weight: 700; color: var(--md-primary); font-variant-numeric: tabular-nums; }
+.kv { display: grid; grid-template-columns: 64px 1fr; gap: 6px 10px; padding: 14px 16px; background: var(--md-surface-container); font-size: 13.5px; }
+.kv dt { color: var(--md-on-surface-variant); } .kv dd { margin: 0; word-break: break-all; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.plhead { display: flex; gap: 14px; align-items: flex-end; padding: 4px 20px 6px; }
+.plhead .plc { width: 112px; height: 112px; border-radius: 28px; }
+.plhead b { display: block; font-size: 26px; font-weight: 800; line-height: 1.15; }
+.plhead small { display: block; margin-top: 4px; font-size: 13.5px; color: var(--md-on-surface-variant); }
+
+@media (max-width: 900px) { .flow, .phases { grid-template-columns: 1fr; } }
+@media (max-width: 420px) { .lp { transform: scale(.86); transform-origin: top left; margin-bottom: -110px; } .dev { width: 320px; } }
+</style>
+</head>
+<body>
+
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></symbol>
+  <symbol id="i-done" viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM10 17l-3.5-3.5 1.41-1.41L10 14.17 15.18 9l1.41 1.41L10 17z"/></symbol>
+  <symbol id="i-cloudoff" viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4c-1.48 0-2.85.43-4.01 1.17l1.46 1.46A5.497 5.497 0 0 1 17.5 11v.5H19c1.66 0 3 1.34 3 3 0 1.13-.64 2.11-1.56 2.62l1.45 1.45C23.16 17.16 24 15.68 24 14c0-2.64-2.05-4.78-4.65-4.96zM3 5.27l2.75 2.74C2.56 8.15 0 10.77 0 14c0 3.31 2.69 6 6 6h11.73l2 2L21 20.73 4.27 4 3 5.27zM7.73 10l8 8H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h1.73z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></symbol>
+  <symbol id="i-lib" viewBox="0 0 24 24"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 5h-3v5.5a2.5 2.5 0 0 1-5 0 2.5 2.5 0 0 1 2.5-2.5c.57 0 1.08.19 1.5.51V5h4v2zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6z"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></symbol>
+  <symbol id="i-set" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></symbol>
+  <symbol id="i-eq" viewBox="0 0 24 24"><path d="M7 18h2V6H7v12zm4 4h2V2h-2v20zm-8-8h2v-4H3v4zm12 4h2V6h-2v12zm4-8v4h2v-4h-2z"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8 3 3 3-3a4.237 4.237 0 0 0-6 0zm-4-4 2 2a7.074 7.074 0 0 1 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></symbol>
+  <symbol id="i-dns" viewBox="0 0 24 24"><path d="M20 13H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM20 3H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1zM7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></symbol>
+  <symbol id="i-person" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9.29 6.71a1 1 0 0 0 0 1.42L13.17 12l-3.88 3.88a1 1 0 1 0 1.42 1.42l4.59-4.59a1 1 0 0 0 0-1.42L10.7 6.7a1 1 0 0 0-1.41.01z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M16 1H8C6.34 1 5 2.34 5 4v16c0 1.66 1.34 3 3 3h8c1.66 0 3-1.34 3-3V4c0-1.66-1.34-3-3-3zm-2 20h-4v-1h4v1zm3.25-3H6.75V4h10.5v14z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></symbol>
+  <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></symbol>
+  <symbol id="i-gift" viewBox="0 0 24 24"><path d="M20 6h-2.18c.11-.31.18-.65.18-1 0-1.66-1.34-3-3-3-1.05 0-1.96.54-2.5 1.35l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm11 15H4v-2h16v2zm0-5H4V8h5.08L7 10.83 8.62 12 11 8.76l1-1.36 1 1.36L15.38 12 17 10.83 14.92 8H20v6z"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></symbol>
+  <symbol id="i-del" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></symbol>
+  <symbol id="i-add" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></symbol>
+  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 2c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6H6zm7 7V3.5L18.5 9H13z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></symbol>
+</svg>
+
+<header class="page-head">
+  <div class="doc-label">设 计 方 案 · 2 0 2 6 - 1 1 - 0 9</div>
+  <h1>本地的歌也能<em>跟着歌单换设备</em></h1>
+  <p class="lede">
+    这份稿子回答三件事：<strong>扫描本机音乐并补上封面和歌词</strong>；<strong>把本地歌上传到网易云盘或自己的 WebDAV</strong>，这样加进自建歌单后，换一台设备也能直接播；<strong>音乐库同步在 GitHub Gist、Gitee 代码片段之外，多一个 WebDAV</strong>。
+    思路是：同步文件里不放音频，只放“这首歌是哪个文件、传到了哪里、匹配到了哪首”。每台设备按这几条线索自己找能播的那一份，一份都找不到就如实显示“只在某台设备上”，不删歌单里的条目。
+  </p>
+  <div class="chips">
+    <span class="chip2"><span class="dot"></span>接口依据：<b>docs/local-music-cloud-sync-spec.md</b></span>
+    <span class="chip2">新页面 <b>2</b> 个：本地音乐、设置 › 本地音乐</span>
+    <span class="chip2">同步位置 <b>3</b> 个</span>
+    <span class="chip2">同步文件 <b>v3</b>，旧版本读得懂</span>
+  </div>
+</header>
+
+<main>
+
+<section class="block" id="verdict">
+  <div class="block-head"><span class="kicker">00</span><h2>结论</h2></div>
+  <p class="sub">扫描和匹配都在本机完成，不依赖任何云盘；难的是跨设备，靠“文件指纹 + 云端位置 + 匹配结果”三条线索解决。网易云盘有完整的上传和播放链路，做；QQ 音乐云盘只有读取，上传协议没有公开闭环，<strong>这次只做只读</strong>；WebDAV 是标准协议，既能放歌，也能放同步文件，一个账号两处用。</p>
+  <div class="tiles">
+    <div class="tile"><b>这台设备有文件</b><span>同一个文件（按首尾 64KB + 大小算指纹）在哪台设备上都认得出，直接播本机文件。</span></div>
+    <div class="tile"><b>传到了云盘</b><span>按同步过来的云端位置播：网易云盘走现有取流，WebDAV 带账号直接流式播放。</span></div>
+    <div class="tile"><b>匹配到了平台版本</b><span>文件和云端都没有时，用匹配到的那首平台歌播（可关）。界面写明“用网易云的版本”。</span></div>
+    <div class="tile"><b>哪里都没有</b><span>灰掉，写“只在 Pixel 8 上”，点开告诉用户怎么办。歌单条目保留，同步照常。</span></div>
+  </div>
+</section>
+
+<section class="block" id="flow">
+  <div class="block-head"><span class="kicker">01</span><h2>从扫描到另一台设备播放</h2></div>
+  <div class="flow">
+    <div class="step"><b>扫描</b><span>系统媒体库 + 用户选的文件夹。只读文件，不改、不传。</span><small>READ_MEDIA_AUDIO / 文件夹授权</small></div>
+    <div class="step"><b>匹配</b><span>先按标签搜，分数够就用；不够再取 3 秒做听歌识曲。拿到封面、歌词、标题。</span><small>复用识曲和换源的匹配打分</small></div>
+    <div class="step"><b>加进歌单</b><span>和平台歌一样加。同步已连接、这首又只在本机时，提示一句并给“上传”。</span><small>歌单里记的是文件指纹</small></div>
+    <div class="step"><b>上传</b><span>一首一首传到网易云盘或 WebDAV；网易云曲库里有的歌秒传。</span><small>串行、可取消、先查容量</small></div>
+    <div class="step"><b>另一台设备</b><span>歌单同步过来，按“本机 → 云端 → 平台版本”找能播的一份。</span><small>找不到也不删条目</small></div>
+  </div>
+</section>
+
+<section class="block" id="library">
+  <div class="block-head"><span class="kicker">02</span><h2>入口和本地音乐页</h2></div>
+  <p class="sub">「我的」里，三张磁贴下面加一行「本地音乐」，和「汽水天天送会员」并成一组。本地音乐页的结构照「下载」页：顶上一张占用卡片，分段条显示已上传、只匹配、没匹配三类；再往下是播放全部、筛选和歌曲列表。<strong>本机 / 云端</strong>两个视图用现有的连接按钮组切换（右边两张图是同一页的两个视图）。</p>
+  <div class="devices">
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="sc">
+        <div class="bar"><span class="sp"></span><span class="ib"><svg><use href="#i-done"/></svg></span><span class="ib"><svg><use href="#i-set"/></svg></span></div>
+        <div class="big"><h5>我的</h5><p>已同步到 GitHub Gist · 3 分钟前</p></div>
+        <div class="gut">
+          <div class="bento">
+            <div class="fav"><span class="hb"><svg><use href="#i-heart"/></svg></span><div><b>128</b><span>首喜欢的歌</span></div><span class="pl"><svg><use href="#i-play"/></svg></span></div>
+            <div class="col">
+              <div class="sm" style="background:var(--md-tertiary-container);color:var(--md-on-tertiary-container)"><b>最近播放</b><span>今天 12 首</span></div>
+              <div class="sm" style="background:var(--md-secondary-container);color:var(--md-on-secondary-container)"><b>下载</b><span>36 首 · 1.2 GB</span></div>
+            </div>
+          </div>
+          <div class="seg" style="margin-top:12px">
+            <div class="lr newmark"><span class="ti pri"><svg><use href="#i-lib"/></svg></span><div class="tx"><b>本地音乐</b><small>1,284 首 · 236 首已上传</small></div><span class="tag"><svg><use href="#i-up"/></svg>2 / 5</span></div>
+            <div class="lr"><span class="ti ter"><svg><use href="#i-gift"/></svg></span><div class="tx"><b>汽水天天送会员</b><small>今天已听 18 分钟</small></div></div>
+          </div>
+          <div class="lbl">自建歌单 <span class="tag">6 个</span></div>
+          <div class="seg">
+            <div class="plr"><span class="plc"><i style="background:linear-gradient(135deg,#ffb36b,#e0485a)"></i><i style="background:linear-gradient(135deg,#9af0d6,#1f9c8e)"></i><i style="background:linear-gradient(135deg,#c3d6ff,#5b7cf0)"></i><i style="background:linear-gradient(135deg,#ffe08a,#c98a1c)"></i></span><div class="tx"><b>通勤路上</b><small>24 首 · 昨天</small></div><span class="tag"><svg><use href="#i-done"/></svg>已同步</span></div>
+            <div class="plr"><span class="plc"><i style="background:linear-gradient(135deg,#d7b7ff,#7b4fd0)"></i><i style="background:linear-gradient(135deg,#ffc9de,#d0507e)"></i><i style="background:linear-gradient(135deg,#b9f2ff,#3aa0c8)"></i><i style="background:linear-gradient(135deg,#e3e3e3,#8a8a8a)"></i></span><div class="tx"><b>老歌 FLAC</b><small>58 首 · 3 天前</small></div><span class="tag ter"><svg><use href="#i-up"/></svg>待同步</span></div>
+          </div>
+        </div>
+      </div>
+      <span class="fab"><svg><use href="#i-add"/></svg></span>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>① 我的</b>新的一行用现有 <code>ListRow</code>，说明写总数和已上传数；有上传任务时尾部挂进度标签。三张磁贴不动，平板和电视的布局也不用改。</figcaption></figure>
+
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="sc">
+        <div class="bar"><span class="ib"><svg><use href="#i-back"/></svg></span><span class="sp"></span><span class="ib"><svg><use href="#i-search"/></svg></span><span class="ib"><svg><use href="#i-refresh"/></svg></span></div>
+        <div class="big"><h5>本地音乐</h5><p>1,284 首 · 10 分钟前扫描</p></div>
+        <div class="gut">
+          <div class="ctg"><button class="on">本机</button><button>云端</button></div>
+          <div class="card" style="margin-top:12px">
+            <h6>1,284 首 · 18.6 GB</h6>
+            <p>封面和歌词自动匹配，原文件不改。</p>
+            <div class="sbar"><i style="flex:236;background:var(--md-primary)"></i><i style="flex:962;background:var(--md-tertiary)"></i><i style="flex:86;background:var(--md-surface-container-highest)"></i></div>
+            <div class="legend"><span><i style="background:var(--md-primary)"></i>已上传 236</span><span><i style="background:var(--md-tertiary)"></i>已匹配 962</span><span><i style="background:var(--md-surface-container-highest);box-shadow:inset 0 0 0 1px var(--md-outline-variant)"></i>没匹配 86</span></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+            <span class="split"><span class="btn"><svg><use href="#i-play"/></svg>播放全部</span><span class="btn"><svg><use href="#i-down"/></svg></span></span>
+            <span class="btn txt"><svg><use href="#i-up"/></svg>上传…</span>
+          </div>
+          <div class="chipsrow"><span class="fc on"><svg><use href="#i-check"/></svg>全部</span><span class="fc">没匹配</span><span class="fc">没上传</span><span class="fc">文件夹</span></div>
+          <div class="day">正在上传 · 2 / 5</div>
+          <div class="seg">
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#ffb36b,#e0485a 60%,#521437)"></span><div class="tx"><b>晚风信号</b><div class="sub2"><span>网易云盘 · 18.2 / 32.4 MB</span></div></div><span class="trail"><svg class="ring" viewBox="0 0 28 28"><circle cx="14" cy="14" r="11" fill="none" stroke="var(--md-secondary-container)" stroke-width="4"/><circle cx="14" cy="14" r="11" fill="none" stroke="var(--md-primary)" stroke-width="4" stroke-linecap="round" stroke-dasharray="69.1" stroke-dashoffset="30.3" transform="rotate(-90 14 14)"/></svg></span></div>
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#9af0d6,#1f9c8e 60%,#0b3742)"></span><div class="tx"><b>海边慢车</b><div class="sub2"><span>等待上传 · 还有 3 首</span></div></div><span class="more"><svg><use href="#i-close"/></svg></span></div>
+          </div>
+          <div class="day">全部歌曲</div>
+          <div class="seg">
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#c3d6ff,#5b7cf0 60%,#2a2678)"></span><div class="tx"><b>雨季备忘</b><div class="sub2"><span class="bdgs"><span class="pb"><i></i>本机</span><span class="pb"><i></i>网易云盘</span></span><span>示例歌手</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#ffe08a,#c98a1c 60%,#5a3a06)"></span><div class="tx"><b>旧城北路</b><div class="sub2"><span class="bdgs"><span class="pb"><i></i>本机</span></span><span>示例乐队</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+            <div class="sr"><span class="cv"><svg><use href="#i-note"/></svg></span><div class="tx"><b>track07.flac</b><div class="sub2"><span class="tag gry" style="min-height:20px;padding:0 6px;font-size:11px">没匹配</span><span>未知歌手 · 3:58</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="snack"><span>已加入“通勤路上”。这首只在本机，换台设备放不了</span><b>上传</b></div>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>② 本地音乐 · 本机</b>徽标照 <code>PlatformBadge</code>：实心点表示这份能播。没匹配的歌显示文件名和灰标签。底部是把只在本机的歌加进已同步歌单时出现的提示，点“上传”直接打开上传面板。</figcaption></figure>
+
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="sc">
+        <div class="bar"><span class="ib"><svg><use href="#i-back"/></svg></span><span class="sp"></span><span class="ib"><svg><use href="#i-search"/></svg></span><span class="ib"><svg><use href="#i-refresh"/></svg></span></div>
+        <div class="big"><h5>本地音乐</h5><p>1,284 首 · 10 分钟前扫描</p></div>
+        <div class="gut">
+          <div class="ctg"><button>本机</button><button class="on">云端</button></div>
+          <div class="card" style="margin-top:12px">
+            <div style="display:flex;align-items:center;gap:12px"><span class="ti nm">网</span><div class="tx"><b style="font-weight:700">网易云盘</b><small>已登录 · 示例用户</small></div></div>
+            <h6 style="margin-top:12px">23.1 GB / 60 GB</h6>
+            <p>236 首，其中 31 首这台手机上没有文件</p>
+            <div class="sbar"><i style="flex:23.1;background:var(--md-primary)"></i><i style="flex:36.9;background:var(--md-surface-container-highest)"></i></div>
+          </div>
+          <div class="seg" style="margin-top:8px">
+            <div class="lr one"><span class="ti dav"><svg><use href="#i-dns"/></svg></span><div class="tx"><b>WebDAV</b><small>dav.jianguoyun.com · 58 首 · 2.3 GB</small></div><span class="chev"><svg><use href="#i-chev"/></svg></span></div>
+          </div>
+          <div class="seg" style="margin-top:8px">
+            <div class="lr one"><span class="ti qq">QQ</span><div class="tx"><b>QQ 音乐云盘</b><small>48 首 · 只能读取，不能上传</small></div><span class="tag gry">只读</span></div>
+          </div>
+          <div class="lbl">网易云盘里，本机没有的</div>
+          <div class="seg">
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#ffc9de,#d0507e 60%,#4d1029)"></span><div class="tx"><b>夏天的尾巴</b><div class="sub2"><span class="bdgs"><span class="pb"><i></i>网易云盘</span></span><span>示例歌手 · 平板上传</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#b9f2ff,#3aa0c8 60%,#0d3a52)"></span><div class="tx"><b>不夜城</b><div class="sub2"><span class="bdgs"><span class="pb"><i></i>网易云盘</span></span><span>示例乐队</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+          </div>
+          <div class="lbl">QQ 音乐云盘</div>
+          <div class="seg">
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#d7b7ff,#7b4fd0 60%,#2a1450)"></span><div class="tx"><b>月台</b><div class="sub2"><span class="bdgs"><span class="pb"><i></i>QQ 云盘</span></span><span>示例歌手</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+            <div class="sr gone"><span class="cv"><svg><use href="#i-note"/></svg></span><div class="tx"><b>live_0612.mp3</b><div class="sub2"><span class="bdgs"><span class="pb un"><i></i>QQ 云盘</span></span><span>原文件暂不支持播放</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>③ 本地音乐 · 云端</b>每个云端一张卡：网易云盘读 <code>size / maxSize</code> 画容量条；WebDAV 和 QQ 收成一行，点开是各自的列表。QQ 云盘里没被 QQ 匹配上的原文件按现有规则画成删除线，写明原因。</figcaption></figure>
+  </div>
+  <ul class="clean">
+    <li><b>权限：</b>第一次打开本地音乐时是空状态页，主按钮“允许读取音乐”（Android 13 起 <code>READ_MEDIA_AUDIO</code>，更早是读存储）；拒绝后按钮换成“改为选择文件夹”，走系统文件夹选择器，不需要权限。</li>
+    <li><b>扫描：</b>后台低优先级，按修改时间增量；首次扫描时卡片换成进度（“正在扫描 · 已找到 812 首”），列表边扫边出现。消失的文件先标“文件不在了”，不自动删记录。</li>
+    <li><b>下载的歌：</b>myMusic 自己下载的文件已经在「下载」里，扫描时跳过下载目录，不重复出现。</li>
+    <li><b>电视：</b>入口照样有，只扫媒体库；电视上通常没有系统文件夹选择器，检测不到时隐藏“添加文件夹”。</li>
+  </ul>
+</section>
+
+<section class="block" id="song">
+  <div class="block-head"><span class="kicker">03</span><h2>一首歌：匹配和上传</h2></div>
+  <p class="sub">在歌曲行点 ⋮ 打开「歌曲信息」，在这里看匹配结果、云端副本和文件。<strong>匹配只改应用里显示的封面、歌词和标题，不写回文件</strong>，规格里也建议第一版不碰文件标签。上传面板可以从单曲、多选和本地音乐页顶部的“上传…”打开。</p>
+  <div class="devices">
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="scrim"></div>
+      <div class="sheet" style="top:96px">
+        <div class="grab"></div>
+        <div class="bd" style="padding-top:8px">
+          <div class="hd2"><span class="cv" style="background:linear-gradient(135deg,#c3d6ff,#5b7cf0 60%,#2a2678)"></span><div><b>雨季备忘</b><small>示例歌手 · 示例专辑</small></div></div>
+          <div class="lbl">封面和歌词</div>
+          <div class="seg">
+            <div class="lr"><span class="ti pri"><svg><use href="#i-eq"/></svg></span><div class="tx"><b>网易云 · 雨季备忘</b><small>听歌识曲匹配 · 96%</small></div><span class="btn txt">换一个</span></div>
+            <div class="lr"><span class="ti"><svg><use href="#i-lyrics"/></svg></span><div class="tx"><b>歌词</b><small>逐字 · 有翻译；文件旁有同名 .lrc 时用 .lrc</small></div></div>
+          </div>
+          <div class="lbl">云端副本</div>
+          <div class="seg">
+            <div class="lr"><span class="ti nm">网</span><div class="tx"><b>网易云盘</b><small>可以播放 · 11 月 8 日上传</small></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+            <div class="lr"><span class="ti dav"><svg><use href="#i-dns"/></svg></span><div class="tx"><b>WebDAV</b><small>还没上传</small></div><span class="btn txt">上传</span></div>
+          </div>
+          <div class="lbl">文件</div>
+          <dl class="kv one" style="margin:0">
+            <dt>位置</dt><dd>Music/示例歌手/雨季备忘.flac</dd>
+            <dt>格式</dt><dd>FLAC · 24 bit / 48 kHz · 4:12</dd>
+            <dt>大小</dt><dd>32.4 MB</dd>
+            <dt>指纹</dt><dd class="mono">sha256:9f3a…c41e</dd>
+          </dl>
+          <div style="display:flex;gap:8px;margin-top:16px"><span class="btn ton h48" style="flex:1"><svg><use href="#i-add"/></svg>加入歌单</span><span class="btn ton h48" style="flex:1"><svg><use href="#i-queue"/></svg>下一首播放</span></div>
+        </div>
+      </div>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>④ 歌曲信息</b>三段都用现有分段列表。云端副本那行的 ⋮ 里是“从网易云盘删除”，删前确认；删云端不影响本机文件和歌单。</figcaption></figure>
+
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="scrim"></div>
+      <div class="sheet" style="top:96px">
+        <div class="grab"></div>
+        <div class="hd"><h5>换一个匹配</h5><p>只改应用里显示的封面、歌词和标题，文件不动</p></div>
+        <div class="bd">
+          <div class="tf focus" style="margin-top:10px"><label>搜索</label><span class="v">雨季备忘 示例歌手</span><svg><use href="#i-search"/></svg></div>
+          <div class="chipsrow"><span class="fc on"><svg><use href="#i-check"/></svg>网易云</span><span class="fc">QQ 音乐</span><span class="fc">酷狗</span><span class="fc">酷我</span></div>
+          <div class="seg" style="margin-top:6px" id="cands">
+            <div class="sr" data-c><span class="cv" style="background:linear-gradient(135deg,#c3d6ff,#5b7cf0 60%,#2a2678)"></span><div class="tx"><b>雨季备忘</b><div class="sub2"><span>示例歌手 · 示例专辑 · 4:12</span></div></div><span class="trail"><span class="pct">96%</span><span class="rd on"></span></span></div>
+            <div class="sr" data-c><span class="cv" style="background:linear-gradient(135deg,#dfe7ff,#8fa3d8 60%,#3a4570)"></span><div class="tx"><b>雨季备忘（Live）</b><div class="sub2"><span>示例歌手 · 2024 巡演 · 4:47</span></div></div><span class="trail"><span class="pct">71%</span><span class="rd"></span></span></div>
+            <div class="sr" data-c><span class="cv" style="background:linear-gradient(135deg,#e8d6ff,#9d7fd0 60%,#3a2860)"></span><div class="tx"><b>雨季备忘</b><div class="sub2"><span>翻唱歌手 · 4:05</span></div></div><span class="trail"><span class="pct">58%</span><span class="rd"></span></span></div>
+          </div>
+          <div class="seg" style="margin-top:8px"><div class="lr one"><span class="ti ter"><svg><use href="#i-eq"/></svg></span><div class="tx"><b>再听一次歌识曲</b><small>换一段（第 60 秒起）重新识别</small></div></div></div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px"><span class="btn txt">不匹配</span><span class="btn h48">使用这个</span></div>
+        </div>
+      </div>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>⑤ 换一个匹配</b>搜索框预填文件标签或文件名；百分比是现有换源匹配的打分，时长差、Live、翻唱都会拉低分数。点候选可以切换（可点）。“不匹配”会清掉匹配，回到文件自己的标签和内嵌封面。</figcaption></figure>
+
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="scrim"></div>
+      <div class="sheet" style="top:150px">
+        <div class="grab"></div>
+        <div class="hd"><h5>上传 3 首</h5><p>共 412 MB，一首一首传，可以随时取消</p></div>
+        <div class="bd">
+          <div class="seg" id="targets" style="margin-top:6px">
+            <div class="lr sel" data-t="nm"><span class="rd on"></span><div class="tx"><b>网易云盘</b><small>剩 36.9 GB · 曲库里有的歌直接秒传</small></div><span class="ti nm">网</span></div>
+            <div class="lr" data-t="dav"><span class="rd"></span><div class="tx"><b>WebDAV</b><small>dav.jianguoyun.com · myMusic/music</small></div><span class="ti dav"><svg><use href="#i-dns"/></svg></span></div>
+            <div class="lr dis"><span class="rd"></span><div class="tx"><b>QQ 音乐云盘</b><small>只能读取，暂不支持上传</small></div><span class="ti qq">QQ</span></div>
+          </div>
+          <div class="seg" style="margin-top:8px"><div class="lr one"><div class="tx"><b>只在 Wi-Fi 下上传</b><small>用移动网络时先排队</small></div><span class="sw on"></span></div></div>
+          <div class="info" style="margin-top:12px" id="upNote">传的是原文件，不转码。传完后，同步过的歌单在其它设备上能直接播这 3 首。单个文件超过 500 MB 的会跳过。</div>
+          <span class="btn h48 wide" style="margin-top:16px"><svg><use href="#i-up"/></svg>开始上传</span>
+        </div>
+      </div>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>⑥ 上传</b>选项照现有的单选列表画，选中项是全圆角底色。点“开始上传”前先按容量和单文件大小检查，不够就在这里说明，不进队列。可以切换网易云盘和 WebDAV（可点）。</figcaption></figure>
+  </div>
+  <div class="note plain"><b>匹配的顺序（照规格 5.1）：</b>标题和歌手都有 → 在已启用平台里搜，用现有的匹配打分，≥ 0.85 直接用；没有标签或分数不够 → 取 3 秒 8kHz 单声道片段，本机算指纹，交给网易云识曲；还不行 → 标“没匹配”，等用户手动换。识曲只发指纹，不发音频。</div>
+</section>
+
+<section class="block" id="cross">
+  <div class="block-head"><span class="kicker">04</span><h2>换一台设备打开同一个歌单</h2></div>
+  <p class="sub">在另一台手机上打开同步过来的「通勤路上」。每首本地歌按 <strong>本机文件 → 云盘 / WebDAV → 匹配到的平台版本</strong> 的顺序找能播的那份，用现有徽标说明是哪一份。哪里都找不到的歌灰掉，写明文件在哪台设备上；这需要同步文件里多记一个上传设备名（规格里没有，见第 07 节）。</p>
+  <div class="devices">
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="sc">
+        <div class="bar"><span class="ib"><svg><use href="#i-back"/></svg></span><span class="sp"></span><span class="ib"><svg><use href="#i-search"/></svg></span><span class="ib"><svg><use href="#i-more"/></svg></span></div>
+        <div class="plhead"><span class="plc"><i style="background:linear-gradient(135deg,#ffb36b,#e0485a)"></i><i style="background:linear-gradient(135deg,#9af0d6,#1f9c8e)"></i><i style="background:linear-gradient(135deg,#c3d6ff,#5b7cf0)"></i><i style="background:linear-gradient(135deg,#ffe08a,#c98a1c)"></i></span><div><b>通勤路上</b><small>24 首 · 已同步到 GitHub Gist</small></div></div>
+        <div class="gut">
+          <div style="display:flex;gap:8px;align-items:center;margin:12px 0 8px"><span class="split"><span class="btn"><svg><use href="#i-play"/></svg>播放全部</span><span class="btn"><svg><use href="#i-down"/></svg></span></span></div>
+          <div class="info amber newmark" style="margin:12px 0 10px">有 1 首只在 Pixel 8 上。在那台设备上传到云盘后，这里就能播。</div>
+          <div class="seg">
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#ffb36b,#e0485a 60%,#521437)"></span><div class="tx"><b>晚风信号</b><div class="sub2"><span class="bdgs"><span class="pb"><i></i>网易云盘</span></span><span>示例歌手</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#9af0d6,#1f9c8e 60%,#0b3742)"></span><div class="tx"><b>海边慢车</b><div class="sub2"><span class="bdgs"><span class="pb"><i></i>WebDAV</span></span><span>示例歌手</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#ffe08a,#c98a1c 60%,#5a3a06)"></span><div class="tx"><b>旧城北路</b><div class="sub2"><span class="bdgs"><span class="pb"><i></i>本机</span></span><span>示例乐队</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#c3d6ff,#5b7cf0 60%,#2a2678)"></span><div class="tx"><b>雨季备忘</b><div class="sub2"><span class="bdgs"><span class="pb"><i></i>网易云</span></span><span>用网易云的版本</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+            <div class="sr gone"><span class="cv"><svg><use href="#i-note"/></svg></span><div class="tx"><b>track07.flac</b><div class="sub2"><span class="bdgs"><span class="pb un"><i></i>本地</span></span><span>只在 Pixel 8 上</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+            <div class="sr"><span class="cv" style="background:linear-gradient(135deg,#ffc9de,#d0507e 60%,#4d1029)"></span><div class="tx"><b>夏天的尾巴</b><div class="sub2"><span class="bdgs"><span class="pb"><i></i>QQ</span><span class="pb pre"><i></i>酷狗</span></span><span>示例歌手</span></div></div><span class="more"><svg><use href="#i-more"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>⑦ 另一台设备上的歌单</b>前四首分别是：云盘里有、WebDAV 里有、这台设备上恰好也有同一个文件、只能用匹配到的平台版本。第五首哪里都没有。最后一首是普通的平台歌，作对照。</figcaption></figure>
+
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="scrim"></div>
+      <div class="sheet" style="top:330px">
+        <div class="grab"></div>
+        <div class="hd"><h5>只在 Pixel 8 上</h5><p>track07.flac · 9.6 MB · 没有匹配到平台版本</p></div>
+        <div class="bd">
+          <div class="info">文件在 Pixel 8 的本地音乐里，还没有上传。在那台设备上打开「我的 › 本地音乐」上传它，这里会自动变成可以播放。</div>
+          <div class="seg" style="margin-top:12px">
+            <div class="lr"><span class="ti"><svg><use href="#i-search"/></svg></span><div class="tx"><b>找一首平台版本</b><small>按文件名在已启用的平台里搜，匹配会同步回 Pixel 8</small></div><span class="chev"><svg><use href="#i-chev"/></svg></span></div>
+            <div class="lr"><span class="ti err"><svg><use href="#i-del"/></svg></span><div class="tx"><b>从歌单移除</b><small>所有设备上都会移除</small></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>⑧ 点了放不了的歌</b>不弹错误，给两条能做的路。“找一首平台版本”就是第 ⑤ 张的面板；匹配结果会同步，所以在哪台设备上匹配都行。</figcaption></figure>
+
+    <figure class="dev" style="align-self:stretch;width:372px">
+      <div style="background:var(--paper);border:1px solid var(--line);border-radius:22px;padding:18px;font-size:13px;color:var(--muted);line-height:1.75">
+        <b style="color:var(--ink);font-size:14px">每种情况的徽标和文字</b>
+        <table style="margin-top:10px;font-size:12.5px">
+          <thead><tr><th>能播的那份</th><th>徽标</th><th>副标题</th></tr></thead>
+          <tbody>
+            <tr><td>本机文件</td><td>● 本机</td><td>歌手</td></tr>
+            <tr><td>网易云盘</td><td>● 网易云盘</td><td>歌手</td></tr>
+            <tr><td>WebDAV</td><td>● WebDAV</td><td>歌手</td></tr>
+            <tr><td>平台版本</td><td>● 网易云 等</td><td>用网易云的版本</td></tr>
+            <tr><td>云端暂时连不上</td><td>○ 网易云盘</td><td>云端暂时连不上</td></tr>
+            <tr><td>云端文件被删了</td><td>— 网易云盘</td><td>云端文件已删除</td></tr>
+            <tr><td>哪里都没有</td><td>— 本地</td><td>只在 Pixel 8 上</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:10px">“云端暂时连不上”用空心点（和试听同一个样式，表示现在不一定能播），不标成删除；401 / 403 时提示去重新登录，不清掉云端位置。</p>
+      </div>
+      <figcaption><b>⑨ 状态对照</b>都用现有 <code>PlatformBadge</code> 的三种字形，不新增颜色。</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="block" id="settings">
+  <div class="block-head"><span class="kicker">05</span><h2>设置 › 本地音乐</h2></div>
+  <p class="sub">设置首页第二组「平台账号、音乐库同步」后面加「本地音乐」（说明：扫描范围、封面歌词匹配与上传）。本地音乐页右上角的 ⚙ 也直接进这里。WebDAV 账号只有一个：在这里配，或者在音乐库同步里选 WebDAV 时配，是同一个表单、同一份密钥。</p>
+  <div class="devices">
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="sc">
+        <div class="bar"><span class="ib"><svg><use href="#i-back"/></svg></span></div>
+        <div class="big"><h5>本地音乐</h5><p>扫描范围、封面歌词匹配与上传</p></div>
+        <div class="gut">
+          <div class="lbl" style="padding-top:4px">扫描</div>
+          <div class="seg">
+            <div class="lr"><div class="tx"><b>系统媒体库</b><small>手机里所有音频；需要“音乐和音频”权限</small></div><span class="sw on"></span></div>
+            <div class="lr"><span class="ti"><svg><use href="#i-folder"/></svg></span><div class="tx"><b>Download/flac</b><small>312 首</small></div><span class="more"><svg><use href="#i-close"/></svg></span></div>
+            <div class="lr"><span class="ti"><svg><use href="#i-add"/></svg></span><div class="tx"><b>添加文件夹</b><small>SD 卡、U 盘或媒体库没收录的目录</small></div></div>
+            <div class="lr"><div class="tx"><b>跳过 30 秒以下的音频</b><small>铃声、录音、提示音</small></div><span class="sw on"></span></div>
+          </div>
+          <div class="lbl">封面和歌词</div>
+          <div class="seg">
+            <div class="lr"><div class="tx"><b>自动匹配</b><small>先按标签搜，再用 3 秒听歌识曲；文件不改</small></div><span class="sw on"></span></div>
+            <div class="lr" style="flex-direction:column;align-items:stretch;gap:8px"><div class="tx"><b>标题和歌手</b><small>文件标签和匹配结果不一致时显示哪个</small></div><div class="ctg sm"><button>文件</button><button class="on">只补空缺</button><button>匹配结果</button></div></div>
+            <div class="lr"><div class="tx"><b>同名 .lrc 优先</b><small>歌曲旁边有同名歌词文件时用它</small></div><span class="sw on"></span></div>
+          </div>
+          <div class="lbl">上传</div>
+          <div class="seg">
+            <div class="lr"><span class="ti nm">网</span><div class="tx"><b>默认上传到</b><small>网易云盘 · 已用 23.1 / 60 GB</small></div><span class="chev"><svg><use href="#i-chev"/></svg></span></div>
+            <div class="lr"><span class="ti dav"><svg><use href="#i-dns"/></svg></span><div class="tx"><b>WebDAV 服务器</b><small>dav.jianguoyun.com · 和音乐库同步共用</small></div><span class="chev"><svg><use href="#i-chev"/></svg></span></div>
+            <div class="lr"><div class="tx"><b>加进歌单时提醒上传</b><small>只在本机的歌加进已同步的歌单时提示</small></div><span class="sw on"></span></div>
+            <div class="lr"><div class="tx"><b>只在 Wi-Fi 下上传</b></div><span class="sw on"></span></div>
+          </div>
+          <div class="lbl">播放</div>
+          <div class="seg">
+            <div class="lr one"><div class="tx"><b>没有文件时用平台版本</b><small>其它设备上的本地歌没上传时，用匹配到的那首播放</small></div><span class="sw on"></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>⑩ 设置 › 本地音乐</b>全是现有的设置行（开关、带图标的列表行、连接按钮组）。“加进歌单时提醒上传”默认开，但只提示不自动传：上传要占流量和云盘空间，得用户点头。</figcaption></figure>
+
+    <figure class="dev" style="width:auto;flex:1;min-width:300px;max-width:760px">
+      <div style="background:var(--paper);border:1px solid var(--line);border-radius:22px;padding:18px 20px;font-size:13.5px;color:var(--muted);line-height:1.8">
+        <b style="color:var(--ink);font-size:14.5px">为什么这样设默认值</b>
+        <ul class="clean" style="margin-top:6px">
+          <li><b>自动匹配 开：</b>用户提的需求就是“补封面和歌词”。匹配只发歌名歌手或 3 秒指纹，隐私说明里写清楚。</li>
+          <li><b>标题和歌手 只补空缺：</b>很多文件标签是“Track 01 / 未知艺术家”，这类按匹配结果显示；标签正常的不覆盖，免得把用户自己整理的名字换掉。</li>
+          <li><b>同名 .lrc 优先 开：</b>自己配歌词的人一定想用自己的版本。</li>
+          <li><b>加进歌单时提醒上传 开、自动上传 不提供：</b>规格要求上传串行、有容量预检，自动上传在多选加歌时容易一下排几百首。</li>
+          <li><b>只在 Wi-Fi 下上传 开：</b>FLAC 一首三四十 MB。</li>
+          <li><b>没有文件时用平台版本 开：</b>放得出来比灰掉好；徽标写明“用网易云的版本”，不会让人以为是自己的文件。</li>
+        </ul>
+        <b style="color:var(--ink);font-size:14.5px;display:block;margin-top:12px">默认上传到</b>
+        <p>没登录网易云、也没配 WebDAV 时这一行写“还没有可用的位置”，点进去两个入口：登录网易云（去平台账号）和连接 WebDAV。QQ 音乐云盘在列表里但不可选，说明“只能读取”。</p>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<section class="block" id="webdav">
+  <div class="block-head"><span class="kicker">06</span><h2>音乐库同步：多一个 WebDAV</h2></div>
+  <p class="sub">实现上是同步接口的第三个实现：同步文件 <code>mymusic-library.json</code> 放在 WebDAV 目录里，读写用 <code>GET</code> / <code>PUT</code>，<code>ETag</code> 防止两台设备同时写覆盖对方。合并规则、冲突处理、自动同步都和 Gist / Gitee 一样。<strong>同步位置选 WebDAV 时不需要令牌</strong>，适合不想用 GitHub、Gitee 的人，也适合 NAS 用户。</p>
+  <div class="devices">
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="sc">
+        <div class="bar"><span class="ib"><svg><use href="#i-back"/></svg></span></div>
+        <div class="big"><h5>音乐库同步</h5><p>本机音乐库 · 未连接同步</p></div>
+        <div class="gut">
+          <div class="pc chg">
+            <span class="cookie9" style="clip-path:url(#ck9)"><svg><use href="#i-up"/></svg></span>
+            <h6>云端是副本，本机才是主版本</h6>
+            <p>连接 GitHub Gist、Gitee 或 WebDAV 后，自建歌单会自动同步。修改先保存在本机，断网也能用。</p>
+            <div class="acts"><span class="btn h48">连接 GitHub Gist</span><span class="btn ton h48">Gitee</span><span class="btn ton h48">WebDAV</span></div>
+          </div>
+          <div class="lbl">备份</div>
+          <div class="seg">
+            <div class="lr"><span class="ti"><svg><use href="#i-file"/></svg></span><div class="tx"><b>导出到文件</b><small>保存歌单、收藏和平台 Cookie 为 JSON</small></div></div>
+            <div class="lr"><span class="ti"><svg><use href="#i-dl"/></svg></span><div class="tx"><b>从文件导入</b><small>与本机歌单、收藏和 Cookie 合并，不会覆盖</small></div></div>
+          </div>
+          <div class="lbl">同步位置</div>
+          <div class="seg">
+            <div class="lr"><span class="ti"><svg><use href="#i-cloud"/></svg></span><div class="tx"><b>GitHub Gist</b><small>需要输入令牌</small></div><span class="chev"><svg><use href="#i-chev"/></svg></span></div>
+            <div class="lr"><span class="ti"><svg><use href="#i-cloud"/></svg></span><div class="tx"><b>Gitee 代码片段</b><small>需要输入令牌</small></div><span class="chev"><svg><use href="#i-chev"/></svg></span></div>
+            <div class="lr newmark"><span class="ti"><svg><use href="#i-dns"/></svg></span><div class="tx"><b>WebDAV</b><small>坚果云、Nextcloud、群晖或自己的服务器</small></div><span class="chev"><svg><use href="#i-chev"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>⑪ 音乐库同步（未连接）</b>引导卡多一个“WebDAV”按钮，三个按钮一行放不下，改成自动换行（<code>FlowRow</code>）。文案把 WebDAV 加进去。“同步位置”多一行。</figcaption></figure>
+
+    <figure class="dev"><div class="lp"><div class="ls">
+      <div class="st"><span>9:41</span><span>5G ▮▮ 86%</span></div>
+      <div class="sc">
+        <div class="bar"><span class="ib"><svg><use href="#i-back"/></svg></span></div>
+        <div class="big"><h5>连接同步</h5><p>WebDAV</p></div>
+        <div class="gut">
+          <div class="ctg sm chg"><button>GitHub Gist</button><button>Gitee</button><button class="on">WebDAV</button></div>
+          <div class="wc" style="margin-top:12px"><b>会同步什么</b><p>自建歌单、收藏和平台账号 Cookie，写进 WebDAV 目录里的 mymusic-library.json。Cookie 是明文，别把这个目录共享出去。WebDAV 密码只存在本机。</p></div>
+          <div class="chipsrow" id="presets"><span class="fc on" data-p="jg"><svg><use href="#i-check"/></svg>坚果云</span><span class="fc" data-p="nc">Nextcloud</span><span class="fc" data-p="syn">群晖</span><span class="fc" data-p="other">其它</span></div>
+          <div class="tf focus"><label>服务器地址</label><span class="v" id="davUrl">https://dav.jianguoyun.com/dav/</span><svg><use href="#i-link"/></svg></div>
+          <div class="tf"><label>用户名</label><span class="v">me@example.com</span><svg><use href="#i-person"/></svg></div>
+          <div class="tf"><label id="pwLabel">应用密码</label><span class="v">••••••••••••••••</span><svg><use href="#i-eye"/></svg></div>
+          <div class="tf-sup" id="pwSup">坚果云要用“安全选项 › 第三方应用管理”里生成的应用密码，不是登录密码。密码用 Android Keystore 加密，只存本机。</div>
+          <div class="tf"><label>目录</label><span class="v">myMusic/</span><svg><use href="#i-folder"/></svg></div>
+          <div class="tf-sup">同步文件和上传的歌都放在这个目录下，没有会自动建</div>
+          <div class="seg" style="margin-top:14px"><div class="lr one"><div class="tx"><b>信任自签名证书</b><small>只在自己架的服务器上打开</small></div><span class="sw"></span></div></div>
+          <div style="display:flex;gap:8px;margin-top:16px"><span class="btn out h48" style="flex:1">测试连接</span><span class="btn h48" style="flex:1.3">连接并同步</span></div>
+        </div>
+      </div>
+      <div class="navpill"></div>
+    </div></div>
+    <figcaption><b>⑫ 连接同步 · WebDAV</b>和现有的令牌表单同一页。三个选项放不下“Gitee 代码片段”全名，按钮上写“Gitee”，标题下的副标题仍写全名。服务商标签只帮忙填地址、改密码提示（可点），不做专门适配。</figcaption></figure>
+
+    <figure class="dev" style="width:auto;flex:1;min-width:300px;max-width:760px">
+      <div style="background:var(--paper);border:1px solid var(--line);border-radius:22px;padding:18px 20px;font-size:13.5px;color:var(--muted);line-height:1.8">
+        <b style="color:var(--ink);font-size:14.5px">连接时检查什么</b>
+        <ul class="clean" style="margin-top:6px">
+          <li><b>测试连接：</b><code>PROPFIND</code> 目录，不存在就逐级 <code>MKCOL</code>；再写一个小文件、读回、删掉，确认能读写。结果写在按钮下方：“能读写 · 服务器支持断点播放”或具体哪一步失败。</li>
+          <li><b>http 地址：</b>可以连，但字段下方用琥珀色提示“密码会明文传输”。局域网地址在 Android 17 上会触发本地网络权限，沿用现有的申请流程。</li>
+          <li><b>401：</b>“用户名或密码不对”，不重试；坚果云额外提示应用密码。</li>
+          <li><b>证书不受信任：</b>提示可以打开“信任自签名证书”，不自动打开。</li>
+          <li><b>首次合并：</b>WebDAV 上已有同步文件时，走现有的“首次合并”对话框。</li>
+          <li><b>电视：</b>现有的扫码配置页多一种 WebDAV 表单，在手机上填好推给电视，不在电视上敲密码。</li>
+          <li><b>已连接后：</b>同步卡片写“已同步到 WebDAV · 3 分钟前 · 6 个歌单 · 214 首 · dav.jianguoyun.com”；第二个按钮原来是“查看 Gist”，WebDAV 没有网页可看，换成“测试连接”。</li>
+        </ul>
+        <b style="color:var(--ink);font-size:14.5px;display:block;margin-top:12px">同步和存歌是两件事</b>
+        <p>同步位置选 Gist，歌照样可以传到 WebDAV；同步位置选 WebDAV，歌也可以传到网易云盘。两处共用的只是 WebDAV 账号。断开同步时只删同步令牌和基线；WebDAV 账号还被“上传”用着时保留，在本地音乐设置里单独删除。</p>
+      </div>
+    </figure>
+  </div>
+  <svg width="0" height="0" style="position:absolute"><clipPath id="ck9" clipPathUnits="objectBoundingBox"><path id="ck9p"/></clipPath></svg>
+</section>
+
+<section class="block" id="platforms">
+  <div class="block-head"><span class="kicker">07</span><h2>三个存放位置能做到什么</h2></div>
+  <p class="sub">下表按规格文档整理，不另外验证。“这次做”一列就是落地范围。</p>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:14%"></th><th style="width:29%">网易云盘</th><th style="width:29%">QQ 音乐云盘</th><th>WebDAV</th></tr></thead>
+    <tbody>
+      <tr><td>前提</td><td>已登录网易云（Cookie 带 MUSIC_U）</td><td>已登录 QQ 音乐</td><td>服务器地址、用户名、密码</td></tr>
+      <tr><td>看列表</td><td class="yes">能，带已用 / 总容量</td><td class="yes">能</td><td class="yes">能（PROPFIND）</td></tr>
+      <tr><td>上传</td><td class="yes">能：检查 → 申请令牌 → 传到 NOS → 提交 → 等转码 → 发布；曲库有的歌秒传</td><td class="no">不做：只有未公开参数的接口，网页版已无入口</td><td class="yes">能：PUT 前先 HEAD，同一文件跳过</td></tr>
+      <tr><td>播放</td><td class="adj">匹配上的走现有取流；没匹配上的云盘原文件要真机确认用哪个地址</td><td class="adj">只有 QQ 匹配上的能播；原文件不能播</td><td class="yes">带账号直接流式播放，支持断点</td></tr>
+      <tr><td>封面歌词</td><td>匹配后用现有接口</td><td>匹配后用现有接口</td><td>和存放无关，走本机匹配结果</td></tr>
+      <tr><td>限制</td><td>单文件约 500 MB；风控码 −460 时停队列</td><td>—</td><td>部分服务器限制单次上传大小；不支持断点续传</td></tr>
+      <tr><td>这次做</td><td class="yes">列表、上传、播放、删除</td><td class="adj">只读：列表、已匹配的播放、删除</td><td class="yes">列表、上传、播放、删除；同步位置</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="block" id="data">
+  <div class="block-head"><span class="kicker">08</span><h2>同步文件 v3</h2></div>
+  <p class="sub">版本号从 2 升到 3。一首本地歌在歌单里长这样（只多几个可选字段，旧版本读到会忽略）：</p>
+<pre>{
+  <span class="k">"key"</span>: <span class="s">"local:sha256:9f3a…c41e"</span>,        <span class="c">// 主身份：文件首尾各 64KB + 大小算出的指纹，不用云盘 ID</span>
+  <span class="k">"title"</span>: <span class="s">"雨季备忘"</span>, <span class="k">"artist"</span>: <span class="s">"示例歌手"</span>, <span class="k">"durationSec"</span>: <span class="n">252</span>,
+  <span class="k">"local"</span>: { <span class="k">"hash"</span>: <span class="s">"sha256:9f3a…c41e"</span>, <span class="k">"fileName"</span>: <span class="s">"雨季备忘.flac"</span>, <span class="k">"fileSize"</span>: <span class="n">33973452</span>,
+             <span class="k">"device"</span>: <span class="s">"Pixel 8"</span> },              <span class="c">// 新增：上传前用来写“只在 Pixel 8 上”</span>
+  <span class="k">"remote"</span>: { <span class="k">"provider"</span>: <span class="s">"netease_cloud"</span>, <span class="k">"id"</span>: <span class="s">"1990…"</span>, <span class="k">"playableId"</span>: <span class="s">""</span>,
+              <span class="k">"status"</span>: <span class="s">"ready"</span>, <span class="k">"uploadedAt"</span>: <span class="s">"2026-11-08T21:14:03Z"</span> },
+  <span class="k">"match"</span>:  { <span class="k">"provider"</span>: <span class="s">"netease"</span>, <span class="k">"id"</span>: <span class="s">"1901371647"</span>, <span class="k">"confidence"</span>: <span class="n">0.96</span>,
+              <span class="k">"method"</span>: <span class="s">"audio"</span>, <span class="k">"matchedAt"</span>: <span class="s">"2026-11-08T20:02:11Z"</span> }
+}</pre>
+  <ul class="clean">
+    <li><b>合并：</b>歌单层面仍按修改时间后写的为准，不重写同步；同一首歌两边都有时字段取并集，<code>remote</code> 取上传时间新的，<code>match</code> 取分数高的。</li>
+    <li><b>删除：</b>本机删了文件不写墓碑，歌单条目保留；云盘里删了只把 <code>remote.status</code> 改成 <code>deleted</code>。“哪里都放不了”永远不是删除歌单条目的理由，这条写进合并测试。</li>
+    <li><b>体积：</b>只同步加进歌单或收藏的本地歌，不同步整个本地库。每首多 150–250 字节；同步文件超过 1 MB 时提示，不悄悄截断。</li>
+    <li><b>永远不进同步文件：</b>音频、歌词正文、封面图片、WebDAV 密码、播放地址、本机文件路径。</li>
+    <li><b>一个 WebDAV 位置下放两类东西：</b><code>myMusic/mymusic-library.json</code>（同步文件）和 <code>myMusic/music/&lt;指纹前两位&gt;/&lt;指纹&gt;.&lt;扩展名&gt;</code>（上传的歌）。歌的路径按规格 8.3，只是多套一层 <code>music/</code>，免得和同步文件混在一起。</li>
+  </ul>
+</section>
+
+<section class="block" id="errors">
+  <div class="block-head"><span class="kicker">09</span><h2>出错时用户看到什么</h2></div>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:26%">情况</th><th style="width:34%">界面</th><th>处理</th></tr></thead>
+    <tbody>
+      <tr><td>网易云盘容量不够</td><td>上传面板里网易云盘那行说明“还差 1.2 GB”，按钮不可点</td><td>开始前按已用 / 总容量和待传总大小检查，不进队列</td></tr>
+      <tr><td>单个文件超过 500 MB</td><td>“有 1 首超过 500 MB，会跳过”</td><td>其余照传</td></tr>
+      <tr><td>网易返回 −460</td><td>队列暂停；我的页那行写“上传暂停：网易云要求重新验证”</td><td>不自动重试，用户点“继续”才再试；退避</td></tr>
+      <tr><td>转码超过 10 分钟没完成</td><td>这首标“上传失败”，可重试</td><td>状态轮询 3–5 秒一次，最长 10 分钟</td></tr>
+      <tr><td>WebDAV 401</td><td>“WebDAV 密码不对或已失效”，点进去改密码</td><td>不清掉已上传的位置记录</td></tr>
+      <tr><td>WebDAV 不支持断点</td><td>播放时第一次提示“这个服务器要整首下载后才能播”</td><td>退化为整文件读取</td></tr>
+      <tr><td>云端连不上（断网）</td><td>空心点 + “云端暂时连不上”</td><td>不写进同步文件，网络恢复自动好</td></tr>
+      <tr><td>本机文件被删或移走</td><td>本地音乐里标“文件不在了”，可清理</td><td>歌单条目保留；有云端副本时照常从云端播</td></tr>
+      <tr><td>没给读取音乐权限</td><td>空状态 + “改为选择文件夹”</td><td>文件夹授权不需要权限</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="block" id="privacy">
+  <div class="block-head"><span class="kicker">10</span><h2>隐私说明、README 和许可</h2></div>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:18%">位置</th><th>加什么</th></tr></thead>
+    <tbody>
+      <tr><td>隐私说明 · 新增「本地音乐」</td><td>扫描只读取文件信息和标签，不改文件，也不会自己上传。自动匹配时，会把歌名和歌手发给已启用的平台搜索；标签不够时，在本机把 3 秒片段算成指纹，只把指纹发给网易云识曲，不发音频。只有你点了上传，文件才会传到你选的网易云盘或 WebDAV。</td></tr>
+      <tr><td>隐私说明 · 「写入你选择的云端」</td><td>加一句：选 WebDAV 时，同步文件写在你的 WebDAV 目录里；WebDAV 密码只存在本机，不进同步文件。</td></tr>
+      <tr><td>README · 功能列表</td><td>本地音乐：扫描手机里的歌，自动补封面和歌词；可以上传到网易云盘或自己的 WebDAV，加进歌单后换设备也能播。</td></tr>
+      <tr><td>README · 音乐库同步</td><td>同步位置可选 GitHub Gist、Gitee 代码片段或 WebDAV。</td></tr>
+      <tr><td>THIRD_PARTY_NOTICES</td><td>上传流程参考的开源实现（规格第 15 节列出的项目）如果照搬了代码或协议细节，按它们各自的许可登记在这里；README 不写接口细节。</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="block" id="phases">
+  <div class="block-head"><span class="kicker">11</span><h2>落地顺序</h2></div>
+  <p class="sub">WebDAV 同步位置不依赖本地音乐，先做；本地库和匹配先在本机成立；最后才碰云端上传。</p>
+  <div class="phases">
+    <div class="phase"><header><span class="tag">P1</span><h3>WebDAV 同步位置</h3></header><ul><li>同步接口第三个实现，ETag 防覆盖</li><li>连接表单、测试连接、自签名开关</li><li>电视扫码配置加 WebDAV</li></ul></div>
+    <div class="phase"><header><span class="tag">P2</span><h3>本地库</h3></header><ul><li>权限、媒体库 + 文件夹扫描、增量</li><li>本地音乐页（本机视图）、播放本地文件</li><li>加进歌单（<code>local:</code> 条目）</li></ul></div>
+    <div class="phase"><header><span class="tag">P3</span><h3>匹配</h3></header><ul><li>标签搜索 + 3 秒识曲</li><li>歌曲信息、换一个匹配</li><li>同名 .lrc、标题显示策略</li></ul></div>
+    <div class="phase"><header><span class="tag">P4</span><h3>同步 v3 和可用性</h3></header><ul><li>SyncTrack 新字段、合并测试</li><li>本机 → 云端 → 平台版本 的解析</li><li>“只在某设备上”状态和面板</li></ul></div>
+    <div class="phase"><header><span class="tag">P5</span><h3>上传和云端播放</h3></header><ul><li>WebDAV 上传 / 播放</li><li>网易云盘上传状态机、秒传、容量</li><li>上传面板、队列、云端视图</li></ul></div>
+    <div class="phase"><header><span class="tag">P6</span><h3>QQ 云盘只读</h3></header><ul><li>列表、已匹配的播放、删除</li><li>原文件标为不能播</li><li>隐私说明、README</li></ul></div>
+  </div>
+  <h3>不做的事</h3>
+  <ul class="clean">
+    <li>QQ 音乐云盘上传（等有真机抓包确认参数后再说）。</li>
+    <li>改写文件标签、把封面写进文件。</li>
+    <li>把整个本地库清单同步到云端；只同步加进歌单和收藏的。</li>
+    <li>音频、歌词正文、封面、WebDAV 密码进同步文件。</li>
+    <li>并发上传、扫描时自动上传。</li>
+    <li>把“云端删除 / 暂时连不上”当成用户删了歌。</li>
+  </ul>
+  <div class="note plain"><b>上线前要在真机上确认的</b>（规格第 14 节）：网易云盘没匹配上的原文件用哪个地址播；<code>simpleSong.id</code> 和 <code>songId</code> 是否相同；Gist / Gitee 对 1 MB 以上同步文件的限制；坚果云对单次 PUT 的大小限制。</div>
+</section>
+
+</main>
+
+<footer>
+  <b>依据</b>：<code>docs/local-music-cloud-sync-spec.md</code>（接口、数据模型和限制，按要求不另外验证）；myMusic 当前的 <code>LibraryScreen</code>（我的）、<code>LibraryCollections</code>（下载页占用卡片）、<code>SyncScreens</code>（音乐库同步与连接）、<code>components/Lists.kt</code>、<code>Badges.kt</code>、<code>Buttons.kt</code>、<code>SettingsCommon.kt</code>。<br>
+  手机稿用 M3E 浅色令牌（种子色 #006b5f）；歌名、歌手、容量和设备名都是示例。
+</footer>
+
+<script>
+// 引导卡的 Cookie9Sided 形状（只是装饰），和现有 ShapeIcon 一样
+(() => { let d = ''; for (let i = 0; i <= 180; i++) { const a = i / 180 * Math.PI * 2, r = .5 * (0.9 + 0.1 * Math.cos(9 * a)); d += (i ? 'L' : 'M') + (.5 + r * Math.cos(a)).toFixed(4) + ' ' + (.5 + r * Math.sin(a)).toFixed(4); } document.getElementById('ck9p').setAttribute('d', d + 'Z'); })();
+
+// 换一个匹配：点候选切换
+document.querySelectorAll('#cands [data-c]').forEach(row => row.addEventListener('click', () => {
+  document.querySelectorAll('#cands .rd').forEach(r => r.classList.remove('on'));
+  row.querySelector('.rd').classList.add('on');
+}));
+
+// 上传目标：网易云盘 / WebDAV
+const notes = {
+  nm: '传的是原文件，不转码。传完后，同步过的歌单在其它设备上能直接播这 3 首。单个文件超过 500 MB 的会跳过。',
+  dav: '传到 myMusic/music 下，同一个文件已经在服务器上时跳过。其它设备连上同一个 WebDAV 就能播。',
+};
+document.querySelectorAll('#targets [data-t]').forEach(row => { row.style.cursor = 'pointer'; row.addEventListener('click', () => {
+  document.querySelectorAll('#targets [data-t]').forEach(r => { r.classList.toggle('sel', r === row); r.querySelector('.rd').classList.toggle('on', r === row); });
+  document.getElementById('upNote').textContent = notes[row.dataset.t];
+}); });
+
+// WebDAV 服务商：只帮忙填地址和改密码提示
+const presets = {
+  jg: ['https://dav.jianguoyun.com/dav/', '应用密码', '坚果云要用“安全选项 › 第三方应用管理”里生成的应用密码，不是登录密码。密码用 Android Keystore 加密，只存本机。'],
+  nc: ['https://cloud.example.com/remote.php/dav/files/me/', '应用密码', 'Nextcloud 建议在“安全”里新建一个应用密码。密码用 Android Keystore 加密，只存本机。'],
+  syn: ['https://nas.local:5006/', '密码', '群晖要先在套件中心装 WebDAV Server；局域网地址在 Android 17 上会请求本地网络权限。'],
+  other: ['https://', '密码', '填服务器给的 WebDAV 地址。密码用 Android Keystore 加密，只存本机，不进同步文件。'],
+};
+document.querySelectorAll('#presets [data-p]').forEach(chip => chip.addEventListener('click', () => {
+  document.querySelectorAll('#presets .fc').forEach(c => { c.classList.toggle('on', c === chip); const s = c.querySelector('svg'); if (s) s.remove(); });
+  chip.insertAdjacentHTML('afterbegin', '<svg><use href="#i-check"/></svg>');
+  const [url, label, sup] = presets[chip.dataset.p];
+  document.getElementById('davUrl').textContent = url;
+  document.getElementById('pwLabel').textContent = label;
+  document.getElementById('pwSup').textContent = sup;
+}));
+</script>
+</body>
+</html>
