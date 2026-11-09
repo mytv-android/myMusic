@@ -14,6 +14,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             val success = app.sync.runSync(manual = false, notify = false)
             when {
                 success -> Result.success()
+                // WebDAV 密码错了：退避重试也没用，等用户手动同步或重新连接
+                app.sync.waitingForCredentials() -> Result.success()
                 app.sync.state.value.status == SyncStatus.Error -> Result.retry()
                 else -> Result.success()
             }

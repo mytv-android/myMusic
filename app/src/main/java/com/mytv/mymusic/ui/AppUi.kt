@@ -289,6 +289,8 @@ class MusicActions(private val model: MusicViewModel) {
     fun refreshAccountProfiles() = model.refreshAccountProfiles()
     fun syncBoundPlaylistsOnScreen() = model.refreshStaleBoundPlaylists()
     fun connectSync(providerId: String, token: String, remote: String) = model.connectSync(providerId, token, remote)
+    fun connectWebDav(account: com.mytv.mymusic.data.webdav.WebDavAccount) = model.connectWebDav(account)
+    fun testWebDav(account: com.mytv.mymusic.data.webdav.WebDavAccount?) = model.testWebDav(account)
     fun resolveInitial(strategy: SyncStrategy) = model.resolveInitialSync(strategy)
     fun cancelInitial() = model.cancelInitialSync()
     fun resolveConflict(id: String, strategy: SyncStrategy) = model.resolveSyncConflict(id, strategy)

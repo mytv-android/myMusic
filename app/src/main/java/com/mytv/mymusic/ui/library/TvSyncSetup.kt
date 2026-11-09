@@ -107,7 +107,13 @@ internal fun TvSyncSetupContent(
         onSubmit = { submission ->
             scope.launch {
                 onSubmission()
-                actions.connectSync(submission.provider, submission.token, submission.remote)
+                // WebDAV 走自己的入口：同一位置只换密码时不用再选一遍首次合并
+                val webDav = submission.webDav
+                if (webDav != null) {
+                    actions.connectWebDav(webDav)
+                } else {
+                    actions.connectSync(submission.provider, submission.token, submission.remote)
+                }
             }
         },
     )
@@ -142,7 +148,7 @@ internal fun TvSyncSetupContent(
                         fontWeight = FontWeight.ExtraBold,
                     )
                     Text(
-                        "1. 手机与电视连接同一网络\n2. 扫码选择 GitHub Gist 或 Gitee\n3. 提交后按电视提示完成连接",
+                        "1. 手机与电视连接同一网络\n2. 扫码选择 GitHub Gist、Gitee 或 WebDAV\n3. 提交后按电视提示完成连接",
                         Modifier.padding(top = 8.dp),
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -204,7 +210,7 @@ internal fun TvSyncSetupContent(
                                     QrCodeImage(
                                         text = current.url,
                                         modifier = Modifier.size(300.dp).padding(10.dp),
-                                        description = "扫描后在手机配置 Gist 或 Gitee 同步",
+                                        description = "扫描后在手机配置 Gist、Gitee 或 WebDAV 同步",
                                     )
                                 }
                                 Text(
@@ -254,7 +260,7 @@ internal fun TvSyncSetupContent(
                             }
                             session is TvSetupSession.Ready -> {
                                 Text(
-                                    "等待手机提交；已保存的令牌不会显示在网页中",
+                                    "等待手机提交；已保存的令牌和密码不会显示在网页中",
                                     Modifier.padding(top = 16.dp),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,

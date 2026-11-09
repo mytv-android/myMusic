@@ -320,7 +320,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playlistItems(
                 EmptyState(
                     icon = Icons.AutoMirrored.Filled.PlaylistAdd,
                     title = "还没有自建歌单",
-                    message = "新建歌单后可以添加歌曲、调整顺序，并同步到 GitHub Gist 或 Gitee。",
+                    message = "新建歌单后可以添加歌曲、调整顺序，并同步到 GitHub Gist、Gitee 或 WebDAV。",
                     actionLabel = "新建歌单",
                     onAction = onCreate,
                 )
@@ -1045,7 +1045,7 @@ private fun SyncStatusCard(sync: SyncUiState, onOpen: () -> Unit, modifier: Modi
         )
         sync.account != null && sync.error.isNotBlank() -> Triple("同步失败", sync.error, IconTone.Error)
         sync.status == SyncStatus.Syncing -> Triple("正在同步…", sync.phase.ifBlank { sync.providerLabel }, IconTone.Primary)
-        sync.account == null -> Triple("把音乐库同步到云端", "连接 GitHub Gist 或 Gitee，同步歌单、收藏和平台账号", IconTone.Secondary)
+        sync.account == null -> Triple("把音乐库同步到云端", "连接 GitHub Gist、Gitee 或 WebDAV，同步歌单、收藏和平台账号", IconTone.Secondary)
         else -> return
     }
     ListRow(

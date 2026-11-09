@@ -136,6 +136,38 @@ class SyncSetupServerTest {
     }
 
     @Test
+    fun acceptsWebDavAccountAndKeepsPasswordOutOfResponses() {
+        val submissions = CopyOnWriteArrayList<SyncSetupSubmission>()
+        val base = start(AtomicReference(SyncSetupSnapshot()), submissions::add)
+        val password = "nas-app-password"
+
+        post(base, """{"provider":"webdav","url":"https://nas.local:5006","username":"admin","password":""}""")
+            .use { assertEquals(400, it.code) }
+        post(base, """{"provider":"webdav","url":"https://","username":"admin","password":"x"}""")
+            .use { assertEquals(400, it.code) }
+        post(base, """{"provider":"webdav","url":"https://nas.local:5006","username":" ","password":"x"}""")
+            .use { assertEquals(400, it.code) }
+        assertTrue(submissions.isEmpty())
+
+        post(
+            base,
+            """{"provider":"webdav","url":"nas.local:5006","username":" admin ","password":"$password","directory":"/音乐/","trustSelfSigned":true}""",
+        ).use { response ->
+            assertEquals(202, response.code)
+            assertFalse(response.body.string().contains(password))
+        }
+        val submission = submissions.single()
+        assertEquals("webdav", submission.provider)
+        // 电视上走的还是 connect(provider, token)：token 就是规范化后的整个账号
+        val account = com.mytv.mymusic.data.webdav.WebDavAccount.decode(submission.token)
+        assertEquals(
+            com.mytv.mymusic.data.webdav.WebDavAccount("https://nas.local:5006/", "admin", password, "音乐/", true),
+            account,
+        )
+        get(base, "api/status").use { response -> assertFalse(response.body.string().contains(password)) }
+    }
+
+    @Test
     fun rejectsInvalidCrossSiteAndOversizedRequests() {
         val submissions = CopyOnWriteArrayList<SyncSetupSubmission>()
         val base = start(AtomicReference(SyncSetupSnapshot()), submissions::add)

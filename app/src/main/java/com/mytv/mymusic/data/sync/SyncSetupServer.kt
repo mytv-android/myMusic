@@ -1,5 +1,8 @@
 package com.mytv.mymusic.data.sync
 
+import com.mytv.mymusic.data.webdav.WebDavAccount
+import com.mytv.mymusic.data.webdav.WebDavMessages
+import com.mytv.mymusic.data.webdav.WebDavPaths
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -46,10 +49,15 @@ internal data class SyncSetupSnapshot(
     val sync: SyncUiState = SyncUiState(),
 )
 
+/**
+ * 手机提交的配置。WebDAV 时 [token] 是整个账号 [WebDavAccount.encode] 出来的串，
+ * 交给 SyncCoordinator.connect 的方式和 Gist 令牌一样；[webDav] 只用来在会话里做校验。
+ */
 internal class SyncSetupSubmission(
     val provider: String,
     val token: String,
     val remote: String,
+    val webDav: WebDavAccount? = null,
 )
 
 internal data class SyncSetupStarted(val url: String, val expiresAt: Long)
@@ -76,7 +84,26 @@ private class ConnectRequest(
     val provider: String = "",
     val token: String = "",
     val remote: String = "",
-)
+    // 以下是 WebDAV 表单；令牌类的提交里没有这些字段
+    val url: String = "",
+    val username: String = "",
+    val password: String = "",
+    val directory: String = "",
+    val trustSelfSigned: Boolean = false,
+) {
+    fun toSubmission(): SyncSetupSubmission = if (provider == WebDavSyncProvider.ID) {
+        val account = WebDavAccount(
+            serverUrl = url,
+            username = username,
+            password = password,
+            directory = directory,
+            trustSelfSigned = trustSelfSigned,
+        )
+        SyncSetupSubmission(provider, account.encode(), "", account)
+    } else {
+        SyncSetupSubmission(provider, token, remote)
+    }
+}
 
 private data class AccountMarker(
     val provider: String?,
@@ -108,12 +135,15 @@ internal class SyncSetupSession(
     @Synchronized
     fun submit(submission: SyncSetupSubmission): SyncSetupSubmitResult {
         if (isExpired()) return SyncSetupSubmitResult.Expired
-        val token = submission.token.trim()
-        if (submission.provider !in PROVIDERS || token.isBlank() ||
-            token.length > MAX_TOKEN_CHARS || submission.remote.length > MAX_REMOTE_CHARS
-        ) {
-            return SyncSetupSubmitResult.Invalid
+        val webDav = submission.webDav?.normalized()
+        val token = if (webDav != null) webDav.encode() else submission.token.trim()
+        val valid = when {
+            submission.provider !in PROVIDERS -> false
+            submission.provider == WebDavSyncProvider.ID -> webDav != null && isValidWebDav(webDav)
+            else -> token.isNotBlank() && token.length <= MAX_TOKEN_CHARS &&
+                submission.remote.length <= MAX_REMOTE_CHARS
         }
+        if (!valid) return SyncSetupSubmitResult.Invalid
         if (submittedProvider == null && snapshot().sync.status == SyncStatus.Syncing) {
             return SyncSetupSubmitResult.Busy
         }
@@ -131,7 +161,7 @@ internal class SyncSetupSession(
         submissionError = ""
         observedTransition = false
         return try {
-            onSubmit(SyncSetupSubmission(submission.provider, token, submission.remote.trim()))
+            onSubmit(SyncSetupSubmission(submission.provider, token, submission.remote.trim(), webDav))
             SyncSetupSubmitResult.Accepted
         } catch (_: Exception) {
             submissionError = "电视没有接收这次配置，请返回电视重试。"
@@ -145,7 +175,7 @@ internal class SyncSetupSession(
         val provider = submittedProvider ?: return SyncSetupStatus(
             phase = SyncSetupPhase.Idle,
             title = "等待配置",
-            detail = "填写访问令牌后，电视会验证并完成连接。",
+            detail = "填写访问令牌或 WebDAV 账号后，电视会验证并完成连接。",
             provider = current.provider.takeIf { it in PROVIDERS } ?: "gist",
         )
         val sync = current.sync
@@ -169,15 +199,21 @@ internal class SyncSetupSession(
             sync.status == SyncStatus.Syncing -> SyncSetupStatus(
                 SyncSetupPhase.Working,
                 "正在连接",
-                sync.phase.ifBlank { "电视正在验证令牌并读取云端文件。" },
+                sync.phase.ifBlank { "电视正在验证账号并读取云端文件。" },
                 provider,
             )
             sync.error.isNotBlank() && (observedTransition || clock() - submittedAt >= STALE_ERROR_GRACE_MILLIS) ->
-                SyncSetupStatus(SyncSetupPhase.Error, "连接未完成", safeSetupError(sync.error), provider)
+                SyncSetupStatus(
+                    SyncSetupPhase.Error,
+                    "连接未完成",
+                    // WebDAV 的错误文案是固定写法（不夹服务器正文），手机上要看到才知道改哪一项
+                    if (provider == WebDavSyncProvider.ID) sync.error else safeSetupError(sync.error),
+                    provider,
+                )
             observedTransition && account?.provider == provider && sync.error.isBlank() -> SyncSetupStatus(
                 SyncSetupPhase.Success,
                 "连接成功",
-                "电视已连接 ${providerLabel(provider)}，可以关闭此页面。",
+                successDetail(provider, sync),
                 provider,
             )
             else -> SyncSetupStatus(
@@ -191,6 +227,24 @@ internal class SyncSetupSession(
 
     fun isExpired(): Boolean = clock() >= expiresAt
 
+    /**
+     * 手机网页读不到 WebDAV 服务器的证书，打开“信任自签名证书”时由电视第一次连上时自己记下那张；
+     * 把指纹也报给手机，方便对着服务器核对。
+     */
+    private fun successDetail(provider: String, sync: SyncUiState): String {
+        val certificate = sync.webDav?.certificate?.takeIf { provider == WebDavSyncProvider.ID && !it.systemTrusted }
+            ?: return "电视已连接 ${providerLabel(provider)}，可以关闭此页面。"
+        return "电视已连接 WebDAV，并记下了服务器的${WebDavMessages.certificate(certificate)}。" +
+            "以后证书变了，电视会停下来提醒。可以关闭此页面。"
+    }
+
+    private fun isValidWebDav(account: WebDavAccount): Boolean =
+        WebDavPaths.parseServerUrl(account.serverUrl) != null &&
+            account.serverUrl.length <= MAX_REMOTE_CHARS &&
+            account.username.isNotBlank() && account.username.length <= MAX_FIELD_CHARS &&
+            account.password.isNotEmpty() && account.password.length <= MAX_TOKEN_CHARS &&
+            account.directory.length <= MAX_FIELD_CHARS
+
     private fun safeSetupError(message: String): String = when {
         message.startsWith("令牌无效") || message.startsWith("令牌权限") || message.startsWith("令牌无法读取") -> message
         message.startsWith("找不到云端文件") || message.startsWith("同步文件") || message.startsWith("云端") -> message
@@ -200,8 +254,9 @@ internal class SyncSetupSession(
     }
 
     private companion object {
-        val PROVIDERS = setOf("gist", "gitee")
+        val PROVIDERS = setOf("gist", "gitee", WebDavSyncProvider.ID)
         const val MAX_TOKEN_CHARS = 1024
+        const val MAX_FIELD_CHARS = 512
         const val MAX_REMOTE_CHARS = 2048
         const val STALE_ERROR_GRACE_MILLIS = 3000L
     }
@@ -325,7 +380,7 @@ internal class SyncSetupServer(
         "api/session" -> jsonResponse(
             Response.Status.OK,
             buildJsonObject {
-                put("provider", snapshot().provider.takeIf { it == "gist" || it == "gitee" } ?: "gist")
+                put("provider", snapshot().provider.takeIf { it in SETUP_PROVIDERS } ?: "gist")
                 put("expiresAt", session.expiresAt)
             },
         )
@@ -361,7 +416,7 @@ internal class SyncSetupServer(
         } catch (_: Exception) {
             return errorResponse(Response.Status.BAD_REQUEST, "配置格式不正确")
         }
-        return when (session.submit(SyncSetupSubmission(request.provider, request.token, request.remote))) {
+        return when (session.submit(request.toSubmission())) {
             SyncSetupSubmitResult.Accepted -> jsonResponse(
                 Response.Status.ACCEPTED,
                 statusJson(
@@ -376,7 +431,11 @@ internal class SyncSetupServer(
             SyncSetupSubmitResult.Busy -> errorResponse(Response.Status.CONFLICT, "电视正在处理配置，请稍候")
             SyncSetupSubmitResult.Invalid -> errorResponse(
                 Response.Status.BAD_REQUEST,
-                "请检查服务类型和令牌；已有文件 ID 或链接不能超过 2048 个字符",
+                if (request.provider == WebDavSyncProvider.ID) {
+                    "请检查 WebDAV 服务器地址、用户名和密码"
+                } else {
+                    "请检查服务类型和令牌；已有文件 ID 或链接不能超过 2048 个字符"
+                },
             )
             SyncSetupSubmitResult.Expired -> errorResponse(Response.Status.GONE, "二维码已过期，请重新扫码")
             SyncSetupSubmitResult.Failed -> errorResponse(Response.Status.INTERNAL_ERROR, "电视没有接收配置，请重试")
@@ -476,11 +535,13 @@ internal class SyncSetupServer(
 
     private companion object {
         val COLOR = Regex("^#[0-9a-fA-F]{6}$")
+        val SETUP_PROVIDERS = setOf("gist", "gitee", WebDavSyncProvider.ID)
     }
 }
 
 internal fun providerLabel(provider: String): String = when (provider) {
     "gist" -> "GitHub Gist"
     "gitee" -> "Gitee 代码片段"
+    WebDavSyncProvider.ID -> "WebDAV"
     else -> provider
 }

@@ -7,6 +7,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import java.net.Inet6Address
+import java.net.InetAddress
 
 /**
  * Android 17（API 37）起的本地网络保护：targetSdk ≥ 37 的应用连「接受局域网入站连接」也要持有
@@ -34,6 +36,29 @@ object LocalNetworkAccess {
     fun isGranted(context: Context): Boolean =
         !isRequired(context) ||
             ContextCompat.checkSelfPermission(context, PERMISSION) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * 作为客户端连出去时，目标是不是“本地网络”：私网 IPv4、链路本地、IPv6 ULA（fc00::/7）。
+     * 回环不算，本机永远能连。WebDAV 填了 NAS 的局域网地址时要先拿到权限，否则连接直接被丢包。
+     */
+    fun isLocalNetworkAddress(address: InetAddress): Boolean {
+        if (address.isLoopbackAddress || address.isAnyLocalAddress) return false
+        if (address.isSiteLocalAddress || address.isLinkLocalAddress) return true
+        return address is Inet6Address && (address.address[0].toInt() and 0xfe) == 0xfc
+    }
+
+    /**
+     * 主机名是否指向本地网络。会做 DNS 解析，必须在 IO 线程调用；解析失败时按字面判断：
+     * `.local`（mDNS）和不带点的单标签主机名（`nas`）基本都在局域网里。
+     */
+    fun isLocalNetworkHost(host: String): Boolean {
+        val name = host.trim().trim('[', ']')
+        if (name.isEmpty()) return false
+        val resolved = runCatching { InetAddress.getAllByName(name).toList() }.getOrNull()
+        if (!resolved.isNullOrEmpty()) return resolved.any(::isLocalNetworkAddress)
+        val lower = name.lowercase()
+        return lower.endsWith(".local") || lower.endsWith(".lan") || !lower.contains('.')
+    }
 
     /** 权限属于 NEARBY_DEVICES 组，被拒后系统不再弹框，只能引导用户自己去应用详情页开 */
     fun openSettings(context: Context) {

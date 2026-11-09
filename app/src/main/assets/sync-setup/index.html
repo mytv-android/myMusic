@@ -29,7 +29,7 @@
       </div>
       <div>
         <h1 id="page-title">在手机上完成电视同步</h1>
-        <p>不用遥控器输入长令牌。配置只发送到这台电视，验证后由电视加密保存。</p>
+        <p>不用遥控器输入长令牌或密码。配置只发送到这台电视，验证后由电视加密保存。</p>
       </div>
     </section>
 
@@ -40,11 +40,13 @@
             <legend>同步位置</legend>
             <div class="segmented" aria-label="选择同步位置">
               <button type="button" class="provider-option" data-provider="gist" aria-pressed="true">GitHub Gist</button>
-              <button type="button" class="provider-option" data-provider="gitee" aria-pressed="false">Gitee 代码片段</button>
+              <button type="button" class="provider-option" data-provider="gitee" aria-pressed="false" aria-label="Gitee 代码片段">Gitee</button>
+              <button type="button" class="provider-option" data-provider="webdav" aria-pressed="false">WebDAV</button>
             </div>
             <p id="provider-description" class="field-help provider-description">使用 GitHub 账号创建一个私密 Gist，或连接已有 Gist。</p>
           </fieldset>
 
+          <div id="token-fields">
           <div class="field">
             <div class="label-row">
               <label for="token">访问令牌</label>
@@ -64,6 +66,43 @@
             <label for="remote" id="remote-label">Gist ID（可选）</label>
             <input id="remote" name="remote" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="2048" placeholder="留空则新建一个私密 Gist" aria-describedby="remote-help">
             <p id="remote-help" class="field-help">也可以粘贴已有文件的完整链接。</p>
+          </div>
+          </div>
+
+          <div id="webdav-fields" hidden>
+            <div class="preset-row" role="radiogroup" aria-label="服务商">
+              <button type="button" class="preset-chip" data-preset="jianguoyun" role="radio" aria-checked="true">坚果云</button>
+              <button type="button" class="preset-chip" data-preset="nextcloud" role="radio" aria-checked="false">Nextcloud</button>
+              <button type="button" class="preset-chip" data-preset="synology" role="radio" aria-checked="false">群晖</button>
+              <button type="button" class="preset-chip" data-preset="other" role="radio" aria-checked="false">其它</button>
+            </div>
+            <div class="field">
+              <label for="dav-url">服务器地址</label>
+              <input id="dav-url" name="dav-url" type="url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="2048" aria-describedby="dav-url-help">
+              <p id="dav-url-help" class="field-help">坚果云的地址固定是这个，不用改。</p>
+            </div>
+            <div class="field">
+              <label for="dav-user">用户名</label>
+              <input id="dav-user" name="dav-user" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="512">
+            </div>
+            <div class="field">
+              <label for="dav-pass" id="dav-pass-label">应用密码</label>
+              <div class="input-shell">
+                <input id="dav-pass" name="dav-pass" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="1024" aria-describedby="dav-pass-help">
+                <button id="toggle-dav-pass" class="reveal-button" type="button" aria-label="显示密码" aria-pressed="false">显示</button>
+              </div>
+              <p id="dav-pass-help" class="field-help">坚果云要用“安全选项 › 第三方应用管理”里生成的应用密码，不是登录密码。密码由电视加密保存，不会写进同步文件。</p>
+            </div>
+            <div class="field">
+              <label for="dav-dir">目录</label>
+              <input id="dav-dir" name="dav-dir" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="512" value="myMusic/" aria-describedby="dav-dir-help">
+              <p id="dav-dir-help" class="field-help">同步文件和上传的歌都放在这个目录下，没有会自动建</p>
+            </div>
+            <label class="switch-row" for="dav-trust">
+              <span class="switch-text"><b>信任自签名证书</b><small>只在自己架的服务器上打开</small></span>
+              <input id="dav-trust" name="dav-trust" type="checkbox" role="switch">
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
           </div>
 
           <div id="form-error" class="inline-error" role="alert" hidden></div>
@@ -92,15 +131,15 @@
       <aside class="side-content">
         <section class="note-card">
           <h2>会同步什么</h2>
-          <p>自建歌单、收藏、歌曲元数据和平台账号 Cookie。Cookie 会以明文写入私密 Gist / 代码片段，请勿公开文件链接。</p>
+          <p id="note-sync">自建歌单、收藏、歌曲元数据和平台账号 Cookie。Cookie 会以明文写入私密 Gist / 代码片段，请勿公开文件链接。</p>
           <div class="note-divider"></div>
           <h3>不会包含</h3>
-          <p>最近播放、下载文件、播放地址和播放进度。Gist / Gitee 访问令牌只用于连接，不会写进同步文件。</p>
+          <p id="note-exclude">最近播放、下载文件、播放地址和播放进度。Gist / Gitee 访问令牌只用于连接，不会写进同步文件。</p>
         </section>
         <section class="next-steps" aria-labelledby="next-title">
           <h2 id="next-title">接下来</h2>
           <ol>
-            <li>电视验证令牌，并创建或读取云端文件。</li>
+            <li>电视验证令牌或 WebDAV 账号，并创建或读取云端文件。</li>
             <li>如果本机和云端都有歌单，在电视大屏上选择首次合并方式。</li>
           </ol>
         </section>

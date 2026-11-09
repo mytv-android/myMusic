@@ -18,7 +18,8 @@ import java.io.IOException
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
-enum class SyncFailureKind { Auth, Permission, NotFound, Network, Corrupt, Unknown }
+/** Precondition：带条件的写入被拒（WebDAV 412），说明读完到写入之间云端被别的设备改了。 */
+enum class SyncFailureKind { Auth, Permission, NotFound, Network, Corrupt, Precondition, Unknown }
 
 class SyncException(val kind: SyncFailureKind, override val message: String) : Exception(message)
 
@@ -38,9 +39,22 @@ interface PlaylistSyncProvider {
     val fileName: String
 
     suspend fun validate(token: String): RemoteAccount
+
+    /**
+     * 同步文件位置固定的后端（WebDAV：`<目录>/mymusic-library.json`）用它找已有文件，找到返回
+     * remoteId，没有返回空串。Gist / Gitee 的文件 ID 只能由用户给，默认就是空串。
+     */
+    suspend fun locate(token: String): String = ""
+
     suspend fun read(token: String, remoteId: String): RemoteFile
     suspend fun create(token: String, content: String): RemoteFile
-    suspend fun update(token: String, remoteId: String, content: String): RemoteFile
+
+    /**
+     * [expectedRevision] 是写入前刚读到的 [RemoteFile.revision]。支持条件写入的后端（WebDAV 的
+     * If-Match）在云端已经变了时抛 [SyncFailureKind.Precondition]；Gist / Gitee 没有条件写入，
+     * 忽略它，靠同步流程里“上传前再读一次”比较。
+     */
+    suspend fun update(token: String, remoteId: String, content: String, expectedRevision: String = ""): RemoteFile
 }
 
 internal fun syncHttpClient(): OkHttpClient = OkHttpClient.Builder()
@@ -108,7 +122,7 @@ class GistSyncProvider(private val http: OkHttpClient = syncHttpClient()) : Play
         parseFile(execute(request))
     }
 
-    override suspend fun update(token: String, remoteId: String, content: String): RemoteFile = call {
+    override suspend fun update(token: String, remoteId: String, content: String, expectedRevision: String): RemoteFile = call {
         val payload = buildJsonObject {
             put("files", buildJsonObject { put(fileName, buildJsonObject { put("content", content) }) })
         }
@@ -207,7 +221,7 @@ class GiteeSyncProvider(private val http: OkHttpClient = syncHttpClient()) : Pla
         )
     }
 
-    override suspend fun update(token: String, remoteId: String, content: String): RemoteFile = call {
+    override suspend fun update(token: String, remoteId: String, content: String, expectedRevision: String): RemoteFile = call {
         val payload = buildJsonObject {
             put("access_token", token)
             put("description", "myMusic 自建歌单同步")

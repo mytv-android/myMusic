@@ -22,6 +22,15 @@ import com.mytv.mymusic.data.SyncBaseEntity
 import com.mytv.mymusic.data.SyncConflictEntity
 import com.mytv.mymusic.data.SyncDao
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.webdav.WebDavAccount
+import com.mytv.mymusic.data.webdav.WebDavAccountInfo
+import com.mytv.mymusic.data.webdav.WebDavAccountStore
+import com.mytv.mymusic.data.webdav.WebDavCertificate
+import com.mytv.mymusic.data.webdav.WebDavErrorKind
+import com.mytv.mymusic.data.webdav.WebDavException
+import com.mytv.mymusic.data.webdav.WebDavMessages
+import com.mytv.mymusic.data.webdav.WebDavTrust
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -82,6 +91,29 @@ data class SyncUiState(
     val favoritesCount: Int = 0,
     val cookieCount: Int = 0,
     val initialMerge: InitialMergePreview? = null,
+    /** 本机保存的 WebDAV 账号（不含密码）；同步位置和以后的上传共用。 */
+    val webDav: WebDavAccountInfo? = null,
+    val webDavCheck: WebDavCheckUi = WebDavCheckUi(),
+)
+
+/**
+ * “测试连接”的结果。[target] 是被测账号的 [WebDavAccount.locationKey]：表单改了地址或用户名后，
+ * 旧结果对不上就不显示，免得把上一个服务器的“能读写”当成这一个的。
+ */
+data class WebDavCheckUi(
+    val running: Boolean = false,
+    val ok: Boolean = false,
+    val message: String = "",
+    val target: String = "",
+    /** 测的是本机保存的账号（已连接卡片上的按钮），不是表单里还没保存的草稿。 */
+    val saved: Boolean = false,
+    /**
+     * 打开“信任自签名证书”时这次读到的服务器证书。用户看过它再点连接，连接就钉这一张
+     * （表单把它放进 [WebDavAccount.pinnedCertificate] 传回来）。
+     */
+    val certificate: WebDavCertificate? = null,
+    /** 读到的证书和本机记下的不一样：测试停在发密码之前，等用户点“信任新证书”。 */
+    val certificateChanged: Boolean = false,
 )
 
 data class SyncEvent(val message: String, val error: Boolean = false)
@@ -104,21 +136,31 @@ class SyncCoordinator(
     private val secretStore: SecretStore,
     private val settings: SettingsStore,
     private val scope: CoroutineScope,
+    /** WebDAV 账号是独立实体：同步位置用它，以后的“上传到 WebDAV”也用它。 */
+    val webDavAccounts: WebDavAccountStore = WebDavAccountStore(context, secretStore),
 ) {
     private val _state = MutableStateFlow(SyncUiState())
     val state: StateFlow<SyncUiState> = _state.asStateFlow()
     private val _events = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 8)
     val events = _events.asSharedFlow()
 
+    private val webDavProvider = WebDavSyncProvider()
     private val providers: Map<String, PlaylistSyncProvider> = mapOf(
         "gist" to GistSyncProvider(),
         "gitee" to GiteeSyncProvider(),
+        WebDavSyncProvider.ID to webDavProvider,
     )
     fun availableProviders(): List<Pair<String, String>> =
         providers.values.map { it.id to it.label }
 
     private val mutex = Mutex()
     private var pendingInitial: PendingInitial? = null
+
+    /**
+     * WebDAV 回过 401 的那个位置。自动同步（改歌单、回前台、WorkManager 重试）不再拿错密码去撞，
+     * Nextcloud 之类会因为连续失败把 IP 限速甚至锁号；手动同步或重新连接时才清掉。
+     */
+    @Volatile private var authBlocked: String? = null
     private var localChangeJob: Job? = null
     private val musicDao = db.dao()
 
@@ -173,6 +215,9 @@ class SyncCoordinator(
                 }
             }
         }
+        scope.launch {
+            webDavAccounts.info.collect { info -> _state.update { it.copy(webDav = info) } }
+        }
     }
 
     private data class Derived(
@@ -205,9 +250,14 @@ class SyncCoordinator(
             fail("同步后端不可用：${account.provider}")
             return@withLock false
         }
-        val token = secretStore.token(account.provider)
+        val token = credential(account.provider)
         if (token.isNullOrBlank()) {
-            fail("同步令牌已失效，请在设置中重新连接。")
+            fail(missingCredentialMessage(account.provider))
+            return@withLock false
+        }
+        if (manual) {
+            authBlocked = null
+        } else if (authBlocked == blockKey(account)) {
             return@withLock false
         }
         if (account.remoteId.isBlank()) {
@@ -420,7 +470,13 @@ class SyncCoordinator(
                         }
                         applySnapshot(merged, removeAbsent = false, dirty = true)
                         _state.update { it.copy(phase = "正在上传数据") }
-                        uploaded = upload(provider, token, account, merged, latest)
+                        uploaded = try {
+                            upload(provider, token, account, merged, latest)
+                        } catch (error: SyncException) {
+                            // WebDAV 的 If-Match 被拒：读完到写入之间云端又变了，下一轮重新读、重新合并
+                            if (error.kind != SyncFailureKind.Precondition) throw error
+                            null
+                        }
                     }
                     val finalSnapshot = merged
                     val finalUpload = uploaded ?: return@withLock false
@@ -437,8 +493,14 @@ class SyncCoordinator(
                 }
             }
         } catch (error: SyncException) {
-            fail(error.message)
-            if (notify) emit(error.message, error = true)
+            val message = if (error.kind == SyncFailureKind.Auth && account.provider == WebDavSyncProvider.ID) {
+                authBlocked = blockKey(account)
+                "WebDAV 密码不对或已失效，请在“同步位置 › WebDAV”里重新输入。"
+            } else {
+                error.message
+            }
+            fail(message)
+            if (notify) emit(message, error = true)
             false
         } catch (error: Exception) {
             val message = error.message ?: "同步失败"
@@ -448,29 +510,57 @@ class SyncCoordinator(
         }
     }
 
+    /** SyncWorker 用：密码错了时别让 WorkManager 一直退避重试，等用户手动处理。 */
+    fun waitingForCredentials(): Boolean {
+        val account = _state.value.account ?: return false
+        return authBlocked == blockKey(account)
+    }
+
+    private fun blockKey(account: SyncAccountEntity) = "${account.provider}|${account.remoteId}|${account.accountLabel}"
+
     suspend fun connect(providerId: String, token: String, remoteInput: String): Boolean {
         val provider = providers[providerId] ?: run {
             emit("不支持的同步后端", error = true)
             return false
         }
+        val webDav = providerId == WebDavSyncProvider.ID
+        authBlocked = null
         _state.update {
             it.copy(
                 status = SyncStatus.Syncing,
-                phase = "正在验证令牌",
+                phase = if (webDav) "正在连接 WebDAV" else "正在验证令牌",
                 message = "",
                 error = "",
+                // 之前测的结果（比如输错密码那次）对新连接没有意义，别留在已连接卡片下面
+                webDavCheck = WebDavCheckUi(),
             )
         }
         return try {
             val accountInfo = provider.validate(token)
             _state.update { it.copy(phase = "正在读取云端文件") }
             val local = localSnapshot()
-            val remoteId = extractRemoteId(remoteInput)
+            // WebDAV 的同步文件位置是固定的，不靠用户填 ID：先看目录里有没有
+            var remoteId = (if (webDav) "" else extractRemoteId(remoteInput)).ifBlank { provider.locate(token) }
+            var created: RemoteFile? = null
             if (remoteId.isBlank()) {
-                _state.update { it.copy(phase = "正在创建私人 ${provider.label}") }
+                _state.update { it.copy(phase = if (webDav) "正在创建同步文件" else "正在创建私人 ${provider.label}") }
                 val content = encodeForUpload(local)
-                val remoteFile = provider.create(token, content)
-                secretStore.saveToken(providerId, token)
+                created = try {
+                    provider.create(token, content)
+                } catch (error: SyncException) {
+                    // If-None-Match: * 被拒：另一台设备恰好先建好了同步文件，按已有文件走首次合并
+                    if (error.kind != SyncFailureKind.Precondition) throw error
+                    null
+                }
+                if (created == null) {
+                    remoteId = provider.locate(token).ifBlank {
+                        throw SyncException(SyncFailureKind.Unknown, "云端同步文件状态异常，请稍后重试。")
+                    }
+                }
+            }
+            if (created != null) {
+                val remoteFile = created
+                saveCredential(providerId, token)
                 syncDao.clearAccounts()
                 syncDao.clearBases()
                 syncDao.clearConflicts()
@@ -501,7 +591,7 @@ class SyncCoordinator(
                 val localEmpty = !local.hasUserData()
                 when {
                     remoteEmpty && localEmpty -> {
-                        secretStore.saveToken(providerId, token)
+                        saveCredential(providerId, token)
                         syncDao.clearAccounts()
                         syncDao.clearBases()
                         syncDao.clearConflicts()
@@ -523,11 +613,11 @@ class SyncCoordinator(
                         true
                     }
                     remoteEmpty -> {
-                        secretStore.saveToken(providerId, token)
+                        saveCredential(providerId, token)
                         syncDao.clearAccounts()
                         syncDao.clearBases()
                         syncDao.clearConflicts()
-                        val uploaded = provider.update(token, remoteFile.id, encodeForUpload(local))
+                        val uploaded = provider.update(token, remoteFile.id, encodeForUpload(local), remoteFile.revision)
                         val newAccount = SyncAccountEntity(
                             provider = providerId,
                             remoteId = remoteFile.id,
@@ -549,7 +639,7 @@ class SyncCoordinator(
                         true
                     }
                     localEmpty -> {
-                        secretStore.saveToken(providerId, token)
+                        saveCredential(providerId, token)
                         syncDao.clearAccounts()
                         syncDao.clearBases()
                         syncDao.clearConflicts()
@@ -619,37 +709,55 @@ class SyncCoordinator(
         return@withLock try {
             val provider = providers[pending.providerId]
                 ?: throw SyncException(SyncFailureKind.Unknown, "同步后端不可用")
-            val content = SyncMerge.applyStrategy(pending.local, pending.remote, strategy)
-            val merged = SyncSnapshot(
-                deviceId = deviceId,
-                updatedAt = SyncTime.nowIso(),
-                playlists = content.playlists,
-                favorites = content.favorites,
-                cookies = content.cookies,
-            )
+            val build = { remote: SyncSnapshot ->
+                val content = SyncMerge.applyStrategy(pending.local, remote, strategy)
+                SyncSnapshot(
+                    deviceId = deviceId,
+                    updatedAt = SyncTime.nowIso(),
+                    playlists = content.playlists,
+                    favorites = content.favorites,
+                    cookies = content.cookies,
+                )
+            }
+            var remoteFile = pending.remoteFile
+            var merged = build(pending.remote)
+            var uploaded: RemoteFile? = null
+            var round = 0
+            while (uploaded == null) {
+                uploaded = try {
+                    provider.update(pending.token, pending.remoteId, encodeForUpload(merged), remoteFile.revision)
+                } catch (error: SyncException) {
+                    // 选合并方式期间云端被别的设备改了（WebDAV 412）：按最新的云端重新套一遍所选方式。
+                    // 先传后写本机，传不上时本机歌单保持原样
+                    if (error.kind != SyncFailureKind.Precondition || ++round >= MAX_PUSH_ROUNDS) throw error
+                    remoteFile = provider.read(pending.token, pending.remoteId)
+                    merged = build(SyncJson.decode(remoteFile.content))
+                    null
+                }
+            }
+            val pushed = uploaded ?: return@withLock false
             if (strategy == SyncStrategy.Remote) {
                 db.withTransaction { libraryDao.clearPlaylists() }
             }
             applySnapshot(merged, removeAbsent = strategy == SyncStrategy.Remote)
-            val uploaded = provider.update(pending.token, pending.remoteId, encodeForUpload(merged))
             syncDao.clearAccounts()
             syncDao.clearBases()
             syncDao.clearConflicts()
-            secretStore.saveToken(pending.providerId, pending.token)
+            saveCredential(pending.providerId, pending.token)
             val initialAccount = SyncAccountEntity(
                 provider = pending.providerId,
                 remoteId = pending.remoteId,
                 fileName = provider.fileName,
                 lastSyncedAt = System.currentTimeMillis(),
-                remoteRevision = uploaded.revision,
-                remoteUrl = uploaded.htmlUrl,
+                remoteRevision = pushed.revision,
+                remoteUrl = pushed.htmlUrl,
                 accountLabel = pending.accountLabel,
                 updatedAt = System.currentTimeMillis(),
             )
             saveAccount(initialAccount)
-            saveBase(merged, uploaded.revision)
+            saveBase(merged, pushed.revision)
             pendingInitial = null
-            val aligned = reconcileAfterPush(provider, pending.token, initialAccount, uploaded, merged)
+            val aligned = reconcileAfterPush(provider, pending.token, initialAccount, pushed, merged)
             if (aligned) {
                 finish("首次合并完成")
                 emit("首次合并完成，已同步 ${merged.summary()}")
@@ -705,9 +813,9 @@ class SyncCoordinator(
             fail("同步后端不可用：${account.provider}")
             return@withLock false
         }
-        val token = secretStore.token(account.provider)
+        val token = credential(account.provider)
         if (token.isNullOrBlank()) {
-            fail("同步令牌已失效，请在设置中重新连接。")
+            fail(missingCredentialMessage(account.provider))
             return@withLock false
         }
         _state.update {
@@ -728,7 +836,14 @@ class SyncCoordinator(
                 return@withLock false
             }
             val local = localSnapshot()
-            val uploaded = upload(provider, token, account, local, remoteFile)
+            val uploaded = try {
+                upload(provider, token, account, local, remoteFile)
+            } catch (error: SyncException) {
+                if (error.kind != SyncFailureKind.Precondition) throw error
+                fail("云端文件在冲突处理期间又发生变化，请重新同步。")
+                emit("云端文件已变化，请重新同步。", error = true)
+                return@withLock false
+            }
             saveBase(local, uploaded.revision)
             saveAccount(
                 account.copy(
@@ -769,7 +884,9 @@ class SyncCoordinator(
 
     suspend fun disconnect() {
         pendingInitial = null
-        secretStore.clear()
+        authBlocked = null
+        // 只删同步要用的凭据：WebDAV 账号还被上传用着时保留（见 removeCredential）
+        providers.keys.forEach(::removeCredential)
         syncDao.clearAccounts()
         syncDao.clearBases()
         syncDao.clearConflicts()
@@ -784,6 +901,7 @@ class SyncCoordinator(
                 error = "",
                 conflicts = emptyList(),
                 initialMerge = null,
+                webDavCheck = WebDavCheckUi(),
             )
         }
     }
@@ -793,7 +911,7 @@ class SyncCoordinator(
         pendingInitial = null
         if (pending != null) scope.launch {
             if (syncDao.account(pending.providerId) == null) {
-                secretStore.removeToken(pending.providerId)
+                removeCredential(pending.providerId)
             }
         }
         _state.update {
@@ -804,6 +922,181 @@ class SyncCoordinator(
             )
         }
     }
+
+    // ---------- WebDAV ----------
+
+    /**
+     * 补全表单草稿：
+     * - 密码留空、地址和用户名又和已保存的一样时沿用已保存的密码：改个目录或证书开关
+     *   不用再把应用密码翻出来重输一遍；
+     * - 草稿没带证书（没先测试）、又是同一台服务器时，拿本机记下的那张来比，
+     *   证书变了就停下，不会因为重新填了一遍表单就悄悄换成新证书。
+     */
+    fun resolveWebDavDraft(draft: WebDavAccount): WebDavAccount {
+        var resolved = draft.normalized()
+        val saved = webDavAccounts.load() ?: return resolved
+        if (resolved.password.isEmpty() && saved.serverUrl == resolved.serverUrl && saved.username == resolved.username) {
+            resolved = resolved.copy(password = saved.password)
+        }
+        if (resolved.trustSelfSigned && resolved.pinnedCertificate == null && saved.sameEndpoint(resolved)) {
+            resolved = resolved.copy(pinnedCertificate = saved.pinnedCertificate).normalized()
+        }
+        return resolved
+    }
+
+    /**
+     * 打开“信任自签名证书”时，带密码的请求之前先只握手读一次证书（WebDavClient.probeCertificate），
+     * 和本机记下的比一比。没开开关或是 http 地址时返回 null，照常走系统校验。
+     */
+    private suspend fun inspectCertificate(account: WebDavAccount): WebDavTrust.Decision? {
+        if (!account.trustSelfSigned || account.baseUrl?.isHttps != true) return null
+        return WebDavTrust.decide(account.pinnedCertificate, webDavProvider.probeCertificate(account))
+    }
+
+    suspend fun connectWebDav(draft: WebDavAccount): Boolean {
+        var account = resolveWebDavDraft(draft)
+        if (account.trustSelfSigned && account.baseUrl?.isHttps == true) {
+            _state.update {
+                it.copy(status = SyncStatus.Syncing, phase = "正在读取服务器证书", message = "", error = "", webDavCheck = WebDavCheckUi())
+            }
+            val decision = try {
+                inspectCertificate(account)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: WebDavException) {
+                return failWebDav(WebDavMessages.describe(error, account))
+            }
+            when (decision) {
+                // 用户没看过的新证书不钉：回去点“测试连接”核对，再点“信任新证书”
+                is WebDavTrust.Decision.Changed -> return failWebDav(
+                    WebDavMessages.describe(WebDavException(WebDavErrorKind.CertificateChanged, ""), account),
+                )
+                // 第一次连（含电视扫码）就记下这次读到的那张，连上以后卡片上会显示它的指纹
+                is WebDavTrust.Decision.Trust -> account = account.copy(pinnedCertificate = decision.certificate)
+                null -> Unit
+            }
+        }
+        // 已经连着同一个位置，只是服务器上改了密码或者换了证书：同步文件和基线都还是那一份，
+        // 换上新密码 / 新指纹接着同步就行，不必重走一遍首次合并
+        val current = syncDao.accountOnce()
+        val saved = webDavAccounts.load()
+        if (current?.provider == WebDavSyncProvider.ID && saved != null &&
+            saved.locationKey() == account.locationKey() &&
+            current.remoteId == account.pathInDirectory(WebDavSyncProvider.FILE_NAME)
+        ) {
+            return updateWebDavAccount(account)
+        }
+        return connect(WebDavSyncProvider.ID, account.encode(), "")
+    }
+
+    private fun failWebDav(message: String): Boolean {
+        fail(message)
+        emit(message, error = true)
+        return false
+    }
+
+    private suspend fun updateWebDavAccount(account: WebDavAccount): Boolean {
+        _state.update {
+            it.copy(status = SyncStatus.Syncing, phase = "正在连接 WebDAV", message = "", error = "", webDavCheck = WebDavCheckUi())
+        }
+        return try {
+            // 先用新密码 / 新指纹访问一次，对了才存，免得把错的覆盖掉原来那个
+            webDavProvider.validate(account.encode())
+            webDavAccounts.save(account)
+            authBlocked = null
+            runSync(manual = true, notify = true)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: SyncException) {
+            fail(error.message)
+            emit(error.message, error = true)
+            false
+        }
+    }
+
+    /** 测试连接；[draft] 为 null 时测本机已保存的账号（已连接卡片上的“测试连接”）。 */
+    fun testWebDav(draft: WebDavAccount?) {
+        scope.launch {
+            val account = draft?.let(::resolveWebDavDraft) ?: webDavAccounts.load()
+            if (account == null) {
+                _state.update {
+                    it.copy(webDavCheck = WebDavCheckUi(ok = false, message = "本机没有保存 WebDAV 账号，请重新连接。"))
+                }
+                return@launch
+            }
+            val target = account.locationKey()
+            val saved = draft == null
+            _state.update {
+                it.copy(webDavCheck = WebDavCheckUi(running = true, message = "正在测试…", target = target, saved = saved))
+            }
+            val result = try {
+                when (val decision = inspectCertificate(account)) {
+                    is WebDavTrust.Decision.Changed -> WebDavCheckUi(
+                        ok = false,
+                        message = WebDavMessages.certificateChanged(decision.observed),
+                        target = target,
+                        saved = saved,
+                        certificate = decision.observed,
+                        certificateChanged = true,
+                    )
+                    else -> {
+                        val certificate = (decision as? WebDavTrust.Decision.Trust)?.certificate
+                        val pinnedBefore = certificate != null && account.pinnedCertificate?.sha256 == certificate.sha256
+                        val client = webDavProvider.client(account.copy(pinnedCertificate = certificate ?: account.pinnedCertificate))
+                        // 已连接的账号本来就在用那个同步文件，不用再提示“连接时会让你选合并方式”
+                        val lookFor = if (saved) null else WebDavSyncProvider.FILE_NAME
+                        val check = client.check(account.normalizedDirectory, lookFor = lookFor)
+                        WebDavCheckUi(
+                            ok = check.ok,
+                            message = WebDavMessages.checkSummary(check, account, certificate, pinnedBefore),
+                            target = target,
+                            saved = saved,
+                            certificate = certificate,
+                        )
+                    }
+                }
+            } catch (error: WebDavException) {
+                WebDavCheckUi(ok = false, message = WebDavMessages.describe(error, account), target = target, saved = saved)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                WebDavCheckUi(ok = false, message = error.message ?: "测试失败", target = target, saved = saved)
+            }
+            // 测试期间又开始了另一次测试时，只认最后那次
+            _state.update { current ->
+                val pending = current.webDavCheck
+                if (pending.running && pending.target == target && pending.saved == saved) current.copy(webDavCheck = result) else current
+            }
+        }
+    }
+
+    private fun credential(providerId: String): String? =
+        if (providerId == WebDavSyncProvider.ID) webDavAccounts.load()?.encode() else secretStore.token(providerId)
+
+    /** 连接成功后保存新位置的凭据，并清掉旧位置留下的：换了同步位置，旧令牌在本机没有用处了。 */
+    private fun saveCredential(providerId: String, credential: String) {
+        if (providerId == WebDavSyncProvider.ID) {
+            val account = WebDavAccount.decode(credential)
+                ?: throw SyncException(SyncFailureKind.Auth, "WebDAV 账号信息不完整，请重新连接。")
+            webDavAccounts.save(account)
+        } else {
+            secretStore.saveToken(providerId, credential)
+        }
+        providers.keys.filter { it != providerId }.forEach(::removeCredential)
+    }
+
+    private fun removeCredential(providerId: String) {
+        if (providerId == WebDavSyncProvider.ID) {
+            // 上传还在用这个 WebDAV 账号时只解除同步，账号留给上传；现在 usedForStorage 总是 false
+            if (!webDavAccounts.usedForStorage) webDavAccounts.clear()
+        } else {
+            secretStore.removeToken(providerId)
+        }
+    }
+
+    private fun missingCredentialMessage(providerId: String): String =
+        if (providerId == WebDavSyncProvider.ID) "本机没有 WebDAV 账号了，请在“同步位置 › WebDAV”里重新连接。"
+        else "同步令牌已失效，请在设置中重新连接。"
 
     suspend fun export(uri: Uri): Boolean = try {
         val snapshot = localSnapshot(includeDeleted = false).copy(
@@ -1208,7 +1501,13 @@ class SyncCoordinator(
             if (!remoteMatches(check, latest)) continue
             _state.update { it.copy(phase = "正在同步其他设备的更新") }
             applySnapshot(merged, removeAbsent = false, dirty = true)
-            lastUploaded = upload(provider, token, account, merged, check)
+            lastUploaded = try {
+                upload(provider, token, account, merged, check)
+            } catch (error: SyncException) {
+                // 又被别的设备抢先写了：回到开头按最新内容再合并一次
+                if (error.kind != SyncFailureKind.Precondition) throw error
+                continue
+            }
             base = merged
         }
     }
@@ -1241,7 +1540,12 @@ class SyncCoordinator(
         val uploaded = if (account.remoteId.isBlank()) {
             provider.create(token, content)
         } else {
-            provider.update(token, if (remoteFile.id.isBlank()) account.remoteId else remoteFile.id, content)
+            provider.update(
+                token,
+                if (remoteFile.id.isBlank()) account.remoteId else remoteFile.id,
+                content,
+                remoteFile.revision,
+            )
         }
         markClean(snapshot)
         return uploaded

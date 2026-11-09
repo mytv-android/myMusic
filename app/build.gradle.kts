@@ -149,6 +149,10 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling.preview)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // WebDAV 客户端 / 同步位置的测试用它模拟服务器（PROPFIND、条件写入、412）
+    testImplementation(libs.okhttp.mockwebserver)
+    // 证书钉住的测试在测试里现生成自签名证书和根证书
+    testImplementation(libs.okhttp.tls)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso)

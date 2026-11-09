@@ -120,7 +120,7 @@ svg { display: block; }
 .provider-fieldset legend, .field label { display: block; margin-bottom: 9px; font-size: 14px; line-height: 1.45; font-weight: 680; }
 .segmented {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
   padding: 5px;
   border-radius: 23px;
@@ -193,6 +193,81 @@ input:disabled { opacity: .62; }
   font-weight: 650;
 }
 .field-help { margin: 8px 0 0; color: var(--on-surface-variant); font-size: 12.5px; line-height: 1.55; }
+/* http:// 地址的明文提醒：琥珀色，和 App 里 InfoNote 的 amber 一样取 tertiary 容器色 */
+.field-help.warn {
+  padding: 7px 11px;
+  border-radius: 12px;
+  background: var(--tertiary-container);
+  color: var(--on-tertiary-container);
+}
+
+/* 服务商标签：和 App 里的 FilterChip 一样，选中 16px 圆角 + secondaryContainer，未选中 8px 描边 */
+.preset-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 23px; }
+.preset-chip {
+  min-height: 40px;
+  padding: 6px 16px;
+  border: 1px solid var(--outline-variant);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--on-surface-variant);
+  font-size: 14px;
+  font-weight: 600;
+}
+.preset-chip[aria-checked="true"] {
+  border-color: transparent;
+  border-radius: 16px;
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+}
+/* 勾只是装饰：第二行的替代文本写空，读屏不会把“✓”念进标签名；不认这种写法的浏览器退回第一行 */
+.preset-chip[aria-checked="true"]::before { content: "✓ "; content: "✓ " / ""; }
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 23px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.switch-text { flex: 1; display: grid; gap: 2px; }
+.switch-text b { font-size: 15px; font-weight: 650; }
+.switch-text small { color: var(--on-surface-variant); font-size: 12.5px; }
+.switch-row input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 32px;
+  border: 2px solid var(--outline);
+  border-radius: 16px;
+  background: var(--surface-container-high);
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--outline);
+  transition: transform 150ms ease, width 150ms ease, height 150ms ease;
+}
+.switch-row input:checked + .switch-track { border-color: var(--primary); background: var(--primary); }
+.switch-row input:checked + .switch-track::after {
+  top: 2px;
+  left: 2px;
+  width: 24px;
+  height: 24px;
+  background: var(--on-primary);
+  transform: translateX(20px);
+}
+.switch-row input:focus-visible + .switch-track { outline: 3px solid var(--primary); outline-offset: 3px; }
+.switch-row input:disabled + .switch-track { opacity: .5; }
 
 .inline-error {
   margin-top: 16px;

@@ -4743,6 +4743,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.sync.connect(providerId, token.trim(), remote.trim()) }
     }
 
+    fun connectWebDav(account: com.mytv.mymusic.data.webdav.WebDavAccount) {
+        viewModelScope.launch { app.sync.connectWebDav(account) }
+    }
+
+    /** account 为 null 时测本机已保存的 WebDAV 账号。 */
+    fun testWebDav(account: com.mytv.mymusic.data.webdav.WebDavAccount?) = app.sync.testWebDav(account)
+
     fun resolveInitialSync(strategy: SyncStrategy) {
         viewModelScope.launch { app.sync.resolveInitial(strategy) }
     }
@@ -4776,6 +4783,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun syncProviderLabel(id: String): String = when (id) {
         "gist" -> "GitHub Gist"
         "gitee" -> "Gitee 代码片段"
+        "webdav" -> "WebDAV"
         else -> id
     }
 

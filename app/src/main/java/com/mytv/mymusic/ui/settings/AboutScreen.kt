@@ -145,7 +145,7 @@ fun AboutScreen(
                 ListRow(
                     title = "检查更新",
                     index = 0,
-                    count = 6,
+                    count = 7,
                     onClick = ::check,
                     icon = Icons.Filled.Refresh,
                     summary = checkSummary,
@@ -159,7 +159,7 @@ fun AboutScreen(
                 ListRow(
                     title = "隐私说明",
                     index = 1,
-                    count = 6,
+                    count = 7,
                     onClick = onPrivacy,
                     icon = Icons.Filled.PrivacyTip,
                     summary = "哪些数据留在本机，哪些会离开",
@@ -167,7 +167,7 @@ fun AboutScreen(
                 ListRow(
                     title = "开源许可",
                     index = 2,
-                    count = 6,
+                    count = 7,
                     onClick = onLicenses,
                     icon = Icons.Filled.Code,
                     summary = "AGPL-3.0 · music-lib、Folia 模组、Rush 与第三方依赖",
@@ -175,7 +175,7 @@ fun AboutScreen(
                 ListRow(
                     title = "项目主页",
                     index = 3,
-                    count = 6,
+                    count = 7,
                     onClick = { openUri(PROJECT_URL) },
                     icon = Icons.AutoMirrored.Filled.OpenInNew,
                     summary = "github.com/mytv-android/myMusic",
@@ -184,7 +184,7 @@ fun AboutScreen(
                 ListRow(
                     title = "Telegram 群组",
                     index = 4,
-                    count = 6,
+                    count = 7,
                     onClick = { openUri(TELEGRAM_URL) },
                     icon = Icons.Filled.Group,
                     summary = "t.me/mytv_android_channel",
@@ -232,7 +232,7 @@ fun AboutScreen(
         item(key = "links", contentType = "linksCard") { LinksCard(openUri) }
         item(key = "note", contentType = "infoNote") {
             Box(Modifier.padding(top = 16.dp)) {
-                InfoNote("Cookie、播放记录和下载文件只保存在本机。同步仅使用你选择的 Gist / Gitee 账号，写入自建歌单数据；应用没有集中式服务器。")
+                InfoNote("Cookie、播放记录和下载文件只保存在本机。同步仅使用你选择的 Gist / Gitee 账号或 WebDAV 服务器，写入自建歌单数据；应用没有集中式服务器。")
             }
         }
         item(key = "footer", contentType = "footer") {

@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
@@ -82,6 +85,9 @@ import com.mytv.mymusic.data.sync.SyncConflictUi
 import com.mytv.mymusic.data.sync.SyncStatus
 import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.data.sync.SyncUiState
+import com.mytv.mymusic.data.sync.WebDavSyncProvider
+import com.mytv.mymusic.data.webdav.WebDavAccount
+import com.mytv.mymusic.data.webdav.WebDavMessages
 import com.mytv.mymusic.ui.ConfirmDialog
 import com.mytv.mymusic.ui.ErrorBlock
 import com.mytv.mymusic.ui.InfoNote
@@ -135,6 +141,32 @@ fun SyncCenterScreen(
                 SyncIntroCard(onConnect, primaryFocus)
             } else {
                 SyncAccountCard(sync, actions, primaryFocus)
+            }
+        }
+        // 已连接卡片上“测试连接”的结果；只认本机保存的那个账号测出来的，表单里草稿的结果不算
+        val savedCheck = sync.webDavCheck.takeIf {
+            sync.account?.provider == WebDavSyncProvider.ID && it.saved && !it.running && it.message.isNotBlank() &&
+                it.target.isNotEmpty() && it.target == savedWebDavKey(sync)
+        }
+        if (savedCheck != null) {
+            item(key = "webDavCheck", contentType = "message") {
+                Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (savedCheck.ok) InfoNote(savedCheck.message, "green") else ErrorBlock(savedCheck.message)
+                    // 测出来的证书不是本机记下的那张（换了证书，或者本机还没记过）：用户看过指纹、自己点了才换。
+                    // 密码沿用本机保存的（SyncCoordinator.resolveWebDavDraft）
+                    val newCertificate = savedCheck.certificate?.takeIf {
+                        !it.systemTrusted && it.sha256 != sync.webDav?.certificate?.sha256
+                    }
+                    if (newCertificate != null) {
+                        FilledTonalButton(
+                            onClick = {
+                                savedWebDavDraft(sync)?.let { actions.connectWebDav(it.copy(pinnedCertificate = newCertificate)) }
+                            },
+                            enabled = sync.status != SyncStatus.Syncing,
+                            modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp)),
+                        ) { Text(if (savedCheck.certificateChanged) "信任新证书并同步" else "信任这张证书并同步") }
+                    }
+                }
             }
         }
         if (sync.status == SyncStatus.Syncing) {
@@ -217,23 +249,30 @@ fun SyncCenterScreen(
                 summary = "与本机歌单、收藏和 Cookie 合并，不会覆盖",
             )
         }
-        if (account != null) {
-            item(key = "providerHead", contentType = "header") { SectionLabel("同步位置") }
-            val providers = listOf("gist" to "GitHub Gist", "gitee" to "Gitee 代码片段")
-            providers.forEachIndexed { index, (id, label) ->
-                item(key = "provider:$id", contentType = "row") {
-                    val current = account.provider == id
-                    ListRow(
-                        title = label,
-                        index = index,
-                        count = providers.size,
-                        onClick = { onConnect(id) },
-                        icon = Icons.Filled.Cloud,
-                        selected = current,
-                        summary = if (current) "当前使用 · ${account.fileName}" else "改用这里，需要输入令牌",
-                    )
-                }
+        item(key = "providerHead", contentType = "header") { SectionLabel("同步位置") }
+        syncLocations.forEachIndexed { index, (id, label) ->
+            item(key = "provider:$id", contentType = "row") {
+                val current = account != null && account.provider == id
+                val webDav = id == WebDavSyncProvider.ID
+                ListRow(
+                    title = label,
+                    index = index,
+                    count = syncLocations.size,
+                    onClick = { onConnect(id) },
+                    icon = if (webDav) Icons.Filled.Dns else Icons.Filled.Cloud,
+                    selected = current,
+                    summary = when {
+                        // WebDAV 写目录里的路径，换过目录的人能一眼看出文件在哪
+                        current && webDav -> "当前使用 · ${account.remoteId.ifBlank { account.fileName }}"
+                        current -> "当前使用 · ${account.fileName}"
+                        webDav -> "坚果云、Nextcloud、群晖或自己的服务器"
+                        account == null -> "需要输入令牌"
+                        else -> "改用这里，需要输入令牌"
+                    },
+                )
             }
+        }
+        if (account != null) {
             item(key = "disconnect", contentType = "row") {
                 ListRow(
                     title = "断开同步",
@@ -244,14 +283,18 @@ fun SyncCenterScreen(
                     icon = Icons.Filled.CloudOff,
                     iconTone = IconTone.Error,
                     danger = true,
-                    summary = "删除本机保存的令牌，云端数据保留",
+                    summary = if (account.provider == WebDavSyncProvider.ID) {
+                        "删除本机保存的 WebDAV 账号，云端数据保留"
+                    } else {
+                        "删除本机保存的令牌，云端数据保留"
+                    },
                     showChevron = false,
                 )
             }
         }
         item(key = "note", contentType = "note") {
             Box(Modifier.padding(top = 16.dp)) {
-                InfoNote("同步自建歌单、收藏和平台账号 Cookie。Cookie 会以明文写入私密同步文件，请勿公开文件链接；最近播放、下载文件、播放地址不会进入云端。")
+                InfoNote("同步自建歌单、收藏和平台账号 Cookie。Cookie 会以明文写入同步文件，请勿公开文件链接或共享 WebDAV 目录；最近播放、下载文件、播放地址不会进入云端。")
             }
         }
     }
@@ -287,7 +330,11 @@ fun SyncCenterScreen(
     if (disconnectOpen) {
         ConfirmDialog(
             title = "断开同步",
-            message = "会删除本机保存的令牌、同步基线和冲突记录。本机歌单保留，云端文件不会删除。",
+            message = if (sync.account?.provider == WebDavSyncProvider.ID) {
+                "会删除本机保存的 WebDAV 账号、同步基线和冲突记录。本机歌单保留，WebDAV 上的同步文件不会删除。"
+            } else {
+                "会删除本机保存的令牌、同步基线和冲突记录。本机歌单保留，云端文件不会删除。"
+            },
             confirmLabel = "断开",
             danger = true,
             onConfirm = actions::disconnectSync,
@@ -310,6 +357,30 @@ internal fun ShapeIcon(icon: ImageVector) {
     }
 }
 
+/** 同步位置：设置里的“同步位置”列表、连接页的切换组都按这个顺序。 */
+private val syncLocations = listOf(
+    "gist" to "GitHub Gist",
+    "gitee" to "Gitee 代码片段",
+    WebDavSyncProvider.ID to "WebDAV",
+)
+
+/** 本机保存的 WebDAV 账号对应的“测试连接”结果键，和 SyncCoordinator 记的 target 一致。 */
+private fun savedWebDavKey(sync: SyncUiState): String = savedWebDavDraft(sync)?.locationKey().orEmpty()
+
+/** 本机保存的 WebDAV 账号，密码留空（界面状态里没有密码，交给 SyncCoordinator 补上）。 */
+private fun savedWebDavDraft(sync: SyncUiState): WebDavAccount? {
+    val saved = sync.webDav ?: return null
+    return WebDavAccount(
+        serverUrl = saved.serverUrl,
+        username = saved.username,
+        password = "",
+        directory = saved.directory,
+        trustSelfSigned = saved.trustSelfSigned,
+        pinnedCertificate = saved.certificate,
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SyncIntroCard(onConnect: (String) -> Unit, focus: FocusRequester) {
     Surface(
@@ -327,11 +398,16 @@ private fun SyncIntroCard(onConnect: (String) -> Unit, focus: FocusRequester) {
                 fontWeight = FontWeight.ExtraBold,
             )
             Text(
-                "连接 GitHub Gist 或 Gitee 后，自建歌单会自动同步。修改先保存在本机，断网也能用。",
+                "连接 GitHub Gist、Gitee 或 WebDAV 后，自建歌单会自动同步。修改先保存在本机，断网也能用。",
                 Modifier.padding(top = 4.dp),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 三个按钮在窄屏一行放不下，自动换行
+            FlowRow(
+                Modifier.padding(top = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Button(
                     onClick = { onConnect("gist") },
                     modifier = Modifier.heightIn(min = 48.dp).focusRequester(focus).tvFocusRing(RoundedCornerShape(24.dp)),
@@ -340,11 +416,16 @@ private fun SyncIntroCard(onConnect: (String) -> Unit, focus: FocusRequester) {
                     onClick = { onConnect("gitee") },
                     modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp)),
                 ) { Text("Gitee") }
+                FilledTonalButton(
+                    onClick = { onConnect(WebDavSyncProvider.ID) },
+                    modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp)),
+                ) { Text("WebDAV") }
             }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SyncAccountCard(sync: SyncUiState, actions: MusicActions, focus: FocusRequester) {
     val account = sync.account ?: return
@@ -377,7 +458,20 @@ private fun SyncAccountCard(sync: SyncUiState, actions: MusicActions, focus: Foc
                 Modifier.padding(top = 2.dp),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 本机钉住的自签名证书：电视扫码连接时是电视自己记下的，这里是用户能看到、能核对它的地方
+            val certificate = sync.webDav?.certificate?.takeIf { account.provider == WebDavSyncProvider.ID && !it.systemTrusted }
+            if (certificate != null) {
+                Text(
+                    "本机只认这张证书：${WebDavMessages.certificate(certificate)}",
+                    Modifier.padding(top = 6.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            FlowRow(
+                Modifier.padding(top = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Button(
                     onClick = actions::syncNow,
                     enabled = !syncing,
@@ -387,7 +481,22 @@ private fun SyncAccountCard(sync: SyncUiState, actions: MusicActions, focus: Foc
                     Spacer(Modifier.width(8.dp))
                     Text(if (syncing) "同步中…" else "立即同步")
                 }
-                if (account.remoteUrl.isNotBlank()) {
+                if (account.provider == WebDavSyncProvider.ID) {
+                    // WebDAV 没有网页可看，第二个按钮换成测本机保存的账号
+                    val testing = sync.webDavCheck.running && sync.webDavCheck.saved &&
+                        sync.webDavCheck.target == savedWebDavKey(sync)
+                    FilledTonalButton(
+                        onClick = { actions.testWebDav(null) },
+                        enabled = !testing && !syncing,
+                        modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp)),
+                    ) {
+                        if (testing) {
+                            LoadingIndicator(Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text(if (testing) "正在测试…" else "测试连接")
+                    }
+                } else if (account.remoteUrl.isNotBlank()) {
                     FilledTonalButton(
                         onClick = { runCatching { uri.openUri(account.remoteUrl) } },
                         modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp)),
@@ -594,7 +703,9 @@ fun SyncConnectScreen(
     val uri = LocalUriHandler.current
     var tvManualInput by rememberSaveable { mutableStateOf(false) }
     val useQrSetup = window.isTv && !tvManualInput
-    var provider by rememberSaveable { mutableStateOf(initialProvider?.takeIf { it == "gist" || it == "gitee" } ?: "gist") }
+    var provider by rememberSaveable {
+        mutableStateOf(initialProvider?.takeIf { id -> syncLocations.any { it.first == id } } ?: "gist")
+    }
     var token by remember { mutableStateOf("") }
     var remote by rememberSaveable { mutableStateOf("") }
     var showToken by remember { mutableStateOf(false) }
@@ -604,6 +715,8 @@ fun SyncConnectScreen(
     val importFile = rememberImportLauncher(actions)
     val syncing = sync.status == SyncStatus.Syncing
     val gist = provider == "gist"
+    val webDav = provider == WebDavSyncProvider.ID
+    val webDavForm = rememberWebDavFormState(sync.webDav)
 
     // 已连接时改用另一处：重试会先把 error 清空，旧 account 还在，不等验证结束就会返回；
     // 连接完成后 account 还会再变，所以只在不在同步中时返回，且只返回一次
@@ -630,11 +743,18 @@ fun SyncConnectScreen(
     if (!useQrSetup) TvDefaultFocus(tokenFocus, provider)
 
     val providerPicker: @Composable () -> Unit = {
+        // 三个选项放不下“Gitee 代码片段”全名，按钮上写短名，页面副标题仍写全名（设计稿 ⑫）
         ConnectedToggleGroup(
-            options = listOf("gist", "gitee"),
+            options = syncLocations.map { it.first },
             selected = provider,
             onSelect = { provider = it },
-            label = { if (it == "gist") "GitHub Gist" else "Gitee 代码片段" },
+            label = {
+                when (it) {
+                    "gist" -> "GitHub Gist"
+                    "gitee" -> "Gitee"
+                    else -> "WebDAV"
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -648,7 +768,11 @@ fun SyncConnectScreen(
             Column(Modifier.padding(18.dp)) {
                 Text("会同步什么", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "自建歌单、收藏和平台账号 Cookie。Cookie 会以明文写入私密 Gist / 代码片段，请勿公开文件链接。不包括最近播放、下载文件和播放进度。",
+                    if (webDav) {
+                        "自建歌单、收藏和平台账号 Cookie，写进 WebDAV 目录里的 mymusic-library.json。Cookie 是明文，别把这个目录共享出去。WebDAV 密码只存在本机。"
+                    } else {
+                        "自建歌单、收藏和平台账号 Cookie。Cookie 会以明文写入私密 Gist / 代码片段，请勿公开文件链接。不包括最近播放、下载文件和播放进度。"
+                    },
                     Modifier.padding(top = 4.dp),
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -683,7 +807,7 @@ fun SyncConnectScreen(
             }
         }
     }
-    val form: @Composable ColumnScope.() -> Unit = {
+    val tokenForm: @Composable ColumnScope.() -> Unit = {
         OutlinedTextField(
             value = token,
             onValueChange = { token = it.trim() },
@@ -758,10 +882,37 @@ fun SyncConnectScreen(
             }
         }
     }
+    val form: @Composable ColumnScope.() -> Unit = {
+        if (webDav) {
+            WebDavForm(
+                form = webDavForm,
+                sync = sync,
+                actions = actions,
+                firstFocus = tokenFocus,
+                onConnectAttempt = { attempted = true },
+            )
+            if (window.isTv) {
+                Column(Modifier.padding(top = 8.dp)) {
+                    InfoNote("手机扫码可避免在电视上输入密码。")
+                    TextButton(
+                        onClick = { tvManualInput = false },
+                        modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+                    ) { Text("使用扫码配置") }
+                }
+            }
+        } else {
+            tokenForm()
+        }
+    }
 
     PageScaffold(
         title = "连接同步",
-        subtitle = if (useQrSetup) "手机扫码配置" else if (gist) "GitHub Gist" else "Gitee 代码片段",
+        subtitle = when {
+            useQrSetup -> "手机扫码配置"
+            webDav -> "WebDAV"
+            gist -> "GitHub Gist"
+            else -> "Gitee 代码片段"
+        },
         onBack = leave,
     ) { padding ->
         if (useQrSetup) {
@@ -792,7 +943,7 @@ fun SyncConnectScreen(
                     ) {
                         providerPicker()
                         whatCard()
-                        help()
+                        if (!webDav) help()
                         offline()
                     }
                 },
@@ -814,11 +965,20 @@ fun SyncConnectScreen(
             ) {
                 Column(Modifier.widthIn(max = 560.dp)) {
                     providerPicker()
-                    Spacer(Modifier.size(16.dp))
-                    form()
-                    Spacer(Modifier.size(16.dp))
-                    whatCard()
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { help() }
+                    Spacer(Modifier.size(12.dp))
+                    if (webDav) {
+                        // 设计稿 ⑫：WebDAV 先说清楚写到哪里、Cookie 是明文，再填表
+                        whatCard()
+                        Spacer(Modifier.size(12.dp))
+                        form()
+                        Spacer(Modifier.size(16.dp))
+                    } else {
+                        Spacer(Modifier.size(4.dp))
+                        form()
+                        Spacer(Modifier.size(16.dp))
+                        whatCard()
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { help() }
+                    }
                     offline()
                 }
             }
