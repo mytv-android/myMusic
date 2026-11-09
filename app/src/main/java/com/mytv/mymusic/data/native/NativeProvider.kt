@@ -124,6 +124,27 @@ interface NativeProvider {
 
     /** 登录账号的昵称、头像、会员/等级；null 表示这个平台没有实现或资料不可用。 */
     suspend fun accountInfo(cookie: String): AccountInfo? = null
+
+    /**
+     * 这个歌单能不能用当前账号修改。null 表示平台没法判断（网络失败、未登录或没实现），
+     * 调用方按“可以试”处理，写失败时再给原因。
+     */
+    suspend fun playlistWritable(cookie: String, id: String): Boolean? = null
+
+    /** 往平台歌单里加歌；[songs] 必须已经是这个平台的曲目。 */
+    suspend fun addPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        throw PlaylistWriteException("${info.name} 暂不支持修改歌单", PlaylistWriteFailure.Unsupported)
+    }
+
+    /** 从平台歌单里删歌；[songs] 必须已经是这个平台的曲目。 */
+    suspend fun removePlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        throw PlaylistWriteException("${info.name} 暂不支持修改歌单", PlaylistWriteFailure.Unsupported)
+    }
+
+    /** 把整张歌单按 [songs] 的新顺序写回平台；必须是歌单内的全部歌曲。 */
+    suspend fun reorderPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        throw PlaylistWriteException("${info.name} 暂不支持调整歌单顺序", PlaylistWriteFailure.Unsupported)
+    }
 }
 
 abstract class BaseNativeProvider(override val info: ProviderInfo) : NativeProvider

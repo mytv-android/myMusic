@@ -98,6 +98,20 @@ open class MusicRepository {
     suspend fun accountInfo(provider: String, cookie: String): AccountInfo? =
         runCatching { requireProvider(provider).accountInfo(cookie) }.getOrNull()
 
+    suspend fun playlistWritable(provider: String, cookie: String, id: String): Boolean? =
+        requireProvider(provider).playlistWritable(cookie, id)
+
+    suspend fun addPlaylistTracks(provider: String, cookie: String, playlistId: String, songs: List<Song>) =
+        requireProvider(provider).addPlaylistTracks(cookie, playlistId, songs)
+
+    suspend fun removePlaylistTracks(provider: String, cookie: String, playlistId: String, songs: List<Song>) =
+        requireProvider(provider).removePlaylistTracks(cookie, playlistId, songs)
+
+    suspend fun reorderPlaylistTracks(provider: String, cookie: String, playlistId: String, songs: List<Song>) =
+        requireProvider(provider).reorderPlaylistTracks(cookie, playlistId, songs)
+
+    fun providerInfo(provider: String): ProviderInfo? = NativeProviders.get(provider)?.info
+
     private fun requireProvider(id: String): NativeProvider =
         NativeProviders.get(id) ?: throw IllegalArgumentException("unsupported provider: $id")
 }

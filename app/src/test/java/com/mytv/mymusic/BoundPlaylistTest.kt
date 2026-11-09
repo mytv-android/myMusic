@@ -3,6 +3,7 @@ package com.mytv.mymusic
 import com.mytv.mymusic.data.PlaylistEntity
 import com.mytv.mymusic.data.bindingTarget
 import com.mytv.mymusic.data.boundDiff
+import com.mytv.mymusic.data.canReorderBoundPlaylist
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -79,5 +80,23 @@ class BoundPlaylistTest {
     @Test
     fun blankNameWithNoBindingCreatesNew() {
         assertNull(bindingTarget(emptyList(), "netease", "p1", "  "))
+    }
+
+    // ---- 排序能力：没写接口的平台仍按编辑即解绑 ----
+
+    @Test
+    fun unboundPlaylistCanAlwaysReorder() {
+        assertTrue(canReorderBoundPlaylist(bound = false, writeSupported = true, reorderSupported = false))
+    }
+
+    @Test
+    fun boundProviderWithoutWriteApiKeepsLocalReorder() {
+        assertTrue(canReorderBoundPlaylist(bound = true, writeSupported = false, reorderSupported = false))
+    }
+
+    @Test
+    fun boundWritableProviderFollowsReorderCapability() {
+        assertTrue(canReorderBoundPlaylist(bound = true, writeSupported = true, reorderSupported = true))
+        assertFalse(canReorderBoundPlaylist(bound = true, writeSupported = true, reorderSupported = false))
     }
 }

@@ -142,6 +142,24 @@ object NativeHttp {
         return this
     }
 
+    /** POST 二进制请求体，响应也按原始字节返回（汽水/酷狗这类加密响应）。 */
+    suspend fun postBinary(
+        url: String,
+        bytes: ByteArray,
+        headers: Map<String, String> = emptyMap(),
+        cookie: String = "",
+        randomIp: Boolean = false,
+        userAgent: String = DEFAULT_USER_AGENT,
+        contentType: String = "application/json;charset=utf-8",
+    ): NativeResponse {
+        val request = Request.Builder()
+            .url(url)
+            .post(bytes.toRequestBody(contentType.toMediaType()))
+            .applyCommonHeaders(headers, cookie, randomIp, userAgent)
+            .build()
+        return execute(request, binary = true)
+    }
+
     private suspend fun execute(request: Request, binary: Boolean = false): NativeResponse =
         suspendCancellableCoroutine { continuation ->
             val call = client.newCall(request)

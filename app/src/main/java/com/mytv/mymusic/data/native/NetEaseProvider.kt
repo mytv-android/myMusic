@@ -55,6 +55,7 @@ private val NETEASE_INFO = ProviderInfo(
     topListSongs = true,
     hotSongs = true,
     listeningModes = true,
+    playlistWrite = true,
 )
 
 /** 分享文本里的链接；取到后去掉紧跟在链接后的中文/英文标点。 */
@@ -254,6 +255,76 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         if (parsed.first != NeteaseLinkKind.Playlist) throw IllegalArgumentException("invalid netease playlist link")
         val (playlist, songs) = fetchPlaylistDetailLimited(cookie, parsed.second, 0)
         return CollectionResult(playlist, songs)
+    }
+
+    override suspend fun playlistWritable(cookie: String, id: String): Boolean? {
+        if (cookie.isBlank()) return null
+        val userId = accountUserId(cookie) ?: return null
+        val detail = runCatching { playlistDetail(cookie, id) }.getOrNull() ?: return null
+        // 我喜欢的音乐等特殊歌单不走普通歌单的加删接口
+        if (detail.specialType != 0) return false
+        if (detail.creator.userId == 0L) return null
+        return detail.creator.userId == userId
+    }
+
+    override suspend fun addPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) =
+        manipulateTracks(cookie, playlistId, "add", songs)
+
+    override suspend fun removePlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) =
+        manipulateTracks(cookie, playlistId, "del", songs)
+
+    private suspend fun manipulateTracks(cookie: String, playlistId: String, op: String, songs: List<Song>) {
+        if (cookie.isBlank()) {
+            throw PlaylistWriteException("netease playlist write requires login", PlaylistWriteFailure.NotLoggedIn)
+        }
+        val ids = songs.map { neteaseTrackId(it) }.distinct()
+        if (ids.isEmpty()) return
+        ids.chunked(100).forEach { batch ->
+            val trackIds = buildJsonArray { batch.forEach { add(JsonPrimitive(it)) } }.toString()
+            val response = NativeHttp.postForm(
+                PLAYLIST_TRACKS_API,
+                mapOf("op" to op, "pid" to playlistId, "trackIds" to trackIds, "imme" to "true"),
+                headers = mapOf("Referer" to REFERER),
+                cookie = cookie,
+                randomIp = true,
+                userAgent = PLAYLIST_WRITE_USER_AGENT,
+            )
+            val root = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrNull()
+                ?: throw PlaylistWriteException("netease playlist $op response is not json")
+            val code = root.int("code")
+            // 512 = 歌曲已经在歌单里；重复添加按成功处理
+            if (op == "add" && code == 512) return@forEach
+            if (code != 200) {
+                throw PlaylistWriteException("netease playlist $op error code: $code (${root.string("message")})")
+            }
+        }
+    }
+
+    private fun neteaseTrackId(song: Song): String {
+        val raw = song.extra["song_id"].orEmpty().ifBlank { song.id }
+        return raw.takeIf { it.isNotBlank() && it.all { char -> char.isDigit() } }
+            ?: throw PlaylistWriteException("netease song id is invalid: $raw", PlaylistWriteFailure.SongNotFound)
+    }
+
+    private suspend fun accountUserId(cookie: String): Long? {
+        val response = weapiPost(USER_ACCOUNT_API, buildJsonObject { put("csrf_token", "") }, cookie)
+        val root = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrNull() ?: return null
+        if (root.int("code") != 200) return null
+        return root["profile"]?.jsonObject?.long("userId")?.takeIf { it > 0 }
+    }
+
+    private suspend fun playlistDetail(cookie: String, id: String): NeteasePlaylistDetail {
+        val body = buildJsonObject {
+            put("id", id)
+            put("n", 0)
+            put("csrf_token", "")
+        }
+        val response = weapiPost(PLAYLIST_API, body, cookie)
+        val data = json.decodeFromString<NeteasePlaylistResponse>(response.body)
+        if (data.code != 200) {
+            throw PlaylistWriteException("netease playlist detail error code: ${data.code}")
+        }
+        return data.playlist ?: throw PlaylistWriteException("netease playlist not found", PlaylistWriteFailure.SongNotFound)
     }
 
     override suspend fun recommendedPlaylists(cookie: String): List<Playlist> {
@@ -1053,6 +1124,9 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         const val DOWNLOAD_EAPI = "https://interface3.music.163.com/eapi/song/enhance/player/url/v1"
         const val DETAIL_API = "https://music.163.com/weapi/v3/song/detail"
         const val PLAYLIST_API = "https://music.163.com/weapi/v3/playlist/detail"
+        const val PLAYLIST_TRACKS_API = "https://music.163.com/api/playlist/manipulate/tracks"
+        const val PLAYLIST_WRITE_USER_AGENT =
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
         const val CATEGORY_API = "https://music.163.com/weapi/playlist/catalogue"
         const val CATEGORY_PLAYLIST_API = "https://music.163.com/weapi/playlist/list"
         const val USER_PLAYLIST_API = "https://music.163.com/weapi/user/playlist"
@@ -1210,7 +1284,10 @@ private fun NeteasePrivilege.bestLevel(): String =
 private data class NeteaseSize(val size: Long = 0)
 
 @Serializable
-private data class NeteaseCreator(val nickname: String = "")
+private data class NeteaseCreator(
+    val nickname: String = "",
+    val userId: Long = 0,
+)
 
 @Serializable
 private data class NeteaseSearchPlaylist(
@@ -1290,6 +1367,8 @@ private data class NeteasePlaylistDetail(
     val trackCount: Int = 0,
     val creator: NeteaseCreator = NeteaseCreator(),
     val trackIds: List<NeteaseTrackId> = emptyList(),
+    /** 5 = 我喜欢的音乐等特殊歌单，不能按普通歌单加删。 */
+    val specialType: Int = 0,
 )
 
 @Serializable

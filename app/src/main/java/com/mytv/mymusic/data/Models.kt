@@ -27,6 +27,10 @@ data class ProviderInfo(
     @SerialName("TopListSongs") val topListSongs: Boolean = false,
     @SerialName("HotSongs") val hotSongs: Boolean = false,
     @SerialName("ListeningModes") val listeningModes: Boolean = false,
+    /** 能往平台歌单里加歌 / 删歌；没有这个能力的平台编辑绑定歌单仍然解绑。 */
+    @SerialName("PlaylistWrite") val playlistWrite: Boolean = false,
+    /** 能把整张歌单的新顺序写回平台；只对自建歌单有效。 */
+    @SerialName("PlaylistReorder") val playlistReorder: Boolean = false,
     @SerialName("Unstable") val unstable: String = "",
     @SerialName("Note") val note: String = "",
 )

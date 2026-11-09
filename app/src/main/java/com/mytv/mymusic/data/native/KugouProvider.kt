@@ -19,7 +19,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.math.BigInteger
@@ -58,6 +60,8 @@ private val KUGOU_INFO = ProviderInfo(
     topLists = true,
     topListSongs = true,
     hotSongs = true,
+    playlistWrite = true,
+    playlistReorder = true,
 )
 
 class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
@@ -353,6 +357,225 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
                 CollectionResult(playlist, songs)
             }
             else -> throw IllegalArgumentException("invalid kugou playlist link")
+        }
+    }
+
+    override suspend fun playlistWritable(cookie: String, id: String): Boolean? {
+        val cookieMap = parseKugouCookie(cookie)
+        if (cookieMap["userid"].orEmpty().isBlank() ||
+            cookieMap["token"].orEmpty().isBlank() ||
+            cookieMap["KUGOU_API_MID"].orEmpty().isBlank()
+        ) {
+            return null
+        }
+        return id.trim().startsWith("cloudlist:")
+    }
+
+    override suspend fun addPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        if (songs.isEmpty()) return
+        val ctx = writeContext(cookie)
+        val listId = cloudlistIdOf(playlistId)
+        val data = buildJsonObject {
+            put("userid", ctx.userId)
+            put("token", ctx.token)
+            put("listid", listId)
+            put("list_ver", 0)
+            put("type", 0)
+            put("slow_upload", 1)
+            put("scene", "false;null")
+            putJsonArray("data") {
+                songs.forEach { song ->
+                    add(buildJsonObject {
+                        put("number", 1)
+                        put("name", song.name)
+                        put("hash", song.extra["hash"].orEmpty().ifBlank { song.id })
+                        put("size", song.size)
+                        put("sort", 0)
+                        put("timelen", song.duration * 1000L)
+                        put("bitrate", song.bitrate)
+                        put("album_id", song.extra["album_id"].orEmpty().toLongOrNull() ?: 0L)
+                        put("mixsongid", kugouMixSongId(song))
+                    })
+                }
+            }
+        }
+        val params = ctx.baseParams + mapOf("last_time" to ctx.clienttime, "last_area" to "gztx")
+        val body = kugouPlainWrite(KUGOU_CLOUD_ADD_SONG, params, data.toString(), ctx, router = null)
+        checkKugouWrite(body, "add")
+    }
+
+    override suspend fun removePlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        if (songs.isEmpty()) return
+        val ctx = writeContext(cookie)
+        val listId = cloudlistIdOf(playlistId)
+        val page = cloudlistPage(cookie, listId)
+        val fileIds = songs.map { kugouFileId(it, page) }
+        val data = buildJsonObject {
+            put("listid", listId)
+            put("userid", ctx.userId)
+            putJsonArray("data") { fileIds.forEach { add(buildJsonObject { put("fileid", it) }) } }
+            put("type", 0)
+            put("token", ctx.token)
+            put("list_ver", page.listVer)
+        }
+        val body = kugouPlainWrite(KUGOU_CLOUD_DELETE_SONGS, ctx.baseParams, data.toString(), ctx, KUGOU_CLOUD_ROUTER)
+        checkKugouWrite(body, "delete")
+    }
+
+    override suspend fun reorderPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        val ctx = writeContext(cookie)
+        val listId = cloudlistIdOf(playlistId)
+        val page = cloudlistPage(cookie, listId)
+        val fileIds = songs.map { kugouFileId(it, page) }
+        val data = buildJsonObject {
+            put("listid", listId.toLongOrNull() ?: 0L)
+            put("list_ver", page.listVer)
+            put("type", 0)
+            putJsonArray("data") {
+                fileIds.forEachIndexed { index, fileId ->
+                    add(buildJsonObject {
+                        put("fileid", fileId)
+                        put("sort", index)
+                    })
+                }
+            }
+        }
+        val body = kugouCloudWrite(KUGOU_CLOUD_SORT, data, ctx)
+        checkKugouWrite(body, "sort")
+    }
+
+    private fun writeContext(cookie: String): KugouWriteContext {
+        val cookieMap = parseKugouCookie(cookie)
+        val userId = cookieMap["userid"].orEmpty().trim()
+        val token = cookieMap["token"].orEmpty().trim()
+        val mid = cookieMap["KUGOU_API_MID"].orEmpty().trim()
+        if (userId.isBlank() || userId == "0" || token.isBlank() || mid.isBlank()) {
+            throw PlaylistWriteException("kugou playlist write requires login", PlaylistWriteFailure.NotLoggedIn)
+        }
+        val clienttime = nowSeconds()
+        val dfid = firstNonEmpty(cookieMap["dfid"].orEmpty(), "-")
+        return KugouWriteContext(
+            cookie = cookie,
+            userId = userId,
+            token = token,
+            mid = mid,
+            dfid = dfid,
+            clienttime = clienttime,
+            baseParams = mapOf(
+                "dfid" to dfid,
+                "mid" to mid,
+                "uuid" to "-",
+                "appid" to KUGOU_LITE_APP_ID,
+                "clientver" to KUGOU_LITE_VER,
+                "clienttime" to clienttime,
+                "token" to token,
+                "userid" to userId,
+            ),
+        )
+    }
+
+    private fun cloudlistIdOf(playlistId: String): String {
+        val id = playlistId.trim()
+        if (!id.startsWith("cloudlist:")) {
+            throw PlaylistWriteException("kugou playlist is not owned by this account", PlaylistWriteFailure.NotOwner)
+        }
+        return id.removePrefix("cloudlist:").trim()
+            .takeIf { it.isNotEmpty() }
+            ?: throw PlaylistWriteException("kugou cloudlist id is empty", PlaylistWriteFailure.Other)
+    }
+
+    private fun kugouMixSongId(song: Song): Long =
+        firstNonEmpty(
+            song.extra["album_audio_id"].orEmpty(),
+            song.extra["audio_id"].orEmpty(),
+        ).toLongOrNull() ?: 0L
+
+    private fun kugouFileId(song: Song, page: KugouCloudlistPage): Long {
+        song.extra["fileid"].orEmpty().toLongOrNull()?.takeIf { it > 0 }?.let { return it }
+        val hash = song.extra["hash"].orEmpty().ifBlank { song.id }
+        page.fileIds[hash]?.let { return it }
+        throw PlaylistWriteException(
+            "kugou fileid not found: ${song.name.ifBlank { song.id }}",
+            PlaylistWriteFailure.SongNotFound,
+        )
+    }
+
+    private suspend fun kugouPlainWrite(
+        path: String,
+        params: Map<String, String>,
+        data: String,
+        ctx: KugouWriteContext,
+        router: String?,
+    ): String {
+        val url = buildAndroidUrl(KUGOU_GATEWAY + path, params, data)
+        return NativeHttp.postJson(
+            url,
+            data,
+            headers = androidHeaders(ctx.dfid, ctx.mid, ctx.clienttime, router),
+            cookie = kugouCookieString(ctx),
+            randomIp = true,
+            userAgent = KUGOU_ANDROID_UA,
+        ).body
+    }
+
+    private suspend fun kugouCloudWrite(path: String, data: JsonObject, ctx: KugouWriteContext): String {
+        val seed = randomAesSeed()
+        val digest = NativeCrypto.md5Hex(seed).lowercase(Locale.ROOT)
+        val key = digest.substring(0, 16).toByteArray(Charsets.UTF_8)
+        val iv = digest.substring(16, 32).toByteArray(Charsets.UTF_8)
+        val keyParam = NativeCrypto.md5Hex(
+            "$KUGOU_LITE_APP_ID$KUGOU_CLOUD_APP_KEY$KUGOU_LITE_VER${ctx.clienttime}"
+        ).lowercase(Locale.ROOT)
+        val portrait = rsaPkcs1Hex(
+            buildJsonObject {
+                put("aes", seed)
+                put("uid", ctx.userId)
+                put("token", ctx.token)
+            }.toString()
+        )
+        val params = mapOf(
+            "appid" to KUGOU_LITE_APP_ID,
+            "clientver" to KUGOU_LITE_VER,
+            "mid" to ctx.mid,
+            "clienttime" to ctx.clienttime,
+            "key" to keyParam,
+            "dfid" to ctx.dfid,
+            "p" to portrait,
+        )
+        val url = KUGOU_GATEWAY + path + "?" + query(params)
+        val response = NativeHttp.postBinary(
+            url,
+            aesCbcEncrypt(data.toString().toByteArray(Charsets.UTF_8), key, iv),
+            headers = androidHeaders(ctx.dfid, ctx.mid, ctx.clienttime, KUGOU_CLOUD_ROUTER),
+            cookie = kugouCookieString(ctx),
+            randomIp = true,
+            userAgent = KUGOU_ANDROID_UA,
+        )
+        val raw = response.bytes
+        val decoded = runCatching { String(aesCbcDecrypt(raw, key, iv), Charsets.UTF_8) }.getOrNull()
+        // 服务端不一定加密响应；解出来不是 JSON 就按明文处理
+        return decoded?.trimStart()?.takeIf { it.startsWith("{") } ?: String(raw, Charsets.UTF_8)
+    }
+
+    private fun kugouCookieString(ctx: KugouWriteContext): String = ctx.cookie
+
+    private fun randomAesSeed(): String {
+        val alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        val random = SecureRandom()
+        return buildString { repeat(6) { append(alphabet[random.nextInt(alphabet.length)]) } }
+    }
+
+    private fun checkKugouWrite(body: String, action: String) {
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+            ?: throw PlaylistWriteException("kugou playlist $action response is not json")
+        val status = root["status"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        val errorCode = root["error_code"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        val errcode = root["errcode"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        if (status != 1 || errorCode != 0 || errcode != 0) {
+            throw PlaylistWriteException(
+                "kugou playlist $action failed: status=$status error_code=$errorCode errcode=$errcode " +
+                    root["error"]?.jsonPrimitive?.content.orEmpty()
+            )
         }
     }
 
@@ -1701,7 +1924,10 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         return result to songs
     }
 
-    private suspend fun fetchCloudlistDetail(cookie: String, listId: String): Pair<Playlist, List<Song>> {
+    private suspend fun fetchCloudlistDetail(cookie: String, listId: String): Pair<Playlist, List<Song>> =
+        cloudlistPage(cookie, listId).let { it.playlist to it.songs }
+
+    private suspend fun cloudlistPage(cookie: String, listId: String): KugouCloudlistPage {
         val cookieMap = parseKugouCookie(cookie)
         val userID = cookieMap["userid"].orEmpty().trim()
         val token = cookieMap["token"].orEmpty().trim()
@@ -1756,6 +1982,7 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             trackCount = resp.data.count.numericString().toIntOrNull() ?: 0,
         )
         val songs = mutableListOf<Song>()
+        val fileIds = mutableMapOf<String, Long>()
         for (item in resp.data.info) {
             var baseSize = item.size
             if (baseSize == 0L) baseSize = item.fileSize
@@ -1818,24 +2045,44 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
                 source = "kugou",
                 cover = cover,
                 link = "https://www.kugou.com/song/#hash=$finalHash",
-                extra = mapOf(
-                    "hash" to finalHash,
-                    "ogg_320_hash" to item.transParam.ogg320Hash,
-                    "ogg_128_hash" to item.transParam.ogg128Hash,
-                    "sq_hash" to sqHash,
-                    "file_hash" to fileHash,
-                    "res_hash" to item.resFileHash,
-                    "mv_hash" to item.mvHash,
-                    "hq_hash" to hqHash,
-                    "audio_id" to audioId,
-                    "album_audio_id" to albumAudioId,
-                    "album_id" to albumId,
-                    "cloud_listid" to listId,
-                    "privilege" to item.privilege.toString(),
-                ),
+                extra = buildMap {
+                    put("hash", finalHash)
+                    put("ogg_320_hash", item.transParam.ogg320Hash)
+                    put("ogg_128_hash", item.transParam.ogg128Hash)
+                    put("sq_hash", sqHash)
+                    put("file_hash", fileHash)
+                    put("res_hash", item.resFileHash)
+                    put("mv_hash", item.mvHash)
+                    put("hq_hash", hqHash)
+                    put("audio_id", audioId)
+                    put("album_audio_id", albumAudioId)
+                    put("album_id", albumId)
+                    put("cloud_listid", listId)
+                    put("privilege", item.privilege.toString())
+                    val fileId = firstNonEmpty(
+                        item.fileId.numericString(),
+                        item.fileIdLegacy.numericString(),
+                        item.id.numericString(),
+                    ).toLongOrNull()
+                    if (fileId != null && fileId > 0) {
+                        put("fileid", fileId.toString())
+                        fileIds[finalHash] = fileId
+                        fileIds[fileHash] = fileId
+                    }
+                },
             )
         }
-        return playlist.copy(trackCount = songs.size) to songs
+        val listVer = firstNonEmpty(
+            resp.data.listVer.numericString(),
+            resp.data.listVerLower.numericString(),
+            resp.listVer.numericString(),
+        ).toLongOrNull() ?: 0L
+        return KugouCloudlistPage(
+            playlist = playlist.copy(trackCount = songs.size),
+            songs = songs,
+            listVer = listVer,
+            fileIds = fileIds,
+        )
     }
 
     private suspend fun getUserPlaylistsGateway(
@@ -2884,6 +3131,12 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         const val KUGOU_LITE_SIGN = "LnT6xpN3khm36zse0QzvmgTZ3waWdRSA"
         const val KUGOU_LITE_APP_ID = "3116"
         const val KUGOU_LITE_VER = "11440"
+        const val KUGOU_GATEWAY = "https://gateway.kugou.com"
+        const val KUGOU_CLOUD_ADD_SONG = "/cloudlist.service/v6/add_song"
+        const val KUGOU_CLOUD_DELETE_SONGS = "/v4/delete_songs"
+        const val KUGOU_CLOUD_SORT = "/v1/modify_song_sort"
+        const val KUGOU_CLOUD_ROUTER = "cloudlist.service.kugou.com"
+        const val KUGOU_CLOUD_APP_KEY = "LnT6xpN3khm36zse0QzvmgTZ3waWdRSA"
         const val KUGOU_LITE_KEY = "185672dd44712f60bb1736df5a377e82"
         const val HOT_SONG_TOP_LIST_ID = "8888"
         const val KUGOU_SINGER_SONG_LIMIT = 500
@@ -3065,23 +3318,48 @@ private data class KugouAlbumInfo(
 )
 
 @Serializable
+private data class KugouWriteContext(
+    val cookie: String,
+    val userId: String,
+    val token: String,
+    val mid: String,
+    val dfid: String,
+    val clienttime: String,
+    val baseParams: Map<String, String>,
+)
+
+private data class KugouCloudlistPage(
+    val playlist: Playlist,
+    val songs: List<Song>,
+    val listVer: Long,
+    /** hash / fileHash → fileid，写歌单时用来定位曲目。 */
+    val fileIds: Map<String, Long>,
+)
+
+@Serializable
 private data class KugouCloudlistResponse(
     val status: Int = 0,
     @SerialName("error_code") val errorCode: Int = 0,
     val errcode: Int = 0,
     val error: String = "",
+    @SerialName("list_ver") val listVer: JsonElement? = null,
     val data: KugouCloudlistData = KugouCloudlistData(),
 )
 
 @Serializable
 private data class KugouCloudlistData(
     val count: JsonElement? = null,
+    @SerialName("list_ver") val listVer: JsonElement? = null,
+    @SerialName("listver") val listVerLower: JsonElement? = null,
     val info: List<KugouCloudlistItem> = emptyList(),
 )
 
 @Serializable
 private data class KugouCloudlistItem(
     @SerialName("ID") val id: JsonElement? = null,
+    @SerialName("fileid") val fileId: JsonElement? = null,
+    @SerialName("FileID") val fileIdLegacy: JsonElement? = null,
+    @SerialName("type") val songType: Int = 0,
     val hash: String = "",
     @SerialName("FileHash") val fileHash: String = "",
     @SerialName("SQFileHash") val sqFileHash: String = "",

@@ -638,6 +638,30 @@ footer b { color: var(--muted); font-weight: 700; }
 </section>
 
 <section class="block">
+  <div class="block-head"><span class="kicker">实现状态</span><h2>2026-11-09 已落地</h2></div>
+  <p class="sub">
+    三个平台的写接口、通用解析与回滚、详情页只读态都已实现并通过单元测试与 Debug 构建；
+    平台接口仍需要在真实账号上逐项核对（见上一节清单）。
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>模块</th><th>状态</th><th>落点</th></tr></thead>
+      <tbody>
+        <tr><td>写接口能力位与默认实现</td><td class="yes">完成</td><td><code>NativeProvider</code>、<code>ProviderInfo.PlaylistWrite/PlaylistReorder</code></td></tr>
+        <tr><td>网易云增删</td><td class="yes">完成</td><td><code>NetEaseProvider.manipulateTracks</code>；排序按不支持处理</td></tr>
+        <tr><td>QQ 增删排序</td><td class="yes">完成</td><td><code>PlaylistDetailWrite</code>；<code>dirid</code> 解析与缓存；排序全量提交</td></tr>
+        <tr><td>酷狗增删排序</td><td class="yes">完成</td><td>云歌单签名/加密通道；<code>fileid</code>、<code>list_ver</code> 从详情带入</td></tr>
+        <tr><td>跨源解析</td><td class="yes">完成</td><td>同源 → canonical_sources → 搜索 + TrackMatcher 0.92</td></tr>
+        <tr><td>写失败回滚 / 撤销反向写</td><td class="yes">完成</td><td><code>PlaylistSnapshot</code>、<code>insertPlaylistEntry</code></td></tr>
+        <tr><td>排序防抖与刷新互斥</td><td class="yes">完成</td><td>500ms 合并；有未推送排序时跳过自动刷新</td></tr>
+        <tr><td>只读判定与界面</td><td class="yes">完成</td><td>打开详情页检查归属；只读时隐藏编辑、添加、多选与移除</td></tr>
+        <tr><td>真机写操作验证</td><td class="adj">待做</td><td>需要三个平台的已登录账号，按核对清单跑</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="block">
   <div class="block-head"><span class="kicker">风险</span><h2>需要提前接受的代价</h2></div>
   <ul class="clean">
     <li><b>非官方接口：</b>三个平台都没有公开文档，接口可能随客户端升级变化。实现上按“失败即降级为解绑”兜底，不把用户卡死在写不出去的歌单里。</li>

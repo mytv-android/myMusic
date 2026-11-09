@@ -85,12 +85,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.local.LOCAL_SOURCE
 import com.mytv.mymusic.data.CollectionView
+import com.mytv.mymusic.data.canReorderBoundPlaylist
 import com.mytv.mymusic.data.PlaylistEntity
 import com.mytv.mymusic.data.PlaylistEntryEntity
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.sync.SyncUiState
+import com.mytv.mymusic.ui.BoundPlaylistAccess
 import com.mytv.mymusic.ui.ConfirmDialog
 import com.mytv.mymusic.ui.Cover
 import com.mytv.mymusic.ui.EmptyState
@@ -158,6 +160,7 @@ fun LocalPlaylistScreen(
     librarySearch: LibrarySearchUiState,
     favorites: List<SavedSong>,
     playlists: List<LocalPlaylistSummary>,
+    boundAccess: BoundPlaylistAccess? = null,
     actions: MusicActions,
     onBack: () -> Unit,
     onOpenSync: () -> Unit,
@@ -171,15 +174,30 @@ fun LocalPlaylistScreen(
     val songs = detail?.songs.orEmpty()
     val conflict = sync.conflicts.any { it.playlistId == playlistId }
     val bound = playlist?.bound == true
-    // 打开绑定歌单时后台拉一次平台最新内容（内部按 15 分钟节流，失败静默）
+    val readOnly = bound && boundAccess?.readOnly == true
+    // 有写接口的平台看平台是否支持排序；没有写接口的仍按老行为在本地排序后解绑
+    val canReorder = canReorderBoundPlaylist(
+        bound = bound,
+        writeSupported = boundAccess?.supported == true,
+        reorderSupported = boundAccess?.reorder == true,
+    )
+    // 绑定歌单的“添加”直接在目标平台里搜，减少跨平台匹配误差
+    val addProviderId = playlist?.linkProvider?.takeIf { bound && boundAccess?.supported == true }
+    // 打开绑定歌单时后台拉一次平台最新内容（内部按 15 分钟节流，失败静默），并判断能不能改
     LaunchedEffect(playlistId, playlist?.linkId) {
-        if (playlist?.bound == true) actions.refreshBoundPlaylist(playlistId)
+        if (playlist?.bound == true) {
+            actions.refreshBoundPlaylist(playlistId)
+            actions.checkBoundPlaylistAccess(playlistId)
+        }
     }
     val undo = rememberUndo()
     val playFocus = remember { FocusRequester() }
     val editFocus = remember { FocusRequester() }
 
     var editing by rememberSaveable(playlistId) { mutableStateOf(false) }
+    LaunchedEffect(readOnly) {
+        if (readOnly) editing = false
+    }
     var nameDraft by rememberSaveable(playlistId, playlist?.name) { mutableStateOf(playlist?.name.orEmpty()) }
     var renameOpen by remember { mutableStateOf(false) }
     var deleteOpen by remember { mutableStateOf(false) }
@@ -260,7 +278,7 @@ fun LocalPlaylistScreen(
     val meta = remember(songs) { playlistMeta(songs) }
 
     val menu = PlaylistMenu(
-        onEdit = { editing = true },
+        onEdit = if (readOnly) null else ({ editing = true }),
         onRename = { renameOpen = true },
         onDelete = { deleteOpen = true },
         onSync = if (bound) ({ actions.syncBoundPlaylist(playlistId) }) else null,
@@ -281,7 +299,8 @@ fun LocalPlaylistScreen(
                     index = index,
                     count = entries.size,
                     container = rowContainer,
-                    moveFocus = if (index == 0) editFocus else null,
+                    moveFocus = if (index == 0 && canReorder) editFocus else null,
+                    canMove = canReorder,
                     onUp = { actions.moveEntry(playlistId, entry.position, -1) },
                     onDown = { actions.moveEntry(playlistId, entry.position, 1) },
                     onRemove = { remove(entry, song) },
@@ -362,6 +381,13 @@ fun LocalPlaylistScreen(
         }
     }
     val headerExtras: LazyListScope.() -> Unit = {
+        if (readOnly && !editing) {
+            item(key = "readonly", contentType = "note") {
+                Box(Modifier.padding(bottom = 8.dp)) {
+                    InfoNote("这个歌单不能修改。仍可播放、下载，或解除绑定后存成本机歌单。", "red")
+                }
+            }
+        }
         if (elsewhereNote.isNotBlank() && !editing) {
             item(key = "elsewhere", contentType = "note") {
                 Box(Modifier.padding(bottom = 8.dp)) { InfoNote(elsewhereNote, "amber") }
@@ -384,9 +410,22 @@ fun LocalPlaylistScreen(
         if (editing) {
             item(key = "editNote", contentType = "note") {
                 Text(
-                    (if (window.isTv) "用行尾的上移、下移按钮调整顺序，左侧按钮移除。"
-                    else "用上下箭头调整顺序（键盘 Alt + ↑↓），点左侧按钮移除。修改自动保存到本机。") +
-                        (if (bound) "这个歌单绑定了平台，手动增删或移动后会自动解除绑定。" else ""),
+                    buildString {
+                        if (canReorder) {
+                            append(
+                                if (window.isTv) "用行尾的上移、下移按钮调整顺序，左侧按钮移除。"
+                                else "用上下箭头调整顺序（键盘 Alt + ↑↓），点左侧按钮移除。"
+                            )
+                        } else {
+                            append("点左侧按钮移除歌曲。")
+                        }
+                        if (bound) {
+                            append("修改会同步到${providerName(state.providers, playlist?.linkProvider.orEmpty())}歌单。")
+                            if (!canReorder) append("这个平台不支持在 App 内调整歌单顺序。")
+                        } else {
+                            append("修改自动保存到本机。")
+                        }
+                    },
                     Modifier.padding(start = 4.dp, top = 4.dp, bottom = 8.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -438,10 +477,10 @@ fun LocalPlaylistScreen(
                 enabled = songs.isNotEmpty(),
                 onPlayAll = { actions.play(songs.first(), songs) },
                 onShuffle = { val list = songs.shuffled(); actions.play(list.first(), list) },
-                onAdd = { addOpen = true },
+                onAdd = if (readOnly) null else ({ addOpen = true }),
                 menu = if (showEdit) menu else null,
                 playFocus = playFocus,
-                onMultiSelect = if (songs.isNotEmpty()) ({ selection.start() }) else null,
+                onMultiSelect = if (songs.isNotEmpty() && !readOnly) ({ selection.start() }) else null,
                 // 嵌在“我的”里没有顶栏，入口放操作行；手机和双栏的左栏操作行已经排满，入口在顶栏
                 onPosterView = if (embedded) showPoster else null,
             )
@@ -464,6 +503,7 @@ fun LocalPlaylistScreen(
                 cover = coverUrls.firstOrNull().orEmpty(),
                 onEdit = { editing = true },
                 onAddTracks = { addOpen = true },
+                readOnly = readOnly,
                 onSongActions = { song, entry -> actionEntry = song to entry },
                 onBack = onBack,
                 resetKey = playlistId,
@@ -576,8 +616,10 @@ fun LocalPlaylistScreen(
                         IconButton(onClick = showPoster, modifier = Modifier.tvFocusRing(CircleShape)) {
                             Icon(Icons.Filled.GridView, "海报视图")
                         }
-                        IconButton(onClick = { editing = true }, modifier = Modifier.tvFocusRing(CircleShape)) {
-                            Icon(Icons.Filled.Edit, "编辑歌单")
+                        if (!readOnly) {
+                            IconButton(onClick = { editing = true }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                                Icon(Icons.Filled.Edit, "编辑歌单")
+                            }
                         }
                         PlaylistMoreMenu(menu.copy(onEdit = null))
                     }
@@ -628,10 +670,10 @@ fun LocalPlaylistScreen(
                 actionEntry = null
                 actions.openSourceForSong(song, songs)
             },
-            onRemoveFromPlaylist = {
+            onRemoveFromPlaylist = if (readOnly) null else ({
                 remove(entry, song)
                 actionEntry = null
-            },
+            }),
             onDismiss = { actionEntry = null },
             // 本地歌：这台设备没有文件、放的是匹配到的平台版本时，只有这里能换匹配（换好的会同步回有文件的设备）
             onRematch = if (song.source == LOCAL_SOURCE) ({ actionEntry = null; unplayable.rematch = song }) else null,
@@ -657,7 +699,8 @@ fun LocalPlaylistScreen(
         AddTracksSheet(
             search = librarySearch,
             existing = remember(entries) { entries.map { it.songKey }.toSet() },
-            onSearch = actions::searchLibrary,
+            sourceName = addProviderId?.let { providerName(state.providers, it) },
+            onSearch = { query -> actions.searchLibrary(query, addProviderId) },
             onAdd = { song -> actions.addSongToPlaylist(playlistId, song) },
             onDismiss = {
                 addOpen = false
@@ -712,6 +755,7 @@ private fun LocalPlaylistPoster(
     cover: String,
     onEdit: () -> Unit,
     onAddTracks: () -> Unit,
+    readOnly: Boolean = false,
     onSongActions: (Song, PlaylistEntryEntity) -> Unit,
     onBack: () -> Unit,
     resetKey: Any?,
@@ -742,11 +786,13 @@ private fun LocalPlaylistPoster(
             back = onBack,
         )
     }
-    val edit = remember(onEdit) { PosterExtraAction(Icons.Filled.Edit, "编辑歌单", onEdit) }
+    val edit = remember(onEdit, readOnly) {
+        if (readOnly) null else PosterExtraAction(Icons.Filled.Edit, "编辑歌单", onEdit)
+    }
     val providers = state.providers
     val sourceName: (Song) -> String = remember(providers) { { song -> providerName(providers, song.source) } }
     // 空歌单沿用列表的提示；“添加歌曲”是搜索面板，不用切回列表
-    val message: (@Composable () -> Unit)? = if (detail != null && songs.isEmpty()) ({
+    val message: (@Composable () -> Unit)? = if (!readOnly && detail != null && songs.isEmpty()) ({
         EmptyState(
             icon = Icons.Filled.Search,
             title = "歌单还是空的",
@@ -828,7 +874,7 @@ private fun PlaylistActionRow(
     enabled: Boolean,
     onPlayAll: () -> Unit,
     onShuffle: () -> Unit,
-    onAdd: () -> Unit,
+    onAdd: (() -> Unit)?,
     menu: PlaylistMenu?,
     playFocus: FocusRequester,
     onMultiSelect: (() -> Unit)? = null,
@@ -842,7 +888,7 @@ private fun PlaylistActionRow(
         Box(Modifier.focusRequester(playFocus)) {
             if (enabled) {
                 PlayAllSplitButton(onPlayAll = onPlayAll, onShuffle = onShuffle)
-            } else {
+            } else if (onAdd != null) {
                 Button(onClick = onAdd, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp))) {
                     Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -850,7 +896,7 @@ private fun PlaylistActionRow(
                 }
             }
         }
-        if (enabled) {
+        if (enabled && onAdd != null) {
             FilledTonalButton(onClick = onAdd, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp))) {
                 Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
@@ -933,6 +979,7 @@ private fun EditTrackRow(
     count: Int,
     container: Color,
     moveFocus: FocusRequester?,
+    canMove: Boolean = true,
     onUp: () -> Unit,
     onDown: () -> Unit,
     onRemove: () -> Unit,
@@ -963,24 +1010,27 @@ private fun EditTrackRow(
             Text(song.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(song.artist, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        IconButton(onClick = onUp, enabled = index > 0, modifier = Modifier.tvFocusRing(CircleShape)) {
-            Icon(Icons.Filled.ArrowUpward, "上移“${song.title}”")
-        }
-        IconButton(
-            onClick = onDown,
-            enabled = index < count - 1,
-            modifier = (if (moveFocus != null) Modifier.focusRequester(moveFocus) else Modifier).tvFocusRing(CircleShape),
-        ) {
-            Icon(Icons.Filled.ArrowDownward, "下移“${song.title}”")
+        if (canMove) {
+            IconButton(onClick = onUp, enabled = index > 0, modifier = Modifier.tvFocusRing(CircleShape)) {
+                Icon(Icons.Filled.ArrowUpward, "上移“${song.title}”")
+            }
+            IconButton(
+                onClick = onDown,
+                enabled = index < count - 1,
+                modifier = (if (moveFocus != null) Modifier.focusRequester(moveFocus) else Modifier).tvFocusRing(CircleShape),
+            ) {
+                Icon(Icons.Filled.ArrowDownward, "下移“${song.title}”")
+            }
         }
     }
 }
 
-/** 添加歌曲：在默认浏览来源中搜索。手机是底部面板，平板 / 电视是侧边面板。 */
+/** 添加歌曲：在默认浏览来源（绑定歌单则在绑定平台）中搜索。手机是底部面板，平板 / 电视是侧边面板。 */
 @Composable
 internal fun AddTracksSheet(
     search: LibrarySearchUiState,
     existing: Set<String>,
+    sourceName: String? = null,
     onSearch: (String) -> Unit,
     onAdd: (Song) -> Unit,
     onDismiss: () -> Unit,
@@ -990,7 +1040,11 @@ internal fun AddTracksSheet(
     // 平台搜索结果同一 key 可能重复，按出现顺序加序号；输入框留在惰性列表外层
     val resultKeys = remember(search.results) { distinctKeys(search.results) { it.key } }
     TvDefaultFocus(field)
-    AdaptiveSheet(onDismiss = onDismiss, title = "添加歌曲", subtitle = "在默认浏览来源中搜索") {
+    AdaptiveSheet(
+        onDismiss = onDismiss,
+        title = "添加歌曲",
+        subtitle = if (sourceName.isNullOrBlank()) "在默认浏览来源中搜索" else "在${sourceName}中搜索",
+    ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             OutlinedTextField(
                 value = query,

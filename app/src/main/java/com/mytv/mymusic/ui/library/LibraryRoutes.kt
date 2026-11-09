@@ -166,6 +166,7 @@ private fun LocalPlaylistHost(app: AppNav, id: String, embedded: Boolean, onBack
     val librarySearch by app.model.librarySearch.collectAsState()
     val favorites by app.model.favorites.collectAsState()
     val localPlaylists by app.model.localPlaylists.collectAsState()
+    val boundAccess by app.actions.boundAccess.collectAsState()
     LocalPlaylistScreen(
         playlistId = id,
         detailFlow = detailFlow,
@@ -174,6 +175,7 @@ private fun LocalPlaylistHost(app: AppNav, id: String, embedded: Boolean, onBack
         librarySearch = librarySearch,
         favorites = favorites,
         playlists = localPlaylists,
+        boundAccess = boundAccess[id],
         actions = app.actions,
         onBack = onBack,
         onOpenSync = { app.nav.navigate("syncCenter") },

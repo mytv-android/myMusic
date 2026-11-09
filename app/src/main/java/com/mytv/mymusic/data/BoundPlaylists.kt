@@ -12,6 +12,13 @@ fun boundDiff(oldKeys: Collection<String>, newKeys: Collection<String>): BoundDi
 }
 
 /**
+ * 绑定歌单能不能调整顺序。没绑定、或者平台没有写接口时仍然可以在本机调（调完解绑）；
+ * 有写接口的平台则要看它是否支持把整张歌单的新顺序写回去。
+ */
+fun canReorderBoundPlaylist(bound: Boolean, writeSupported: Boolean, reorderSupported: Boolean): Boolean =
+    !bound || !writeSupported || reorderSupported
+
+/**
  * 绑定时落到哪个本地歌单：优先找已绑定同一平台歌单的；没有就升级同名的普通歌单
  * （旧版“收藏 = 存成同名本地歌单”留下的副本，点绑定直接变活，不产生重复行）；
  * 都没有返回 null，由调用方新建。

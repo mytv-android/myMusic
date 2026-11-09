@@ -31,6 +31,16 @@ The playback-report state machine in `data/playreport/BasePlayReporter.kt` is sh
 
 All of these channels are best-effort: they carry no user-identifying data beyond what the platform already receives for the same account, they fail silently, and they can be switched off entirely in `设置 › 播放上报`.
 
+## Platform playlist writes (protocol only)
+
+Editing a bound platform playlist uses the following unofficial write contracts. No upstream source code is bundled for these; the Kotlin implementations are written against the request formats documented by the referenced projects.
+
+- **NetEase Cloud Music** (`data/native/NetEaseProvider.kt`): `POST https://music.163.com/api/playlist/manipulate/tracks` (`op=add|del`, `pid`, `trackIds`, `imme`) and the Web API's `__csrf` cookie. Reference: NeteaseCloudMusicApi's `module/playlist_tracks.js`.
+- **QQ Music** (`data/native/QQProvider.kt`): `musicu.fcg` module `music.musicasset.PlaylistDetailWrite` (`AddSonglist` / `DelSonglist` / `SeqSonglist`), with `dirId`, `tid`, and `v_songInfo` / `v_songPair`. Reference: https://github.com/L-1124/QQMusicApi (`qqmusic_api/modules/songlist.py`) and https://github.com/jsososo/QQMusicApi (`routes/songlist.js`, legacy fcgi endpoints).
+- **Kugou Music** (`data/native/KugouProvider.kt`): cloud playlist service `/cloudlist.service/v6/add_song`, `/v4/delete_songs`, `/v1/modify_song_sort`, using the Android signature and the cloudlist AES/RSA envelope. Reference: https://github.com/MakcRe/KuGouMusicApi (`module/playlist_tracks_add.js`, `playlist_tracks_del.js`, `playlist_tracks_sort.js`).
+
+These are best-effort unofficial interfaces. They are only used when the user explicitly edits a bound playlist that belongs to the signed-in account.
+
 ## libmssdk (protocol only)
 
 - Upstream: https://github.com/sodahub-org/libmssdk
