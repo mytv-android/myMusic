@@ -156,6 +156,26 @@ class WebDavStorageTest {
     }
 
     @Test
+    fun leftoverTempFromKilledUploadIsSweptButActiveOneIsKept() = runBlocking {
+        // 上次传这首时进程被杀：半截临时文件留在服务器上；另一台设备此刻也在传同一首，它的临时文件一直在长
+        dav.mkdirs("/dav/myMusic/music/9f/")
+        val stale = "/dav/myMusic/music/9f/.$hex.flac.0badf00d.tmp"
+        val active = "/dav/myMusic/music/9f/.$hex.flac.0c0ffee0.tmp"
+        val other = "/dav/myMusic/music/9f/.9f00${"1".repeat(60)}.flac.11111111.tmp"
+        dav.putFromElsewhere(stale, "half")
+        dav.putFromElsewhere(active, "gr")
+        dav.putFromElsewhere(other, "not this song")
+        dav.beforePut = { path -> if (path.endsWith(".tmp") && path != active) dav.putFromElsewhere(active, "growing") }
+
+        storage.upload(source(), meta())
+
+        assertArrayEquals(content, dav.bytes(finalPath))
+        assertNull("没人在写的旧临时文件清掉", dav.bytes(stale))
+        assertNotNull("别的设备正在写的不动", dav.bytes(active))
+        assertNotNull("别的歌的临时文件不碰", dav.bytes(other))
+    }
+
+    @Test
     fun serverWithoutMoveFallsBackToDirectPutWithIfNoneMatch() = runBlocking {
         dav.moveSupported = false
         storage.upload(source(), meta())
@@ -240,6 +260,23 @@ class WebDavStorageTest {
         assertEquals("myMusic/music/ab/$second.mp3", rest.entries.single().id)
         assertEquals("sha256:$second", rest.entries.single().localId)
         assertNull(rest.nextCursor)
+    }
+
+    @Test
+    fun listSweepsTempFilesNobodyTouchedForADay() = runBlocking {
+        // 取消后立刻重试，上一次的临时文件当时还在长、没被上传时的清理删掉；这首传完不会再传，只能靠列表时清
+        dav.mkdirs("/dav/myMusic/music/9f/")
+        val temp = "/dav/myMusic/music/9f/.$hex.flac.0badf00d.tmp"
+        dav.putFromElsewhere(finalPath, "x")
+        dav.putFromElsewhere(temp, "half")
+
+        storage.list(null)
+        assertNotNull("刚写过的可能还在传，不动", dav.bytes(temp))
+
+        val dayLater = WebDavStorage(storage.client, now = { System.currentTimeMillis() + 25L * 60 * 60 * 1000 })
+        assertEquals(listOf("myMusic/music/9f/$hex.flac"), dayLater.list(null).entries.map { it.id })
+        assertNull("一天没动过的清掉", dav.bytes(temp))
+        assertNotNull(dav.bytes(finalPath))
     }
 
     @Test

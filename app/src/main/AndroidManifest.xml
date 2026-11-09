@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- 本地歌上传到网易云盘 / WebDAV：WorkManager 长任务用 dataSync 类型的前台服务（Android 14 起要声明类型和对应权限） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -191,6 +193,11 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_tools_info" />
         </receiver>
+        <!-- WorkManager 的前台服务：上传本地歌时带进度通知，类型是 dataSync（见 data/local/LocalUploadWorker） -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

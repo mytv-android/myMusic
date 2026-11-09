@@ -65,6 +65,9 @@ sealed interface WidgetTarget {
     data object Charts : WidgetTarget
     data class Chart(val source: String, val id: String, val name: String) : WidgetTarget
     data class LocalPlaylist(val id: String) : WidgetTarget
+
+    /** 本地音乐页：上传通知点进来看进度、取消和重试。 */
+    data object LocalMusic : WidgetTarget
 }
 
 /** 搜索页要做的一次性动作：组件的搜索条聚焦输入框，识曲按钮直接开始听。 */
@@ -98,6 +101,7 @@ object WidgetLinks {
                 intent.putExtra(EXTRA_ID, target.id)
                 "localPlaylist"
             }
+            WidgetTarget.LocalMusic -> "localMusic"
         }
         return intent.putExtra(EXTRA_TARGET, name)
     }
@@ -122,6 +126,7 @@ object WidgetLinks {
                 name = intent.getStringExtra(EXTRA_NAME).orEmpty(),
             )
             "localPlaylist" -> if (id.isBlank()) null else WidgetTarget.LocalPlaylist(id)
+            "localMusic" -> WidgetTarget.LocalMusic
             else -> null
         }
     }

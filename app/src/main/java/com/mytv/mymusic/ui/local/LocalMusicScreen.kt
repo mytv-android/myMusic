@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -72,6 +73,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.cloud.CloudProvider
+import com.mytv.mymusic.data.local.LocalUploadRules
 import com.mytv.mymusic.aggregate.Availability
 import com.mytv.mymusic.data.local.LocalCopyKind
 import com.mytv.mymusic.data.local.LocalCopyRules
@@ -109,13 +112,18 @@ import com.mytv.mymusic.ui.library.TwoColumns
 import com.mytv.mymusic.ui.library.withGutter
 import kotlinx.coroutines.launch
 
-/** 本地音乐页的筛选：全部、没匹配、按文件夹分组。 */
-internal enum class LocalFilter(val label: String) { All("全部"), Unmatched("没匹配"), Folders("文件夹") }
+/** 本地音乐页的筛选：全部、没匹配、没上传（哪个云端都还没有能播的一份）、按文件夹分组。 */
+internal enum class LocalFilter(val label: String) { All("全部"), Unmatched("没匹配"), NotUploaded("没上传"), Folders("文件夹") }
 
 /**
- * 本地音乐 · 本机视图。结构照「下载」页：顶上一张占用卡片（分段条：已匹配 / 没匹配），
- * 再往下是播放全部、筛选和歌曲列表。第一次进来没有权限也没有文件夹时是空状态，
+ * 本地音乐页，「本机 / 云端」两个视图用连接按钮组切换（设计稿第 ②③ 张）。
+ *
+ * 本机视图结构照「下载」页：顶上一张占用卡片（分段条：已上传 / 已匹配 / 没匹配），再往下是播放全部、
+ * “上传…”、筛选、正在上传的那一段和歌曲列表。第一次进来没有权限也没有文件夹时是空状态，
  * 主按钮“允许读取音乐”，拒绝后换成“改为选择文件夹”（系统文件夹选择器，不要权限）。
+ *
+ * 云端视图：网易云盘卡片（容量、这台手机上没有文件的几首），WebDAV 和 QQ 云盘各一行，下面是
+ * “网易云盘里，本机没有的”。
  */
 @Composable
 fun LocalMusicScreen(
@@ -124,15 +132,24 @@ fun LocalMusicScreen(
     actions: MusicActions,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenAccounts: () -> Unit = {},
+    onConnectWebDav: () -> Unit = {},
+    onOpenCloudList: (CloudProvider) -> Unit = {},
 ) {
     val library = rememberLocalLibrary() ?: return
+    val uploads = rememberLocalUploads() ?: return
     val window = LocalAppWindow.current
+    val context = LocalContext.current
+    val snackbar = LocalAppSnackbar.current
+    val scope = rememberCoroutineScope()
     val index by library.index.collectAsStateWithLifecycle()
     val scan by library.scan.collectAsStateWithLifecycle()
     val matching by library.matching.collectAsStateWithLifecycle()
     val prefs by library.prefs.collectAsStateWithLifecycle()
+    val uploadState by uploads.state.collectAsStateWithLifecycle()
     val access = rememberLocalAccess(library, prefs)
 
+    var view by rememberSaveable { mutableStateOf(LocalView.Device) }
     var filter by rememberSaveable { mutableStateOf(LocalFilter.All) }
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -151,11 +168,58 @@ fun LocalMusicScreen(
     val shown = remember(index, filter, query) { filterItems(index, filter, query) }
     val songs = remember(shown) { shown.map { it.song } }
     val playable = remember(shown) { shown.filter { it.onDevice }.map { it.song } }
+    // “上传…”：这一屏里这台设备上有文件、哪个云端都还没有能播的一份的
+    val uploadable = remember(shown) {
+        shown.filter { it.onDevice && !LocalUploadRules.hasAnyReadyCopy(index.remotes[it.localId].orEmpty()) }.map { it.localId }
+    }
     val empty = index.items.isEmpty()
     val sourcesReady = library.canScan(prefs)
-    TvDefaultFocus(firstFocus, empty)
+    TvDefaultFocus(firstFocus, empty to view)
+    // 只在 Wi-Fi 下上传时，“等 Wi-Fi”那句要知道现在是不是移动网络；进度一变重查一次就够
+    val metered = remember(uploadState.running, uploadState.pendingCount) { LocalUploadNetwork.metered(context) }
+
+    // 云端视图
+    val netease = rememberCloudList(CloudProvider.NeteaseCloud, view == LocalView.Cloud && CloudProvider.NeteaseCloud in index.clouds)
+    val links = remember(index) { CloudLinks(index) }
+    val entryActions = rememberCloudEntryActions(library, actions)
+    val nickname = rememberNeteaseNickname()
+    val webDav = rememberWebDavInfo()
+
+    val toggle: LazyListScope.() -> Unit = {
+        item(key = "view", contentType = "toggle") {
+            LocalViewToggle(
+                view,
+                { view = it },
+                Modifier.padding(bottom = 8.dp).then(if (view == LocalView.Cloud) Modifier.focusRequester(firstFocus) else Modifier),
+            )
+        }
+    }
+    val cloudHeader: LazyListScope.() -> Unit = {
+        toggle()
+        localCloudHeader(
+            index = index,
+            netease = netease,
+            neteaseName = nickname,
+            webDavLabel = webDav?.hostLabel,
+            onOpenAccounts = onOpenAccounts,
+            onConnectWebDav = onConnectWebDav,
+            onOpenList = onOpenCloudList,
+        )
+    }
+    val cloudList: LazyListScope.() -> Unit = {
+        localCloudNeteaseList(
+            index = index,
+            netease = netease,
+            links = links,
+            playing = state.current?.key,
+            onPlay = { entry, localId -> entryActions?.play(entry, localId, index) },
+            onDelete = { entry, localId -> entryActions?.confirm = Triple(entry, localId, netease) },
+            onLoadMore = { (context.applicationContext as? com.mytv.mymusic.MyMusicApp)?.let { scope.launch { netease.load(it, reset = false) } } },
+        )
+    }
 
     val header: LazyListScope.() -> Unit = {
+        toggle()
         item(key = "card", contentType = "card") {
             LocalStorageCard(index, scan, matching, onCleanMissing = { library.launch { removeMissing() } })
         }
@@ -172,6 +236,16 @@ fun LocalMusicScreen(
                     onAddTo = { pickerSongs = songs.filter { it.key in selection.selected } },
                     onExit = { selection.exit() },
                     modifier = Modifier.padding(top = 12.dp).selectionBackPreview(selection),
+                    onUpload = {
+                        val picked = shown.filter { it.song.key in selection.selected }
+                        val ids = picked.filter { it.onDevice }.map { it.localId }
+                        if (ids.isEmpty()) {
+                            scope.launch { snackbar.showSnackbar("选中的歌这台设备上都没有文件，传不了") }
+                        } else {
+                            uploads.openSheet(ids)
+                            selection.exit()
+                        }
+                    },
                 )
             } else {
                 Row(
@@ -181,12 +255,19 @@ fun LocalMusicScreen(
                 ) {
                     PlayAllSplitButton(
                         onPlayAll = { playable.firstOrNull()?.let { actions.play(it, playable) } },
-                        modifier = Modifier.focusRequester(firstFocus),
+                        modifier = if (view == LocalView.Device) Modifier.focusRequester(firstFocus) else Modifier,
                         onShuffle = {
                             val list = playable.shuffled()
                             list.firstOrNull()?.let { actions.play(it, list) }
                         },
                     )
+                    // 设计稿第 ② 张：播放全部旁边的“上传…”，传这一屏里还没上传的
+                    if (uploadable.isNotEmpty()) {
+                        TextButton(
+                            onClick = { uploads.openSheet(uploadable) },
+                            modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+                        ) { Text("上传…") }
+                    }
                     Spacer(Modifier.weight(1f))
                     if (songs.isNotEmpty()) {
                         IconButton(onClick = { selection.start() }, modifier = Modifier.tvFocusRing(CircleShape)) {
@@ -223,12 +304,14 @@ fun LocalMusicScreen(
         }
     }
     val list: LazyListScope.() -> Unit = {
+        localUploadSection(uploadState, index, prefs.uploadWifiOnly, metered, uploads)
         if (shown.isEmpty()) {
             item(key = "none", contentType = "empty") {
                 Text(
                     when {
                         query.isNotBlank() -> "没有找到“$query”。"
                         filter == LocalFilter.Unmatched -> "所有歌都匹配上了。"
+                        filter == LocalFilter.NotUploaded -> "所有歌都上传过了。"
                         else -> "还没有扫到歌。"
                     },
                     Modifier.padding(start = 4.dp, top = 8.dp),
@@ -291,10 +374,26 @@ fun LocalMusicScreen(
             }
         },
     ) { padding ->
+        // 本机视图没有歌时（没权限、没扫到）也能切到云端：空状态上面留着切换按钮
+        val emptyWithToggle: @Composable (@Composable () -> Unit) -> Unit = { content ->
+            Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = window.gutter)) {
+                LocalViewToggle(view, { view = it }, Modifier.padding(top = 8.dp, bottom = 8.dp))
+                Box(Modifier.weight(1f)) { CenteredEmpty(PaddingValues(0.dp), firstFocus) { content() } }
+            }
+        }
         when {
-            empty && !sourcesReady -> CenteredEmpty(padding) { LocalAccessEmpty(access) }
+            view == LocalView.Cloud && window.twoPane -> TwoColumns(padding, if (window.isTv) 360.dp else 380.dp, cloudHeader, cloudList)
+            view == LocalView.Cloud -> LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = padding.withGutter(window.gutter),
+                verticalArrangement = Arrangement.spacedBy(SegmentGap),
+            ) {
+                cloudHeader()
+                cloudList()
+            }
+            empty && !sourcesReady -> emptyWithToggle { LocalAccessEmpty(access) }
             empty && !index.loaded -> Box(Modifier.padding(padding))
-            empty && !scan.running && scan.error.isEmpty() && prefs.lastScanAt > 0 -> CenteredEmpty(padding) {
+            empty && !scan.running && scan.error.isEmpty() && prefs.lastScanAt > 0 -> emptyWithToggle {
                 EmptyState(
                     icon = Icons.Filled.AudioFile,
                     title = "没有找到音乐",
@@ -325,13 +424,26 @@ fun LocalMusicScreen(
                 library = library,
                 preferLrc = prefs.preferLrc,
                 onRematch = { rematchFor = id },
-                onAddToPlaylist = { pickerSongs = listOf(item.song) },
+                // 先收起歌曲信息再选歌单：加完的提示（只在本机的歌带“上传”）在底部，被这张面板盖住就看不到了
+                onAddToPlaylist = {
+                    infoFor = null
+                    pickerSongs = listOf(item.song)
+                },
                 onPlayNext = {
                     actions.playSongNext(item.song)
                     infoFor = null
                 },
                 onDismiss = { infoFor = null },
-                cloudCopies = localCloudCopiesSection(id, index.remotes[id].orEmpty(), library),
+                cloudCopies = localCloudCopiesSection(
+                    id,
+                    index.remotes[id].orEmpty(),
+                    library,
+                    // 这台设备上有文件才传得了；先收起歌曲信息，上传面板不叠在它上面
+                    onUpload = if (item.onDevice) ({ provider, force ->
+                        infoFor = null
+                        uploads.openSheet(listOf(id), force, provider)
+                    }) else null,
+                ),
             )
         }
     }
@@ -349,6 +461,7 @@ fun LocalMusicScreen(
             LocalRematchSheet(item = item, library = library, onDismiss = { rematchFor = null })
         }
     }
+    entryActions?.let { CloudDeleteConfirm(it, index) }
     pickerSongs?.let { picked ->
         PlaylistPickerSheet(
             playlists = playlists,
@@ -371,6 +484,7 @@ private fun filterItems(index: LocalIndex, filter: LocalFilter, query: String): 
     val text = query.trim()
     return index.items.filter { item ->
         (filter != LocalFilter.Unmatched || index.isUnmatched(item)) &&
+            (filter != LocalFilter.NotUploaded || !LocalUploadRules.hasAnyReadyCopy(index.remotes[item.localId].orEmpty())) &&
             (text.isEmpty() || item.song.name.contains(text, ignoreCase = true) ||
                 item.song.artist.contains(text, ignoreCase = true) ||
                 item.row.displayName.contains(text, ignoreCase = true))
@@ -447,8 +561,8 @@ private fun LocalSongRow(
 }
 
 /**
- * 顶上的占用卡片：总数和大小，分段条按已匹配 / 没匹配 / 等待匹配分；扫描时换成进度。
- * 有“文件不在了”的歌时给一个清理入口——只清本地音乐里的记录，歌单不受影响。
+ * 顶上的占用卡片：总数和大小，分段条按已上传 / 已匹配（只匹配没上传）/ 没匹配 / 等待匹配分（设计稿第 ② 张）；
+ * 扫描时换成进度。有“文件不在了”的歌时给一个清理入口——只清本地音乐里的记录，歌单不受影响。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -459,13 +573,17 @@ private fun LocalStorageCard(
     onCleanMissing: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val matched = index.matchedCount
-    val unmatched = index.unmatchedCount
-    val pending = (index.items.size - matched - unmatched).coerceAtLeast(0)
+    // 四类互不重叠：传上去了的先算，剩下的再按匹配分
+    val uploaded = index.items.filter { LocalUploadRules.isUploaded(index.remotes[it.localId].orEmpty()) }.map { it.localId }.toSet()
+    val rest = index.items.filter { it.localId !in uploaded }
+    val matched = rest.count { it.row.matched }
+    val unmatched = rest.count { index.isUnmatched(it) }
+    val pending = (rest.size - matched - unmatched).coerceAtLeast(0)
     val segments = listOf(
-        Triple("已匹配", matched, scheme.primary),
+        Triple("已上传", uploaded.size, scheme.primary),
+        Triple("已匹配", matched, scheme.tertiary),
         Triple("没匹配", unmatched, scheme.surfaceContainerHighest),
-        Triple(if (matching.running) "正在匹配" else "等待匹配", pending, scheme.tertiary),
+        Triple(if (matching.running) "正在匹配" else "等待匹配", pending, scheme.secondary),
     ).filter { it.second > 0 }
     val total = segments.sumOf { it.second }.coerceAtLeast(1)
     Surface(
@@ -619,7 +737,7 @@ private fun LocalAccessEmpty(access: LocalAccess) {
             !access.denied -> EmptyState(
                 icon = Icons.Filled.AudioFile,
                 title = "扫描手机里的歌",
-                message = "只读取音乐文件的信息和标签，不改文件，也不会上传。封面和歌词会自动补上。",
+                message = "只读取音乐文件的信息和标签，不改文件，也不会自己上传。封面和歌词会自动补上。",
                 actionLabel = "允许读取音乐",
                 onAction = access.requestPermission,
             )

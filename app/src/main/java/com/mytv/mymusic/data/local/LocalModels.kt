@@ -132,4 +132,13 @@ data class LocalMusicSettings(
     val permissionDenied: Boolean = false,
     /** 上次扫描完成的时间，页头写“X 分钟前扫描”。 */
     val lastScanAt: Long = 0L,
+    /**
+     * 默认上传到哪（[com.mytv.mymusic.data.cloud.CloudProvider.id]）。空表示没选过：登录了网易云就网易云盘，
+     * 否则配了 WebDAV 就 WebDAV（见 LocalUploadRules.defaultTarget）。
+     */
+    val uploadTarget: String = "",
+    /** 只在本机的歌加进已同步的歌单 / 收藏时提示一句“上传”。只提示，从不自动传。 */
+    val uploadPrompt: Boolean = true,
+    /** 只在 Wi-Fi（不按流量计费的网络）下上传；用移动网络时先排队。FLAC 一首三四十 MB。 */
+    val uploadWifiOnly: Boolean = true,
 )

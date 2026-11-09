@@ -113,6 +113,8 @@ fun SelectionBar(
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
     onRemove: (() -> Unit)? = null,
+    /** 本地音乐页多选时的“上传”（打开上传面板）；其它页面为空。 */
+    onUpload: (() -> Unit)? = null,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -148,6 +150,11 @@ fun SelectionBar(
             }
             TextButton(onPlay, enabled = count > 0, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
                 Text("播放")
+            }
+            onUpload?.let {
+                TextButton(it, enabled = count > 0, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
+                    Text("上传")
+                }
             }
             Button(
                 onClick = onAddTo,

@@ -32,6 +32,8 @@ import com.mytv.mymusic.data.local.LocalRefDao
 import com.mytv.mymusic.data.local.LocalRefEntity
 import com.mytv.mymusic.data.local.LocalRemoteEntity
 import com.mytv.mymusic.data.local.LocalTrackEntity
+import com.mytv.mymusic.data.local.LocalUploadDao
+import com.mytv.mymusic.data.local.LocalUploadEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -999,8 +1001,9 @@ interface AggregateDao {
         LocalTrackEntity::class,
         LocalRefEntity::class,
         LocalRemoteEntity::class,
+        LocalUploadEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -1010,6 +1013,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun aggregate(): AggregateDao
     abstract fun localTracks(): LocalTrackDao
     abstract fun localRefs(): LocalRefDao
+    abstract fun localUploads(): LocalUploadDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -1355,8 +1359,32 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 本地歌的上传队列（cloud_uploads）：进程被杀、重启后按它把还没传完的放回来。
+         * 只记身份、位置、状态和失败原因，不放音频；只建新表。
+         */
+        internal val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `cloud_uploads` (
+                        `local_id` TEXT NOT NULL,
+                        `provider` TEXT NOT NULL,
+                        `position` INTEGER NOT NULL,
+                        `state` TEXT NOT NULL,
+                        `error_kind` TEXT NOT NULL,
+                        `error_message` TEXT NOT NULL,
+                        `error_code` INTEGER NOT NULL,
+                        `attempts` INTEGER NOT NULL,
+                        PRIMARY KEY(`local_id`, `provider`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         internal val ALL_MIGRATIONS: Array<Migration>
-            get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+            get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
 
         fun create(context: Context) = Room.databaseBuilder(context, AppDatabase::class.java, "mymusic.db")
             .addMigrations(*ALL_MIGRATIONS)

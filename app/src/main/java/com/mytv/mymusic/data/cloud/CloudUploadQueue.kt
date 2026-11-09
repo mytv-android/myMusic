@@ -56,6 +56,8 @@ data class CloudQueueResult(val localId: String, val ref: CloudRef?, val error: 
  * - 其他失败只记在那一项上，不影响后面的；能重试的由用户点 [retry]。
  * - 断点续传靠存储自己：网易在 [com.mytv.mymusic.data.cloud.netease.NeteaseCloudUploader] 里按
  *   localId 记断点，所以重试 / 继续时同一首会从断点接着走。
+ * - [gate]：每取下一项之前先过一次。集成层用它把“真正开始传”交给后台任务（WorkManager 前台服务、
+ *   只在 Wi-Fi 下上传）：门关着时排队项老老实实停在“排队”，不会显示成正在传。
  */
 class CloudUploadQueue(
     private val storage: CloudStorage,
@@ -65,6 +67,7 @@ class CloudUploadQueue(
     private val now: () -> Long = System::currentTimeMillis,
     /** 用户从队列里删掉一项时调用（网易：丢掉断点）。 */
     private val onRemoved: (String) -> Unit = {},
+    private val gate: UploadGate = UploadGate.Always,
 ) {
     private val lock = Any()
     private val _state = MutableStateFlow(CloudQueueState())
@@ -175,6 +178,37 @@ class CloudUploadQueue(
         }
     }
 
+    /**
+     * 打断正在传的那一项，但不算暂停也不算失败：项放回队首，下次门开了从断点接着传。
+     * 后台任务被系统停掉（换到移动网络、前台服务超时）时用——不是用户的决定，界面不该显示“已暂停”。
+     */
+    fun interrupt() {
+        synchronized(lock) {
+            if (_state.value.activeId == null) return
+            activeJob?.cancel(CancellationException(INTERRUPTED))
+        }
+    }
+
+    /**
+     * 进程重启后把存下来的队列放回来（只在队列还空着时有效，返回是否放了）。[pausedBy] 非空时整个队列
+     * 维持暂停：风控、登录失效这类暂停要等用户点“继续”，不能因为重启就自己接着撞。
+     */
+    fun restore(items: List<CloudQueueItem>, pausedBy: CloudException?): Boolean {
+        val restored = synchronized(lock) {
+            if (_state.value.items.isNotEmpty() || items.isEmpty()) return@synchronized false
+            _state.update {
+                it.copy(
+                    items = items.distinctBy { item -> item.localId },
+                    paused = pausedBy != null,
+                    pauseReason = pausedBy,
+                )
+            }
+            true
+        }
+        if (restored) ensureWorker()
+        return restored
+    }
+
     /** 从队列删掉一项（不删云端文件）。 */
     fun remove(localId: String) {
         synchronized(lock) {
@@ -182,6 +216,16 @@ class CloudUploadQueue(
             _state.update { state -> state.copy(items = state.items.filterNot { it.localId == localId }) }
         }
         onRemoved(localId)
+    }
+
+    /**
+     * 只清掉传完的项，失败的留着（用户还要看原因、点重试）。一批传完时集成层调它，
+     * 下一批的“第几首 / 共几首”从头数。
+     */
+    fun clearCompleted() {
+        synchronized(lock) {
+            _state.update { state -> state.copy(items = state.items.filterNot { it.stage == CloudUploadStage.READY }) }
+        }
     }
 
     /** 清掉已完成的项（成功的和失败的），留下还在排队的。 */
@@ -206,6 +250,8 @@ class CloudUploadQueue(
     private suspend fun runWorker() {
         try {
             while (true) {
+                // 先等门开（后台任务在跑、网络合要求），门关着时排队项都还是“排队”
+                gate.awaitAllowed()
                 // 风控退避：等的过程中 resume / pause 可能改了 resumeAt，醒来重新看一遍
                 val wait = _state.value.resumeAt - now()
                 if (wait > 0) {
@@ -312,5 +358,6 @@ class CloudUploadQueue(
 
     private companion object {
         const val PAUSED = "已暂停"
+        const val INTERRUPTED = "后台任务停了，排回队首"
     }
 }

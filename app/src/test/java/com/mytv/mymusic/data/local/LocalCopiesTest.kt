@@ -148,6 +148,27 @@ class LocalCopiesTest {
     }
 
     @Test
+    fun rejectedRefNeverFallsBackToPlatform() {
+        // 别的设备点过「不匹配」（同步来的 method "none"）：这台设备手里哪怕还有一份旧匹配也不用
+        val rejected = LocalRefEntity(localId = id, matchProvider = "netease", matchId = match.id, matchMethod = "none", matchConfidence = 1f)
+        fun rejectedRequest(remotes: List<LocalRemoteEntity> = emptyList()) = LocalResolveRequest(
+            song = song,
+            row = null,
+            item = null,
+            prefs = LocalMusicSettings(),
+            skipFile = false,
+            ref = rejected,
+            remotes = remotes,
+            refMatch = match,
+        )
+        assertNull(resolve(chain(false, emptyMap()), rejectedRequest()))
+        // 有云端副本时照常放云端的：拒绝的只是平台匹配
+        val netease = ok(CloudProvider.NeteaseCloud)
+        val cloud = resolve(chain(false, mapOf(CloudProvider.NeteaseCloud to netease)), rejectedRequest(listOf(remote(CloudProvider.NeteaseCloud))))
+        assertTrue(cloud is LocalPlayable.Cloud)
+    }
+
+    @Test
     fun settingOffSkipsPlatform() {
         val req = request(refMatch = match, platformFallback = false)
         assertNull(resolve(chain(false, emptyMap()), req))

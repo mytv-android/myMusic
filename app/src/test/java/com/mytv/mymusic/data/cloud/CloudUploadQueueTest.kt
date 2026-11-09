@@ -6,6 +6,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -69,14 +71,23 @@ class CloudUploadQueueTest {
         work?.cancel()
     }
 
-    private fun TestScope.queue() = CloudUploadQueue(
+    private fun TestScope.queue(gate: UploadGate = UploadGate.Always) = CloudUploadQueue(
         storage = storage,
         scope = CoroutineScope(StandardTestDispatcher(testScheduler) + Job()).also { work = it },
         riskBackoffMs = 60_000,
         riskBackoffMaxMs = 30 * 60_000,
         now = { testScheduler.currentTime },
         onRemoved = { removed += it },
+        gate = gate,
     )
+
+    /** 集成层的门：后台任务开着才放行（LocalUploads 里是 allowed 这个 StateFlow）。 */
+    private class Gate(open: Boolean) : UploadGate {
+        val allowed = MutableStateFlow(open)
+        override suspend fun awaitAllowed() {
+            allowed.first { it }
+        }
+    }
 
     private fun CloudUploadQueue.add(vararg ids: String) =
         ids.forEach { enqueue(CloudUploadSource.of("$it.mp3", ByteArray(10)), CloudUploadMeta(localId = it)) }
@@ -246,5 +257,96 @@ class CloudUploadQueueTest {
         assertEquals(CloudUploadStage.READY, queue.item("b").stage)
         queue.clearFinished()
         assertTrue(queue.state.value.items.isEmpty())
+    }
+
+    @Test
+    fun closedGateKeepsItemsQueuedUntilOpened() = runTest {
+        val gate = Gate(open = false)
+        val queue = queue(gate)
+        queue.add("a", "b")
+        advanceUntilIdle()
+        // 后台任务还没起来：都还是“排队”，没有一项显示成正在传
+        assertTrue(storage.attempts.isEmpty())
+        assertNull(queue.state.value.activeId)
+        assertTrue(queue.state.value.items.all { it.stage == CloudUploadStage.QUEUED })
+
+        gate.allowed.value = true
+        advanceUntilIdle()
+        assertEquals(listOf("a", "b"), storage.attempts)
+    }
+
+    @Test
+    fun interruptRequeuesAtHeadWithoutPausing() = runTest {
+        storage.behavior = { id, attempt, progress ->
+            progress(CloudUploadProgress(CloudUploadStage.UPLOADING, 4, 10))
+            if (id == "b" && attempt == 1) awaitCancellation() else delay(10)
+        }
+        val gate = Gate(open = true)
+        val queue = queue(gate)
+        queue.add("a", "b", "c")
+        advanceTimeBy(15)
+        runCurrent()
+        assertEquals("b", queue.state.value.activeId)
+
+        // 后台任务被系统停了：先关门再打断，正在传的那首放回队首，不算失败也不算暂停
+        gate.allowed.value = false
+        queue.interrupt()
+        advanceUntilIdle()
+        val state = queue.state.value
+        assertFalse(state.paused)
+        assertNull(state.pauseReason)
+        assertEquals("b", state.items.first().localId)
+        assertEquals(CloudUploadStage.QUEUED, queue.item("b").stage)
+        assertNull(queue.item("b").error)
+        assertEquals(CloudUploadStage.QUEUED, queue.item("c").stage)
+        assertEquals(listOf("a", "b"), storage.attempts)
+
+        gate.allowed.value = true
+        advanceUntilIdle()
+        assertEquals(listOf("a", "b", "b", "c"), storage.attempts)
+        assertTrue(queue.state.value.items.all { it.stage == CloudUploadStage.READY })
+    }
+
+    @Test
+    fun restoreWithPauseReasonWaitsForResume() = runTest {
+        val queue = queue()
+        val items = listOf("a", "b").map { id ->
+            CloudQueueItem(
+                localId = id,
+                source = CloudUploadSource.of("$id.mp3", ByteArray(10)),
+                meta = CloudUploadMeta(localId = id),
+                progress = CloudUploadProgress(CloudUploadStage.QUEUED, 0, 10, error = if (id == "a") risk() else null),
+            )
+        }
+        assertTrue(queue.restore(items, risk()))
+        advanceUntilIdle()
+        // 重启前撞了风控：重启后不能自己接着撞，等用户点继续
+        assertTrue(queue.state.value.paused)
+        assertTrue(storage.attempts.isEmpty())
+        // 队列里已经有东西时不再覆盖
+        assertFalse(queue.restore(items.take(1), null))
+
+        queue.resume()
+        advanceUntilIdle()
+        assertEquals(listOf("a", "b"), storage.attempts)
+    }
+
+    @Test
+    fun restoreWithoutPauseRunsAndClearCompletedKeepsFailures() = runTest {
+        storage.behavior = { id, _, _ ->
+            if (id == "b") throw CloudException(CloudErrorKind.TranscodeTimeout, CloudMessages.TRANSCODE_TIMEOUT, CloudProvider.NeteaseCloud)
+        }
+        val queue = queue()
+        val items = listOf("a", "b").map { id ->
+            CloudQueueItem(id, CloudUploadSource.of("$id.mp3", ByteArray(10)), CloudUploadMeta(localId = id))
+        }
+        assertTrue(queue.restore(items, null))
+        advanceUntilIdle()
+        assertEquals(CloudUploadStage.READY, queue.item("a").stage)
+        assertEquals(CloudUploadStage.FAILED, queue.item("b").stage)
+
+        // 一批传完：传好的清掉（计数从头数），失败的留着给用户看原因、点重试
+        queue.clearCompleted()
+        assertEquals(listOf("b"), queue.state.value.items.map { it.localId })
     }
 }

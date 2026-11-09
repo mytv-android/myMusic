@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.cloud.CloudProvider
+import com.mytv.mymusic.data.cloud.CloudUploadStage
 import com.mytv.mymusic.data.cloud.CloudRefStatus
 import com.mytv.mymusic.data.local.LocalCandidate
 import com.mytv.mymusic.data.local.LocalCopyKind
@@ -575,22 +576,25 @@ internal fun LocalUnplayableSheet(
  * 歌曲信息里的「云端副本」段（设计稿第 ④ 张）：每个云端一行，写状态、大小、上传日期；⋮ 里是
  * “从网易云盘删除 / 从 WebDAV 删除”，删前确认。删云端只把这份标成已删除，不碰本机文件，也不动歌单。
  *
- * [onUpload] 留给上传面板（第 ⑥ 张）：传了就在还没传过的云端那行显示“上传”，现在没有上传就为空。
- * 没有任何副本、也没有上传入口时返回 null，整段不画。
+ * [onUpload] 打开上传面板（第 ⑥ 张），第二个参数是“重新上传”（这个云端已经有一份，用户明确要再传）：
+ * 这台设备上有文件时才传，还没传过的云端那行显示“上传”，⋮ 里有“重新上传”。
+ * 正在排队 / 正在传 / 传失败的写在那一行的说明里。没有任何副本、也没有上传入口时返回 null，整段不画。
  */
 internal fun localCloudCopiesSection(
     localId: String,
     remotes: List<LocalRemoteEntity>,
     library: LocalLibrary,
-    onUpload: ((CloudProvider) -> Unit)? = null,
+    onUpload: ((CloudProvider, Boolean) -> Unit)? = null,
 ): (@Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit)? {
     if (remotes.isEmpty() && onUpload == null) return null
     return { LocalCloudCopies(localId, library, onUpload) }
 }
 
 @Composable
-private fun LocalCloudCopies(localId: String, library: LocalLibrary, onUpload: ((CloudProvider) -> Unit)?) {
+private fun LocalCloudCopies(localId: String, library: LocalLibrary, onUpload: ((CloudProvider, Boolean) -> Unit)?) {
     val index by library.index.collectAsStateWithLifecycle()
+    val uploads = rememberLocalUploads()
+    val uploadState = uploads?.state?.collectAsStateWithLifecycle()?.value
     val slots = index.remotes[localId].orEmpty()
     val providers = LocalCopyRules.CLOUD_ORDER.filter { provider ->
         slots.any { it.provider == provider.id } || (onUpload != null && provider.canUpload)
@@ -600,6 +604,16 @@ private fun LocalCloudCopies(localId: String, library: LocalLibrary, onUpload: (
     providers.forEachIndexed { at, provider ->
         val slot = slots.firstOrNull { it.provider == provider.id }
         var menu by remember(provider) { mutableStateOf(false) }
+        // 队列里这首在这个云端的那一项：正在传、等着、失败了都写在说明里，不再给“上传”按钮
+        val queued = uploadState?.find(localId)?.firstOrNull { it.provider == provider }?.item
+        val queuedText = when {
+            queued == null -> ""
+            queued.stage == CloudUploadStage.FAILED -> "上传失败：${queued.error?.message.orEmpty()}"
+            queued.stage == CloudUploadStage.UPLOADING -> "正在上传 · ${(queued.progress.fraction * 100).toInt()}%"
+            queued.stage == CloudUploadStage.READY -> ""
+            uploadState.active.any { it.localId == localId && it.provider == provider } -> "正在上传"
+            else -> "等待上传"
+        }
         ListRow(
             title = provider.label,
             index = at,
@@ -610,19 +624,39 @@ private fun LocalCloudCopies(localId: String, library: LocalLibrary, onUpload: (
             leading = if (provider == CloudProvider.WebDav) null else {
                 { ProviderIcon(id = provider.id, name = provider.label, size = 40.dp) }
             },
-            summary = if (slot == null) "还没上传" else cloudCopySummary(slot, provider, index.clouds),
+            summary = when {
+                queuedText.isNotBlank() -> queuedText
+                slot == null -> "还没上传"
+                else -> cloudCopySummary(slot, provider, index.clouds)
+            },
             showChevron = false,
             trailing = {
+                val pending = queued != null && queued.stage != CloudUploadStage.FAILED && queued.stage != CloudUploadStage.READY
                 when {
-                    slot == null && onUpload != null -> TextButton(
-                        onClick = { onUpload(provider) },
+                    queued?.stage == CloudUploadStage.FAILED && uploads != null -> TextButton(
+                        onClick = { uploads.retry(provider, localId) },
                         modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
-                    ) { Text("上传") }
+                    ) { Text("重试") }
+                    pending -> Unit
+                    // 删掉过的那份也能再传：它不算“已经有一份”，不用当成重新上传
+                    (slot == null || slot.status == CloudRefStatus.DELETED) && onUpload != null && provider.canUpload -> TextButton(
+                        onClick = { onUpload(provider, false) },
+                        modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+                    ) { Text(if (slot == null) "上传" else "重新上传") }
                     slot != null && slot.status != CloudRefStatus.DELETED -> Box {
                         IconButton(onClick = { menu = true }, modifier = Modifier.tvFocusRing(androidx.compose.foundation.shape.CircleShape)) {
                             Icon(Icons.Filled.MoreVert, "${cloudInText(provider).trimStart()}副本的更多操作")
                         }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            if (onUpload != null && provider.canUpload) {
+                                DropdownMenuItem(
+                                    text = { Text("重新上传到${cloudInText(provider).trimEnd()}") },
+                                    onClick = {
+                                        menu = false
+                                        onUpload(provider, true)
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("从${cloudInText(provider)}删除", color = MaterialTheme.colorScheme.error) },
                                 onClick = {

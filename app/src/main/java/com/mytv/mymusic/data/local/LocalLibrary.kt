@@ -20,6 +20,9 @@ import com.mytv.mymusic.data.cloud.CloudMessages
 import com.mytv.mymusic.data.cloud.CloudProvider
 import com.mytv.mymusic.data.cloud.CloudRef
 import com.mytv.mymusic.data.cloud.CloudRefStatus
+import com.mytv.mymusic.data.cloud.CloudUploadMeta
+import com.mytv.mymusic.data.cloud.CloudUploadSource
+import com.mytv.mymusic.data.cloud.skipFully
 import com.mytv.mymusic.data.cloud.cloudExtensionOf
 import com.mytv.mymusic.data.sync.LocalSyncRefs
 import com.mytv.mymusic.data.sync.SyncLocal
@@ -102,6 +105,9 @@ data class LocalIndex(
     val matchedCount: Int get() = items.count { it.row.matched }
     val unmatchedCount: Int get() = items.count { isUnmatched(it) }
     val missingCount: Int get() = items.count { it.row.missing }
+
+    /** 已经传到至少一个云端（状态 ready）的歌，卡片的“已上传”和我的页那行用。 */
+    val uploadedCount: Int get() = items.count { LocalUploadRules.isUploaded(remotes[it.localId].orEmpty()) }
 
     /** 灰色“没匹配”标签：自动匹配试过没成、用户点了不匹配，或者自动匹配关着。还在排队的不算。 */
     fun isUnmatched(item: LocalItem): Boolean = !item.row.matched && (item.row.matchSettled || !autoMatch)
@@ -560,8 +566,24 @@ class LocalLibrary(
 
     /** 返回 true 表示写进了一个匹配。 */
     private suspend fun autoMatch(row: LocalTrackEntity): Boolean {
+        val synced = refDao.ref(row.localId)
+        // 别的设备上点过「不匹配」：那是用户的决定，这台设备也不再自动匹配，免得自动结果又被同步回去
+        if (synced?.rejected == true) {
+            update(row.localId) { current ->
+                if (current.matchSettled) current else current.copy(
+                    matchProvider = "",
+                    matchId = "",
+                    matchConfidence = 0f,
+                    matchMethod = LocalMatchMethod.REJECTED,
+                    matchedAt = synced.matchedAt,
+                    matchPayload = "",
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+            return false
+        }
         // 别的设备已经匹配过（同步来的）就直接用：省一次搜索 / 识曲，几台设备上也是同一首
-        refDao.ref(row.localId)?.takeIf { it.matched && it.matchPayload.isNotBlank() }?.let { ref ->
+        synced?.takeIf { it.matched && it.matchPayload.isNotBlank() }?.let { ref ->
             var adopted = false
             update(row.localId) { current ->
                 if (current.matchSettled) current else current.withRefMatch(ref).also { adopted = true }
@@ -618,19 +640,39 @@ class LocalLibrary(
         notifyRefsChanged()
     }
 
-    /** 「不匹配」：清掉匹配，回到文件自己的标签和内嵌封面，自动匹配也不再碰它。 */
+    /**
+     * 「不匹配」：清掉匹配，回到文件自己的标签和内嵌封面，自动匹配也不再碰它。
+     * 这也是用户的决定，要同步出去（同步文件里记成 method=none、满分）：不然别的设备快照里的旧匹配
+     * 合并时又会被并回来。这台设备没有文件时记进线索表，效果是各台设备都不再用那个平台版本。
+     */
     suspend fun rejectMatch(localId: String) {
-        update(localId) {
-            it.copy(
-                matchProvider = "",
-                matchId = "",
-                matchConfidence = 0f,
-                matchMethod = LocalMatchMethod.REJECTED,
-                matchedAt = System.currentTimeMillis(),
-                matchPayload = "",
-                updatedAt = System.currentTimeMillis(),
-            )
+        val now = System.currentTimeMillis()
+        if (dao.get(localId) != null) {
+            update(localId) {
+                it.copy(
+                    matchProvider = "",
+                    matchId = "",
+                    matchConfidence = 0f,
+                    matchMethod = LocalMatchMethod.REJECTED,
+                    matchedAt = now,
+                    matchPayload = "",
+                    updatedAt = now,
+                )
+            }
+        } else {
+            writeRef(localId) { ref ->
+                ref.copy(
+                    matchProvider = "",
+                    matchId = "",
+                    matchConfidence = USER_CONFIDENCE,
+                    matchMethod = SyncMatch.METHOD_REJECTED,
+                    matchedAt = now,
+                    matchPayload = "",
+                    updatedAt = now,
+                )
+            }
         }
+        notifyRefsChanged()
     }
 
     /** [song] 是歌单里的那首：这台设备没有文件时拿它的歌名歌手当打分参考。 */
@@ -738,7 +780,7 @@ class LocalLibrary(
         val item = index.value.byId[song.id]
         val ref = refDao.ref(song.id)
         val remotes = refDao.remotes(song.id)
-        val refMatch = ref?.takeUnless { row?.matchMethod == LocalMatchMethod.REJECTED }?.let(::decodeRefMatch)
+        val refMatch = ref?.takeUnless { row?.matchMethod == LocalMatchMethod.REJECTED || it.rejected }?.let(::decodeRefMatch)
         val prefs = prefs.value
         val request = LocalResolveRequest(song, row, item, prefs, skipFile, ref, remotes, refMatch, skipCloud)
         runResolveChain(resolveSteps.toList(), request)?.let { outcome ->
@@ -776,7 +818,7 @@ class LocalLibrary(
         val preferLrc = prefs.value.preferLrc
         if (row != null && preferLrc) readSidecar(row)?.let { return@withContext it }
         val match = row?.let(::decodeMatch)
-            ?: refDao.ref(song.id)?.takeUnless { row?.matchMethod == LocalMatchMethod.REJECTED }?.let(::decodeRefMatch)
+            ?: refDao.ref(song.id)?.takeUnless { row?.matchMethod == LocalMatchMethod.REJECTED || it.rejected }?.let(::decodeRefMatch)
         if (match != null) {
             val text = try {
                 repository.lyrics(match, cookies[match.source].orEmpty())
@@ -934,6 +976,61 @@ class LocalLibrary(
         onRefsChanged?.invoke()
     }
 
+    // ---- 上传 ----
+
+    /**
+     * 上传用的文件和歌曲信息：这台设备上扫到过、现在打得开的才有，否则 null（传不了）。
+     * content:// 每次现开流；版本写“大小:修改时间”，文件被替换后网易的断点不会接到旧文件上。
+     * 歌名、歌手按界面上显示的（可能是匹配结果），云盘里看到的和这里一致。
+     */
+    suspend fun uploadSource(localId: String): Pair<CloudUploadSource, CloudUploadMeta>? = withContext(Dispatchers.IO) {
+        val row = dao.get(localId) ?: return@withContext null
+        if (row.missing || !canOpen(row.uri)) return@withContext null
+        val shown = index.value.byId[localId]?.song
+        val source = ContentUploadSource(context, row.uri, row.displayName, row.size, "${row.size}:${row.modifiedAt}")
+        source to CloudUploadMeta(
+            localId = localId,
+            title = shown?.name.orEmpty().ifBlank { row.title },
+            artist = shown?.artist.orEmpty().ifBlank { row.artist },
+            album = shown?.album.orEmpty().ifBlank { row.album },
+            ext = row.extension,
+            // 已经匹配到网易云的那首：上传完顺手在云盘里关联上，云盘里也有封面和歌词
+            neteaseMatchId = if (row.matched && row.matchProvider == "netease") row.matchId else "",
+        )
+    }
+
+    /**
+     * 队列里放回来、但这台设备上已经找不到文件的那项要个占位：大小按线索表里记的，打开就报错。
+     * 它会直接记成失败，从不真的被读。
+     */
+    suspend fun missingUploadSource(localId: String): Pair<CloudUploadSource, CloudUploadMeta> = withContext(Dispatchers.IO) {
+        val row = dao.get(localId)
+        val ref = refDao.ref(localId)
+        val name = row?.displayName ?: ref?.fileName.orEmpty().ifBlank { localId.substringAfter(':').take(12) }
+        val size = row?.size ?: ref?.fileSize ?: 0L
+        val source = object : CloudUploadSource {
+            override val fileName: String = name
+            override val size: Long = size
+            override fun open(offset: Long): java.io.InputStream = throw java.io.IOException(LocalUploadRows.FILE_GONE)
+        }
+        source to CloudUploadMeta(localId = localId, title = row?.title.orEmpty(), artist = row?.artist.orEmpty())
+    }
+
+    /** 本地文件当上传源：content:// 和 file:// 都走 ContentResolver（SAF 文件夹里的歌也是 content://）。 */
+    private class ContentUploadSource(
+        private val context: Context,
+        private val uri: String,
+        override val fileName: String,
+        override val size: Long,
+        override val version: String,
+    ) : CloudUploadSource {
+        override fun open(offset: Long): java.io.InputStream {
+            val stream = context.contentResolver.openInputStream(Uri.parse(uri))
+                ?: throw java.io.IOException("打不开文件")
+            return stream.also { it.skipFully(offset) }
+        }
+    }
+
     private val refLock = Mutex()
 
     /** 改一行线索（没有就新建一行），在锁里读改写，免得同步写回和用户操作互相覆盖。 */
@@ -1040,12 +1137,12 @@ class LocalLibrary(
                 // 只有这台设备真有过这个文件才写自己的名字
                 device = ref?.device.orEmpty().ifBlank { if (row != null && !row.missing) own else "" },
             )
-            val rowMatch = row?.takeIf { it.matched }?.let(::syncMatchOf)
+            val rowMatch = row?.let(::rowSyncMatch)
             val match = SyncRefMerge.match(rowMatch, ref?.syncMatch())
             val remote = slots.sortedBy { it.provider }.mapNotNull { it.toSync() }
                 .fold(null as SyncRemote?) { best, next -> SyncRefMerge.remote(best, next) }
             val matchSong = when {
-                match == null -> null
+                match == null || match.rejected -> null
                 rowMatch == match -> row?.let(::decodeMatch)
                 else -> ref?.let(::decodeRefMatch)
             }
@@ -1066,6 +1163,13 @@ class LocalLibrary(
         method = row.matchMethod,
         matchedAt = isoOrEmpty(row.matchedAt),
     )
+
+    /** 这台设备上的匹配写进同步文件的样子：匹配上的照写；点过「不匹配」的写成拒绝；自动没匹配上的不写。 */
+    private fun rowSyncMatch(row: LocalTrackEntity): SyncMatch? = when {
+        row.matchMethod == LocalMatchMethod.REJECTED -> SyncMatch.rejection(isoOrEmpty(row.matchedAt))
+        row.matched -> syncMatchOf(row)
+        else -> null
+    }
 
     /**
      * 合并后的线索写回：线索表按同样的合并规则并进来（同步来的一份当作“另一边”），云端位置写到对应云端那一行；
@@ -1181,7 +1285,16 @@ class LocalLibrary(
             fileSize = local?.fileSize?.takeIf { it > 0 } ?: current.fileSize,
             device = local?.device.orEmpty().ifBlank { current.device },
         )
-        if (match != null && match != mine) {
+        if (match != null && match != mine && match.rejected) {
+            next = next.copy(
+                matchProvider = "",
+                matchId = "",
+                matchConfidence = match.confidence,
+                matchMethod = SyncMatch.METHOD_REJECTED,
+                matchedAt = SyncTime.toMillis(match.matchedAt),
+                matchPayload = "",
+            )
+        } else if (match != null && match != mine) {
             val sameSong = match.provider == current.matchProvider && match.id == current.matchId
             next = next.copy(
                 matchProvider = match.provider,
@@ -1240,10 +1353,21 @@ class LocalLibrary(
     }
 
     private fun adoptMatch(row: LocalTrackEntity, match: SyncMatch, track: SyncTrack, now: Long): LocalTrackEntity? {
-        val mine = row.takeIf { it.matched }?.let(::syncMatchOf)
+        // 这台设备点过「不匹配」也是一个决定，按同样的规则和同步来的比：更新的手选能盖过它，自动匹配不能
+        val mine = rowSyncMatch(row)
         if (SyncRefMerge.match(mine, match) != match || mine == match) return null
         val at = SyncTime.toMillis(match.matchedAt)
-        if (row.matchMethod == LocalMatchMethod.REJECTED && row.matchedAt >= at) return null
+        if (match.rejected) {
+            return row.copy(
+                matchProvider = "",
+                matchId = "",
+                matchConfidence = 0f,
+                matchMethod = LocalMatchMethod.REJECTED,
+                matchedAt = at,
+                matchPayload = "",
+                updatedAt = now,
+            )
+        }
         val sameSong = match.provider == row.matchProvider && match.id == row.matchId
         return row.copy(
             matchProvider = match.provider,

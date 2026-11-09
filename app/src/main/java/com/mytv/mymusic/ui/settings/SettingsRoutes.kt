@@ -116,7 +116,12 @@ private fun SectionContent(
                 app.nav.navigate("syncConnect/$provider")
             }
         }
-        SettingsSection.LocalMusic -> LocalMusicSettingsScreen(onBack, embedded)
+        SettingsSection.LocalMusic -> LocalMusicSettingsScreen(
+            onBack = onBack,
+            embedded = embedded,
+            onOpenAccounts = { onOpen(SettingsSection.Accounts) },
+            onConnectWebDav = { app.nav.navigate(com.mytv.mymusic.ui.local.localWebDavRoute(app)) { launchSingleTop = true } },
+        )
         SettingsSection.Storage -> StorageContent(app, onBack, embedded, onCacheCleared)
         SettingsSection.About -> {
             val state by app.model.state.collectAsState()

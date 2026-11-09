@@ -16,6 +16,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import com.mytv.mymusic.data.local.LocalUploadRules
 import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.ForegroundActivity
 import com.mytv.mymusic.MyMusicApp
@@ -2002,7 +2003,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             )
             libraryDao.markDirty(playlistId, now)
             app.sync.onLocalChange()
-            message("已加入「${playlist.name}」")
+            addedMessage("已加入「${playlist.name}」", listOf(song))
         }
     }
 
@@ -2028,7 +2029,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             libraryDao.markDirty(playlistId, System.currentTimeMillis())
             app.sync.onLocalChange()
             val skipped = songs.size - candidates.size
-            message(if (skipped > 0) "已加入 ${candidates.size} 首，$skipped 首已存在" else "已把 ${candidates.size} 首加入「${playlist.name}」")
+            addedMessage(
+                if (skipped > 0) "已加入 ${candidates.size} 首，$skipped 首已存在" else "已把 ${candidates.size} 首加入「${playlist.name}」",
+                candidates,
+            )
         }
     }
 
@@ -2049,7 +2053,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 },
             )
             app.sync.onLocalChange()
-            message("已创建歌单「$value」，加入 ${songs.size} 首")
+            addedMessage("已创建歌单「$value」，加入 ${songs.size} 首", songs.distinctBy { it.key })
         }
     }
 
@@ -2327,6 +2331,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             dao.clearTombstone("favorite", song.key)
             remember("favorite", song)
+            // 收藏也会同步：只在本机的本地歌提示一句能上传（其它歌照旧不提示）
+            uploadPrompt("已加入收藏", listOf(song))?.let { _events.tryEmit(it) }
         }
         app.sync.onLocalChange()
     }
@@ -5153,6 +5159,37 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         !settingsState.value.sodaSignerEnabled -> "已关闭"
         settingsState.value.sodaSignerUrl.isBlank() -> "SodaM 公共签名服务"
         else -> "自定义"
+    }
+
+    /** 加进歌单后提示里的“上传”：打开全局的上传面板。 */
+    fun openUploadSheet(ids: List<String>) = app.localUploads.openSheet(ids)
+
+    /**
+     * 加进歌单后的那句提示：里面有只在本机的本地歌（同步连着、设置开着、哪个云端都还没有、也没在排队）时
+     * 换成带“上传”的提示，否则照旧。
+     */
+    private fun addedMessage(text: String, added: List<Song>) {
+        val prompt = uploadPrompt(text, added)
+        if (prompt != null) _events.tryEmit(prompt) else message(text)
+    }
+
+    private fun uploadPrompt(text: String, added: List<Song>): UiEvent.UploadPrompt? {
+        // 没有本地歌就不碰本地音乐库（它是懒加载的）
+        if (added.none { it.source == LOCAL_SOURCE }) return null
+        val library = app.localLibrary
+        val index = library.index.value
+        val queue = app.localUploads.state.value
+        val ids = LocalUploadRules.promptFor(
+            songs = added,
+            enabled = library.prefs.value.uploadPrompt,
+            syncConnected = app.sync.state.value.account != null,
+            onDevice = { index.byId[it]?.onDevice == true },
+            hasReadyCopy = { id ->
+                LocalUploadRules.hasAnyReadyCopy(index.remotes[id].orEmpty()) || queue.find(id).any { !it.item.stage.terminal }
+            },
+        )
+        if (ids.isEmpty()) return null
+        return UiEvent.UploadPrompt(LocalUploadRules.promptText(text, added.size, ids.size), ids)
     }
 
     private fun message(text: String, error: Boolean = false) {

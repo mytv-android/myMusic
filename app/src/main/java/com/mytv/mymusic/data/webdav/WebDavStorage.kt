@@ -122,6 +122,7 @@ class WebDavStorage(
                 if (error.kind == WebDavErrorKind.NotFound) emptyList() else throw toCloud(error)
             }
             entries += files.filter { !it.isCollection && !it.name.startsWith(".") }.map(::entryOf)
+            sweepAbandoned(files)
             index++
         }
         return CloudPage(entries, buckets.getOrNull(index))
@@ -216,14 +217,19 @@ class WebDavStorage(
         val report: (Long) -> Unit = { written -> progress(CloudUploadProgress(CloudUploadStage.UPLOADING, written, total)) }
         if (moveSupported) {
             val temp = tempPath(target, ext)
+            // 上次传这首时进程被杀（finally 来不及删）留下的半截临时文件：先记下它们现在的样子，传完再清
+            val before = tempsOf(target)
             var leftover = false
             try {
                 leftover = true
                 putSource(temp, source, ext, report)
                 progress(CloudUploadProgress(CloudUploadStage.SUBMITTING, total, total))
                 when (moveIntoPlace(temp, target, total)) {
-                    MoveResult.Moved -> leftover = false
-                    MoveResult.AlreadyThere -> Unit
+                    MoveResult.Moved -> {
+                        leftover = false
+                        sweepTemps(target, before)
+                    }
+                    MoveResult.AlreadyThere -> sweepTemps(target, before)
                     MoveResult.Unsupported -> {
                         moveSupported = false
                         attempt { client.delete(temp) }
@@ -246,6 +252,43 @@ class WebDavStorage(
     }
 
     private enum class MoveResult { Moved, AlreadyThere, Unsupported }
+
+    /**
+     * 列表时顺手删一天没动过的临时文件。上传时的清理只看同一首、只删上传期间没变的；取消后立刻重试时，服务器可能还在
+     * 收上一次被掐断的数据，那个临时文件当时还在长，就留下了——而这首传完之后不会再传，没人再清它。
+     * 一天没写过的不可能还在传（500 MB 慢到 50 KB/s 也只要三个钟头），删掉只是腾空间；删不掉就算了。
+     */
+    private suspend fun sweepAbandoned(files: List<WebDavResource>) {
+        val day = 24L * 60 * 60 * 1000
+        files.filter { !it.isCollection && it.name.startsWith(".") && it.name.endsWith(".tmp") }
+            .filter { file -> file.lastModified?.let { now() - it > day } == true }
+            .forEach { attempt { client.delete(it.path) } }
+    }
+
+    /** 同一首的临时文件（`.<key>.<ext>.<随机>.tmp`），路径 → 列表里看到的样子。列不出来就当没有。 */
+    private suspend fun tempsOf(target: String): Map<String, WebDavResource> {
+        val dir = target.substringBeforeLast('/', "")
+        val prefix = "." + target.substringAfterLast('/').substringBefore('.') + "."
+        val files = attempt { client.list(if (dir.isEmpty()) "" else "$dir/") }.getOrNull() ?: return emptyMap()
+        return files.filter { !it.isCollection && it.name.startsWith(prefix) && it.name.endsWith(".tmp") }.associateBy { it.path }
+    }
+
+    /**
+     * 清掉没人在写的旧临时文件：从传之前到传完这段时间里大小和修改时间都没变的（另一台设备正在传同一首时，
+     * 它的临时文件一直在长，不会被删），以及一天没动过的。只是清理，失败不影响这次上传。
+     */
+    private suspend fun sweepTemps(target: String, before: Map<String, WebDavResource>) {
+        if (before.isEmpty()) return
+        val day = 24L * 60 * 60 * 1000
+        for ((path, current) in tempsOf(target)) {
+            val earlier = before[path] ?: continue
+            // 有的服务器不报修改时间：大小、ETag 也一起比
+            val idle = earlier.contentLength == current.contentLength && earlier.lastModified == current.lastModified &&
+                earlier.etag == current.etag
+            val old = current.lastModified?.let { now() - it > day } == true
+            if (idle || old) attempt { client.delete(path) }
+        }
+    }
 
     /** MOVE 临时名 → 正式名，不覆盖。412 说明正式名已经有了（另一台设备刚传完同一首），比大小。 */
     private suspend fun moveIntoPlace(temp: String, target: String, total: Long): MoveResult = try {

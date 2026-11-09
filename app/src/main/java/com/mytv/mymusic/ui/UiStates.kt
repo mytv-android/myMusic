@@ -171,6 +171,12 @@ data class LibrarySearchUiState(
 sealed interface UiEvent {
     data class OpenCollection(val title: String) : UiEvent
     data class Message(val text: String) : UiEvent
+
+    /**
+     * 只在本机的本地歌加进了已同步的歌单 / 收藏：提示一句，带“上传”按钮（设计稿第 ② 张底部）。
+     * [ids] 是要提示上传的那几首的本地身份，点了打开上传面板。只提示，从不自动上传。
+     */
+    data class UploadPrompt(val text: String, val ids: List<String>) : UiEvent
 }
 
 data class LinkPreview(val link: Boolean, val text: String)

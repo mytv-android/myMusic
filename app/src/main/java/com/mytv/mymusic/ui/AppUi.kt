@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.FindReplace
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -587,6 +588,11 @@ fun TrackActionsSheet(
     onMerge: (() -> Unit)? = null,
     onWallLocate: (() -> Unit)? = null,
     onWallSettings: (() -> Unit)? = null,
+    /**
+     * 本地歌的「换一个匹配」。这台设备没有文件、正在用匹配到的平台版本播放时，这是唯一能改匹配的入口
+     * （歌曲信息只在本地音乐页里），选好的匹配记进线索表并同步回有文件的设备。非本地歌为 null。
+     */
+    onRematch: (() -> Unit)? = null,
 ) {
     var showPlaylists by remember { mutableStateOf(false) }
     com.mytv.mymusic.ui.components.AdaptiveSheet(
@@ -605,6 +611,7 @@ fun TrackActionsSheet(
                 }
                 Spacer(Modifier.height(12.dp))
                 val rows = listOfNotNull(
+                    onRematch?.let { SheetRow(Icons.Filled.FindReplace, "换一个匹配", false, it) },
                     onOpenSource?.let { SheetRow(Icons.Filled.SwapHoriz, "选择音源 / 查看其他版本", false, it) },
                     onMerge?.let { SheetRow(Icons.AutoMirrored.Filled.CallMerge, "合并到…", false, it) },
                     onRemoveFromPlaylist?.let { SheetRow(Icons.Filled.Delete, "从歌单移除", true, it) },

@@ -4,6 +4,8 @@
 
     <!-- 系统媒体按键拉起播放服务、续播失败时的兜底通知 -->
     <string name="playback_resume_channel">继续播放</string>
+    <string name="local_upload_channel">上传本地歌</string>
+    <string name="local_upload_channel_description">把本地歌上传到网易云盘或 WebDAV 时显示进度</string>
     <string name="playback_resume_failed">暂时无法继续播放</string>
 
     <!-- 桌面小组件：名字和选择器里的一句说明（android:description） -->

@@ -99,16 +99,34 @@ data class SyncRemote(
     val uploadedAt: String = "",
 )
 
-/** 匹配结果（规格 3.3）：只记平台和 ID，另一台设备按它现取封面和歌词，不同步歌词正文。 */
+/**
+ * 匹配结果（规格 3.3）：只记平台和 ID，另一台设备按它现取封面和歌词，不同步歌词正文。
+ *
+ * 用户点了「不匹配」也要同步出去，否则别的设备快照里还留着旧匹配，合并时会把它“复活”：
+ * 记成 [METHOD_REJECTED]、置信度 1（和手选一样算用户的决定）、平台和 ID 留空。
+ * 所有读匹配的地方（解析、徽标、显示）都把它当成“没有匹配”。
+ */
 @Serializable
 data class SyncMatch(
     val provider: String,
     val id: String,
     val confidence: Float = 0f,
-    /** tag / audio / manual；用户在「换一个匹配」里选的置信度记 1，合并时总能盖过自动匹配。 */
+    /** tag / audio / manual / none；用户在「换一个匹配」里选的置信度记 1，合并时总能盖过自动匹配。 */
     val method: String = "",
     val matchedAt: String = "",
-)
+) {
+    /** 用户点过「不匹配」。 */
+    val rejected: Boolean get() = method == METHOD_REJECTED
+
+    companion object {
+        /** 同步文件里“用户拒绝了匹配”的写法；旧版本读到只会当成平台为空、没法用的匹配。 */
+        const val METHOD_REJECTED = "none"
+        const val METHOD_MANUAL = "manual"
+        const val METHOD_TAG = "tag"
+
+        fun rejection(matchedAt: String): SyncMatch = SyncMatch("", "", 1f, METHOD_REJECTED, matchedAt)
+    }
+}
 
 /** 建快照时一首本地歌要带上的线索；[cover] 是能公开的封面网址（匹配到的平台封面），本机封面缓存不算。 */
 data class SyncTrackRefs(

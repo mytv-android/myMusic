@@ -225,6 +225,7 @@ fun MyMusicApp(model: MusicViewModel) {
                 actions.openChart(TopList(id = target.id, name = target.name, source = target.source))
             }
             is WidgetTarget.LocalPlaylist -> nav.navigate("localPlaylist/${target.id}") { launchSingleTop = true }
+            WidgetTarget.LocalMusic -> nav.navigate(com.mytv.mymusic.ui.local.LOCAL_MUSIC_ROUTE) { launchSingleTop = true }
         }
     }
 
@@ -248,6 +249,16 @@ fun MyMusicApp(model: MusicViewModel) {
                 is UiEvent.OpenCollection -> nav.navigate("collection") { launchSingleTop = true }
                 // showSnackbar 会挂起到提示消失，放在 collect 里会把后面的跳转事件卡住几秒
                 is UiEvent.Message -> launch { snackbar.showSnackbar(event.text) }
+                // 只在本机的本地歌加进了同步的歌单：给“上传”，点了打开上传面板；只提示，不自动传
+                is UiEvent.UploadPrompt -> launch {
+                    val result = snackbar.showSnackbar(
+                        message = event.text,
+                        actionLabel = "上传",
+                        withDismissAction = true,
+                        duration = SnackbarDuration.Long,
+                    )
+                    if (result == SnackbarResult.ActionPerformed) model.openUploadSheet(event.ids)
+                }
             }
         }
     }
@@ -450,6 +461,11 @@ fun MyMusicApp(model: MusicViewModel) {
         if (timerOpen) {
             PlayerTheme { SleepTimerSheet(state, sleep, actions, onDismiss = { timerOpen = false }) }
         }
+        // 本地歌的上传面板（设计稿第 ⑥ 张）：本地音乐页、歌曲信息、加进歌单后的提示都从这里打开
+        com.mytv.mymusic.ui.local.LocalUploadSheetHost(
+            onOpenAccounts = { openSettings("settings/accounts") },
+            onConnectWebDav = { nav.navigate(com.mytv.mymusic.ui.local.localWebDavRoute(app)) { launchSingleTop = true } },
+        )
         if (state.sourcePickerTrack != null) {
             // 从播放页、海报墙打开时沿用它们的深色配色
             if (covered) PlayerTheme { SourcePickerSheet(state, actions) } else SourcePickerSheet(state, actions)

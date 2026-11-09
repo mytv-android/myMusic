@@ -28,6 +28,11 @@ import com.mytv.mymusic.data.local.LocalLibrary
 import com.mytv.mymusic.data.local.LocalMatchProgress
 import com.mytv.mymusic.data.local.LocalScanPhase
 import com.mytv.mymusic.data.local.LocalScanState
+import com.mytv.mymusic.data.local.LocalUploadRules
+import com.mytv.mymusic.data.local.LocalUploadState
+import com.mytv.mymusic.ui.library.Tag
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material3.MaterialTheme
 import com.mytv.mymusic.ui.components.IconTone
 import com.mytv.mymusic.ui.components.ListRow
 import com.mytv.mymusic.ui.components.PlatformBadge
@@ -53,14 +58,25 @@ internal fun rememberCanPickFolder(): Boolean {
     }
 }
 
-/** 「我的」那一行的说明：总数，扫描或匹配时带上进度。 */
-internal fun localEntrySummary(index: LocalIndex, scan: LocalScanState, matching: LocalMatchProgress): String {
+/**
+ * 「我的」那一行的说明：总数和已上传数（设计稿第 ① 张），扫描或匹配时带上进度；
+ * 上传队列被风控 / 登录失效停下时写原因（设计稿第 09 节：“上传暂停：网易云要求重新验证”）。
+ */
+internal fun localEntrySummary(
+    index: LocalIndex,
+    scan: LocalScanState,
+    matching: LocalMatchProgress,
+    uploads: LocalUploadState = LocalUploadState(),
+): String {
     val count = index.items.size
+    uploads.paused?.let { (provider, reason) -> return LocalUploadRules.pausedText(provider, reason) }
+    val uploaded = index.uploadedCount
     return when {
         scan.running && count == 0 -> "正在扫描…"
         scan.running -> "$count 首 · 扫描中…"
         matching.running -> "$count 首 · 正在匹配 ${matching.done}/${matching.total}"
         count == 0 -> "扫描手机里的歌，自动补封面和歌词"
+        uploaded > 0 -> "$count 首 · 已上传 $uploaded"
         else -> "$count 首"
     }
 }
@@ -97,14 +113,19 @@ internal fun scanProgressLabel(scan: LocalScanState): String = when (scan.phase)
 @Composable
 internal fun LocalMusicEntryRow(onOpen: () -> Unit, index: Int, count: Int, modifier: Modifier = Modifier) {
     val library = rememberLocalLibrary()
+    val uploadsHub = rememberLocalUploads()
+    var progress: LocalUploadState? = null
     val summary = if (library == null) {
         ""
     } else {
         val local by library.index.collectAsStateWithLifecycle()
         val scan by library.scan.collectAsStateWithLifecycle()
         val matching by library.matching.collectAsStateWithLifecycle()
-        localEntrySummary(local, scan, matching)
+        val uploads = uploadsHub?.state?.collectAsStateWithLifecycle()?.value ?: LocalUploadState()
+        progress = uploads
+        localEntrySummary(local, scan, matching, uploads)
     }
+    val busy = progress?.takeIf { it.busy && it.paused == null }
     ListRow(
         title = "本地音乐",
         index = index,
@@ -114,6 +135,17 @@ internal fun LocalMusicEntryRow(onOpen: () -> Unit, index: Int, count: Int, modi
         icon = Icons.Filled.AudioFile,
         iconTone = IconTone.Secondary,
         summary = summary,
+        // 有上传任务时尾部挂进度标签“↑ 2 / 5”（设计稿第 ① 张）
+        trailing = busy?.let { state ->
+            {
+                Tag(
+                    "${state.current} / ${state.total}",
+                    MaterialTheme.colorScheme.primaryContainer,
+                    MaterialTheme.colorScheme.onPrimaryContainer,
+                    icon = Icons.Filled.CloudUpload,
+                )
+            }
+        },
     )
 }
 
@@ -121,10 +153,13 @@ internal fun LocalMusicEntryRow(onOpen: () -> Unit, index: Int, count: Int, modi
 @Composable
 internal fun rememberLocalEntrySummary(): String {
     val library = rememberLocalLibrary() ?: return ""
+    val uploadsHub = rememberLocalUploads()
     val local by library.index.collectAsStateWithLifecycle()
     val scan by library.scan.collectAsStateWithLifecycle()
     val matching by library.matching.collectAsStateWithLifecycle()
-    return localEntrySummary(local, scan, matching)
+    val uploads = uploadsHub?.state?.collectAsStateWithLifecycle()?.value ?: LocalUploadState()
+    val summary = localEntrySummary(local, scan, matching, uploads)
+    return if (uploads.busy && uploads.paused == null) "$summary · 正在上传 ${uploads.current}/${uploads.total}" else summary
 }
 
 /**

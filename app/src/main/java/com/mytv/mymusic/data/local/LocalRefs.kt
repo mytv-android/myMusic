@@ -46,17 +46,24 @@ data class LocalRefEntity(
     @ColumnInfo(name = "updated_at") val updatedAt: Long = 0,
 ) {
     val key: String get() = "$LOCAL_SOURCE:$localId"
-    val matched: Boolean get() = matchProvider.isNotBlank() && matchId.isNotBlank()
+
+    /** 用户（在哪台设备上都行）点过「不匹配」：这里的 matchMethod 存的是同步文件里的写法。 */
+    val rejected: Boolean get() = matchMethod == SyncMatch.METHOD_REJECTED
+    val matched: Boolean get() = !rejected && matchProvider.isNotBlank() && matchId.isNotBlank()
 
     fun syncLocal(): SyncLocal = SyncLocal(localId, fileName, fileSize, device)
 
-    fun syncMatch(): SyncMatch? = if (!matched) null else SyncMatch(
-        provider = matchProvider,
-        id = matchId,
-        confidence = matchConfidence,
-        method = matchMethod,
-        matchedAt = isoOrEmpty(matchedAt),
-    )
+    fun syncMatch(): SyncMatch? = when {
+        rejected -> SyncMatch.rejection(isoOrEmpty(matchedAt))
+        !matched -> null
+        else -> SyncMatch(
+            provider = matchProvider,
+            id = matchId,
+            confidence = matchConfidence,
+            method = matchMethod,
+            matchedAt = isoOrEmpty(matchedAt),
+        )
+    }
 }
 
 /**

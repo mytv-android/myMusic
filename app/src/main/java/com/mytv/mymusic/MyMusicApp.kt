@@ -86,6 +86,14 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         )
     }
 
+    /**
+     * 本地歌上传：网易云盘、WebDAV 各一条串行队列，落盘在 cloud_uploads，后台用 WorkManager 前台服务跑。
+     * 启动时在 onCreate 里放回队列；后台任务被系统拉起时也会第一次取到它。
+     */
+    val localUploads by lazy {
+        com.mytv.mymusic.data.local.LocalUploads(localLibrary, cloud, database.localUploads(), sync.webDavAccounts)
+    }
+
     override val viewModelStore = ViewModelStore()
 
     /**
@@ -160,6 +168,11 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         localLibrary.onRefsChanged = { sync.onLocalChange() }
         // 本地音乐：启动后等一会儿做一遍增量扫描（没给权限、没加文件夹时什么都不做）
         localLibrary.startupScan()
+        // 上传队列：放回上次没传完的；没有后台任务可用（解锁前的进程）时 runner 为空，在进程里直接传
+        if (backgroundWork) {
+            localUploads.runner = com.mytv.mymusic.data.local.LocalUploadWorker.runner(this, appScope)
+        }
+        localUploads.start()
         // 日志导出用的设备和版本信息，启动时采一次就够
         AppLog.captureHeader(this)
         queueStore = QueueStore(this)

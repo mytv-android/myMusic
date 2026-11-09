@@ -186,8 +186,14 @@ internal fun rememberWebDavFormState(saved: WebDavAccountInfo?): WebDavFormState
     }
 
 /**
+ * 只配“上传到 WebDAV”的账号时（设置 › 本地音乐 › WebDAV 服务器）表单的主按钮：换成“保存”，不碰同步位置。
+ * 账号还是同一份（WebDavAccountStore），同步以后选 WebDAV 时直接带出来。
+ */
+internal class WebDavSaveAction(val busy: Boolean, val error: String, val onSave: (WebDavAccount) -> Unit)
+
+/**
  * WebDAV 表单（设计稿 ⑫）：服务商标签、地址、用户名、密码、目录、自签名证书开关，
- * “测试连接”和“连接并同步”。测试结果写在按钮下方。
+ * “测试连接”和“连接并同步”。测试结果写在按钮下方。[save] 不为空时主按钮是“保存”（只给上传用）。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -197,11 +203,12 @@ internal fun WebDavForm(
     actions: MusicActions,
     firstFocus: FocusRequester,
     onConnectAttempt: () -> Unit,
+    save: WebDavSaveAction? = null,
 ) {
     var showPassword by remember { mutableStateOf(false) }
     // 测试时用的密码：改了密码，上次的结果（比如“密码不对”）就不再算数
     var testedPassword by remember { mutableStateOf<String?>(null) }
-    val syncing = sync.status == SyncStatus.Syncing
+    val syncing = save?.busy ?: (sync.status == SyncStatus.Syncing)
     val parsedUrl = WebDavPaths.parseServerUrl(form.url)
     val host = parsedUrl?.host.orEmpty()
     val cleartext = parsedUrl?.isHttps == false
@@ -325,7 +332,8 @@ internal fun WebDavForm(
             onClick = {
                 gate(host) {
                     onConnectAttempt()
-                    actions.connectWebDav(form.toAccount().copy(pinnedCertificate = check?.certificate))
+                    val account = form.toAccount().copy(pinnedCertificate = check?.certificate)
+                    if (save != null) save.onSave(account) else actions.connectWebDav(account)
                 }
             },
             enabled = ready && !syncing,
@@ -334,11 +342,19 @@ internal fun WebDavForm(
             if (syncing) {
                 LoadingIndicator(Modifier.size(22.dp), color = MaterialTheme.colorScheme.onPrimary)
                 Spacer(Modifier.width(8.dp))
-                Text("正在连接…", maxLines = 1)
+                Text(if (save != null) "正在保存…" else "正在连接…", maxLines = 1)
             } else {
                 Icon(Icons.Filled.Cloud, null, Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(if (certificateChanged) "信任新证书并连接" else "连接并同步", maxLines = 1)
+                Text(
+                    when {
+                        save != null && certificateChanged -> "信任新证书并保存"
+                        save != null -> "保存"
+                        certificateChanged -> "信任新证书并连接"
+                        else -> "连接并同步"
+                    },
+                    maxLines = 1,
+                )
             }
         }
     }
@@ -346,6 +362,10 @@ internal fun WebDavForm(
         Box(Modifier.padding(top = 12.dp)) {
             if (check.ok) InfoNote(check.message, "green") else ErrorBlock(check.message)
         }
+    }
+    if (save != null) {
+        if (save.error.isNotBlank()) Box(Modifier.padding(top = 12.dp)) { ErrorBlock(save.error) }
+        return
     }
     if (sync.error.isNotBlank()) {
         Box(Modifier.padding(top = 12.dp)) { ErrorBlock(sync.error) }

@@ -102,8 +102,8 @@ data class WebDavAccountInfo(
  * WebDAV 账号的本机存储：地址、用户名、目录、证书开关和记下的证书指纹放普通偏好（指纹是公开信息，
  * 只需要防改不需要保密，应用私有目录够了），密码交给 [SecretStore] 用 Keystore 加密。
  *
- * [usedForStorage] 是给后续“上传到 WebDAV”留的钩子：上传还在用这个账号时，断开同步只解除
- * 同步绑定，不删账号。现在还没有上传功能，所以它总是 false。
+ * [usedForStorage]：本地歌上传还在用这个账号（往 WebDAV 排过上传、或在“设置 › 本地音乐”里单独配的）。
+ * 这时断开同步只解除同步绑定，不删账号；要删在本地音乐设置里单独删。
  */
 class WebDavAccountStore(context: Context, private val secrets: SecretStore) {
     private val preferences = context.getSharedPreferences("mymusic_webdav", Context.MODE_PRIVATE)

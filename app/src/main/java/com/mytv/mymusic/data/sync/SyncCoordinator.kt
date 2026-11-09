@@ -1079,6 +1079,52 @@ class SyncCoordinator(
         }
     }
 
+    /**
+     * 只给“上传到 WebDAV”用的账号（设置 › 本地音乐 › WebDAV 服务器）：先做一遍和“测试连接”一样的读写检查，
+     * 通过了才存，并记成“上传在用”（断开同步时不删）。不碰同步位置：同步正连着 WebDAV 时表单走 [connectWebDav]，
+     * 账号只有一份。返回失败说明，成功返回空串。
+     */
+    suspend fun saveWebDavStorage(draft: WebDavAccount): String {
+        if (syncDao.accountOnce()?.provider == WebDavSyncProvider.ID) {
+            return "音乐库同步正在用 WebDAV，请在“音乐库同步”里修改这个账号。"
+        }
+        var account = resolveWebDavDraft(draft)
+        return try {
+            var certificate: WebDavCertificate? = null
+            when (val decision = inspectCertificate(account)) {
+                is WebDavTrust.Decision.Changed -> return WebDavMessages.certificateChanged(decision.observed)
+                is WebDavTrust.Decision.Trust -> {
+                    certificate = decision.certificate
+                    account = account.copy(pinnedCertificate = decision.certificate)
+                }
+                null -> Unit
+            }
+            val check = webDavProvider.client(account).check(account.normalizedDirectory, lookFor = null)
+            if (!check.ok) return WebDavMessages.checkSummary(check, account, certificate)
+            webDavAccounts.save(account)
+            webDavAccounts.setUsedForStorage(true)
+            ""
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: WebDavException) {
+            WebDavMessages.describe(error, account)
+        } catch (error: Exception) {
+            error.message ?: "保存失败"
+        }
+    }
+
+    /**
+     * 不再用 WebDAV 放歌：同步还在用这个账号时只取消“上传在用”，账号留给同步；否则连密码一起删掉。
+     * 已经传上去的文件和这台设备上记的云端位置都不动。
+     */
+    suspend fun removeWebDavStorage() {
+        if (syncDao.accountOnce()?.provider == WebDavSyncProvider.ID) {
+            webDavAccounts.setUsedForStorage(false)
+        } else {
+            webDavAccounts.clear()
+        }
+    }
+
     private fun credential(providerId: String): String? =
         if (providerId == WebDavSyncProvider.ID) webDavAccounts.load()?.encode() else secretStore.token(providerId)
 
@@ -1096,7 +1142,7 @@ class SyncCoordinator(
 
     private fun removeCredential(providerId: String) {
         if (providerId == WebDavSyncProvider.ID) {
-            // 上传还在用这个 WebDAV 账号时只解除同步，账号留给上传；现在 usedForStorage 总是 false
+            // 上传还在用这个 WebDAV 账号时只解除同步，账号留给上传，在“设置 › 本地音乐”里单独删除
             if (!webDavAccounts.usedForStorage) webDavAccounts.clear()
         } else {
             secretStore.removeToken(providerId)

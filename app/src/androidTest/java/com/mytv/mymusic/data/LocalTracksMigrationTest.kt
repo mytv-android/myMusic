@@ -88,7 +88,7 @@ class LocalTracksMigrationTest {
 
             val sqlite = db.openHelper.writableDatabase
             // 后面的迁移（10 → 11 …）也会接着走完，这里只要求升到了当前版本
-            assertEquals(11, sqlite.version)
+            assertEquals(AppDatabase.ALL_MIGRATIONS.last().endVersion, sqlite.version)
             sqlite.query("PRAGMA index_list(local_tracks)").use { cursor ->
                 val names = buildList { while (cursor.moveToNext()) add(cursor.getString(cursor.getColumnIndexOrThrow("name"))) }
                 assertTrue(names.toString(), "idx_local_tracks_uri" in names)

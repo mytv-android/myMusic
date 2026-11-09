@@ -49,6 +49,35 @@ import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.local.rememberLocalAccess
 import com.mytv.mymusic.ui.local.rememberLocalLibrary
+import com.mytv.mymusic.ui.local.rememberWebDavInfo
+import com.mytv.mymusic.MyMusicApp
+import com.mytv.mymusic.data.cloud.CloudMessages
+import com.mytv.mymusic.data.cloud.CloudProvider
+import com.mytv.mymusic.data.cloud.CloudQuota
+import com.mytv.mymusic.data.local.LocalUploadRules
+import com.mytv.mymusic.data.sync.WebDavSyncProvider
+import com.mytv.mymusic.data.webdav.WebDavAccountInfo
+import com.mytv.mymusic.ui.components.AdaptiveSheet
+import com.mytv.mymusic.ui.components.ProviderIcon
+import com.mytv.mymusic.ui.components.SegmentGap
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val LocalTitlePolicy.label: String
     get() = when (this) {
@@ -74,14 +103,27 @@ internal fun rememberLocalSettingsSummary(): String {
 }
 
 /**
- * 设置 › 本地音乐：扫描范围（系统媒体库、文件夹、跳过短音频）、封面和歌词（自动匹配、标题和歌手、同名 .lrc）、
- * 播放（没有文件时用平台版本）。上传那一组等云盘接进来再加。全是现有的设置行。
+ * 设置 › 本地音乐（设计稿第 ⑩ 张）：扫描范围（系统媒体库、文件夹、跳过短音频）、封面和歌词（自动匹配、
+ * 标题和歌手、同名 .lrc）、上传（默认位置、WebDAV 服务器、加进歌单时提醒、只在 Wi-Fi 下）、
+ * 播放（没有文件时用平台版本）。全是现有的设置行。
+ *
+ * [onOpenAccounts] 去平台账号登录网易云；[onConnectWebDav] 去配 WebDAV（同步在用 WebDAV 时是同步那张表单）。
  */
 @Composable
-internal fun LocalMusicSettingsScreen(onBack: () -> Unit, embedded: Boolean) {
+internal fun LocalMusicSettingsScreen(
+    onBack: () -> Unit,
+    embedded: Boolean,
+    onOpenAccounts: () -> Unit = {},
+    onConnectWebDav: () -> Unit = {},
+) {
     val library = rememberLocalLibrary() ?: return
     val prefs by library.prefs.collectAsStateWithLifecycle()
     val index by library.index.collectAsStateWithLifecycle()
+    val webDav = rememberWebDavInfo()
+    val syncUsesWebDav = rememberSyncUsesWebDav()
+    val target = LocalUploadRules.defaultTarget(prefs.uploadTarget, index.clouds)
+    val neteaseQuota = rememberNeteaseQuota(CloudProvider.NeteaseCloud in index.clouds)
+    var pickTarget by remember { mutableStateOf(false) }
     val access = rememberLocalAccess(library, prefs)
     val first = remember { FocusRequester() }
     SettingsTvFocus(first)
@@ -189,6 +231,62 @@ internal fun LocalMusicSettingsScreen(onBack: () -> Unit, embedded: Boolean) {
             )
         }
 
+        item(key = "uploadHead", contentType = "sectionHeader") { SectionLabel("上传") }
+        item(key = "uploadTarget", contentType = "row") {
+            val usable = target in index.clouds
+            ListRow(
+                title = "默认上传到",
+                index = 0,
+                count = 4,
+                onClick = { pickTarget = true },
+                leading = { UploadTargetIcon(target.takeIf { usable }) },
+                summary = when {
+                    !usable -> "还没有可用的位置"
+                    target == CloudProvider.NeteaseCloud -> listOfNotNull(
+                        target.label,
+                        neteaseQuota?.let { "已用 ${CloudMessages.formatSize(it.used)} / ${CloudMessages.formatSize(it.total)}" },
+                    ).joinToString(" · ")
+                    else -> webDav?.let { "WebDAV · ${it.hostLabel}" } ?: "WebDAV"
+                },
+            )
+        }
+        item(key = "uploadWebDav", contentType = "row") {
+            ListRow(
+                title = "WebDAV 服务器",
+                index = 1,
+                count = 4,
+                onClick = onConnectWebDav,
+                icon = Icons.Filled.Cloud,
+                summary = when {
+                    webDav == null || !webDav.hasPassword -> "还没有配置 · 坚果云、Nextcloud、群晖或自己的服务器"
+                    syncUsesWebDav -> "${webDav.hostLabel} · 和音乐库同步共用"
+                    else -> "${webDav.hostLabel} · 放上传的歌"
+                },
+            )
+        }
+        item(key = "uploadPrompt", contentType = "switch") {
+            SwitchRow(
+                title = "加进歌单时提醒上传",
+                checked = prefs.uploadPrompt,
+                onCheckedChange = { value -> library.launch { updatePrefs { it.copy(uploadPrompt = value) } } },
+                index = 2,
+                count = 4,
+                summary = "只在本机的歌加进已同步的歌单时提示",
+                icon = Icons.Filled.NotificationsActive,
+            )
+        }
+        item(key = "uploadWifi", contentType = "switch") {
+            SwitchRow(
+                title = "只在 Wi-Fi 下上传",
+                checked = prefs.uploadWifiOnly,
+                onCheckedChange = { value -> library.launch { updatePrefs { it.copy(uploadWifiOnly = value) } } },
+                index = 3,
+                count = 4,
+                summary = "用移动网络时先排队",
+                icon = Icons.Filled.Wifi,
+            )
+        }
+
         item(key = "playHead", contentType = "sectionHeader") { SectionLabel("播放") }
         item(key = "fallback", contentType = "switch") {
             SwitchRow(
@@ -204,12 +302,126 @@ internal fun LocalMusicSettingsScreen(onBack: () -> Unit, embedded: Boolean) {
         item(key = "privacy", contentType = "note") {
             Box(Modifier.padding(top = 12.dp)) {
                 InfoNote(
-                    "扫描只读取文件信息和标签，不改文件，也不会上传。自动匹配时把歌名和歌手发给已启用的平台搜索；" +
-                        "标签不够时在本机把 3 秒片段算成指纹，只把指纹发给网易云识曲，不发音频。",
+                    "扫描只读取文件信息和标签，不改文件，也不会自己上传。自动匹配时把歌名和歌手发给已启用的平台搜索；" +
+                        "标签不够时在本机把 3 秒片段算成指纹，只把指纹发给网易云识曲，不发音频。" +
+                        "只有你点了上传，文件才会传到你选的网易云盘或 WebDAV。",
                 )
             }
         }
     }
+    if (pickTarget) {
+        UploadTargetSheet(
+            selected = target,
+            configured = index.clouds,
+            webDav = webDav,
+            onSelect = { value ->
+                pickTarget = false
+                library.launch { updatePrefs { it.copy(uploadTarget = value.id) } }
+            },
+            onOpenAccounts = {
+                pickTarget = false
+                onOpenAccounts()
+            },
+            onConnectWebDav = {
+                pickTarget = false
+                onConnectWebDav()
+            },
+            onDismiss = { pickTarget = false },
+        )
+    }
+}
+
+/** 行首的位置图标：网易云盘用平台图标，WebDAV 用云，还没有可用的位置时是空心云。 */
+@Composable
+private fun UploadTargetIcon(target: CloudProvider?) {
+    when (target) {
+        null -> ToneIcon(Icons.Filled.CloudOff, IconTone.Secondary)
+        CloudProvider.WebDav -> ToneIcon(Icons.Filled.Cloud, IconTone.Secondary)
+        else -> ProviderIcon(id = "netease", name = target.label, size = 40.dp)
+    }
+}
+
+/**
+ * “默认上传到”的单选面板：网易云盘、WebDAV 能选；QQ 音乐云盘列出来但不可选（只能读取）。
+ * 没登录 / 没配置的那行点了去登录 / 去连接（设计稿第 05 节“默认上传到”）。
+ */
+@Composable
+private fun UploadTargetSheet(
+    selected: CloudProvider,
+    configured: Set<CloudProvider>,
+    webDav: WebDavAccountInfo?,
+    onSelect: (CloudProvider) -> Unit,
+    onOpenAccounts: () -> Unit,
+    onConnectWebDav: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val focus = remember { FocusRequester() }
+    SettingsTvFocus(focus)
+    AdaptiveSheet(onDismiss = onDismiss, title = "默认上传到", subtitle = "上传面板里也能临时换") {
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(SegmentGap),
+        ) {
+            val rows = listOf(CloudProvider.NeteaseCloud, CloudProvider.WebDav, CloudProvider.QqCloud)
+            rows.forEachIndexed { at, provider ->
+                val ready = provider in configured
+                val on = provider == selected && ready
+                ListRow(
+                    title = provider.label,
+                    index = at,
+                    count = rows.size,
+                    onClick = when {
+                        !provider.canUpload -> null
+                        !ready && provider == CloudProvider.NeteaseCloud -> onOpenAccounts
+                        !ready -> onConnectWebDav
+                        else -> ({ onSelect(provider) })
+                    },
+                    modifier = (if (at == 0) Modifier.focusRequester(focus) else Modifier)
+                        .then(if (provider.canUpload) Modifier else Modifier.alpha(0.6f))
+                        .semantics {
+                            role = Role.RadioButton
+                            this.selected = on
+                        },
+                    summary = when {
+                        !provider.canUpload -> "只能读取"
+                        provider == CloudProvider.NeteaseCloud && !ready -> "还没登录网易云 · 点这里去登录"
+                        provider == CloudProvider.WebDav && !ready -> "还没有配置 · 点这里连接 WebDAV"
+                        provider == CloudProvider.WebDav -> webDav?.hostLabel.orEmpty()
+                        else -> "曲库里有的歌直接秒传"
+                    },
+                    selected = on,
+                    showChevron = false,
+                    leading = {
+                        if (provider == CloudProvider.WebDav) ToneIcon(Icons.Filled.Cloud, IconTone.Secondary)
+                        else ProviderIcon(id = provider.id, name = provider.label, size = 40.dp, active = on)
+                    },
+                    trailing = if (on) ({ Icon(Icons.Filled.Check, null) }) else null,
+                )
+            }
+        }
+    }
+}
+
+/** 同步是不是正连着 WebDAV：是的话 WebDAV 服务器那行写“和音乐库同步共用”，点进去是同步那张表单。 */
+@Composable
+private fun rememberSyncUsesWebDav(): Boolean {
+    val context = LocalContext.current
+    val app = context.applicationContext as? MyMusicApp ?: return false
+    val sync by app.sync.state.collectAsStateWithLifecycle()
+    return sync.account?.provider == WebDavSyncProvider.ID
+}
+
+/** 网易云盘的已用 / 总容量：登录了才查一次（只读列表接口，顺带返回容量）；查不到就不写。 */
+@Composable
+private fun rememberNeteaseQuota(loggedIn: Boolean): CloudQuota? {
+    val context = LocalContext.current
+    var quota by remember { mutableStateOf<CloudQuota?>(null) }
+    LaunchedEffect(loggedIn) {
+        val app = context.applicationContext as? MyMusicApp ?: return@LaunchedEffect
+        quota = if (!loggedIn) null else runCatching { withContext(Dispatchers.IO) { app.cloud.netease.quota() } }
+            .getOrNull()?.takeIf { it.known }
+    }
+    return quota
 }
 
 /** “标题和歌手”：分段列表里的一行，下面挂三段连接按钮组（文件 / 只补空缺 / 匹配结果）。 */

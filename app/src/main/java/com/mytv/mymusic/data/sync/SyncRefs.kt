@@ -8,7 +8,8 @@ import java.util.Locale
  * 歌单层面照旧按修改时间后写的为准；选定的那一版里，同一首歌在两边都出现时线索取并集：
  * - remote：上传时间新的胜出；同一次上传（同位置、同时间）里 deleted 胜出——删除是单向的，
  *   重新上传会带新的上传时间，自然盖过删除；
- * - match：分数高的胜出，分数一样取匹配时间新的；用户手选的记 1 分，总能盖过自动匹配；
+ * - match：用户的决定（手选一首、或点了「不匹配」）总能盖过自动匹配；两边都是用户的决定时取新的——
+ *   后来又换回一首，换回的那次胜出；两边都是自动匹配时分数高的胜出，分数一样取匹配时间新的；
  * - local：逐个字段非空的胜出。
  * 两边完全打平时取 [b]（云端那一份）：云端是各设备已经看到的版本，取它就不会每次同步来回翻。
  *
@@ -49,14 +50,36 @@ object SyncRefMerge {
     fun match(a: SyncMatch?, b: SyncMatch?): SyncMatch? {
         if (a == null) return b
         if (b == null) return a
+        // 用户的决定和自动匹配不比分数：自动匹配的分数可能也到 1（标签完全一致），不能因此盖过用户点的“不匹配”
+        val ua = isUserDecision(a)
+        val ub = isUserDecision(b)
+        if (ua != ub) return if (ua) a else b
+        val ta = SyncTime.toMillis(a.matchedAt)
+        val tb = SyncTime.toMillis(b.matchedAt)
+        // 两边都是用户的决定：最后一次说了算（拒绝之后又手选一首，或手选之后又拒绝）。
+        // 同一毫秒的两个不同决定按内容定一个，两台设备谁先谁后合并都得出同一个结果
+        if (ua) {
+            if (ta != tb) return if (ta > tb) a else b
+            return if (decisionKey(a) >= decisionKey(b)) a else b
+        }
         // 浮点经过 JSON 往返可能差最后一位：按三位小数比，免得同一个匹配被当成两个分数
         val ca = Math.round(a.confidence * 1000)
         val cb = Math.round(b.confidence * 1000)
         if (ca != cb) return if (ca > cb) a else b
-        val ta = SyncTime.toMillis(a.matchedAt)
-        val tb = SyncTime.toMillis(b.matchedAt)
         if (ta != tb) return if (ta > tb) a else b
         return b
+    }
+
+    private fun decisionKey(match: SyncMatch): String = "${match.method}|${match.provider}|${match.id}"
+
+    /**
+     * 用户自己定的：「不匹配」、手选（manual），以及在「换一个匹配」里选的识曲候选（记满分）。
+     * 自动按标签搜到的即使满分也不算——那是机器的判断。
+     */
+    fun isUserDecision(match: SyncMatch): Boolean = when (match.method) {
+        SyncMatch.METHOD_REJECTED, SyncMatch.METHOD_MANUAL -> true
+        SyncMatch.METHOD_TAG -> false
+        else -> Math.round(match.confidence * 1000) >= 1000
     }
 
     /** [a] 是选定的那一版里的歌，[b] 是另一边同一首的线索；歌本身（标题、位置）以 [a] 为准。 */

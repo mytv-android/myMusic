@@ -95,7 +95,8 @@ class LocalRefsMigrationTest {
             db.localRefs().clearChecks("webdav")
             assertEquals(LocalCloudCheck.OK, db.localRefs().remote("sha256:a", "webdav")!!.checkState)
 
-            assertEquals(11, db.openHelper.writableDatabase.version)
+            // 后面的迁移（11 → 12 …）也会接着走完：只要求升到了当前版本，以后再加版本不用改这里
+            assertEquals(AppDatabase.ALL_MIGRATIONS.last().endVersion, db.openHelper.writableDatabase.version)
         } finally {
             db.close()
         }

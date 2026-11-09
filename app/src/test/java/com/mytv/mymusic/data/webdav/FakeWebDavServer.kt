@@ -6,6 +6,9 @@ import mockwebserver3.RecordedRequest
 import okhttp3.Credentials
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.security.MessageDigest
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
@@ -133,6 +136,8 @@ internal class FakeWebDavServer(
                     append("<d:resourcetype/>")
                     append("<d:getcontentlength>").append(entry.bytes.size).append("</d:getcontentlength>")
                     append("<d:getetag>").append(entry.etag.replace("\"", "&quot;")).append("</d:getetag>")
+                    // 真服务器都给修改时间：临时文件的清理要靠它判断“一天没动过”
+                    append("<d:getlastmodified>").append(httpDate(entry.modified)).append("</d:getlastmodified>")
                 }
                 append("</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>")
             }
@@ -249,3 +254,7 @@ internal class FakeWebDavServer(
     private fun md5(value: String): String =
         MessageDigest.getInstance("MD5").digest(value.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }
+
+/** RFC 1123 日期（getlastmodified 的格式），秒以下截掉，和真服务器一样。 */
+private fun httpDate(millis: Long): String =
+    DateTimeFormatter.RFC_1123_DATE_TIME.format(Instant.ofEpochMilli(millis).atOffset(ZoneOffset.UTC))

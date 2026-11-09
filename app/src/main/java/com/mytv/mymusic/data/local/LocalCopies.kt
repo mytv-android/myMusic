@@ -229,6 +229,8 @@ object LocalPlatformStep : LocalResolveStep {
     override suspend fun resolve(request: LocalResolveRequest): LocalPlayable? {
         if (!request.prefs.platformFallback) return null
         request.item?.match?.let { return LocalPlayable.Platform(it, request.row?.matchConfidence ?: 0f) }
+        // 用户（在这台或别的设备上）点过「不匹配」就是不要平台版本：哪怕手里还有一份旧的匹配也不用
+        if (request.ref?.rejected == true || request.row?.matchMethod == LocalMatchMethod.REJECTED) return null
         val match = request.refMatch ?: return null
         return LocalPlayable.Platform(match, request.ref?.matchConfidence ?: 0f)
     }
@@ -257,7 +259,10 @@ data class LocalMatchTarget(
     val matchMethod: String,
     /** 要读文件才能识曲。 */
     val canListen: Boolean,
-    /** “不匹配”只对这台设备上扫到过的歌有意义（回到文件自己的标签和内嵌封面）。 */
+    /**
+     * 能点“不匹配”：这台设备上扫到过的歌（回到文件自己的标签和内嵌封面）；没有文件但现在有匹配的
+     * （不再用那个平台版本，随同步告诉其他设备）。
+     */
     val canReject: Boolean,
 )
 
@@ -288,8 +293,9 @@ fun LocalIndex.matchTarget(song: Song): LocalMatchTarget {
         match = refMatches[song.id],
         matchProvider = ref?.matchProvider.orEmpty(),
         matchConfidence = ref?.matchConfidence ?: 0f,
-        matchMethod = ref?.matchMethod.orEmpty(),
+        // 线索表里存的是同步文件的写法（拒绝是 none），界面上按本机的写法显示成“已设为不匹配”
+        matchMethod = if (ref?.rejected == true) LocalMatchMethod.REJECTED else ref?.matchMethod.orEmpty(),
         canListen = false,
-        canReject = false,
+        canReject = refMatches[song.id] != null,
     )
 }
