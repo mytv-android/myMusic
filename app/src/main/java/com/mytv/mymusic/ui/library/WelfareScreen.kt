@@ -141,14 +141,21 @@ fun WelfareScreen(
 
 /** 「我的」页入口：汽水天天送会员的状态摘要。 */
 @Composable
-internal fun WelfareEntryCard(soda: SodaWelfareUi, todayMinutes: Int, onOpen: () -> Unit) {
+internal fun WelfareEntryCard(
+    soda: SodaWelfareUi,
+    todayMinutes: Int,
+    onOpen: () -> Unit,
+    index: Int = 0,
+    count: Int = 1,
+    modifier: Modifier = Modifier.padding(top = 12.dp),
+) {
     val scheme = MaterialTheme.colorScheme
     ListRow(
         title = "汽水天天送会员",
-        index = 0,
-        count = 1,
+        index = index,
+        count = count,
         onClick = onOpen,
-        modifier = Modifier.padding(top = 12.dp),
+        modifier = modifier,
         icon = Icons.Filled.CardGiftcard,
         iconTone = when {
             !soda.loggedIn -> IconTone.Secondary

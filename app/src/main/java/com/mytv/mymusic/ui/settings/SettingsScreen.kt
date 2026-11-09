@@ -86,6 +86,7 @@ internal fun settingsOverview(
     equalizer: EqualizerUiState,
     cacheBytes: Long,
     downloadsBytes: Long,
+    localMusic: String = "",
 ): SettingsOverview {
     val appearance = state.appearance
     val eqLabel = EqPresets.byId(equalizer.presetId)?.label ?: "自定义"
@@ -121,6 +122,7 @@ internal fun settingsOverview(
             } else {
                 "未连接 · 本机优先"
             },
+            SettingsSection.LocalMusic to localMusic,
             SettingsSection.Storage to "缓存 ${formatBytes(cacheBytes)} · 下载 ${formatBytes(downloadsBytes)}",
             SettingsSection.About to if (updateAvailable) "$version · 发现新版本 ${info?.versionName.orEmpty()}（构建 ${info?.versionCode ?: 0}）" else version,
         ),

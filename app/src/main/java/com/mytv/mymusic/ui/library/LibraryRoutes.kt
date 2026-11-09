@@ -14,6 +14,8 @@ import androidx.navigation.navArgument
 import com.mytv.mymusic.ui.AppNav
 import com.mytv.mymusic.ui.TvExitBackHandler
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
+import com.mytv.mymusic.ui.local.LOCAL_MUSIC_ROUTE
+import com.mytv.mymusic.ui.local.localMusicRoutes
 import kotlinx.coroutines.launch
 
 /**
@@ -42,6 +44,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
                 openDownloads = { app.nav.navigate("downloads") },
                 openCharts = { app.openTab("charts") },
                 openWelfare = { app.nav.navigate("welfare") },
+                openLocalMusic = { app.nav.navigate(LOCAL_MUSIC_ROUTE) },
             )
         }
         // 「我的」页的入口卡也要显示任务进度，进页面就把服务端状态读回来
@@ -133,6 +136,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
             onBack = app::back,
         )
     }
+    localMusicRoutes(app)
     composable("syncCenter") {
         val sync by app.model.syncState.collectAsState()
         SyncCenterScreen(sync, app.actions, onBack = app::back) { provider ->

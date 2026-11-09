@@ -68,6 +68,10 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val sleepTimer by lazy { SleepTimer(appScope) }
+    /** 本地音乐库：扫描、匹配、本地歌的播放解析和歌词。 */
+    val localLibrary by lazy {
+        com.mytv.mymusic.data.local.LocalLibrary(this, database.localTracks(), settings, repository, appScope)
+    }
 
     override val viewModelStore = ViewModelStore()
 
@@ -138,6 +142,8 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
             scope = appScope,
         )
         update = UpdateRepository(this, settings)
+        // 本地音乐：启动后等一会儿做一遍增量扫描（没给权限、没加文件夹时什么都不做）
+        localLibrary.startupScan()
         // 日志导出用的设备和版本信息，启动时采一次就够
         AppLog.captureHeader(this)
         queueStore = QueueStore(this)

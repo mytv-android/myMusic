@@ -117,6 +117,10 @@ import com.mytv.mymusic.ui.components.SelectionState
 import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.local.LocalSongBadge
+import com.mytv.mymusic.ui.local.localSubtitle
+import com.mytv.mymusic.ui.local.rememberLocalAvailability
+import com.mytv.mymusic.ui.local.rememberLocalDisplay
 import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
@@ -239,6 +243,9 @@ fun LocalPlaylistScreen(
         }
     }
     val rowContainer = if (embedded) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLow
+    // 本地歌：显示换成本机音乐库现在的信息（内嵌封面、匹配后的标题），并标出这台设备上有没有文件
+    val localDisplay = rememberLocalDisplay()
+    val localAvailability = rememberLocalAvailability()
     val coverUrls = remember(songs) { songs.map { it.cover }.filter { it.isNotBlank() }.take(4) }
     // 以 songKey 作行 key，移动后焦点跟着这首歌走；重复的旧数据由 distinctKeys 追加序号
     val rowKeys = remember(entries) { distinctKeys(entries) { it.songKey } }
@@ -309,14 +316,17 @@ fun LocalPlaylistScreen(
                 } else {
                     null
                 }
+                val shown = localDisplay(song)
+                val local = localAvailability(song)
                 SongRow(
-                    title = song.title,
-                    subtitle = song.subtitle,
-                    cover = song.cover,
+                    title = shown.title,
+                    subtitle = localSubtitle(shown, local),
+                    cover = shown.cover,
                     index = index,
                     count = entries.size,
                     onClick = { if (picking) selection.toggle(song.key) else actions.play(song, songs) },
                     playing = state.current?.key == song.key,
+                    badges = local?.let { availability -> { LocalSongBadge(availability) } },
                     container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else rowContainer,
                     trailing = selectTrailing ?: durationTrailing,
                     onMore = rowMore,

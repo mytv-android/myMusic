@@ -99,6 +99,25 @@ class AutomixAnalyzer(
             source.copyTo(target, overwrite = true)
             return target.length()
         }
+        if (uri.scheme == "content") {
+            // 本地音乐：直接从文件读，不经过播放缓存（那边也不缓存本机文件）
+            return runCatching {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    var total = 0L
+                    target.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                            total += read
+                            if (total > MAX_AUDIO_BYTES) return@use
+                        }
+                    }
+                    if (total > MAX_AUDIO_BYTES) 0L else total
+                } ?: 0L
+            }.getOrDefault(0L)
+        }
         val mediaCache = cache ?: return 0L
         val dataSource = CacheDataSource.Factory()
             .setCache(mediaCache)

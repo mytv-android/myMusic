@@ -20,6 +20,9 @@ import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.ForegroundActivity
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.aggregate.AggregateSearchEngine
+import com.mytv.mymusic.aggregate.Attempt
+import com.mytv.mymusic.aggregate.Availability
+import com.mytv.mymusic.aggregate.MatchMethod
 import com.mytv.mymusic.aggregate.AggregationSettings
 import com.mytv.mymusic.aggregate.CanonicalCollection
 import com.mytv.mymusic.aggregate.CanonicalTrack
@@ -77,6 +80,9 @@ import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.SavedSongTombstone
 import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.local.LOCAL_SOURCE
+import com.mytv.mymusic.data.local.LocalPlayable
+import com.mytv.mymusic.data.local.forStorage
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.TrackOverrideEntity
 import com.mytv.mymusic.data.native.AppleLyricsConfig
@@ -623,6 +629,26 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         refreshAccountProfile(id, cookie)
                     }
                 }
+            }
+        }
+        viewModelScope.launch {
+            // 正在放本地歌时改了“同名 .lrc 优先”或换了匹配：同一首歌重新取一次歌词，不用等下次播放
+            val library = app.localLibrary
+            var last: Pair<String, String>? = null
+            combine(
+                base.map { song -> song.current?.takeIf { it.source == LOCAL_SOURCE }?.id }.distinctUntilChanged(),
+                library.index,
+                library.prefs,
+            ) { id, index, prefs ->
+                id?.let { localId ->
+                    val row = index.byId[localId]?.row
+                    localId to "${prefs.preferLrc}|${row?.matchProvider}:${row?.matchId}|${row?.lrcUri}"
+                }
+            }.distinctUntilChanged().collect { now ->
+                val before = last
+                last = now
+                if (now == null || before == null || before.first != now.first || before.second == now.second) return@collect
+                base.value.current?.takeIf { it.source == LOCAL_SOURCE && it.id == now.first }?.let { loadLyrics(it) }
             }
         }
         viewModelScope.launch {
@@ -1968,7 +1994,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     playlistId = playlistId,
                     position = entries.size,
                     songKey = song.key,
-                    payload = json.encodeToString(song),
+                    payload = json.encodeToString(song.forStorage()),
                 ),
             )
             libraryDao.markDirty(playlistId, now)
@@ -1993,7 +2019,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             libraryDao.replaceEntries(
                 playlistId,
                 entries + candidates.mapIndexed { index, song ->
-                    PlaylistEntryEntity(playlistId, entries.size + index, song.key, json.encodeToString(song))
+                    PlaylistEntryEntity(playlistId, entries.size + index, song.key, json.encodeToString(song.forStorage()))
                 },
             )
             libraryDao.markDirty(playlistId, System.currentTimeMillis())
@@ -2016,7 +2042,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             libraryDao.replaceEntries(
                 id,
                 songs.distinctBy { it.key }.mapIndexed { index, song ->
-                    PlaylistEntryEntity(id, index, song.key, json.encodeToString(song))
+                    PlaylistEntryEntity(id, index, song.key, json.encodeToString(song.forStorage()))
                 },
             )
             app.sync.onLocalChange()
@@ -2133,7 +2159,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             libraryDao.replaceEntries(
                 id,
                 songs.mapIndexed { index, song ->
-                    PlaylistEntryEntity(id, index, song.key, json.encodeToString(song))
+                    PlaylistEntryEntity(id, index, song.key, json.encodeToString(song.forStorage()))
                 },
             )
             app.sync.onLocalChange()
@@ -2174,7 +2200,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 libraryDao.replaceEntries(
                     id,
                     songs.distinctBy { it.key }.mapIndexed { index, song ->
-                        PlaylistEntryEntity(id, index, song.key, json.encodeToString(song))
+                        PlaylistEntryEntity(id, index, song.key, json.encodeToString(song.forStorage()))
                     },
                 )
                 app.sync.onLocalChange()
@@ -2234,7 +2260,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             libraryDao.replaceEntries(
                 id,
                 songs.distinctBy { it.key }.mapIndexed { index, song ->
-                    PlaylistEntryEntity(id, index, song.key, json.encodeToString(song))
+                    PlaylistEntryEntity(id, index, song.key, json.encodeToString(song.forStorage()))
                 },
             )
             if (diff.changed) {
@@ -2306,6 +2332,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val downloading = mutableSetOf<String>()
 
     fun download(song: Song) = viewModelScope.launch {
+        if (song.source == LOCAL_SOURCE) {
+            message("「${song.title}」是本地音乐，文件已经在设备上")
+            return@launch
+        }
         if (!downloading.add(song.key)) {
             message("「${song.title}」正在下载")
             return@launch
@@ -2524,11 +2554,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         var playableTrack = track
         var ready: Resolution.Ready? = null
         var autoMatched = false
+        var autoNotice = ""
         if (local == null) {
             val result = resolvePlayable(track, pinnedProvider)
             playableTrack = result.track
             ready = result.resolution as? Resolution.Ready
             autoMatched = result.autoMatched
+            autoNotice = result.notice
             if (ready == null) {
                 base.value = base.value.copy(
                     playbackNotice = noSourceMessage(playableTrack, result.resolution),
@@ -2540,7 +2572,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (pinnedProvider != null) pinnedProviders[playableTrack.id] = pinnedProvider
         val source = local?.first ?: ready!!.source
         val resolvedSong = if (local != null) {
-            source.song.copy(url = Uri.fromFile(local.second).toString())
+            source.song.copy(url = local.second)
         } else {
             source.song.copy(url = ready!!.url)
         }
@@ -2551,7 +2583,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val fallbackNotice = when {
             local != null -> ""
             ready!!.isPreview -> "当前为试听片段"
-            autoMatched -> "原音源不可用，已自动匹配到${ready.source.providerName}"
+            autoMatched -> autoNotice.ifBlank { "原音源不可用，已自动匹配到${ready.source.providerName}" }
             pinnedProvider != null && ready.source.providerId != pinnedProvider ->
                 "所选平台没有返回可播放地址，已切换到${ready.source.providerName}"
             else -> ""
@@ -3086,7 +3118,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // 快速切歌时上一首的请求可能比新歌晚返回，只保留最新一次
         lyricsJob?.cancel()
         lyricsJob = viewModelScope.launch {
-            val lyrics = runCatching { app.repository.lyrics(song, cookieFor(song.source)) }.getOrDefault("")
+            val lyrics = runCatching {
+                // 本地歌：同名 .lrc 或匹配到的平台的歌词，由本地音乐库决定用哪份
+                if (song.source == LOCAL_SOURCE) {
+                    app.localLibrary.lyrics(song, settingsState.value.cookies)
+                } else {
+                    app.repository.lyrics(song, cookieFor(song.source))
+                }
+            }.getOrDefault("")
             // runCatching 会吞掉取消异常，被取消的旧请求在这里停下，不再写回
             if (!isActive) return@launch
             // 请求完成后再读 base：先取 base.value 再挂起会把请求期间更新的当前歌曲、播放状态写回旧值
@@ -3145,12 +3184,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun canonicalForSong(song: Song): CanonicalTrack {
         val providerId = song.source.ifBlank { settingsState.value.provider }
-        return TrackMatcher.singleSource(song, providerName(providerId), providerId, cookieFor(providerId))
+        val track = TrackMatcher.singleSource(song, providerName(providerId), providerId, cookieFor(providerId))
+        // 本地歌的标签常是“Track 01 / 未知歌手”，按标题歌手时长算的规范 id 会撞车，
+        // 队列按 id 去重时就把别的歌吞掉了；本地歌的身份本来就唯一，直接用它
+        return if (providerId == LOCAL_SOURCE) track.copy(id = song.key) else track
     }
 
     private fun preferredSong(track: CanonicalTrack): Song {
-        localFileFor(track)?.let { (source, file) ->
-            return source.song.copy(url = Uri.fromFile(file).toString())
+        localFileFor(track)?.let { (source, url) ->
+            return source.song.copy(url = url)
         }
         val policy = resolver.buildPolicy(track, null)
         val source = resolver.orderCandidates(track, null, emptySet(), policy).firstOrNull()
@@ -3163,22 +3205,32 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         return if (song.source in NEEDS_RESOLVE_ON_SWITCH) song.copy(url = "") else song
     }
 
-    private fun localFileFor(track: CanonicalTrack): Pair<TrackSource, File>? {
+    /**
+     * 这台设备上现成的文件：本地音乐里扫到、文件还在的本地歌（content:// 地址），或下载完成的歌（file://）。
+     * 只查内存，不碰文件；文件其实已经没了的话播放器会报错，再走 onPlayerError 换源。
+     */
+    private fun localFileFor(track: CanonicalTrack): Pair<TrackSource, String>? {
+        track.sources.firstOrNull { it.providerId == LOCAL_SOURCE }?.let { source ->
+            val item = app.localLibrary.playableItem(source.song.id) ?: return@let
+            // 显示信息以本地音乐库现在算出来的为准（匹配、标题设置可能已经变了）
+            return source.copy(song = item.song, availability = Availability.Playable) to item.row.uri
+        }
         val records = downloads.value
         if (records.isEmpty()) return null
         for (source in track.sources) {
             val record = records.firstOrNull { it.key == source.song.key && it.state == DOWNLOAD_DONE } ?: continue
             val file = File(record.path)
-            if (file.exists() && file.length() > 0) return source to file
+            if (file.exists() && file.length() > 0) return source to Uri.fromFile(file).toString()
         }
         return null
     }
 
-    private fun historySong(song: Song): Song =
-        if (song.url.startsWith("file:")) song.copy(url = "") else song
+    private fun historySong(song: Song): Song = song.forStorage()
 
     private fun noSourceMessage(track: CanonicalTrack, resolution: Resolution): String {
         val attempts = (resolution as? Resolution.None)?.attempts.orEmpty()
+        // 本地歌放不了：原因由本地音乐库给（只在原设备上 / 文件不在了），比“都没有返回地址”说得清楚
+        attempts.firstOrNull { it.source.providerId == LOCAL_SOURCE }?.let { return it.reason }
         val reasons = attempts.map { it.reason }
         val tried = attempts.map { it.source.providerName }.distinct()
         return when {
@@ -3196,6 +3248,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val track: CanonicalTrack,
         val resolution: Resolution,
         val autoMatched: Boolean,
+        /** 换到别的源时要给用户看的说明；空就用默认的“已自动匹配到…”。 */
+        val notice: String = "",
     )
 
     private suspend fun resolvePlayable(
@@ -3204,6 +3258,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         excludeProviders: Set<String> = emptySet(),
         forDownload: Boolean = false,
     ): AutoResolution {
+        if (track.sources.any { it.providerId == LOCAL_SOURCE }) return resolveLocal(track, excludeProviders)
         // 下载只要整曲：试听片段和无损档位一样会被平台降级，回退时也优先能下整曲的源
         fun policyFor(item: CanonicalTrack) = resolver.buildPolicy(item, pinnedProvider).let {
             if (forDownload) it.copy(allowPreview = false, pinnedProvider = null) else it
@@ -3248,6 +3303,65 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             last = resolution
         }
         return AutoResolution(current, last, autoMatched = false)
+    }
+
+    /**
+     * 本地歌的解析：先问本地音乐库（本机文件 →〔以后：云端副本〕→ 匹配到的平台版本）；
+     * 这台设备上从没扫到过、也没有匹配记录（别的设备加进歌单的）时，「没有文件时用平台版本」开着
+     * 就按歌名歌手走一遍现有的自动匹配。都不行返回 None，原因记在本地那条尝试里；歌单条目不动。
+     * 刚放失败的本机文件（[excludeProviders] 里有 local）不再拿回来，免得在同一个坏文件上来回重试。
+     */
+    private suspend fun resolveLocal(track: CanonicalTrack, excludeProviders: Set<String>): AutoResolution {
+        val source = track.sources.first { it.providerId == LOCAL_SOURCE }
+        val outcome = app.localLibrary.resolve(source.song, skipFile = LOCAL_SOURCE in excludeProviders)
+        if (outcome is LocalPlayable.File) {
+            val ready = source.copy(song = outcome.song, availability = Availability.Playable)
+            val updated = track.copy(sources = track.sources.map { if (it.providerId == LOCAL_SOURCE) ready else it })
+            return AutoResolution(updated, Resolution.Ready(ready, outcome.uri, isPreview = false), autoMatched = false)
+        }
+        val reason = (outcome as? LocalPlayable.Unavailable)?.reason ?: "这台设备上没有这个文件"
+        val failed = AutoResolution(
+            track,
+            Resolution.None(listOf(Attempt(source.copy(availability = Availability.Unavailable), reason))),
+            autoMatched = false,
+        )
+        val exclude = excludeProviders + LOCAL_SOURCE
+        suspend fun tryPlatform(song: Song, score: Float, method: MatchMethod): AutoResolution? {
+            val providerId = song.source
+            val withPlatform = TrackMatcher.withSource(
+                track,
+                TrackSource(providerId, providerName(providerId), song, matchScore = score, matchMethod = method),
+            )
+            val platformOnly = withPlatform.copy(sources = withPlatform.sources.filter { it.providerId != LOCAL_SOURCE })
+            val resolution = resolver.resolve(platformOnly, null, exclude, resolver.buildPolicy(platformOnly, null))
+            if (resolution !is Resolution.Ready) return null
+            return AutoResolution(
+                withPlatform,
+                resolution,
+                autoMatched = true,
+                notice = "这台设备上没有这个文件，用${resolution.source.providerName}的版本播放",
+            )
+        }
+        // 匹配到的那个平台放不了（会员、下架）时，和没匹配过的歌一样去其它平台找同一首
+        val searchOthers = when (outcome) {
+            is LocalPlayable.Platform -> {
+                tryPlatform(outcome.song, outcome.confidence, MatchMethod.Manual)?.let { return it }
+                true
+            }
+            is LocalPlayable.Unavailable -> outcome.fallbackAllowed && outcome.searchable
+            else -> false
+        }
+        if (searchOthers) {
+            val tried = (outcome as? LocalPlayable.Platform)?.song?.source
+            for (providerId in autoMatchProviders(exclude + listOfNotNull(tried))) {
+                val result = withTimeoutOrNull(AUTO_MATCH_TIMEOUT_MS) {
+                    runCatching { matchJob.matchOne(source.song, providerId) }.getOrNull()
+                } ?: continue
+                val song = result.song ?: continue
+                tryPlatform(song, result.score, result.method)?.let { return it }
+            }
+        }
+        return failed
     }
 
     private fun autoMatchProviders(exclude: Set<String>): List<String> {
@@ -3311,7 +3425,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         settingsState.value.cookies[providerId.ifBlank { settingsState.value.provider }].orEmpty()
 
     private suspend fun remember(bucket: String, song: Song) =
-        app.database.dao().save(SavedSong(song.key, bucket, json.encodeToString(song), System.currentTimeMillis()))
+        app.database.dao().save(SavedSong(song.key, bucket, json.encodeToString(song.forStorage()), System.currentTimeMillis()))
 
     private fun mediaItem(song: Song): MediaItem {
         // Apple 整曲开头那段用的是另一把 key，Provider 单独成了一份清单；地址搭在
@@ -3463,7 +3577,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             resolving = viewModelScope.launch {
                 val local = localFileFor(track)
                 if (local != null) {
-                    val resolved = local.first.song.copy(url = Uri.fromFile(local.second).toString())
+                    val resolved = local.first.song.copy(url = local.second)
                     controller?.replaceMediaItem(index, mediaItem(resolved))
                     prepareIfStopped()
                     unplayableSkips = 0
@@ -3499,7 +3613,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     currentTrack = result.track,
                     currentSource = resolution.source,
                     playbackNotice = when {
-                        result.autoMatched -> "原音源不可用，已自动匹配到${resolution.source.providerName}"
+                        result.autoMatched -> result.notice.ifBlank { "原音源不可用，已自动匹配到${resolution.source.providerName}" }
                         resolution.isPreview -> "当前为试听片段"
                         else -> skipNotice.orEmpty()
                     },
@@ -3639,10 +3753,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             failoverInProgress = true
             viewModelScope.launch {
                 val local = localFileFor(track)
-                if (local != null && !base.value.current?.url.orEmpty().startsWith("file:")) {
+                // 坏的就是这个本机文件（下载的 file://、本地音乐的 content://）时别再换回它，交给下面换源，免得原地循环
+                if (local != null && local.second != queued?.url) {
                     val player = controller
                     if (player != null) {
-                        val resolved = local.first.song.copy(url = Uri.fromFile(local.second).toString())
+                        val resolved = local.first.song.copy(url = local.second)
                         player.replaceMediaItem(index, mediaItem(resolved))
                         player.seekTo(position)
                         player.play()
@@ -3851,7 +3966,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val resolved: Song
             var resolvedTrack = track
             if (local != null) {
-                resolved = local.first.song.copy(url = Uri.fromFile(local.second).toString())
+                resolved = local.first.song.copy(url = local.second)
             } else {
                 val result = resolvePlayable(track, pinnedProviders[track.id])
                 val ready = result.resolution as? Resolution.Ready ?: return@launch
@@ -4190,7 +4305,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val track = tracks[at]
                 val local = localFileFor(track)
                 if (local != null) {
-                    return@withTimeoutOrNull Resumed(at, track, local.first, local.first.song.copy(url = Uri.fromFile(local.second).toString()))
+                    return@withTimeoutOrNull Resumed(at, track, local.first, local.first.song.copy(url = local.second))
                 }
                 val result = resolvePlayable(track, pinnedProviders[track.id])
                 val ready = result.resolution as? Resolution.Ready

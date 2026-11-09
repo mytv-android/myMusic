@@ -152,6 +152,8 @@ import com.mytv.mymusic.ui.song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import com.mytv.mymusic.ui.local.LocalMusicEntryRow
+import com.mytv.mymusic.ui.local.rememberLocalEntrySummary
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
@@ -169,6 +171,7 @@ class LibraryNav(
     val openDownloads: () -> Unit,
     val openCharts: () -> Unit,
     val openWelfare: () -> Unit,
+    val openLocalMusic: () -> Unit = {},
 )
 
 /** 新建菜单的三项：新建歌单、导入歌单链接、从文件导入。三端只是外形不同。 */
@@ -278,7 +281,13 @@ private fun PhoneLibrary(
                         tileHeight = if (phone) 100.dp else 112.dp,
                     )
                 }
-                item(key = "welfare", contentType = "card") { WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare) }
+                // 本地音乐和“汽水天天送会员”并成一组（两行分段圆角）
+                item(key = "localMusic", contentType = "card") {
+                    LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 2, modifier = Modifier.padding(top = 12.dp))
+                }
+                item(key = "welfare", contentType = "card") {
+                    WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 2, modifier = Modifier)
+                }
                 item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
                     SectionLabel("自建歌单", trailing = { CountTag("${playlists.size} 个") })
@@ -429,7 +438,13 @@ private fun TabletLibrary(
                         }
                     }
                 }
-                item(key = "welfare", contentType = "card") { WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare) }
+                // 本地音乐和“汽水天天送会员”并成一组（两行分段圆角）
+                item(key = "localMusic", contentType = "card") {
+                    LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 2, modifier = Modifier.padding(top = 12.dp))
+                }
+                item(key = "welfare", contentType = "card") {
+                    WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 2, modifier = Modifier)
+                }
                 item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
                     SectionLabel("自建歌单", trailing = { NewPlaylistSplitButton(menu) })
@@ -549,6 +564,15 @@ private fun TvLibrary(
                     ) {
                         Text("下载", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text(stats.downloadLabel, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    TvTile(
+                        modifier = Modifier.width(240.dp),
+                        container = MaterialTheme.colorScheme.secondaryContainer,
+                        content = MaterialTheme.colorScheme.onSecondaryContainer,
+                        onClick = nav.openLocalMusic,
+                    ) {
+                        Text("本地音乐", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(rememberLocalEntrySummary(), style = MaterialTheme.typography.bodyMedium, maxLines = 2)
                     }
                 }
             }

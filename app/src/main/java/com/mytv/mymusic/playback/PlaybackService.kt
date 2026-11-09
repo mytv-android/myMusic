@@ -87,7 +87,10 @@ class PlaybackService : MediaSessionService() {
                         direct = direct,
                         isLive = { uri ->
                             val host = uri.host.orEmpty()
-                            host == YUNTING_LIVE_HOST || (host.endsWith(".radio.cn") && uri.path.orEmpty().endsWith(".m3u8"))
+                            // 本机文件（本地音乐的 content://、下载的 file://）直接读：
+                            // 走缓存只会把文件再抄一份进播放缓存，还挤掉在线歌曲的缓存
+                            uri.scheme == "content" || uri.scheme == "file" ||
+                                host == YUNTING_LIVE_HOST || (host.endsWith(".radio.cn") && uri.path.orEmpty().endsWith(".m3u8"))
                         },
                     )
                 } ?: DefaultDataSource.Factory(this),

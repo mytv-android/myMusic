@@ -85,6 +85,10 @@ import com.mytv.mymusic.ui.components.PageScaffold
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.local.LocalSongBadge
+import com.mytv.mymusic.ui.local.localSubtitle
+import com.mytv.mymusic.ui.local.rememberLocalAvailability
+import com.mytv.mymusic.ui.local.rememberLocalDisplay
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatBytes
 import com.mytv.mymusic.ui.relativeTime
@@ -108,6 +112,9 @@ fun FavoritesScreen(
     onBrowse: () -> Unit,
 ) {
     val window = LocalAppWindow.current
+    // 本地歌：显示本机音乐库现在的信息，并标出这台设备上有没有文件
+    val localDisplay = rememberLocalDisplay()
+    val localAvailability = rememberLocalAvailability()
     val undo = rememberUndo()
     val settled = rememberSettled()
     val playFocus = remember { FocusRequester() }
@@ -169,14 +176,17 @@ fun FavoritesScreen(
             key = { _, it -> "fav:${it.first.key}" },
             contentType = { _, _ -> "song" },
         ) { index, (saved, song) ->
+            val display = localDisplay(song)
+            val local = localAvailability(song)
             SongRow(
-                title = song.title,
-                subtitle = listOf(song.artist, sourceLabel(song)).filter { it.isNotBlank() }.joinToString(" · "),
-                cover = song.cover,
+                title = display.title,
+                subtitle = if (local != null) localSubtitle(display, local) else listOf(song.artist, sourceLabel(song)).filter { it.isNotBlank() }.joinToString(" · "),
+                cover = display.cover,
                 index = index,
                 count = shown.size,
                 onClick = { actions.play(song, songs) },
                 playing = state.current?.key == song.key,
+                badges = local?.let { availability -> { LocalSongBadge(availability) } },
                 trailing = {
                     IconButton(onClick = { unfavorite(saved, song) }, modifier = Modifier.tvFocusRing(CircleShape)) {
                         Icon(Icons.Filled.Favorite, "取消收藏“${song.title}”", tint = MaterialTheme.colorScheme.primary)
@@ -268,6 +278,9 @@ fun HistoryScreen(
     onBack: () -> Unit,
 ) {
     val window = LocalAppWindow.current
+    // 本地歌：显示本机音乐库现在的信息，并标出这台设备上有没有文件
+    val localDisplay = rememberLocalDisplay()
+    val localAvailability = rememberLocalAvailability()
     val undo = rememberUndo()
     val settled = rememberSettled()
     val firstRow = remember { FocusRequester() }
@@ -287,15 +300,18 @@ fun HistoryScreen(
             key = { _, it -> "hist:${it.first.key}" },
             contentType = { _, _ -> "song" },
         ) { index, (saved, song) ->
+            val display = localDisplay(song)
+            val local = localAvailability(song)
             SongRow(
-                title = song.title,
-                subtitle = song.artist.ifBlank { song.album },
-                cover = song.cover,
+                title = display.title,
+                subtitle = if (local != null) localSubtitle(display, local) else song.artist.ifBlank { song.album },
+                cover = display.cover,
                 index = index,
                 count = items.size,
                 onClick = { actions.play(song, queue) },
                 modifier = if (focusFirst && index == 0) Modifier.focusRequester(firstRow) else Modifier,
                 playing = state.current?.key == song.key,
+                badges = local?.let { availability -> { LocalSongBadge(availability) } },
                 trailing = {
                     Text(
                         timeLabel(saved.updatedAt),

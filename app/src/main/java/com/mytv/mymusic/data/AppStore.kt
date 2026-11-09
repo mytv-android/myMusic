@@ -26,6 +26,9 @@ import androidx.room.Upsert
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.mytv.mymusic.aggregate.AggregationSettings
+import com.mytv.mymusic.data.local.LocalMusicSettings
+import com.mytv.mymusic.data.local.LocalTrackDao
+import com.mytv.mymusic.data.local.LocalTrackEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -170,6 +173,7 @@ class SettingsStore(private val context: Context) {
     private val sodaSignerTokenKey = stringPreferencesKey("soda_signer_token")
     private val sodaSignerEnabledKey = booleanPreferencesKey("soda_signer_enabled")
     private val aggregationKey = stringPreferencesKey("aggregation")
+    private val localMusicKey = stringPreferencesKey("local_music")
     private val dynamicColorKey = booleanPreferencesKey("dynamic_color")
     private val reduceMotionKey = booleanPreferencesKey("reduce_motion")
     private val volumeNormalizationKey = booleanPreferencesKey("volume_normalization")
@@ -254,6 +258,9 @@ class SettingsStore(private val context: Context) {
             aggregation = runCatching {
                 json.decodeFromString<AggregationSettings>(values[aggregationKey] ?: "")
             }.getOrDefault(AggregationSettings()),
+            localMusic = runCatching {
+                json.decodeFromString<LocalMusicSettings>(values[localMusicKey] ?: "")
+            }.getOrDefault(LocalMusicSettings()),
             dynamicColor = values[dynamicColorKey] ?: false,
             reduceMotion = values[reduceMotionKey] ?: false,
             volumeNormalization = values[volumeNormalizationKey] ?: false,
@@ -520,6 +527,13 @@ class SettingsStore(private val context: Context) {
         it[aggregationKey] = json.encodeToString(value)
     }
 
+    /** 设置 › 本地音乐：在 edit 里读旧值再改，扫描写“上次扫描时间”和用户改开关同时发生也不会互相覆盖。 */
+    suspend fun localMusic(transform: (LocalMusicSettings) -> LocalMusicSettings) = context.dataStore.edit {
+        val current = runCatching { json.decodeFromString<LocalMusicSettings>(it[localMusicKey] ?: "") }
+            .getOrDefault(LocalMusicSettings())
+        it[localMusicKey] = json.encodeToString(transform(current))
+    }
+
     suspend fun saveEqualizer(value: EqualizerSettings) = context.dataStore.edit {
         it[equalizerEnabledKey] = value.enabled
         it[equalizerPresetKey] = value.presetId
@@ -581,6 +595,8 @@ data class AppSettings(
      */
     val thirdPartyLyrics: Boolean = true,
     val aggregation: AggregationSettings = AggregationSettings(),
+    /** 设置 › 本地音乐（扫描范围、匹配、播放兜底）。 */
+    val localMusic: LocalMusicSettings = LocalMusicSettings(),
     val dynamicColor: Boolean = false,
     val reduceMotion: Boolean = false,
     val volumeNormalization: Boolean = false,
@@ -977,8 +993,9 @@ interface AggregateDao {
         MatchCacheEntity::class,
         TrackOverrideEntity::class,
         AutomixAnalysisEntity::class,
+        LocalTrackEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -986,6 +1003,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun library(): LibraryDao
     abstract fun sync(): SyncDao
     abstract fun aggregate(): AggregateDao
+    abstract fun localTracks(): LocalTrackDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -1233,8 +1251,61 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 本地音乐表。列全是 NOT NULL、不带 SQL 默认值：Room 打开库时按实体校验表结构，
+         * 实体没写默认值这里也不能写，否则校验对不上。云端（remote_*）几列先建好，上传落地时不必再迁移。
+         */
+        internal val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `local_tracks` (
+                        `local_id` TEXT NOT NULL,
+                        `uri` TEXT NOT NULL,
+                        `origin` TEXT NOT NULL,
+                        `display_name` TEXT NOT NULL,
+                        `relative_path` TEXT NOT NULL,
+                        `data_path` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `artist` TEXT NOT NULL,
+                        `album` TEXT NOT NULL,
+                        `duration_sec` INTEGER NOT NULL,
+                        `size` INTEGER NOT NULL,
+                        `mime_type` TEXT NOT NULL,
+                        `modified_at` INTEGER NOT NULL,
+                        `added_at` INTEGER NOT NULL,
+                        `bitrate` INTEGER NOT NULL,
+                        `sample_rate` INTEGER NOT NULL,
+                        `bits_per_sample` INTEGER NOT NULL,
+                        `tags_read` INTEGER NOT NULL,
+                        `cover_path` TEXT NOT NULL,
+                        `lrc_uri` TEXT NOT NULL,
+                        `missing` INTEGER NOT NULL,
+                        `match_provider` TEXT NOT NULL,
+                        `match_id` TEXT NOT NULL,
+                        `match_confidence` REAL NOT NULL,
+                        `match_method` TEXT NOT NULL,
+                        `matched_at` INTEGER NOT NULL,
+                        `match_payload` TEXT NOT NULL,
+                        `remote_provider` TEXT NOT NULL,
+                        `remote_id` TEXT NOT NULL,
+                        `remote_playable_id` TEXT NOT NULL,
+                        `remote_status` TEXT NOT NULL,
+                        `remote_updated_at` INTEGER NOT NULL,
+                        `updated_at` INTEGER NOT NULL,
+                        PRIMARY KEY(`local_id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `idx_local_tracks_uri` ON `local_tracks` (`uri`)")
+            }
+        }
+
+        internal val ALL_MIGRATIONS: Array<Migration>
+            get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+
         fun create(context: Context) = Room.databaseBuilder(context, AppDatabase::class.java, "mymusic.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+            .addMigrations(*ALL_MIGRATIONS)
             .build()
     }
 }
