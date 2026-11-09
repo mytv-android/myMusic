@@ -1509,6 +1509,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                 extra = buildMap {
                     put("songmid", item.songmid)
                     if (item.songid > 0) put("song_id", item.songid.toString())
+                    if (item.type > 0) put("song_type", item.type.toString())
                 },
             )
         }
@@ -1553,10 +1554,11 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             source = "qq",
             cover = cover,
             link = "https://y.qq.com/n/ryqq/songDetail/${item.mid}",
-            extra = mapOf(
-                "songmid" to item.mid,
-                "song_id" to item.id.toString(),
-            ),
+            extra = buildMap {
+                put("songmid", item.mid)
+                put("song_id", item.id.toString())
+                if (item.type > 0) put("song_type", item.type.toString())
+            },
         )
     }
 
@@ -1936,10 +1938,11 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             source = "qq",
             cover = cover,
             link = "https://y.qq.com/n/ryqq/songDetail/${item.songmid}",
-            extra = mapOf(
-                "songmid" to item.songmid,
-                "song_id" to item.songid.toString(),
-            ),
+            extra = buildMap {
+                put("songmid", item.songmid)
+                put("song_id", item.songid.toString())
+                if (item.type > 0) put("song_type", item.type.toString())
+            },
         )
     }
 
@@ -2803,6 +2806,7 @@ private data class QQSearchSong(val list: List<QQSearchItem> = emptyList())
 @Serializable
 private data class QQSearchItem(
     val songid: Long = 0,
+    val type: Int = 0,
     val songname: String = "",
     val songmid: String = "",
     val albumname: String = "",
@@ -2987,6 +2991,7 @@ private fun JsonObject.intValue(key: String): Int? =
 @Serializable
 private data class QQCdSong(
     val songid: Long = 0,
+    val type: Int = 0,
     val songname: String = "",
     val songmid: String = "",
     val albumname: String = "",
@@ -3346,6 +3351,7 @@ private data class QQDetailSong(
     val id: Long = 0,
     val name: String = "",
     val mid: String = "",
+    val type: Int = 0,
     val album: QQDetailAlbum = QQDetailAlbum(),
     val singer: List<QQSinger> = emptyList(),
     val interval: Int = 0,

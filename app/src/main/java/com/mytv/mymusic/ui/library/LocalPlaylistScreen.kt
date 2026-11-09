@@ -373,9 +373,9 @@ fun LocalPlaylistScreen(
                 EmptyState(
                     icon = Icons.Filled.Search,
                     title = "歌单还是空的",
-                    message = "点“添加”搜索歌曲，或在任意歌曲的菜单里选择“加到歌单”。",
-                    actionLabel = "添加歌曲",
-                    onAction = { addOpen = true },
+                    message = if (readOnly) "这个歌单是空的。" else "点“添加”搜索歌曲，或在任意歌曲的菜单里选择“加到歌单”。",
+                    actionLabel = if (readOnly) null else "添加歌曲",
+                    onAction = if (readOnly) null else ({ addOpen = true }),
                 )
             }
         }
@@ -656,7 +656,9 @@ fun LocalPlaylistScreen(
         host = unplayable,
         removeLabel = "从歌单移除",
         removeSummary = "所有设备上都会移除",
-        onRemove = { song -> entries.firstOrNull { it.songKey == song.key }?.let { entry -> remove(entry, song) } },
+        onRemove = if (readOnly) null else ({
+            song -> entries.firstOrNull { it.songKey == song.key }?.let { entry -> remove(entry, song) }
+        }),
     )
     actionEntry?.let { (song, entry) ->
         TrackActionsSheet(

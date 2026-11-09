@@ -2424,7 +2424,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun writeErrorMessage(playlist: PlaylistEntity, action: String, error: Throwable): String {
         val name = providerLabel(playlist.linkProvider)
         return when ((error as? PlaylistWriteException)?.failure) {
-            PlaylistWriteFailure.NotLoggedIn -> "请先登录${name}再${action}歌单"
+            PlaylistWriteFailure.NotLoggedIn -> "请先登录${name}再修改歌单"
             PlaylistWriteFailure.NotOwner -> "这是收藏的歌单，不能修改"
             PlaylistWriteFailure.SongNotFound -> "这首歌在${name}里找不到"
             PlaylistWriteFailure.Unsupported -> "${name}暂不支持${action}歌单"
@@ -2497,6 +2497,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             reorderRollback.remove(playlistId)
             reorderJobs.remove(playlistId)
             return true
+        }
+        // QQ 的 SeqSonglist 要求提交全量顺序，提交不全会打乱未提交的歌曲；酷狗同理。
+        // 本地集合和平台不一致（另一台设备刚改过）时先不写，让用户手动同步。
+        val platformSongs = try {
+            app.repository.playlistSongs(
+                playlist.linkProvider,
+                cookieFor(playlist.linkProvider),
+                playlist.linkId,
+            )
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            restoreSnapshot(snapshot)
+            reorderRollback.remove(playlistId)
+            reorderJobs.remove(playlistId)
+            message(writeErrorMessage(playlist, "调整顺序", error), error = true)
+            return false
+        }
+        if (platformSongs.map { it.key }.toSet() != entries.map { it.songKey }.toSet()) {
+            restoreSnapshot(snapshot)
+            reorderRollback.remove(playlistId)
+            reorderJobs.remove(playlistId)
+            message("歌单已在其他设备变化，请先同步再调整顺序", error = true)
+            return false
         }
         try {
             app.repository.reorderPlaylistTracks(
