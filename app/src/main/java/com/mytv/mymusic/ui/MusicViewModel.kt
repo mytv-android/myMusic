@@ -2068,11 +2068,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun playlistAccess(id: String): BoundPlaylistAccess? = _boundAccess.value[id]
 
-    private fun platformSupportsWrite(playlist: PlaylistEntity): Boolean =
-        app.repository.providerInfo(playlist.linkProvider)?.playlistWrite == true
-
     private fun platformSupportsReorder(playlist: PlaylistEntity): Boolean =
         app.repository.providerInfo(playlist.linkProvider)?.playlistReorder == true
+
+    private enum class PlaylistWriteMode { Local, Platform, Unknown }
+
+    /**
+     * 编辑绑定歌单时走哪条路。[Unknown] 是绑定信息指向一个不存在的平台（数据坏了或平台被移除），
+     * 这种情况不能再按老逻辑静默解绑，否则用户会莫名其妙丢绑定。
+     */
+    private fun playlistWriteMode(playlist: PlaylistEntity): PlaylistWriteMode {
+        if (!playlist.bound) return PlaylistWriteMode.Local
+        val info = app.repository.providerInfo(playlist.linkProvider)
+        val mode = when {
+            info == null -> PlaylistWriteMode.Unknown
+            info.playlistWrite -> PlaylistWriteMode.Platform
+            else -> PlaylistWriteMode.Local
+        }
+        AppLog.d(
+            "PlaylistWrite",
+            "mode=$mode playlist=${playlist.id} provider=${playlist.linkProvider} link=${playlist.linkId} " +
+                "write=${info?.playlistWrite} reorder=${info?.playlistReorder}",
+        )
+        return mode
+    }
 
     fun addSongToPlaylist(playlistId: String, song: Song) =
         addSongsToPlaylist(playlistId, listOf(song))
@@ -2086,9 +2105,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         launchPlaylistEdit {
             val playlist = libraryDao.playlistOnce(playlistId) ?: return@launchPlaylistEdit
             if (playlist.deletedAt != null) return@launchPlaylistEdit
-            if (!playlist.bound || !platformSupportsWrite(playlist)) {
-                addSongsToLocalPlaylist(playlist, songs)
-                return@launchPlaylistEdit
+            when (playlistWriteMode(playlist)) {
+                PlaylistWriteMode.Local -> {
+                    addSongsToLocalPlaylist(playlist, songs)
+                    return@launchPlaylistEdit
+                }
+                PlaylistWriteMode.Unknown -> {
+                    message("无法识别绑定的平台：${playlist.linkProvider}", error = true)
+                    return@launchPlaylistEdit
+                }
+                PlaylistWriteMode.Platform -> Unit
             }
             if (playlistAccess(playlistId)?.writable == false) {
                 message("这是收藏的歌单，不能修改", error = true)
@@ -2122,14 +2148,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 playlistId,
                 entries + resolved.mapIndexed { index, song -> entryOf(playlistId, entries.size + index, song) },
             )
+            AppLog.i("PlaylistWrite", "add start provider=$provider link=${playlist.linkId} songs=${resolved.size}")
             try {
                 app.repository.addPlaylistTracks(provider, cookie, playlist.linkId, resolved)
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
+                AppLog.w("PlaylistWrite", "add failed provider=$provider link=${playlist.linkId}: ${error.message}")
                 restoreSnapshot(snapshot)
                 message(writeErrorMessage(playlist, "添加", error), error = true)
                 return@launchPlaylistEdit
             }
+            AppLog.i("PlaylistWrite", "add ok provider=$provider link=${playlist.linkId} songs=${resolved.size}")
             commitBoundWrite(playlistId)
             scheduleBoundReload(playlistId)
             val skipped = songs.size - resolved.size
@@ -2195,9 +2224,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val doomed = positions.toHashSet()
             val doomedEntries = entries.filter { it.position in doomed }
             if (doomedEntries.isEmpty()) return@launchPlaylistEdit
-            if (!playlist.bound || !platformSupportsWrite(playlist)) {
-                removeEntriesLocally(playlistId, doomed)
-                return@launchPlaylistEdit
+            when (playlistWriteMode(playlist)) {
+                PlaylistWriteMode.Local -> {
+                    removeEntriesLocally(playlistId, doomed)
+                    return@launchPlaylistEdit
+                }
+                PlaylistWriteMode.Unknown -> {
+                    message("无法识别绑定的平台：${playlist.linkProvider}", error = true)
+                    return@launchPlaylistEdit
+                }
+                PlaylistWriteMode.Platform -> Unit
             }
             if (playlistAccess(playlistId)?.writable == false) {
                 message("这是收藏的歌单，不能修改", error = true)
@@ -2212,6 +2248,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val platformSongs = doomedEntries.mapNotNull(::decodeEntrySong)
                 .filter { it.source == playlist.linkProvider }
             if (platformSongs.isNotEmpty()) {
+                AppLog.i(
+                    "PlaylistWrite",
+                    "remove start provider=${playlist.linkProvider} link=${playlist.linkId} songs=${platformSongs.size}",
+                )
                 try {
                     app.repository.removePlaylistTracks(
                         playlist.linkProvider,
@@ -2221,10 +2261,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 } catch (error: Exception) {
                     if (error is CancellationException) throw error
+                    AppLog.w(
+                        "PlaylistWrite",
+                        "remove failed provider=${playlist.linkProvider} link=${playlist.linkId}: ${error.message}",
+                    )
                     restoreSnapshot(snapshot)
                     message(writeErrorMessage(playlist, "移除", error), error = true)
                     return@launchPlaylistEdit
                 }
+                AppLog.i("PlaylistWrite", "remove ok provider=${playlist.linkProvider} link=${playlist.linkId}")
             }
             commitBoundWrite(playlistId)
             scheduleBoundReload(playlistId)
@@ -2258,12 +2303,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val entries = source.toMutableList()
             val item = entries.removeAt(index)
             entries.add(target, item)
-            if (!playlist.bound || !platformSupportsWrite(playlist)) {
-                unbindIfBound(playlistId)
-                libraryDao.replaceEntries(playlistId, entries.withIndex().map { (i, entry) -> entry.copy(position = i) })
-                libraryDao.markDirty(playlistId, System.currentTimeMillis())
-                app.sync.onLocalChange()
-                return@launchPlaylistEdit
+            when (playlistWriteMode(playlist)) {
+                PlaylistWriteMode.Local -> {
+                    unbindIfBound(playlistId)
+                    libraryDao.replaceEntries(playlistId, entries.withIndex().map { (i, entry) -> entry.copy(position = i) })
+                    libraryDao.markDirty(playlistId, System.currentTimeMillis())
+                    app.sync.onLocalChange()
+                    return@launchPlaylistEdit
+                }
+                PlaylistWriteMode.Unknown -> {
+                    message("无法识别绑定的平台：${playlist.linkProvider}", error = true)
+                    return@launchPlaylistEdit
+                }
+                PlaylistWriteMode.Platform -> Unit
             }
             if (playlistAccess(playlistId)?.writable == false) {
                 message("这是收藏的歌单，不能修改", error = true)
@@ -2314,9 +2366,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val playlist = libraryDao.playlistOnce(playlistId) ?: return@launchPlaylistEdit
             val entries = libraryDao.entriesOnce(playlistId)
             if (entries.any { it.songKey == songKey }) return@launchPlaylistEdit
-            if (!playlist.bound || !platformSupportsWrite(playlist)) {
-                insertEntryLocally(playlistId, position, songKey, payload)
-                return@launchPlaylistEdit
+            when (playlistWriteMode(playlist)) {
+                PlaylistWriteMode.Local -> {
+                    insertEntryLocally(playlistId, position, songKey, payload)
+                    return@launchPlaylistEdit
+                }
+                PlaylistWriteMode.Unknown -> {
+                    message("无法识别绑定的平台：${playlist.linkProvider}", error = true)
+                    return@launchPlaylistEdit
+                }
+                PlaylistWriteMode.Platform -> Unit
             }
             if (playlistAccess(playlistId)?.writable == false) {
                 message("这是收藏的歌单，不能修改", error = true)
