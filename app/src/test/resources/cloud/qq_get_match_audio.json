@@ -1,0 +1,44 @@
+{
+  "code": 0,
+  "ts": 1762650000000,
+  "req_1": {
+    "code": 0,
+    "data": {
+      "total": 3,
+      "has_more": 0,
+      "info_list": [
+        {
+          "file_id": "wy_7f3e2a",
+          "filename": "5pm05aSpIC0g5ZGo5p2w5LymLmZsYWM=",
+          "filesize": 31457280,
+          "timestamp": 1762650000,
+          "matched": 1,
+          "song_info": {
+            "id": 97773,
+            "mid": "0039MnYb0qxYhV",
+            "name": "晴天",
+            "singer": [{"id": 4558, "mid": "0025NhlN2yWrP4", "name": "周杰伦"}],
+            "album": {"id": 8220, "mid": "000MkMni19ClKG", "pmid": "000MkMni19ClKG_1", "name": "叶惠美"},
+            "interval": 269
+          }
+        },
+        {
+          "file_id": "wy_91c0d4",
+          "filename": "ZGVtb+W9lemfsy5tcDM=",
+          "filesize": "2457600",
+          "timestamp": "1762650100123",
+          "matched": "2",
+          "song_info": {"id": 0, "mid": "", "name": "", "singer": [], "album": {"mid": "", "name": ""}, "interval": 0}
+        },
+        {
+          "fileid": "wy_plain",
+          "file_name": "plain name.mp3",
+          "size": 1024,
+          "timestamp": 0,
+          "matched": true,
+          "song_info": {"id": "12345", "mid": "001abcDEF", "name": "纯文本名", "singer": ["某人"], "album": {"pmid": "002xyz_2", "name": ""}}
+        }
+      ]
+    }
+  }
+}

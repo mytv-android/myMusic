@@ -2324,9 +2324,9 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
 
     /**
      * musicu 接口的登录态：uin 取 cookie 里的 QQ 号，g_tk 由 p_skey/skey 算。
-     * 拿不到登录态时返回匿名的 "0"/5381，行为和以前一致。
+     * 拿不到登录态时返回匿名的 "0"/5381，行为和以前一致。云盘接口（QqCloudApi）也用它，所以是 internal。
      */
-    private fun qqLogin(cookie: String): Pair<String, Int> {
+    internal fun qqLogin(cookie: String): Pair<String, Int> {
         val uin = normalizeQqUin(cookie)
         if (uin.isBlank() || !uin.all { it.isDigit() }) return "0" to 5381
         val skey = firstNonEmpty(cookieValue(cookie, "p_skey"), cookieValue(cookie, "skey"))

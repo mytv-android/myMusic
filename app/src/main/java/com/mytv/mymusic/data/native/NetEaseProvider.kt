@@ -666,11 +666,16 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         )
     }
 
-    private suspend fun weapiPost(
+    /**
+     * 云盘接口（data/cloud/netease）也走这里，所以是 internal。[randomIp] 默认照旧带随机国内 IP；
+     * 云盘上传传 false：同一串上传请求里 IP 来回跳，容易被当成异常环境回 -460。
+     */
+    internal suspend fun weapiPost(
         url: String,
         body: JsonObject,
         cookie: String,
         sendCookie: Boolean = true,
+        randomIp: Boolean = true,
     ): NativeResponse {
         val (params, encSecKey) = NativeCrypto.encryptWeApi(body.toString())
         return NativeHttp.postForm(
@@ -678,7 +683,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             mapOf("params" to params, "encSecKey" to encSecKey),
             headers = mapOf("Referer" to REFERER),
             cookie = if (sendCookie) cookie else "",
-            randomIp = true,
+            randomIp = randomIp,
         )
     }
 

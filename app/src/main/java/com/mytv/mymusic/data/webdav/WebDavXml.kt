@@ -28,6 +28,14 @@ data class WebDavResource(
 }
 
 /**
+ * RFC 4331 的容量属性。[availableBytes] 为 -1 表示服务器没说（或说的是负数，即不限）；
+ * [usedBytes] 同理。
+ */
+data class WebDavQuota(val availableBytes: Long, val usedBytes: Long) {
+    val known: Boolean get() = availableBytes >= 0 || usedBytes >= 0
+}
+
+/**
  * 解析 207 Multi-Status。各家写法差得很远，所以不按前缀认元素，只认“DAV: 命名空间 + 本地名”：
  * - Apache mod_dav 用 `D:`，活属性却挂在 `lp1:`（同样绑到 DAV:）上；
  * - Nextcloud 用 `d:`，再混进 `oc:` / `nc:` 的私有属性，找不到的属性放在 404 的 propstat 里；
@@ -86,6 +94,33 @@ object WebDavXml {
             lastModified = parseHttpDate(props["getlastmodified"]?.textContent),
             displayName = props["displayname"]?.textContent?.trim()?.takeIf { it.isNotEmpty() },
         )
+    }
+
+    /**
+     * 容量 PROPFIND（Depth 0）的结果：取第一个 response 里成功的 propstat 中的
+     * `quota-available-bytes` / `quota-used-bytes`。两个都没有返回 null（多数服务器放在 404 的 propstat 里）。
+     */
+    fun parseQuota(xml: String): WebDavQuota? {
+        if (xml.contains("<!DOCTYPE", ignoreCase = true)) {
+            throw WebDavException(WebDavErrorKind.InvalidResponse, "服务器返回了带 DOCTYPE 的 XML")
+        }
+        val root = try {
+            newBuilderFactory().newDocumentBuilder().parse(InputSource(StringReader(xml))).documentElement
+        } catch (error: Exception) {
+            throw WebDavException(WebDavErrorKind.InvalidResponse, "服务器返回的 XML 无法解析", cause = error)
+        } ?: return null
+        if (!root.isDav("multistatus")) return null
+        val response = root.davChildren("response").firstOrNull() ?: return null
+        val props = response.davChildren("propstat")
+            .filter { statusCode(it.davChildren("status").firstOrNull()?.textContent) in 200..299 }
+            .flatMap { it.davChildren("prop") }
+            .flatMap { it.childElements() }
+            .filter { it.isDav() }
+            .associateBy { it.localNameOrSuffix() }
+        fun bytes(name: String): Long =
+            props[name]?.textContent?.trim()?.toBigDecimalOrNull()?.toLong()?.takeIf { it >= 0 } ?: -1
+        val quota = WebDavQuota(bytes("quota-available-bytes"), bytes("quota-used-bytes"))
+        return quota.takeIf { it.known }
     }
 
     /** `HTTP/1.1 200 OK` → 200；没有 status 时按成功处理（有些服务器省略它）。 */

@@ -321,6 +321,22 @@ class WebDavClient(
         execute(request) { response -> if (!response.isSuccessful) throw httpError(response) }
     }
 
+    /**
+     * 容量（RFC 4331）：PROPFIND Depth 0 只要 quota-available-bytes / quota-used-bytes。
+     * 服务器不支持时返回 null；路径不存在照常抛 NotFound。
+     */
+    suspend fun quota(path: String = ""): WebDavQuota? {
+        val request = Request.Builder()
+            .url(url(collectionPath(path)))
+            .method("PROPFIND", QUOTA_BODY.toRequestBody(XML))
+            .header("Depth", "0")
+            .build()
+        return execute(request) { response ->
+            if (response.code != 207 && response.code != 200) throw httpError(response)
+            WebDavXml.parseQuota(response.body.string())
+        }
+    }
+
     fun stream(path: String): WebDavStream = WebDavStream(
         url = url(path).toString(),
         headers = mapOf("Authorization" to Credentials.basic(account.username, account.password, Charsets.UTF_8)),
@@ -447,6 +463,9 @@ class WebDavClient(
 
         private const val PROPFIND_BODY = """<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getetag/><d:getcontenttype/><d:getlastmodified/><d:displayname/></d:prop></d:propfind>"""
+
+        private const val QUOTA_BODY = """<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:"><d:prop><d:quota-available-bytes/><d:quota-used-bytes/></d:prop></d:propfind>"""
 
         /** 同步用的超时；流播 / 上传要自己 newBuilder() 改长，别直接沿用（见规格 8.4）。 */
         val defaultBase: OkHttpClient by lazy {

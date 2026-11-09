@@ -1,0 +1,48 @@
+{
+  "code": 200,
+  "count": 2,
+  "size": "1073741824",
+  "maxSize": "64424509440",
+  "upgradeSign": 0,
+  "hasMore": true,
+  "data": [
+    {
+      "simpleSong": {
+        "name": "雨季备忘",
+        "id": 1987654321,
+        "ar": [{"id": 12138, "name": "林夕"}, {"id": 12139, "name": "陈奕迅"}],
+        "al": {"id": 34567, "name": "旧唱片", "picUrl": "https://p1.music.126.net/cover.jpg"},
+        "dt": 245000
+      },
+      "songId": 1987654321,
+      "addTime": 1762650000000,
+      "songName": "雨季备忘",
+      "album": "旧唱片",
+      "artist": "林夕",
+      "bitrate": 999000,
+      "fileName": "雨季备忘.flac",
+      "fileSize": 31457280,
+      "md5": "0F343B0931126A20F133D67C2B018A3B",
+      "matchType": "matched"
+    },
+    {
+      "simpleSong": {
+        "name": "demo 录音",
+        "id": 3000000123,
+        "ar": [{"id": 0, "name": ""}],
+        "al": {"id": 0, "name": null, "picUrl": null},
+        "dt": 61000
+      },
+      "songId": "3000000456",
+      "addTime": "1762650100000",
+      "songName": "demo 录音",
+      "album": "未知专辑",
+      "artist": "我",
+      "bitrate": 320,
+      "fileName": "demo 录音.mp3",
+      "fileSize": "2457600",
+      "md5": "aa11bb22cc33dd44ee55ff6600778899",
+      "matchType": "unmatched"
+    }
+  ]
+}
