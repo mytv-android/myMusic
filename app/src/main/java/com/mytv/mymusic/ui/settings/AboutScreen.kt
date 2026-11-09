@@ -1,6 +1,7 @@
 package com.mytv.mymusic.ui.settings
 
 import android.content.ClipData
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
@@ -46,13 +48,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mytv.mymusic.R
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
 import com.mytv.mymusic.data.update.formatSize
@@ -329,22 +334,24 @@ private fun LinkQrCell(
     }
 }
 
+/** 与 res/drawable/ic_launcher_background.xml 相同的渐变（左上到右下）；那份 XML 由品牌仓库生成，改色时两处一起改。 */
+private val LauncherIconBackground = Brush.linearGradient(
+    listOf(Color(0xFF1E9483), Color(0xFF006B5F), Color(0xFF00524A)),
+)
+
 @Composable
 private fun AppHeader(versionName: String, versionCode: Long) {
     Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        // 桌面图标原样：自适应图标的背景渐变 + 前景（屏幕框和音符）。前景画布 108dp、可见区 72dp，
+        // 所以前景按 84 × 108 / 72 = 126dp 画，超出部分被圆角裁掉，和启动器里看到的比例一致
         Box(
             Modifier
                 .size(84.dp)
                 .clip(RoundedCornerShape(28.dp))
-                .background(MaterialTheme.colorScheme.primary),
+                .background(LauncherIconBackground),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                "m",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onPrimary,
-            )
+            Image(painterResource(R.drawable.ic_launcher_foreground), null, Modifier.requiredSize(126.dp))
         }
         Text("myMusic", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.headlineSmall)
         Text(
