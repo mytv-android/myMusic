@@ -43,6 +43,7 @@ import com.mytv.mymusic.data.CanonicalSourceEntity
 import com.mytv.mymusic.data.CanonicalTrackEntity
 import com.mytv.mymusic.data.DOWNLOAD_ACTIVE
 import com.mytv.mymusic.data.DOWNLOAD_DONE
+import com.mytv.mymusic.data.DOWNLOAD_FAILED
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.ListenTaskState
 import com.mytv.mymusic.data.native.SodaApplyFreeVipResult
@@ -587,7 +588,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 val dao = app.database.dao()
                 dao.downloads().first()
-                    .filter { it.state != DOWNLOAD_DONE && it.updatedAt < downloadsAtStart }
+                    .filter { it.state == DOWNLOAD_ACTIVE && it.updatedAt < downloadsAtStart }
                     .forEach { record ->
                         File(record.path).delete()
                         File("${record.path}.part").delete()
@@ -2311,6 +2312,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         try {
             downloadSong(song)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Exception) {
+            message(error.message?.takeIf { it.isNotBlank() } ?: "下载失败", error = true)
         } finally {
             downloading.remove(song.key)
         }
@@ -2337,13 +2342,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             dao.saveDownload(
                 DownloadRecord(
                     song.key,
-                    json.encodeToString(song),
+                    json.encodeToString(song.copy(url = "")),
                     targetFile(song.ext.ifBlank { "mp3" }.lowercase()).absolutePath,
                     DOWNLOAD_ACTIVE,
                     System.currentTimeMillis(),
                 )
             )
         }
+        message("开始下载「${song.title}」")
 
         var failure: Throwable? = null
         val resolved = runCatching { resolvePlayable(canonicalForSong(song), forDownload = true) }
@@ -2354,18 +2360,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             .getOrNull()
         val ready = resolved?.resolution as? Resolution.Ready
         if (resolved == null || ready == null || ready.url.isBlank()) {
-            restoreDownload(song.key, previous)
             val text = resolved?.let { noSourceMessage(it.track, it.resolution) }
                 ?.takeIf { it.isNotBlank() }
                 ?: failure?.message?.takeIf { it.isNotBlank() }
                 ?: "没有可下载的地址"
+            markDownloadFailed(song, previous, text)
             message(text, error = true)
             return
         }
         // 试听片段不是整曲，不能落成「已下载」（正常流程里 forDownload 已经排除了它，这里兜底）
         if (ready.isPreview) {
-            restoreDownload(song.key, previous)
-            message("「${song.title}」当前账号只能试听，无法下载整曲", error = true)
+            val text = "「${song.title}」当前账号只能试听，无法下载整曲"
+            markDownloadFailed(song, previous, text)
+            message(text, error = true)
             return
         }
         val url = ready.url
@@ -2401,8 +2408,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             throw cancel
         } catch (error: Exception) {
             temp.delete()
-            restoreDownload(song.key, previous)
-            message(error.message?.takeIf { it.isNotBlank() } ?: "下载失败", error = true)
+            val text = error.message?.takeIf { it.isNotBlank() } ?: "下载失败"
+            markDownloadFailed(song, previous, text)
+            message(text, error = true)
             return
         }
         val stored = song.copy(url = "", ext = extension, bitrate = ready.source.song.bitrate, size = size)
@@ -2411,6 +2419,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
         if (previous != null && previous.path != file.absolutePath) File(previous.path).delete()
         message("已下载「${song.title}」（${extension.uppercase(Locale.ROOT)}）")
+    }
+
+    /** 下载失败留下一条可见的记录，下载页能提示原因并直接重试；上一次已经下好的保持原样。 */
+    private suspend fun markDownloadFailed(song: Song, previous: DownloadRecord?, text: String) {
+        if (previous != null && File(previous.path).isFile) {
+            app.database.dao().saveDownload(previous)
+            return
+        }
+        app.database.dao().saveDownload(
+            DownloadRecord(
+                song.key,
+                json.encodeToString(song.copy(url = "")),
+                "",
+                DOWNLOAD_FAILED,
+                System.currentTimeMillis(),
+                text,
+            )
+        )
     }
 
     /** 下载没成时恢复上一次已完成的记录；没有旧记录就删掉「下载中」占位。 */
@@ -2423,7 +2449,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteDownload(record: DownloadRecord) = viewModelScope.launch {
-        File(record.path).delete()
+        if (record.path.isNotBlank()) File(record.path).delete()
         app.database.dao().deleteDownload(record.key)
     }
 

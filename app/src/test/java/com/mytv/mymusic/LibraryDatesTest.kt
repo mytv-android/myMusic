@@ -3,7 +3,9 @@ package com.mytv.mymusic
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.DOWNLOAD_ACTIVE
 import com.mytv.mymusic.data.DOWNLOAD_DONE
+import com.mytv.mymusic.data.DOWNLOAD_FAILED
 import com.mytv.mymusic.ui.library.DownloadDiskStat
 import com.mytv.mymusic.ui.library.DownloadSnapshot
 import com.mytv.mymusic.ui.library.prepareDownloads
@@ -116,7 +118,7 @@ class LibraryDatesTest {
     @Test
     fun downloadSnapshotReusesDiskButRefreshesFreeSpaceForActiveChanges() {
         val done = DownloadRecord("test:done", """{"id":"done","name":"Done","source":"test"}""", "/done.flac", DOWNLOAD_DONE, 1L)
-        val active = DownloadRecord("test:active", """{"id":"active","name":"Active","source":"test"}""", "/active.flac", "下载中", 2L)
+        val active = DownloadRecord("test:active", """{"id":"active","name":"Active","source":"test"}""", "/active.flac", DOWNLOAD_ACTIVE, 2L)
         var probes = 0
         val first = prepareDownloads(listOf(done), DownloadSnapshot(), { probes++; DownloadDiskStat(1_000L, true) }, { 9_000L })
         val next = prepareDownloads(listOf(done, active), first, { probes++; DownloadDiskStat(0L, false) }, { 8_000L })
@@ -166,13 +168,22 @@ class LibraryDatesTest {
             key = "test:active",
             payload = "{}",
             path = "/downloads/active.flac",
-            state = "下载中",
+            state = DOWNLOAD_ACTIVE,
             updatedAt = 3L,
+        )
+        val failed = DownloadRecord(
+            key = "test:failed",
+            payload = "{}",
+            path = "",
+            state = DOWNLOAD_FAILED,
+            updatedAt = 4L,
+            error = "当前账号只能试听",
         )
         val decoded = listOf(
             done to Song(id = "done", name = "Done", source = "test"),
             missing to Song(id = "missing", name = "Missing", source = "test"),
             active to Song(id = "active", name = "Active", source = "test"),
+            failed to Song(id = "failed", name = "Failed", source = "test"),
         )
         val disk = mapOf(
             done.path to DownloadDiskStat(size = 1_000L, exists = true),
@@ -183,6 +194,8 @@ class LibraryDatesTest {
 
         assertEquals(listOf(done, missing), sections.done.map { it.record })
         assertEquals(listOf(active), sections.active.map { it.record })
+        assertEquals(listOf(failed), sections.failed.map { it.record })
+        assertEquals("当前账号只能试听", sections.failed.single().record.error)
         assertEquals(1_500L, sections.doneBytes)
         assertEquals(1_000L, sections.done[0].size)
         assertFalse(sections.done[0].missing)

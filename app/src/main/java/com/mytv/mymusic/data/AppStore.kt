@@ -662,10 +662,19 @@ data class SavedSongTombstone(
 
 /** 下载记录状态。进行中的记录只活在当前进程里，进程重启后由 ViewModel 清理。 */
 const val DOWNLOAD_ACTIVE = "下载中"
+const val DOWNLOAD_FAILED = "下载失败"
 const val DOWNLOAD_DONE = "已完成"
 
 @Entity(tableName = "downloads")
-data class DownloadRecord(@PrimaryKey val key: String, val payload: String, val path: String, val state: String, val updatedAt: Long)
+data class DownloadRecord(
+    @PrimaryKey val key: String,
+    val payload: String,
+    val path: String,
+    val state: String,
+    val updatedAt: Long,
+    /** 失败原因，只对 [DOWNLOAD_FAILED] 有意义。 */
+    val error: String = "",
+)
 
 /** 切歌过渡的离线分析结果：节拍网格、响度、调性、首尾和段落，按曲目 key 存。 */
 @Entity(tableName = "automix_analysis")
@@ -969,7 +978,7 @@ interface AggregateDao {
         TrackOverrideEntity::class,
         AutomixAnalysisEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -1217,8 +1226,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** 下载失败要把原因留在记录里，下载页才能提示为什么失败。 */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `downloads` ADD COLUMN `error` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun create(context: Context) = Room.databaseBuilder(context, AppDatabase::class.java, "mymusic.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
             .build()
     }
 }

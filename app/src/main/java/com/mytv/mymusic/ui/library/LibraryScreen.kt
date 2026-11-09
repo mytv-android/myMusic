@@ -112,6 +112,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.DOWNLOAD_DONE
+import com.mytv.mymusic.data.DOWNLOAD_FAILED
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.ListenTaskState
 import com.mytv.mymusic.ui.SodaWelfareUi
@@ -734,6 +735,7 @@ internal class LibraryStats(
     val historyTotal: Int,
     val downloadsDone: Int,
     val downloadsActive: Int,
+    val downloadsFailed: Int,
     val downloadBytes: Long,
 ) {
     val historyLabel: String get() = when {
@@ -743,6 +745,7 @@ internal class LibraryStats(
     }
     val downloadLabel: String get() = when {
         downloadsActive > 0 -> "$downloadsActive 首下载中"
+        downloadsFailed > 0 -> "$downloadsFailed 首下载失败"
         downloadsDone > 0 -> "$downloadsDone 首 · ${formatBytes(downloadBytes)}"
         else -> "还没有下载"
     }
@@ -773,7 +776,8 @@ internal fun rememberLibraryStats(
             historyToday = history.count { it.updatedAt >= today },
             historyTotal = history.size,
             downloadsDone = done.size,
-            downloadsActive = downloads.size - done.size,
+            downloadsActive = downloads.count { it.state != DOWNLOAD_DONE && it.state != DOWNLOAD_FAILED },
+            downloadsFailed = downloads.count { it.state == DOWNLOAD_FAILED },
             downloadBytes = downloadBytes,
         )
     }
@@ -945,6 +949,7 @@ private fun LibraryBentoRow(
             title = "下载",
             detail = when {
                 stats.downloadsActive > 0 -> "${stats.downloadsActive} 首下载中"
+                stats.downloadsFailed > 0 -> "${stats.downloadsFailed} 首下载失败"
                 stats.downloadsDone > 0 -> "${stats.downloadsDone} 首"
                 else -> "暂无下载"
             },

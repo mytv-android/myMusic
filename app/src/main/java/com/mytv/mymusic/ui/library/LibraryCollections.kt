@@ -66,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.DOWNLOAD_DONE
+import com.mytv.mymusic.data.DOWNLOAD_FAILED
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
@@ -432,9 +433,10 @@ fun DownloadsScreen(
     }
     val done = prepared.sections.done
     val active = prepared.sections.active
+    val failed = prepared.sections.failed
     val freeBytes = prepared.freeBytes
     val doneBytes = prepared.sections.doneBytes
-    TvDefaultFocus(firstRow, done.isEmpty())
+    TvDefaultFocus(firstRow, done.isEmpty() && failed.isEmpty())
 
     val summary: LazyListScope.() -> Unit = {
         item(key = "usage", contentType = "usage") { StorageCard(done.size, doneBytes, cacheBytes, freeBytes) }
@@ -449,6 +451,39 @@ fun DownloadsScreen(
                     count = active.size,
                     onClick = {},
                     trailing = { CircularProgressIndicator(Modifier.padding(end = 4.dp).size(24.dp), strokeWidth = 3.dp) },
+                )
+            }
+        }
+        if (failed.isNotEmpty()) {
+            item(key = "failedHead", contentType = "header") { DayLabel("下载失败") }
+            itemsIndexed(failed, key = { _, it -> "failed:${it.record.key}" }, contentType = { _, _ -> "download" }) { index, item ->
+                SongRow(
+                    title = item.song.title,
+                    subtitle = listOf(
+                        item.song.artist.ifBlank { "未知歌手" },
+                        item.record.error.ifBlank { "下载失败" },
+                        "点按重试",
+                    ).joinToString(" · "),
+                    cover = item.song.cover,
+                    index = index,
+                    count = failed.size,
+                    // 失败记录点按直接重下；电视菜单键或行尾按钮删除这条记录
+                    onClick = { actions.download(item.song) },
+                    modifier = Modifier
+                        .then(if (index == 0) Modifier.focusRequester(firstRow) else Modifier)
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && event.key == Key.Menu) {
+                                deleting = item.record
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                    trailing = {
+                        IconButton(onClick = { deleting = item.record }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                            Icon(Icons.Outlined.Delete, "删除“${item.song.title}”的下载记录", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
                 )
             }
         }
@@ -480,7 +515,7 @@ fun DownloadsScreen(
                 onClick = { actions.playDownload(item.record) },
                 // 电视：菜单键删除文件；其余设备用行尾的删除按钮
                 modifier = Modifier
-                    .then(if (index == 0) Modifier.focusRequester(firstRow) else Modifier)
+                    .then(if (index == 0 && failed.isEmpty()) Modifier.focusRequester(firstRow) else Modifier)
                     .onPreviewKeyEvent { event ->
                         if (event.type == KeyEventType.KeyDown && event.key == Key.Menu) {
                             deleting = item.record
@@ -499,7 +534,7 @@ fun DownloadsScreen(
         }
     }
 
-    PageScaffold(title = "下载", subtitle = if (window.isTv) "菜单键删除文件" else "", onBack = onBack) { padding ->
+    PageScaffold(title = "下载", subtitle = if (window.isTv) "失败项点按重试，菜单键删除" else "", onBack = onBack) { padding ->
         when {
             downloads.isEmpty() && !settled -> SkeletonRows(6, Modifier.padding(padding).padding(horizontal = window.gutter))
             downloads.isEmpty() -> CenteredEmpty(padding) {
@@ -523,8 +558,12 @@ fun DownloadsScreen(
 
     deleting?.let { record ->
         ConfirmDialog(
-            title = "删除下载文件",
-            message = "会删除本机上的音频文件，不影响收藏和歌单。",
+            title = if (record.state == DOWNLOAD_FAILED) "移除下载记录" else "删除下载文件",
+            message = if (record.state == DOWNLOAD_FAILED) {
+                "只移除这条失败记录，不影响收藏和歌单。"
+            } else {
+                "会删除本机上的音频文件，不影响收藏和歌单。"
+            },
             confirmLabel = "删除",
             danger = true,
             onConfirm = { actions.deleteDownload(record) },
@@ -558,7 +597,11 @@ internal class DownloadDiskStat(val size: Long, val exists: Boolean)
 
 internal class DownloadItem(val record: DownloadRecord, val song: Song, val size: Long, val missing: Boolean)
 
-internal class DownloadSections(val done: List<DownloadItem>, val active: List<DownloadItem>) {
+internal class DownloadSections(
+    val done: List<DownloadItem>,
+    val active: List<DownloadItem>,
+    val failed: List<DownloadItem> = emptyList(),
+) {
     val doneBytes: Long = done.sumOf { it.size }
 }
 
@@ -572,15 +615,18 @@ internal fun prepareDownloadSections(
 ): DownloadSections {
     val done = ArrayList<DownloadItem>()
     val active = ArrayList<DownloadItem>()
+    val failed = ArrayList<DownloadItem>()
     decoded.forEach { (record, song) ->
-        if (record.state == DOWNLOAD_DONE) {
-            val stat = disk[record.path]
-            done += DownloadItem(record, song, stat?.size ?: 0L, stat?.exists == false)
-        } else {
-            active += DownloadItem(record, song, 0L, false)
+        when (record.state) {
+            DOWNLOAD_DONE -> {
+                val stat = disk[record.path]
+                done += DownloadItem(record, song, stat?.size ?: 0L, stat?.exists == false)
+            }
+            DOWNLOAD_FAILED -> failed += DownloadItem(record, song, 0L, false)
+            else -> active += DownloadItem(record, song, 0L, false)
         }
     }
-    return DownloadSections(done, active)
+    return DownloadSections(done, active, failed)
 }
 
 /** 占用条：下载、播放缓存、剩余空间三段，图例用文字标出数值。 */
