@@ -494,6 +494,11 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         song.extra["fileid"].orEmpty().toLongOrNull()?.takeIf { it > 0 }?.let { return it }
         val hash = song.extra["hash"].orEmpty().ifBlank { song.id }
         page.fileIds[hash]?.let { return it }
+        // 刚加进来的歌还没刷新到本地时，hash 可能和详情里选中的文件不一致，按歌名歌手回退
+        val matched = page.songs.firstOrNull {
+            it.name.equals(song.name, ignoreCase = true) && it.artist == song.artist
+        }
+        matched?.extra?.get("fileid")?.toLongOrNull()?.takeIf { it > 0 }?.let { return it }
         throw PlaylistWriteException(
             "kugou fileid not found: ${song.name.ifBlank { song.id }}",
             PlaylistWriteFailure.SongNotFound,
