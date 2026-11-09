@@ -3097,13 +3097,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             else -> ""
         }
         dormant = null
+        AppLog.d(
+            "Player",
+            "起播《${resolvedSong.title}》${source.providerName}${if (local != null) "（本机文件）" else ""}" +
+                "，队列 ${queueSongs.size} 首，从第 ${startIndex.coerceAtLeast(0) + 1} 首",
+        )
         player.setMediaItems(queueSongs.map(::mediaItem), startIndex.coerceAtLeast(0), 0)
         player.prepare()
         player.play()
+        val requestId = base.value.queueId + 1
         base.value = base.value.copy(
             queue = queueSongs,
             canonicalQueue = canonicalQueue,
-            queueId = base.value.queueId + 1,
+            queueId = requestId,
             current = resolvedSong,
             currentTrack = playableTrack,
             currentSource = source,
@@ -3112,10 +3118,43 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             error = "",
             deepLink = "",
         )
+        verifyQueueApplied(player, requestId)
         rememberCanonical(playableTrack)
         remember("history", historySong(resolvedSong))
         loadLyrics(resolvedSong)
         return true
+    }
+
+    /**
+     * MediaController 的命令要经会话转给播放器，会话正好在换播放器（交叉淡化换主）或刚重连时会被顶掉：
+     * 界面已经换了歌，播放器却还是上一份队列，听感就是「点了没切」。装上以后核对一次，对不上补装一遍。
+     */
+    private fun verifyQueueApplied(player: MediaController, requestId: Int, retried: Boolean = false) {
+        viewModelScope.launch {
+            fun stillCurrent() = controller === player && base.value.queueId == requestId
+            fun applied(): Boolean {
+                val currentKey = base.value.current?.key ?: return true
+                return player.mediaItemCount == base.value.queue.size && player.currentMediaItem?.mediaId == currentKey
+            }
+            delay(QUEUE_APPLY_CHECK_MS)
+            if (!stillCurrent() || applied()) return@launch
+            // 会话推送可能比命令慢一点：再等一会儿核对，别把正常的慢当成没装上
+            delay(QUEUE_APPLY_RECHECK_MS)
+            if (!stillCurrent() || applied()) return@launch
+            val queue = base.value.queue
+            val currentKey = base.value.current?.key ?: return@launch
+            AppLog.w(
+                "Player",
+                "点歌没切过去：播放器在《${player.currentMediaItem?.mediaMetadata?.title}》（${player.mediaItemCount} 首），" +
+                    "界面是《${base.value.current?.title}》（${queue.size} 首）" + if (retried) "，重装后仍不符" else "，重装队列",
+            )
+            if (retried) return@launch
+            val index = queue.indexOfFirst { it.key == currentKey }.coerceAtLeast(0)
+            player.setMediaItems(queue.map(::mediaItem), index, 0)
+            player.prepare()
+            player.play()
+            verifyQueueApplied(player, requestId, retried = true)
+        }
     }
 
     fun openSource(track: CanonicalTrack, queue: List<CanonicalTrack> = _search.value.aggregateGroups) {
@@ -3600,6 +3639,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun queueIndexOf(track: CanonicalTrack, hint: Int): Int {
         val queue = base.value.canonicalQueue
         return if (queue.getOrNull(hint)?.id == track.id) hint else queue.indexOfFirst { it.id == track.id }
+    }
+
+    /**
+     * 播放器报的当前曲目对到队列里的哪一首。按 mediaId（就是 [Song.key]）认，不按下标：
+     * 队列刚换、播放器还停在上一份队列上时下标会指到别的歌，界面就会先跳到一首不相干的歌上。
+     */
+    private fun queueSongFor(player: Player): Song? {
+        val id = player.currentMediaItem?.mediaId
+        if (!id.isNullOrBlank()) return base.value.queue.firstOrNull { it.key == id }
+        return base.value.queue.getOrNull(player.currentMediaItemIndex)
     }
 
     fun clearQueue() {
@@ -4364,7 +4413,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         override fun onEvents(player: Player, events: Player.Events) {
             // 从磁盘接上的队列还没装进播放器：播放器是空的，进度和时长都以存下来的为准
             val sleeping = dormant != null && player.mediaItemCount == 0
-            val song = if (sleeping) null else base.value.queue.getOrNull(player.currentMediaItemIndex)
+            val song = if (sleeping) null else queueSongFor(player)
             val previous = base.value.current
             val rawDuration = player.duration
             val duration = when {
@@ -5736,6 +5785,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 队列变动后停这么久再落盘，连续改队列（听歌模式续一批、批量加入）只写一次。 */
         const val QUEUE_SAVE_DEBOUNCE_MS = 1_000L
+
+        /** 点歌后等这么久核对播放器里是不是换成了这份队列（命令经会话转发，没装上就补一次）。 */
+        const val QUEUE_APPLY_CHECK_MS = 2_000L
+
+        /** 第一遍没对上时再等一会儿：会话把播放器状态推回控制器本身就有延迟。 */
+        const val QUEUE_APPLY_RECHECK_MS = 800L
 
         /** 进度循环 100ms 一圈：歌词换行、系统媒体条和进度条都靠它，越密跟得越紧。100 圈（10 秒）存一次位置。 */
         const val PROGRESS_TICK_MS = 100L
