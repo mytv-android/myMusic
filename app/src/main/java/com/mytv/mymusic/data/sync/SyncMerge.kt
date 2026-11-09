@@ -65,7 +65,7 @@ object SyncMerge {
             SyncRefMerge.index(remote),
         )
         return MergeResult(
-            playlists = playlists,
+            playlists = withKnownLinks(playlists, local.playlists),
             favorites = favorites,
             cookies = mergeCookies(base?.cookies.orEmpty(), local.cookies, remote.cookies),
             conflicts = conflicts,
@@ -84,7 +84,7 @@ object SyncMerge {
             emptyList(),
             SyncRefMerge.index(listOfNotNull(local), emptyList()),
             SyncRefMerge.index(listOfNotNull(remote), emptyList()),
-        ).first.single()
+        ).first.let { withKnownLinks(it, listOfNotNull(local)) }.single()
     }
 
     fun applyStrategy(
@@ -100,7 +100,20 @@ object SyncMerge {
             SyncRefMerge.index(local),
             SyncRefMerge.index(remote),
         )
-        return content.copy(playlists = playlists, favorites = favorites)
+        return content.copy(playlists = withKnownLinks(playlists, local.playlists), favorites = favorites)
+    }
+
+    /**
+     * 选中的是 v2 文件里的那一版时，它不知道绑定状态（[SyncPlaylist.linkKnown] = false）：
+     * 用本机同一个歌单的绑定补上再推，不然推上去的 v3 文件会写成“没绑定”，让其他设备误解绑。
+     */
+    fun withKnownLinks(playlists: List<SyncPlaylist>, local: List<SyncPlaylist>): List<SyncPlaylist> {
+        if (playlists.all { it.linkKnown }) return playlists
+        val localLinks = local.associate { it.id to it.link.takeIf { _ -> it.linkKnown } }
+        return playlists.map { playlist ->
+            if (playlist.linkKnown) playlist
+            else playlist.copy(link = if (playlist.deletedAt == null) localLinks[playlist.id] else null, linkKnown = true)
+        }
     }
 
     private fun chooseContent(

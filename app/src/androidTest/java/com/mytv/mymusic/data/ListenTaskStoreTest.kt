@@ -26,7 +26,8 @@ class ListenTaskStoreTest {
         store.addListening(11 * 60 * 1000L)
         val after = store.state.first()
         assertEquals(before + 11 * 60, after.todaySeconds)
-        assertEquals(11, after.todayMinutes)
+        // 设备上今天可能已经听过一段：分钟数也按“之前的秒数 + 11 分钟”推，不能写死 11
+        assertEquals((before + 11 * 60) / 60, after.todayMinutes)
 
         // 落盘后重新建 store（等于换进程）还能读回来
         val fresh = ListenTaskStore(context)

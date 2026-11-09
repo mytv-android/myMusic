@@ -1457,8 +1457,16 @@ class SyncCoordinator(
         val deletedAt = playlist.deletedAt?.let(SyncTime::toMillis)
         val createdAt = SyncTime.toMillis(playlist.createdAt).takeIf { it > 0 } ?: System.currentTimeMillis()
         val updatedAt = SyncTime.toMillis(playlist.updatedAt).takeIf { it > 0 } ?: System.currentTimeMillis()
-        // 同步快照不带平台绑定：保留本机已有的 link_*，否则一次拉取就把绑定抹掉了
         val existing = libraryDao.playlistOnce(playlist.id)
+        // 绑定跟着歌单走：另一台设备编辑过（会自动解绑）或解除了绑定，本机也解绑，免得本机的定时刷新
+        // 拿平台内容把那边加的歌冲掉。v2 文件不带绑定（linkKnown=false），沿用本机已有的
+        val link = if (playlist.linkKnown) {
+            playlist.link?.takeIf { it.bound }
+        } else {
+            existing?.takeIf { it.bound }?.let { SyncLink(it.linkProvider, it.linkId, it.linkCover) }
+        }
+        val sameLink = link != null && existing != null &&
+            existing.linkProvider == link.provider && existing.linkId == link.id
         libraryDao.putPlaylist(
             PlaylistEntity(
                 id = playlist.id,
@@ -1467,10 +1475,15 @@ class SyncCoordinator(
                 updatedAt = updatedAt,
                 dirty = dirty,
                 deletedAt = deletedAt,
-                linkProvider = existing?.linkProvider.orEmpty(),
-                linkId = existing?.linkId.orEmpty(),
-                linkCover = existing?.linkCover.orEmpty(),
-                linkSyncedAt = existing?.linkSyncedAt ?: 0L,
+                linkProvider = link?.provider.orEmpty(),
+                linkId = link?.id.orEmpty(),
+                linkCover = link?.cover.orEmpty(),
+                // 节流时间是本机的：同一个绑定照旧；新绑上的按那一版的修改时间算，内容已经是那台设备刷新过的
+                linkSyncedAt = when {
+                    link == null -> 0L
+                    sameLink -> existing!!.linkSyncedAt
+                    else -> updatedAt
+                },
             )
         )
         if (deletedAt != null) {

@@ -8,6 +8,7 @@ import com.mytv.mymusic.data.Song
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.security.MessageDigest
@@ -19,6 +20,9 @@ const val SCHEMA = "mymusic.library"
  * 这是有意的：旧客户端不认识这几个字段，写回时会把别的设备记下的云端位置和匹配结果丢掉。
  */
 const val SCHEMA_VERSION = 3
+
+/** 从这一版起歌单带绑定信息（[SyncPlaylist.link]）。 */
+const val LINK_SCHEMA_VERSION = 3
 
 @Serializable
 data class SyncSnapshot(
@@ -39,7 +43,24 @@ data class SyncPlaylist(
     val updatedAt: String = SyncTime.nowIso(),
     val deletedAt: String? = null,
     val tracks: List<SyncTrack> = emptyList(),
+    /**
+     * 绑定的平台歌单（v3 起随歌单同步），null 表示没绑定。以前绑定只留在本机：一台设备上编辑会自动解绑，
+     * 另一台还绑着，它的定时刷新就拿平台内容把那边加的歌冲掉再推回去。
+     */
+    val link: SyncLink? = null,
+    /** 只在内存里：false 表示读自 v2 文件，那时还不同步绑定，合并和写库时沿用本机的绑定。 */
+    @Transient val linkKnown: Boolean = true,
 )
+
+/** 平台歌单绑定；刷新时间（link_synced_at）是每台设备自己的节流，不进同步文件。 */
+@Serializable
+data class SyncLink(
+    val provider: String,
+    val id: String,
+    val cover: String = "",
+) {
+    val bound: Boolean get() = provider.isNotBlank() && id.isNotBlank()
+}
 
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -177,6 +198,10 @@ object SyncJson {
         if (snapshot.version > SCHEMA_VERSION) {
             throw SyncException(SyncFailureKind.Corrupt, "同步文件版本高于当前应用，请先更新应用。")
         }
+        // v2 文件没有绑定这一项：标成“不知道”，免得 link=null 被当成“另一台设备解除了绑定”
+        if (snapshot.version < LINK_SCHEMA_VERSION) {
+            return snapshot.copy(playlists = snapshot.playlists.map { it.copy(linkKnown = false) })
+        }
         return snapshot
     }
 
@@ -225,6 +250,8 @@ fun buildSnapshot(
                     updatedAt = SyncTime.toIso(playlist.updatedAt),
                     deletedAt = playlist.deletedAt?.let(SyncTime::toIso),
                     tracks = tracks,
+                    link = playlist.takeIf { it.bound && it.deletedAt == null }
+                        ?.let { SyncLink(it.linkProvider, it.linkId, it.linkCover) },
                 )
             },
         favorites = favorites.mapNotNull { it.toSyncFavorite(localRefs) } +
@@ -313,6 +340,9 @@ fun playlistSignature(playlist: SyncPlaylist?): String {
         append(playlist.name).append('|')
         append(playlist.deletedAt.orEmpty()).append('|')
         playlist.tracks.forEach { append(it.key).append(',').append(it.title).append(',').append(it.artist).append(';') }
+        // 绑定也算歌单的修改：只解除绑定、不动歌曲时也要推上去。没绑定时不加这一段，
+        // 升级前存下的基线（没有绑定信息）和没绑定的歌单签名照旧相等，不会凭空冒出修改
+        playlist.link?.takeIf { it.bound }?.let { append("|link:").append(it.provider).append(':').append(it.id) }
     }
 }
 

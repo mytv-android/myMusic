@@ -2262,6 +2262,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // 别把拉取前的那一整行盖回去（解除绑定会被写活、改名会被改回去）
             val latest = libraryDao.playlistOnce(id) ?: return@launchPlaylistEdit
             if (latest.deletedAt != null) return@launchPlaylistEdit
+            // 拉取期间被解绑或换绑（包括同步带来的“另一台设备编辑过”）：不能再拿平台内容盖掉
+            if (latest.linkProvider != playlist.linkProvider || latest.linkId != playlist.linkId) return@launchPlaylistEdit
             val entries = libraryDao.entriesOnce(id)
             val diff = boundDiff(entries.map { it.songKey }, songs.map { it.key })
             libraryDao.replaceEntries(
@@ -2303,7 +2305,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         launchPlaylistEdit {
             val playlist = libraryDao.playlistOnce(id) ?: return@launchPlaylistEdit
             if (!playlist.bound) return@launchPlaylistEdit
-            libraryDao.putPlaylist(playlist.copy(linkProvider = "", linkId = "", linkCover = "", linkSyncedAt = 0L))
+            // 绑定会同步：标成本机修改并推上去，其他设备也随之解绑
+            libraryDao.putPlaylist(
+                playlist.copy(
+                    linkProvider = "",
+                    linkId = "",
+                    linkCover = "",
+                    linkSyncedAt = 0L,
+                    updatedAt = System.currentTimeMillis(),
+                    dirty = true,
+                )
+            )
+            app.sync.onLocalChange()
             message("已解除绑定，「${playlist.name}」保留当前歌曲，不再跟随平台更新")
         }
     }
@@ -2312,7 +2325,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun unbindIfBound(playlistId: String) {
         val playlist = libraryDao.playlistOnce(playlistId) ?: return
         if (!playlist.bound) return
-        libraryDao.putPlaylist(playlist.copy(linkProvider = "", linkId = "", linkCover = "", linkSyncedAt = 0L))
+        // 接下来的编辑会推送；这里先把修改时间记上，解绑和编辑作为同一次修改同步出去
+        libraryDao.putPlaylist(
+            playlist.copy(
+                linkProvider = "",
+                linkId = "",
+                linkCover = "",
+                linkSyncedAt = 0L,
+                updatedAt = System.currentTimeMillis(),
+                dirty = true,
+            )
+        )
         message("已解除绑定，「${playlist.name}」改为手动维护，不再跟随平台更新")
     }
 
