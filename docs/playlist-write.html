@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>绑定歌单写回平台 · 调研与方案 · myMusic</title>
+<meta name="description" content="调研网易云、QQ音乐、酷狗等平台歌单的增删与排序接口，给出绑定歌单直接编辑并写回平台的方案。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Roboto+Flex:opsz,wdth,wght@8..144,100..125,300..900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #f4f1f2; --paper: #ffffff; --ink: #1d1b20; --muted: #6b6772; --line: #e4e0e3;
+  --red: #c8102e; --soft-red: #fbe9ec; --dark: #151318;
+  --body: "Roboto Flex", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, p { margin: 0; }
+svg { display: block; }
+.page-head, main, footer { width: min(1180px, calc(100% - 40px)); margin-inline: auto; }
+.page-head { padding: 62px 0 30px; }
+.doc-label { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .16em; }
+h1 { max-width: 980px; margin-top: 14px; font-size: clamp(36px, 5.6vw, 68px); line-height: 1.1; letter-spacing: -.045em; font-weight: 900; text-wrap: balance; }
+h1 em { font-style: normal; color: var(--red); }
+.lede { max-width: 920px; margin-top: 24px; color: var(--muted); font-size: 17px; line-height: 1.85; }
+.lede strong { color: var(--ink); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.chip2 { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 13px; }
+.chip2 b { color: var(--ink); font-weight: 700; }
+.chip2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+.chip2.ok .dot { background: #1b6b3a; }
+.chip2.warn .dot { background: #b37600; }
+section.block { padding: 46px 0; border-top: 1px solid var(--line); }
+.block-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.kicker { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .14em; white-space: nowrap; }
+h2 { font-size: clamp(24px, 3vw, 31px); line-height: 1.25; letter-spacing: -.025em; font-weight: 800; }
+.sub { margin: 10px 0 22px; color: var(--muted); font-size: 14.5px; line-height: 1.8; max-width: 930px; }
+.sub strong { color: var(--ink); font-weight: 700; }
+h3 { margin: 30px 0 12px; font-size: 18px; font-weight: 750; letter-spacing: -.01em; }
+h4 { margin: 22px 0 8px; font-size: 15px; font-weight: 750; }
+p { color: var(--muted); font-size: 14.5px; line-height: 1.85; }
+p strong, li strong { color: var(--ink); font-weight: 700; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-top: 20px; }
+.tile { padding: 18px 18px 15px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.tile b { display: block; font-size: 21px; line-height: 1.3; letter-spacing: -.02em; font-weight: 850; }
+.tile span { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.tile small { display: block; margin-top: 10px; font: 11.5px var(--mono); color: #8f8b95; }
+table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; font-size: 13.5px; }
+th, td { padding: 11px 14px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+thead th { border-top: 0; background: #faf7f8; color: var(--muted); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+td code, p code, li code, .sub code, .note code, td small code { font-family: var(--mono); font-size: 12px; background: #f1edf1; border-radius: 6px; padding: 1px 6px; }
+.scroll { overflow-x: auto; border-radius: 16px; }
+pre { margin: 12px 0 0; padding: 16px 18px; background: var(--dark); color: #d9d5df; border-radius: 16px; overflow: auto; font: 12.5px/1.75 var(--mono); }
+pre .c { color: #8c8797; } pre .s { color: #ffb6c1; } pre .k { color: #a9d8d6; } pre .n { color: #f2c98a; }
+.note { margin-top: 14px; padding: 14px 16px; border-left: 3px solid var(--red); background: #fbf6f7; border-radius: 0 14px 14px 0; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
+.note b { color: var(--ink); }
+.note.plain { border-left-color: #cfcad4; background: #f7f5f7; }
+ul.clean { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; line-height: 1.85; }
+ul.clean b { color: var(--ink); }
+.yes { color: #1b6b3a; font-weight: 700; } .no { color: var(--red); font-weight: 700; } .adj { color: #8a5a00; font-weight: 700; }
+.src { font-size: 11.5px; color: #8f8b95; line-height: 1.6; }
+.src a { color: #6b6772; }
+.flow { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 18px; }
+.step { position: relative; padding: 16px 14px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; counter-increment: s; }
+.flow { counter-reset: s; }
+.step::before { content: counter(s); display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--ink); color: #fff; font: 800 12px/1 var(--body); margin-bottom: 10px; }
+.step b { display: block; font-size: 14.5px; }
+.step span { display: block; margin-top: 4px; color: var(--muted); font-size: 12.2px; line-height: 1.6; }
+.phases { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 8px; }
+.phase { padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.phase header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.phase .tag { font: 700 11px var(--mono); padding: 2px 7px; border-radius: 999px; background: var(--soft-red); color: var(--red); }
+.phase h3 { margin: 0; font-size: 15px; }
+.phase ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 13px; line-height: 1.75; }
+.phase li + li { margin-top: 4px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.card { padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.card h3 { margin-top: 0; }
+.checklist { margin: 0; padding: 0; list-style: none; }
+.checklist li { position: relative; padding-left: 26px; margin-top: 9px; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
+.checklist li::before { content: ""; position: absolute; left: 0; top: 6px; width: 14px; height: 14px; border-radius: 5px; border: 1.5px solid #bdb7c2; }
+footer { padding: 34px 0 70px; border-top: 1px solid var(--line); color: #8f8b95; font-size: 12.5px; line-height: 1.8; }
+footer b { color: var(--muted); font-weight: 700; }
+
+/* 手机示意：当前 App 的 M3E 浅色令牌（BrandSeed #006B5F） */
+.devices { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start; margin: 14px 0 6px;
+  --md-primary:#206a5f; --md-on-primary:#e2fff8; --md-primary-container:#a9f0e2; --md-on-primary-container:#095c52;
+  --md-surface:#f8faf8; --md-on-surface:#191c1b; --md-surface-variant:#dbe5e1; --md-on-surface-variant:#3f4946;
+  --md-outline:#6f7975; --md-error:#a83836; --md-error-container:#fa746f; --md-on-error-container:#410005;
+  --md-secondary-container:#cde8e1; --md-on-secondary-container:#3e5751;
+}
+.phone { width: 340px; border-radius: 38px; background: #101413; padding: 10px; box-shadow: 0 24px 60px rgba(16,20,19,.22); }
+.phone .screen { position: relative; border-radius: 30px; background: var(--md-surface); color: var(--md-on-surface); overflow: hidden; font-size: 13px; }
+.phone .status { display: flex; justify-content: space-between; padding: 12px 18px 0; font: 600 11px var(--body); color: var(--md-on-surface-variant); }
+.phone .topbar { display: flex; align-items: center; gap: 10px; padding: 12px 14px 6px; }
+.phone .icon { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--md-on-surface-variant); font-size: 16px; }
+.phone .icon.solid { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.phone .titles { flex: 1; min-width: 0; }
+.phone .titles b { display: block; font-size: 16px; font-weight: 800; letter-spacing: -.01em; }
+.phone .titles span { display: block; color: var(--md-on-surface-variant); font-size: 11.5px; margin-top: 2px; }
+.phone .tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px; }
+.phone .tag { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 999px; background: var(--md-primary-container); color: var(--md-on-primary-container); font-size: 10.5px; font-weight: 700; }
+.phone .tag.plain { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.phone .actions { display: flex; gap: 8px; padding: 4px 16px 12px; }
+.phone .pill { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px; border-radius: 999px; background: var(--md-primary); color: var(--md-on-primary); font-weight: 700; font-size: 12.5px; }
+.phone .pill.tonal { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.phone .pill.text { flex: 0 0 40px; background: transparent; color: var(--md-on-surface-variant); font-size: 16px; }
+.phone .hint { margin: 0 16px 10px; padding: 10px 12px; border-radius: 12px; background: #eef5f2; color: var(--md-on-surface-variant); font-size: 11.5px; line-height: 1.6; }
+.phone .hint b { color: var(--md-on-surface); }
+.phone .row { display: flex; align-items: center; gap: 10px; padding: 9px 14px 9px 16px; }
+.phone .row + .row { border-top: 1px solid #e8efec; }
+.phone .cover { width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(135deg, #2f7d70, #9fd8c9); flex: 0 0 auto; }
+.phone .cover.b { background: linear-gradient(135deg, #5b6f9e, #c3cde8); }
+.phone .cover.c { background: linear-gradient(135deg, #8d5f79, #e9c8d8); }
+.phone .meta { flex: 1; min-width: 0; }
+.phone .meta b { display: block; font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phone .meta span { display: block; margin-top: 2px; color: var(--md-on-surface-variant); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phone .ctrl { display: flex; gap: 2px; }
+.phone .ctrl i { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 14px; color: var(--md-on-surface-variant); }
+.phone .ctrl i.danger { color: var(--md-error); }
+.phone .snack { margin: 10px 12px 14px; padding: 12px 14px; border-radius: 14px; background: #222927; color: #eef6f3; font-size: 11.5px; display: flex; align-items: center; gap: 8px; }
+.phone .snack b { color: #fff; font-weight: 700; }
+.phone .snack u { margin-left: auto; color: #9fe3d4; text-decoration: none; font-weight: 700; }
+.phone .readonly { display: flex; align-items: center; gap: 8px; margin: 0 16px 12px; padding: 10px 12px; border-radius: 12px; background: var(--md-error-container); color: var(--md-on-error-container); font-size: 11.5px; line-height: 1.55; }
+.caption { width: 340px; color: #8f8b95; font-size: 12px; line-height: 1.7; }
+@media (max-width: 980px) { .cols { grid-template-columns: 1fr; } .flow { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 640px) { .flow, .phases { grid-template-columns: 1fr; } .phone, .caption { width: 100%; } }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <div class="doc-label">调研与方案 · 2026-11-09</div>
+  <h1>绑定歌单也能改：<em>增删与排序写回平台</em></h1>
+  <p class="lede">
+    现在在绑定歌单里加一首、删一首、挪一下位置，都会先<strong>自动解除绑定</strong>，歌单从此变成手动副本。
+    这次把各平台的写接口摸了一遍：<strong>网易云可以增删但没有歌单内排序接口；QQ 音乐、酷狗三项都能写</strong>；
+    其余平台没有找到可用的写接口，继续沿用“编辑即解绑”。方案的核心不是调接口，而是先把本地歌曲解析成平台曲目 ID，
+    写成功后再回读，失败则回滚。
+  </p>
+  <div class="chips">
+    <span class="chip2 ok"><span class="dot"></span>网易云 <b>增 / 删</b></span>
+    <span class="chip2 ok"><span class="dot"></span>QQ 音乐 <b>增 / 删 / 排序</b></span>
+    <span class="chip2 ok"><span class="dot"></span>酷狗 <b>增 / 删 / 排序</b></span>
+    <span class="chip2 warn"><span class="dot"></span>其他平台 <b>无写接口，保持解绑</b></span>
+  </div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="block-head"><span class="kicker">结论</span><h2>先做三个平台，其他平台不硬凑</h2></div>
+  <p class="sub">
+    调研覆盖了 App 里能绑定歌单的全部来源。可写的前提有三个：平台有非公开但稳定的写接口、App 已经持有对应登录态、
+    本地歌曲能被解析成该平台曲目。三个条件同时满足的只有网易云、QQ 音乐和酷狗。
+  </p>
+  <div class="tiles">
+    <div class="tile"><b>3 个平台</b><span>网易云、QQ、酷狗可写回；前两者已有登录态与请求通道。</span><small>P1 网易云 · P2 QQ · P3 酷狗</small></div>
+    <div class="tile"><b>排序是分水岭</b><span>QQ 与酷狗接受“整张歌单的新顺序”；网易云没有歌单内排序接口。</span><small>网易云只做增删</small></div>
+    <div class="tile"><b>跨源添加要先匹配</b><span>从别的平台或本地音乐加进来的歌，先搜索目标平台并严格匹配。</span><small>复用 TrackMatcher 0.92</small></div>
+    <div class="tile"><b>不引入离线队列</b><span>写平台必须在线；失败就回滚，不排后台任务，避免多设备分叉。</span><small>平台为准，先写后更</small></div>
+  </div>
+  <div class="note">
+    <b>一句话方案：</b>绑定歌单的编辑不再解绑。操作时先把歌曲解析成目标平台曲目，调用平台写接口，
+    成功后回读整张歌单覆盖本地并标 dirty；失败则恢复操作前的本地内容并提示原因。
+    平台不支持排序或不是自己的歌单时，界面提前变成只读，而不是让用户改完才发现写不回去。
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-head"><span class="kicker">现状</span><h2>绑定是只读镜像，一编辑就断链</h2></div>
+  <p class="sub">
+    绑定功能（<code>fdc48da</code>）把平台歌单落成本地歌单，靠 15 分钟节流从平台拉最新内容。
+    任何本地编辑都会在写库前调用 <code>unbindIfBound</code>，把绑定字段清空并提示“改为手动维护”。
+    这套设计解决了“快照副本”的问题，但没有解决“把本机当遥控器”的诉求。
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>现状锚点</th><th>行为</th><th>影响</th></tr></thead>
+      <tbody>
+        <tr><td><code>MusicViewModel.addSongToPlaylist</code></td><td>先 <code>unbindIfBound</code>，再写本地条目</td><td>加一首歌，整张歌单失去绑定</td></tr>
+        <tr><td><code>removePlaylistEntries</code> / <code>movePlaylistEntry</code></td><td>同样先解绑</td><td>删歌、调顺序都会断链</td></tr>
+        <tr><td><code>refreshBoundPlaylist</code></td><td>拉平台内容 <code>replaceEntries</code> 覆盖本地，15 分钟节流</td><td>本地顺序完全跟随平台</td></tr>
+        <tr><td><code>LocalPlaylistScreen</code> 编辑提示</td><td>“手动增删或移动后会自动解除绑定”</td><td>用户明确知道这是只读镜像</td></tr>
+        <tr><td>同步 v3 <code>SyncPlaylist.link</code></td><td>绑定随歌单同步，编辑不同步</td><td>多设备绑定状态一致，但改动不落到平台</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note plain">
+    绑定数据在 <code>playlists.link_provider / link_id / link_cover / link_synced_at</code>。
+    写回平台不需要新增表；真正缺的是“平台曲目 ID”和“歌单可写元数据”，这两样都能在操作时取到，不必改库结构。
+  </p>
+</section>
+
+<section class="block">
+  <div class="block-head"><span class="kicker">能力矩阵</span><h2>各平台到底能不能写</h2></div>
+  <p class="sub">
+    下表只记录“有源码或实际请求佐证”的接口。标“未发现”的平台不是永远不能写，而是没有公开可验证的接口，
+    不值得为它引入抓包维护成本。
+  </p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>平台</th><th>添加</th><th>删除</th><th>排序</th><th>鉴权与关键参数</th><th>结论</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>网易云</b><br><small class="src">本机已有登录态</small></td>
+          <td class="yes">可</td><td class="yes">可</td><td class="no">无接口</td>
+          <td>Cookie <code>MUSIC_U</code> + <code>__csrf</code>；<code>op=add/del</code>、<code>pid</code>、<code>trackIds</code> 数组、<code>imme=true</code></td>
+          <td>P1：只做增删</td>
+        </tr>
+        <tr>
+          <td><b>QQ 音乐</b><br><small class="src">需要重新确认 dirid</small></td>
+          <td class="yes">可</td><td class="yes">可</td><td class="yes">可</td>
+          <td><code>uin</code> + <code>qqmusic_key/qm_keyst</code>；<code>dirId</code>、<code>tid</code>、<code>v_songList / v_songPair</code></td>
+          <td>P2：三项都做</td>
+        </tr>
+        <tr>
+          <td><b>酷狗</b><br><small class="src">已有云歌单加密通道</small></td>
+          <td class="yes">可</td><td class="yes">可</td><td class="yes">可</td>
+          <td><code>userid</code> + <code>token</code> + <code>KUGOU_API_MID</code>；<code>listid</code>、<code>list_ver</code>、<code>fileid</code></td>
+          <td>P3：三项都做</td>
+        </tr>
+        <tr>
+          <td><b>B 站收藏夹</b></td>
+          <td class="adj">可（仅视频/音频稿件）</td><td class="adj">可</td><td class="no">未发现</td>
+          <td>SESSDATA + <code>csrf</code>；资源以 <code>{id}:{type}</code> 表示</td>
+          <td>不做：歌曲跨平台无法映射</td>
+        </tr>
+        <tr>
+          <td><b>酷我</b></td><td class="no">未发现</td><td class="no">未发现</td><td class="no">未发现</td>
+          <td>Web 端只找到读接口；收藏入口跳客户端</td><td>不做，保持解绑</td>
+        </tr>
+        <tr>
+          <td><b>咪咕 / 千千 / 汽水</b></td><td class="no">未发现</td><td class="no">未发现</td><td class="no">未发现</td>
+          <td>公开实现只有读接口；汽水为 App 私有签名通道</td><td>不做，保持解绑</td>
+        </tr>
+        <tr>
+          <td><b>Apple / Joox / 5sing</b><br><small class="src">Jamendo / 云听同类</small></td><td class="no">不可用</td><td class="no">不可用</td><td class="no">不可用</td>
+          <td>Apple 需要 MusicKit 用户令牌且无写权限；其余无账号体系</td><td>不做</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>证据与实现细节</h3>
+  <div class="cols">
+    <div class="card">
+      <h3>网易云</h3>
+      <p>增删走 <code>POST https://music.163.com/api/playlist/manipulate/tracks</code>，表单参数
+        <code>op</code>（add / del）、<code>pid</code>、<code>trackIds</code>（JSON 数组字符串）、<code>imme=true</code>。
+        重复添加时接口会回 <code>code=512</code>，按“已存在”处理即可。</p>
+      <p>排序没有对应接口。<code>/api/playlist/order/update</code> 虽然存在，但参数只有 <code>ids</code>、没有 <code>pid</code>，
+        文档语义是“调整歌单顺序”（我创建的歌单之间的顺序），不是歌单内曲目顺序。网易云 Web 端也只有
+        <code>playlist/manipulate/tracks</code> 一个写接口，页面没有拖拽排序。</p>
+      <p class="src">来源：NeteaseCloudMusicApi 镜像的 <code>module/playlist_tracks.js</code>、<code>module/playlist_order_update.js</code>；
+        网易云 Web 核心 JS 中仅出现 <code>/api/playlist/manipulate/tracks</code>。</p>
+    </div>
+    <div class="card">
+      <h3>QQ 音乐</h3>
+      <p>新版接口在 <code>u.y.qq.com/cgi-bin/musicu.fcg</code>，模块 <code>music.musicasset.PlaylistDetailWrite</code>：</p>
+      <ul class="clean">
+        <li><b>AddSonglist</b>：<code>dirId</code>、<code>tid</code>、<code>v_songList</code>（songId + songType）</li>
+        <li><b>DelSonglist</b>：同样的曲目对</li>
+        <li><b>SeqSonglist</b>：<code>v_songPair</code>，必须提交歌单内<b>全部</b>歌曲的新顺序</li>
+      </ul>
+      <p>排序只提交部分歌曲时服务端仍返回成功，但未提交的歌曲顺序会被打乱；提交不存在的歌曲回 <code>80095</code>。
+        旧接口 <code>fcg_music_add2songdir.fcg</code>（按 songmid）和 <code>fcg_music_delbatchsong.fcg</code>（按 songid）
+        仍可用，可作降级。</p>
+      <p class="src">来源：L-1124/QQMusicApi 的 <code>qqmusic_api/modules/songlist.py</code>；jsososo/QQMusicApi 的 <code>routes/songlist.js</code>。</p>
+    </div>
+    <div class="card">
+      <h3>酷狗</h3>
+      <p>云歌单服务（<code>cloudlist.service.kugou.com</code>，Android 加密通道）：</p>
+      <ul class="clean">
+        <li>添加 <code>/cloudlist.service/v6/add_song</code>：<code>listid</code>、name / hash / album_id / mixsongid</li>
+        <li>删除 <code>/v4/delete_songs</code>：<code>fileid</code> 列表</li>
+        <li>排序 <code>/v1/modify_song_sort</code>：<code>fileid|sort</code> 列表、<code>list_ver</code>、<code>type</code></li>
+      </ul>
+      <p>App 的 <code>KugouProvider</code> 已经有同一套 <code>androidHeaders</code> + AES 加密与云歌单详情解析，
+        写接口可以直接复用；缺的是详情响应里的 <code>fileid</code> 与 <code>list_ver</code> 字段。</p>
+      <p class="src">来源：MakcRe/KuGouMusicApi 的 <code>module/playlist_tracks_add.js</code>、<code>playlist_tracks_del.js</code>、<code>playlist_tracks_sort.js</code>。</p>
+    </div>
+    <div class="card">
+      <h3>为什么不做其他平台</h3>
+      <p>酷我 Web 端只有歌单信息与推荐接口，收藏动作会引导下载客户端；公开实现里没有写接口。
+        咪咕、千千的第三方库只覆盖搜索、详情与播放地址。汽水走私有签名器，写接口需要逆客户端。
+        B 站收藏夹虽然能加删，但对象是视频/音频稿件，无法把网易云的歌映射过去。</p>
+      <p class="src">来源：KuwoMusicApi 现有实现、汽水与咪咕第三方库的接口清单、bilibili-API-collect 的收藏夹文档。</p>
+    </div>
+  </div>
+  <div class="note">
+    <b>可信度：</b>三个平台的接口都来自仍在维护的第三方实现，不是官方文档。上线前必须在真机用真实账号跑通一遍
+    （见文末核对清单）；接口失败时按“平台不支持”降级为解绑，而不是让用户卡住。
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-head"><span class="kicker">难点</span><h2>真正要解决的五件事</h2></div>
+
+  <h3>1. 本地歌曲不是平台曲目</h3>
+  <p>
+    歌单条目里存的是 <code>Song</code>，身份是 <code>source:id</code>。绑定网易云时，从网易云拉进来的歌天然带网易云
+    track id；但从 QQ、本地音乐或聚合搜索加进来的歌，<code>source</code> 不是 <code>netease</code>，平台接口不认。
+    写之前必须先得到目标平台的曲目 ID。
+  </p>
+  <div class="note plain">
+    解析顺序：<b>同源直接用</b> → <b>查 canonical_sources 是否已有该平台的版本</b> →
+    <b>按“歌名 + 歌手”搜索目标平台，用 <code>TrackMatcher</code> 严格模式（0.92）取最佳结果</b>。
+    三条都不成立就跳过这首歌，汇总提示“有 N 首在网易云没找到”，不阻断其他歌曲。
+  </div>
+
+  <h3>2. 不是所有歌单都能改</h3>
+  <p>
+    平台只允许改自己创建的歌单。收藏的别人的歌单，写接口会返回权限错误；界面上现在完全看不出来。
+    需要在打开绑定歌单时做一次归属判断：
+  </p>
+  <ul class="clean">
+    <li><b>网易云：</b>用户歌单接口的 <code>subscribed</code> 为 false，或详情里的 <code>creator.userId</code> 等于当前账号。</li>
+    <li><b>QQ：</b>在 <code>userPlaylists</code> 返回的自建歌单里能找到这个 <code>dissid</code>（同时能拿到 <code>dirid</code>）。</li>
+    <li><b>酷狗：</b>云歌单 <code>type=0</code>（自建 / 我喜欢）可写；<code>type=1</code>（收藏）不可写。</li>
+  </ul>
+  <p>判定为不可写时，详情页显示“只读 · 不是你的歌单”，隐藏编辑、添加与排序入口，保留“立即同步”“解除绑定”。</p>
+
+  <h3>3. 排序不是“挪一下”，而是提交整张歌单</h3>
+  <p>
+    QQ 的 <code>SeqSonglist</code> 和酷狗的 <code>modify_song_sort</code> 都要求提交完整顺序。单次移动要在本地先算出
+    新顺序，再整表推送；连续点上下移不能每次都发请求。做法是本地即时重排 + 500ms 防抖，只推送最后一次完整顺序。
+  </p>
+  <p>
+    酷狗还带 <code>list_ver</code> 版本号：别的客户端刚改过歌单时版本会不匹配。收到冲突后重新拉一次详情，
+    把本地顺序合并到新内容上再试一次，仍失败就回滚并提示“歌单已在其他设备变化，请重试”。
+  </p>
+  <p>网易云没有排序接口，编辑模式不显示上移/下移与拖拽，提示“网易云歌单不支持在 App 内调整顺序”。</p>
+
+  <h3>4. 平台写与 15 分钟刷新会抢同一条记录</h3>
+  <p>
+    现有 <code>playlistMutex</code> 已经串行化所有歌单编辑与刷新。写平台是挂起操作，必须继续走同一把锁：
+    有写操作在途时，自动刷新直接跳过；写成功后由写操作自己回读并更新 <code>linkSyncedAt</code>。
+    这样不会出现“刚删完，刷新又把歌加回来”。
+  </p>
+
+  <h3>5. 撤销变成反向写</h3>
+  <p>
+    现有移除操作带撤销（<code>restoreEntry</code>），只写本地。绑定歌单的撤销必须反向调用平台：移除的撤销 = 加回，
+    移动的撤销 = 再排一次。能排序的平台顺带恢复到原位置；网易云只能追加到末尾。撤销失败时明确提示，不静默吞掉。
+  </p>
+</section>
+
+<section class="block">
+  <div class="block-head"><span class="kicker">方案</span><h2>平台为准，先写后更</h2></div>
+  <p class="sub">
+    不引入后台队列、不做离线编辑、不在本地先斩后奏。每次操作都是一次完整的“校验 → 解析 → 写平台 → 回读 → 落库”，
+    失败则回到操作前。这样多设备、刷新、撤销都只有一种真相：平台。
+  </p>
+  <div class="flow">
+    <div class="step"><b>校验</b><span>登录态、歌单归属、平台能力；不可写直接给只读态</span></div>
+    <div class="step"><b>解析曲目</b><span>同源 ID → canonical → 搜索匹配；找不到的跳过并汇总</span></div>
+    <div class="step"><b>调平台</b><span>增删按批；排序推送完整顺序，酷狗带 list_ver</span></div>
+    <div class="step"><b>回读</b><span>重新拉整张歌单，平台顺序与元数据为准</span></div>
+    <div class="step"><b>落库</b><span>覆盖本地条目，更新 linkSyncedAt，标 dirty 推同步</span></div>
+    <div class="step"><b>失败回滚</b><span>恢复操作前条目；提示原因，提供“存本机并解绑”</span></div>
+  </div>
+
+  <h3>接口</h3>
+  <p>在 <code>NativeProvider</code> 上增加三个默认抛“不支持”的方法，只有可写平台覆盖；<code>ProviderInfo</code> 增加能力位供界面判断。</p>
+  <pre><span class="c">// data/native/NativeProvider.kt</span>
+<span class="k">suspend fun</span> addPlaylistTracks(cookie: String, playlistId: String, songs: List&lt;Song&gt;) =
+    <span class="k">throw</span> UnsupportedOperationException(<span class="s">"${info.name} 暂不支持修改歌单"</span>)
+
+<span class="k">suspend fun</span> removePlaylistTracks(cookie: String, playlistId: String, songs: List&lt;Song&gt;) = ...
+
+<span class="k">suspend fun</span> reorderPlaylistTracks(cookie: String, playlistId: String, songs: List&lt;Song&gt;) = ...
+
+<span class="c">// data/Models.kt：能力位，默认 false</span>
+@SerialName(<span class="s">"PlaylistWrite"</span>) <span class="k">val</span> playlistWrite: Boolean = <span class="n">false</span>,
+@SerialName(<span class="s">"PlaylistReorder"</span>) <span class="k">val</span> playlistReorder: Boolean = <span class="n">false</span>,</pre>
+  <p>
+    传入的 <code>songs</code> 已经是目标平台版本（调用方完成解析），保持接口简单。歌单级元数据（QQ 的 <code>dirid</code>、
+    酷狗的 <code>list_ver</code>）由各 provider 内部解析或缓存，不写进 synced 数据。
+  </p>
+
+  <h3>各平台落地要点</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>平台</th><th>添加</th><th>删除</th><th>排序</th><th>元数据来源</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>网易云</b></td>
+          <td><code>/api/playlist/manipulate/tracks</code>，<code>op=add</code>，<code>trackIds</code> 分批（每批 ≤100）</td>
+          <td>同接口 <code>op=del</code>；不存在的 id 忽略</td>
+          <td class="no">不支持</td>
+          <td>曲目 id 即 <code>Song.id</code>；归属看 <code>subscribed</code> / creator</td>
+        </tr>
+        <tr>
+          <td><b>QQ</b></td>
+          <td>优先 <code>AddSonglist</code>；拿不到 songId 时降级旧接口按 songmid 添加</td>
+          <td><code>DelSonglist</code>（songId + songType）；songType 从歌单详情带入</td>
+          <td><code>SeqSonglist</code> 全量顺序；移动后 500ms 防抖合并</td>
+          <td>打开歌单时扫 <code>userPlaylists</code> 拿 <code>dirid</code>；我喜欢固定 dirid=201</td>
+        </tr>
+        <tr>
+          <td><b>酷狗</b></td>
+          <td><code>v6/add_song</code>，需要 name / hash / album_id / mixsongid</td>
+          <td><code>v4/delete_songs</code>，按 <code>fileid</code></td>
+          <td><code>v1/modify_song_sort</code>，<code>fileid|sort</code> + <code>list_ver</code></td>
+          <td>详情响应补 <code>fileid</code>、<code>list_ver</code>；写前刷新一次详情</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>失败对照</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>情况</th><th>界面</th><th>本地</th></tr></thead>
+      <tbody>
+        <tr><td>未登录 / 登录态过期</td><td>“请先登录网易云再修改歌单”</td><td>不变</td></tr>
+        <tr><td>不是自己的歌单</td><td>“这是收藏的歌单，不能修改” + 解除绑定</td><td>不变，并记住只读</td></tr>
+        <tr><td>部分歌曲在平台找不到</td><td>“已加入 N 首，M 首在网易云没找到”</td><td>成功部分生效，其余跳过</td></tr>
+        <tr><td>网络 / 平台 5xx</td><td>“同步失败，已恢复修改前内容”</td><td>回滚</td></tr>
+        <tr><td>曲目已存在（网易云 512）</td><td>不报错，按成功处理</td><td>以回读结果为准</td></tr>
+        <tr><td>酷狗 list_ver 冲突</td><td>自动重试一次；仍失败提示“歌单已在其他设备变化”</td><td>回滚</td></tr>
+        <tr><td>平台不支持排序</td><td>编辑模式不显示排序控件</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-head"><span class="kicker">交互</span><h2>把“会同步”说清楚，把不能做的提前藏掉</h2></div>
+  <p class="sub">
+    不新增页面，仍用现有歌单详情的编辑模式。变化只有三处：绑定标记旁加“可写”状态；编辑提示从“会解绑”改成“会同步”；
+    写操作有进度与撤销。
+  </p>
+  <div class="devices">
+    <div class="phone">
+      <div class="screen">
+        <div class="status"><span>9:41</span><span>5G ▮▮</span></div>
+        <div class="topbar">
+          <div class="icon">‹</div>
+          <div class="titles"><b>深夜写代码</b><span>42 首 · 2 小时 51 分</span></div>
+          <div class="icon solid">⋯</div>
+        </div>
+        <div class="tags">
+          <span class="tag">● 已绑定网易云 · 刚刚同步</span>
+          <span class="tag plain">可修改</span>
+        </div>
+        <div class="actions">
+          <span class="pill">▶ 播放全部</span>
+          <span class="pill tonal">＋ 添加</span>
+          <span class="pill text">✓</span>
+        </div>
+        <div class="hint">编辑模式 · 修改会<b>同步到网易云的「深夜写代码」</b>。这个歌单不支持调整顺序。</div>
+        <div class="row"><div class="cover"></div><div class="meta"><b>雨夜</b><span>陈粒 · 小梦大半</span></div><div class="ctrl"><i class="danger">−</i></div></div>
+        <div class="row"><div class="cover b"></div><div class="meta"><b>夏日漱石</b><span>橘子海 · 浪潮上岸</span></div><div class="ctrl"><i class="danger">−</i></div></div>
+        <div class="row"><div class="cover c"></div><div class="meta"><b>Lemon</b><span>米津玄師 · STRAY SHEEP</span></div><div class="ctrl"><i class="danger">−</i></div></div>
+        <div class="snack"><b>已同步到网易云</b><u>撤销</u></div>
+      </div>
+    </div>
+    <div class="phone">
+      <div class="screen">
+        <div class="status"><span>9:41</span><span>5G ▮▮</span></div>
+        <div class="topbar">
+          <div class="icon">‹</div>
+          <div class="titles"><b>通勤歌单</b><span>68 首 · 4 小时 12 分</span></div>
+          <div class="icon solid">⋯</div>
+        </div>
+        <div class="tags">
+          <span class="tag">● 已绑定 QQ 音乐 · 3 分钟前同步</span>
+          <span class="tag plain">可修改</span>
+        </div>
+        <div class="actions">
+          <span class="pill">▶ 播放全部</span>
+          <span class="pill tonal">＋ 添加</span>
+          <span class="pill text">✓</span>
+        </div>
+        <div class="hint">按住行尾箭头调整顺序，<b>松手后整张歌单同步到 QQ 音乐</b>。</div>
+        <div class="row"><div class="cover b"></div><div class="meta"><b>夜曲</b><span>周杰伦 · 十一月的萧邦</span></div><div class="ctrl"><i>↑</i><i>↓</i><i class="danger">−</i></div></div>
+        <div class="row"><div class="cover"></div><div class="meta"><b>稻香</b><span>周杰伦 · 魔杰座</span></div><div class="ctrl"><i>↑</i><i>↓</i><i class="danger">−</i></div></div>
+        <div class="row"><div class="cover c"></div><div class="meta"><b>晴天</b><span>周杰伦 · 叶惠美</span></div><div class="ctrl"><i>↑</i><i>↓</i><i class="danger">−</i></div></div>
+        <div class="snack"><b>顺序已同步 · 撤销</b><u>完成</u></div>
+      </div>
+    </div>
+    <div class="phone">
+      <div class="screen">
+        <div class="status"><span>9:41</span><span>5G ▮▮</span></div>
+        <div class="topbar">
+          <div class="icon">‹</div>
+          <div class="titles"><b>每日推荐 · 收藏</b><span>30 首</span></div>
+          <div class="icon solid">⋯</div>
+        </div>
+        <div class="tags">
+          <span class="tag">● 已绑定网易云 · 1 小时前同步</span>
+          <span class="tag plain">只读</span>
+        </div>
+        <div class="readonly">这是别人的歌单，不能修改。仍可播放、下载，或解除绑定后存成本机歌单。</div>
+        <div class="actions">
+          <span class="pill">▶ 播放全部</span>
+          <span class="pill text">⋯</span>
+        </div>
+        <div class="row"><div class="cover"></div><div class="meta"><b>若把你</b><span>KIV · 若把你</span></div></div>
+        <div class="row"><div class="cover b"></div><div class="meta"><b>凄美地</b><span>郭顶 · 飞行器的执行周期</span></div></div>
+        <div class="row"><div class="cover c"></div><div class="meta"><b>水星记</b><span>郭顶 · 飞行器的执行周期</span></div></div>
+      </div>
+    </div>
+    <p class="caption">
+      左：网易云可增删、无排序；中：QQ / 酷狗可增删排序，移动后合并推送；右：收藏的别人的歌单直接只读。
+      示意沿用现有歌单详情组件：绑定标签、胶囊按钮、编辑行与 Snackbar。
+    </p>
+  </div>
+
+  <h3>文案与入口</h3>
+  <ul class="clean">
+    <li><b>编辑提示：</b>绑定且可写时改为“修改会同步到{平台}的「{歌单名}」”；不可排序的平台追加一句“这个歌单不支持调整顺序”。</li>
+    <li><b>添加面板：</b>绑定歌单打开“添加”时，搜索源默认切成绑定平台，副标题“在网易云中搜索”；从其他页面加歌仍走解析匹配。</li>
+    <li><b>进度：</b>批量添加/删除时操作行显示“正在同步到网易云…”并禁用重复点击；单曲操作在 Snackbar 提示。</li>
+    <li><b>撤销：</b>绑定歌单的撤销执行反向写；失败提示“撤销失败：{原因}”，不再假装本地已恢复。</li>
+    <li><b>解绑入口：</b>保留“解除绑定”；写失败且用户想保留改动时，提供“存到本机并解绑”作为显式选择。</li>
+  </ul>
+</section>
+
+<section class="block">
+  <div class="block-head"><span class="kicker">代码落点</span><h2>改动集中在数据层与 ViewModel</h2></div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>文件</th><th>改动</th></tr></thead>
+      <tbody>
+        <tr><td><code>data/native/NativeProvider.kt</code></td><td>新增 3 个写方法默认抛不支持</td></tr>
+        <tr><td><code>data/Models.kt</code></td><td><code>ProviderInfo</code> 增加 <code>playlistWrite</code> / <code>playlistReorder</code></td></tr>
+        <tr><td><code>data/native/NetEaseProvider.kt</code></td><td>实现增删；补 <code>playlistWritable</code> 判定</td></tr>
+        <tr><td><code>data/native/QQProvider.kt</code></td><td>实现增删排序；<code>dirid</code> 解析与缓存；歌单曲目补 <code>songid/songtype</code></td></tr>
+        <tr><td><code>data/native/KugouProvider.kt</code></td><td>实现增删排序；云歌单详情补 <code>fileid/list_ver</code>；<code>type</code> 判定</td></tr>
+        <tr><td><code>aggregate/TrackMatcher.kt</code> 或新 <code>WriteResolver</code></td><td>把 Song 解析成目标平台曲目（复用严格匹配）</td></tr>
+        <tr><td><code>ui/MusicViewModel.kt</code></td><td><code>unbindIfBound</code> 改为“可写则写平台”；新增写操作状态、回滚、防抖排序、撤销反向写</td></tr>
+        <tr><td><code>ui/library/LocalPlaylistScreen.kt</code></td><td>只读/可写标签、排序控件按能力显示、提示文案、进度</td></tr>
+        <tr><td><code>data/BoundPlaylists.kt</code></td><td>补归属/能力判定纯函数，便于单测</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note plain">
+    数据库与同步文件都不动：绑定字段已经同步；可写性、<code>dirid</code>、<code>list_ver</code> 都是账号侧实时状态，按需取、内存缓存。
+    这样不会为了一个平台元数据把同步格式再升一版。
+  </p>
+</section>
+
+<section class="block">
+  <div class="block-head"><span class="kicker">实施</span><h2>三个平台分三批，每批都能单独验收</h2></div>
+  <div class="phases">
+    <div class="phase">
+      <header><span class="tag">P1</span><h3>网易云 + 通用骨架</h3></header>
+      <ul>
+        <li>写接口、能力位、写状态与回滚、只读判定</li>
+        <li>增删（单曲 + 批量）与回读刷新</li>
+        <li>跨源解析：同源 / canonical / 搜索匹配</li>
+        <li>排序入口隐藏与提示</li>
+        <li>验收：绑定自建歌单后加删各 3 首，Web 端一致；收藏歌单显示只读</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <header><span class="tag">P2</span><h3>QQ 音乐</h3></header>
+      <ul>
+        <li><code>dirid</code> 解析；<code>AddSonglist / DelSonglist / SeqSonglist</code></li>
+        <li>排序防抖合并 + 全量顺序</li>
+        <li>旧接口降级（songmid 添加）</li>
+        <li>验收：上下移动 10 次只推送最终一次；Web 端顺序一致；部分曲目缺失时给出汇总</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <header><span class="tag">P3</span><h3>酷狗</h3></header>
+      <ul>
+        <li>云歌单详情补 <code>fileid</code> / <code>list_ver</code> / <code>type</code></li>
+        <li>三个云歌单写接口接入 Android 加密通道</li>
+        <li><code>list_ver</code> 冲突重试一次</li>
+        <li>验收：自建歌单增删排序；收藏歌单只读；并发修改提示可恢复</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <header><span class="tag">P4</span><h3>收尾与降级</h3></header>
+      <ul>
+        <li>不支持平台继续“编辑即解绑”，文案与现在一致</li>
+        <li>撤销反向写；失败提示</li>
+        <li>多设备：A 改平台、B 刷新后一致；写操作在途时跳过自动刷新</li>
+        <li>单测：归属判定、顺序合并、错误映射</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-head"><span class="kicker">核对清单</span><h2>上线前必须真机验证的项</h2></div>
+  <div class="cols">
+    <div class="card">
+      <h3>网易云</h3>
+      <ul class="checklist">
+        <li><code>/api/playlist/manipulate/tracks</code> 在本 App 的 UA / IP 下可用，Cookie 只需 MUSIC_U + __csrf</li>
+        <li>重复添加返回 512 时按成功处理</li>
+        <li>自建歌单与收藏歌单的 <code>subscribed</code> / creator 判定准确</li>
+        <li>歌单曲目上限（1000 / 2000）与分批大小</li>
+        <li>桌面客户端是否真的支持歌单内排序（如支持，抓包补接口）</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>QQ 音乐</h3>
+      <ul class="checklist">
+        <li><code>dirid</code> 能从自建歌单列表稳定拿到；我喜欢 = 201</li>
+        <li><code>SeqSonglist</code> 全量提交后 Web 端顺序一致</li>
+        <li>缺歌 / 越权时错误码（80092 / 80095）与文案</li>
+        <li>登录态只需 uin + qqmusic_key + g_tk；二维码登录拿到的 cookie 足够</li>
+        <li>旧接口在会员歌曲上是否仍可添加</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>酷狗</h3>
+      <ul class="checklist">
+        <li>云歌单详情是否返回 <code>fileid</code> 与 <code>list_ver</code></li>
+        <li><code>add_song</code> 的 <code>mixsongid / album_id / hash</code> 三件套是否必需</li>
+        <li><code>type=1</code> 收藏歌单写操作的错误表现</li>
+        <li>token 过期后的错误码与重新登录提示</li>
+        <li>排序 <code>sort</code> 的取值规则（0 起还是 1 起）</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>通用</h3>
+      <ul class="checklist">
+        <li>严格匹配 0.92 对现场版 / remix 的误配率</li>
+        <li>写操作在途时自动刷新确实被跳过</li>
+        <li>写成功后多设备同步与平台回读内容一致</li>
+        <li>撤销在增删、排序、批量三种路径都能反向写</li>
+        <li>平台接口失败不会把本地歌单清空（回滚覆盖所有分支）</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="block-head"><span class="kicker">风险</span><h2>需要提前接受的代价</h2></div>
+  <ul class="clean">
+    <li><b>非官方接口：</b>三个平台都没有公开文档，接口可能随客户端升级变化。实现上按“失败即降级为解绑”兜底，不把用户卡死在写不出去的歌单里。</li>
+    <li><b>账号风险：</b>高频写歌单与官方客户端行为不同，理论上存在风控可能。批量操作限制单批数量、失败不自动重试风暴。</li>
+    <li><b>匹配误差：</b>跨平台加歌只能靠歌名与歌手匹配。严格阈值会漏掉别名，宽松会加错版本；首版接受漏配，不做模糊兜底。</li>
+    <li><b>网易云没有排序：</b>这不是实现取舍，是接口缺失。不要在“删除全部再按新顺序加回”上做文章，那会改变添加时间，失败还会把歌单清空。</li>
+    <li><b>只读歌单占多数：</b>用户收藏的大多是别人的歌单，写功能真正生效的是自建歌单；界面必须提前说明，避免“为什么不能改”的困惑。</li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  <b>myMusic · 绑定歌单写回平台调研</b><br>
+  代码锚点：<code>MusicViewModel.kt</code>、<code>LocalPlaylistScreen.kt</code>、<code>data/native/*</code>、<code>data/sync/SyncModels.kt</code>。
+  平台接口来源为第三方维护的实现，结论以真机核对为准。文档日期 2026-11-09。
+</footer>
+
+</body>
+</html>
