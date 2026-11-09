@@ -48,6 +48,9 @@ class LocalSongStorageTest {
         // 匹配来的平台封面是网址，留着
         val withRemoteCover = playing.copy(cover = "https://p1.music.126.net/x.jpg")
         assertEquals("https://p1.music.126.net/x.jpg", withRemoteCover.forStorage().cover)
+        // 放云端副本时本地歌带着云端的临时地址（网易云盘签名地址、WebDAV 地址），也不能存下
+        val fromCloud = playing.copy(url = "https://m801.music.126.net/cloud.flac?sign=1")
+        assertEquals("", fromCloud.forStorage().url)
         // 平台歌原样不动
         val platform = Song(id = "1", name = "晴天", source = "netease", url = "https://m.example/1.mp3", cover = "https://c/1.jpg")
         assertSame(platform, platform.forStorage())

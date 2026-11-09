@@ -28,6 +28,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.mytv.mymusic.aggregate.AggregationSettings
 import com.mytv.mymusic.data.local.LocalMusicSettings
 import com.mytv.mymusic.data.local.LocalTrackDao
+import com.mytv.mymusic.data.local.LocalRefDao
+import com.mytv.mymusic.data.local.LocalRefEntity
+import com.mytv.mymusic.data.local.LocalRemoteEntity
 import com.mytv.mymusic.data.local.LocalTrackEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -994,8 +997,10 @@ interface AggregateDao {
         TrackOverrideEntity::class,
         AutomixAnalysisEntity::class,
         LocalTrackEntity::class,
+        LocalRefEntity::class,
+        LocalRemoteEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -1004,6 +1009,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sync(): SyncDao
     abstract fun aggregate(): AggregateDao
     abstract fun localTracks(): LocalTrackDao
+    abstract fun localRefs(): LocalRefDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -1301,8 +1307,56 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 本地歌的跨设备线索（同步 v3）：local_refs 记文件名、大小、文件所在设备、匹配；
+         * local_remotes 记云端副本，一首歌在几个云端各一行。只建新表，不碰已有数据。
+         */
+        internal val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `local_refs` (
+                        `local_id` TEXT NOT NULL,
+                        `file_name` TEXT NOT NULL,
+                        `file_size` INTEGER NOT NULL,
+                        `device` TEXT NOT NULL,
+                        `match_provider` TEXT NOT NULL,
+                        `match_id` TEXT NOT NULL,
+                        `match_confidence` REAL NOT NULL,
+                        `match_method` TEXT NOT NULL,
+                        `matched_at` INTEGER NOT NULL,
+                        `match_payload` TEXT NOT NULL,
+                        `updated_at` INTEGER NOT NULL,
+                        PRIMARY KEY(`local_id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `local_remotes` (
+                        `local_id` TEXT NOT NULL,
+                        `provider` TEXT NOT NULL,
+                        `remote_id` TEXT NOT NULL,
+                        `playable_id` TEXT NOT NULL,
+                        `file_name` TEXT NOT NULL,
+                        `file_size` INTEGER NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `uploaded_at` TEXT NOT NULL,
+                        `ext` TEXT NOT NULL,
+                        `md5` TEXT NOT NULL,
+                        `cloud_song_id` TEXT NOT NULL,
+                        `check_state` TEXT NOT NULL,
+                        `checked_at` INTEGER NOT NULL,
+                        `updated_at` INTEGER NOT NULL,
+                        PRIMARY KEY(`local_id`, `provider`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         internal val ALL_MIGRATIONS: Array<Migration>
-            get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+            get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
 
         fun create(context: Context) = Room.databaseBuilder(context, AppDatabase::class.java, "mymusic.db")
             .addMigrations(*ALL_MIGRATIONS)

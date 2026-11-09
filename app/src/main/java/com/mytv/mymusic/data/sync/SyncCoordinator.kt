@@ -94,6 +94,8 @@ data class SyncUiState(
     /** 本机保存的 WebDAV 账号（不含密码）；同步位置和以后的上传共用。 */
     val webDav: WebDavAccountInfo? = null,
     val webDavCheck: WebDavCheckUi = WebDavCheckUi(),
+    /** 上次上传的同步文件超过 1 MB 时的提示（不拦同步，见 [SyncSizeBudget]）；没超为空。 */
+    val sizeNotice: String = "",
 )
 
 /**
@@ -139,6 +141,12 @@ class SyncCoordinator(
     /** WebDAV 账号是独立实体：同步位置用它，以后的“上传到 WebDAV”也用它。 */
     val webDavAccounts: WebDavAccountStore = WebDavAccountStore(context, secretStore),
 ) {
+    /**
+     * 本地音乐的线索（云端位置、匹配、文件所在设备）：建快照时从它取，合并完写回它。
+     * MyMusicApp 建好本地音乐库后接上；没接时本地歌照 v2 的样子只同步歌名歌手。
+     */
+    @Volatile var localRefs: LocalSyncRefs? = null
+
     private val _state = MutableStateFlow(SyncUiState())
     val state: StateFlow<SyncUiState> = _state.asStateFlow()
     private val _events = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 8)
@@ -544,7 +552,7 @@ class SyncCoordinator(
             var created: RemoteFile? = null
             if (remoteId.isBlank()) {
                 _state.update { it.copy(phase = if (webDav) "正在创建同步文件" else "正在创建私人 ${provider.label}") }
-                val content = encodeForUpload(local)
+                val content = encodeForUpload(local, providerId)
                 created = try {
                     provider.create(token, content)
                 } catch (error: SyncException) {
@@ -617,7 +625,7 @@ class SyncCoordinator(
                         syncDao.clearAccounts()
                         syncDao.clearBases()
                         syncDao.clearConflicts()
-                        val uploaded = provider.update(token, remoteFile.id, encodeForUpload(local), remoteFile.revision)
+                        val uploaded = provider.update(token, remoteFile.id, encodeForUpload(local, providerId), remoteFile.revision)
                         val newAccount = SyncAccountEntity(
                             provider = providerId,
                             remoteId = remoteFile.id,
@@ -725,7 +733,7 @@ class SyncCoordinator(
             var round = 0
             while (uploaded == null) {
                 uploaded = try {
-                    provider.update(pending.token, pending.remoteId, encodeForUpload(merged), remoteFile.revision)
+                    provider.update(pending.token, pending.remoteId, encodeForUpload(merged, pending.providerId), remoteFile.revision)
                 } catch (error: SyncException) {
                     // 选合并方式期间云端被别的设备改了（WebDAV 412）：按最新的云端重新套一遍所选方式。
                     // 先传后写本机，传不上时本机歌单保持原样
@@ -794,6 +802,7 @@ class SyncCoordinator(
             emit(error.message ?: "处理冲突失败", error = true)
             return false
         }
+        resolved?.let { applyLocalRefs(SyncRefMerge.index(listOf(it), emptyList()).values) }
         if (remaining > 0) {
             _state.update {
                 it.copy(
@@ -1218,14 +1227,18 @@ class SyncCoordinator(
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
 
-    private fun encodeForUpload(snapshot: SyncSnapshot): String {
+    private fun encodeForUpload(snapshot: SyncSnapshot, providerId: String): String {
         val content = SyncJson.encode(snapshot.copy(deviceId = deviceId, updatedAt = SyncTime.nowIso()))
-        if (content.toByteArray(Charsets.UTF_8).size > MAX_SYNC_BYTES) {
+        val bytes = content.toByteArray(Charsets.UTF_8).size
+        val limit = SyncSizeBudget.hardLimitFor(providerId)
+        if (bytes > limit) {
             throw SyncException(
                 SyncFailureKind.Unknown,
-                "同步文件超过 900 KB，已停止自动上传。请导出本机备份并整理歌单后再同步。",
+                "同步文件超过 ${limit / 1024} KB，这个同步位置读不全这么大的文件，已停止自动上传。请导出本机备份并整理歌单后再同步。",
             )
         }
+        // 超过 1 MB 只提示，照常上传：本地歌多了文件指纹和云端位置，体积变大是正常的
+        _state.update { it.copy(sizeNotice = SyncSizeBudget.warning(bytes)) }
         return content
     }
 
@@ -1253,15 +1266,25 @@ class SyncCoordinator(
 
     private suspend fun localSnapshot(includeDeleted: Boolean = true): SyncSnapshot {
         val cookieSnapshot = settings.cookieSnapshot()
+        val playlists = libraryDao.allPlaylistsOnce()
+        val entries = libraryDao.allEntriesOnce()
+        val favorites = musicDao.songsOnce("favorite")
+        // 只给加进歌单、收藏的本地歌取线索：整个本地库不进同步文件（设计稿第 08 节“体积”）
+        val live = playlists.filter { it.deletedAt == null }.map { it.id }.toHashSet()
+        val localKeys = (entries.filter { it.playlistId in live }.map { it.songKey } + favorites.map { it.key })
+            .filter { it.startsWith("$LOCAL_TRACK_PROVIDER:") }
+            .toSet()
+        val refs = if (localKeys.isEmpty()) emptyMap() else localRefs?.snapshotRefs(localKeys).orEmpty()
         return buildSnapshot(
-            playlists = libraryDao.allPlaylistsOnce(),
-            entries = libraryDao.allEntriesOnce(),
+            playlists = playlists,
+            entries = entries,
             deviceId = deviceId,
             includeDeleted = includeDeleted,
-            favorites = musicDao.songsOnce("favorite"),
+            favorites = favorites,
             favoriteTombstones = musicDao.tombstones("favorite"),
             cookies = cookieSnapshot.cookies,
             cookieUpdatedAt = cookieSnapshot.updatedAt,
+            localRefs = refs,
         )
     }
 
@@ -1283,6 +1306,23 @@ class SyncCoordinator(
         }
         applyFavorites(snapshot.favorites, removeAbsent)
         applyCookies(snapshot.cookies, removeAbsent)
+        applyLocalRefs(SyncRefMerge.index(snapshot).values)
+    }
+
+    /**
+     * 合并好的本地歌线索写回本地音乐库。失败不影响歌单本身（歌单已经写好了），下次同步还会再写；
+     * 记一条日志就够，不把整次同步判成失败。
+     */
+    private suspend fun applyLocalRefs(tracks: Collection<SyncTrack>) {
+        if (tracks.isEmpty()) return
+        val target = localRefs ?: return
+        try {
+            target.applyRefs(tracks)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Exception) {
+            com.mytv.mymusic.AppLog.w("Sync", "本地歌线索写回失败：${error.javaClass.simpleName}: ${error.message}")
+        }
     }
 
     private suspend fun applyFavorites(favorites: List<SyncFavorite>, removeAbsent: Boolean) {
@@ -1536,7 +1576,7 @@ class SyncCoordinator(
         snapshot: SyncSnapshot,
         remoteFile: RemoteFile,
     ): RemoteFile {
-        val content = encodeForUpload(snapshot)
+        val content = encodeForUpload(snapshot, account.provider)
         val uploaded = if (account.remoteId.isBlank()) {
             provider.create(token, content)
         } else {
@@ -1625,7 +1665,6 @@ class SyncCoordinator(
 
     companion object {
         const val WORK_NAME = "mymusic-library-sync"
-        const val MAX_SYNC_BYTES = 900 * 1024
         const val LOCAL_CHANGE_DEBOUNCE_MS = 1_000L
         const val SCREEN_PULL_STALE_MS = 30_000L
         private const val MAX_PUSH_ROUNDS = 3

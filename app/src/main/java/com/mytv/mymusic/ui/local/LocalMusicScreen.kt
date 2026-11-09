@@ -72,7 +72,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mytv.mymusic.data.Song
-import com.mytv.mymusic.data.local.LocalAvailability
+import com.mytv.mymusic.aggregate.Availability
+import com.mytv.mymusic.data.local.LocalCopyKind
+import com.mytv.mymusic.data.local.LocalCopyRules
 import com.mytv.mymusic.data.local.LocalIndex
 import com.mytv.mymusic.data.local.LocalItem
 import com.mytv.mymusic.data.local.LocalLibrary
@@ -92,6 +94,7 @@ import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SelectionBar
 import com.mytv.mymusic.ui.components.SelectionPredictiveBack
 import com.mytv.mymusic.ui.components.SelectionState
+import com.mytv.mymusic.ui.components.PlatformBadge
 import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.tvFocusRing
@@ -136,6 +139,8 @@ fun LocalMusicScreen(
     var infoFor by remember { mutableStateOf<String?>(null) }
     var rematchFor by remember { mutableStateOf<String?>(null) }
     var pickerSongs by remember { mutableStateOf<List<Song>?>(null) }
+    // 文件不在、也没有云端副本和平台版本的歌：点了打开“放不了”面板（第 ⑧ 张）
+    val unplayable = rememberLocalUnplayableHost()
     val selection = remember { SelectionState() }
     SelectionPredictiveBack(selection)
     val firstFocus = remember { FocusRequester() }
@@ -250,10 +255,11 @@ fun LocalMusicScreen(
                     playing = state.current?.key == item.song.key,
                     selection = selection,
                     onPlay = {
-                        if (item.onDevice) {
-                            actions.play(item.song, playable)
-                        } else {
-                            infoFor = item.localId
+                        when {
+                            item.onDevice -> actions.play(item.song, playable)
+                            // 文件不在了，但云端副本或平台版本能放：只放这一首
+                            !index.copyState(item.localId).blocked -> actions.play(item.song, listOf(item.song))
+                            else -> unplayable.intercept(item.song, index.copyState(item.localId))
                         }
                     },
                     onMore = { infoFor = item.localId },
@@ -325,9 +331,16 @@ fun LocalMusicScreen(
                     infoFor = null
                 },
                 onDismiss = { infoFor = null },
+                cloudCopies = localCloudCopiesSection(id, index.remotes[id].orEmpty(), library),
             )
         }
     }
+    LocalUnplayableSheets(
+        host = unplayable,
+        removeLabel = "从本地音乐移除",
+        removeSummary = "只清这台设备上的记录，歌单里的这首不受影响",
+        onRemove = { song -> library.launch { forget(song.id) } },
+    )
     rematchFor?.let { id ->
         val item = index.byId[id]
         if (item == null) {
@@ -381,14 +394,16 @@ private fun LocalSongRow(
     val selected = item.song.key in selection.selected
     val unmatched = index.isUnmatched(item)
     val song = item.song
+    val copy = index.copyState(item.localId)
     val subtitle = listOf(
         song.artist,
         when {
-            item.row.missing -> "文件不在了"
+            // 文件不在时写现在会放哪份（云端副本照常写歌手）或为什么放不了
+            !item.onDevice && copy.kind != LocalCopyKind.Cloud -> localSubtitle(song, copy)
             window.isPhone && song.duration > 0 -> formatDuration(song.duration)
             else -> ""
         },
-    ).filter { it.isNotBlank() }.joinToString(" · ")
+    ).filter { it.isNotBlank() }.distinct().joinToString(" · ")
     SongRow(
         title = song.title,
         subtitle = subtitle,
@@ -398,8 +413,17 @@ private fun LocalSongRow(
         onClick = { if (picking) selection.toggle(song.key) else onPlay() },
         playing = playing,
         container = if (selected) scheme.secondaryContainer else scheme.surfaceContainerLow,
+        dimmed = copy.gone,
         badges = {
-            LocalSongBadge(if (item.onDevice) LocalAvailability.OnDevice else LocalAvailability.Missing)
+            LocalSongBadge(copy)
+            // 已经传到云端的歌在本机行里也标出来（设计稿第 ② 张：本机 + 网易云盘）
+            if (item.onDevice) {
+                index.remotes[item.localId].orEmpty()
+                    .filter { it.ready }
+                    .mapNotNull { it.cloudProvider }
+                    .sortedBy { LocalCopyRules.CLOUD_ORDER.indexOf(it) }
+                    .forEach { provider -> PlatformBadge(provider.label, Availability.Playable) }
+            }
             if (unmatched) Tag("没匹配", scheme.surfaceContainerHighest, scheme.onSurfaceVariant)
         },
         trailing = when {

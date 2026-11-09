@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -97,6 +98,7 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier, trailing: @Composa
 /**
  * 分段歌曲行：封面 48dp、圆角 12dp，最小高度 64dp（随字号增长）。
  * 当前播放的行用 secondaryContainer 底色并显示均衡器标记。
+ * [dimmed]：这台设备上哪里都放不了的本地歌（“只在 Pixel 8 上”），封面和标题淡一半；行照样能点、能按 ⋮。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -115,8 +117,10 @@ fun SongRow(
     onMore: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = onMore,
     container: Color = MaterialTheme.colorScheme.surfaceContainerLow,
+    dimmed: Boolean = false,
 ) {
     val shape = segmentShape(index, count)
+    val fade = if (dimmed) Modifier.alpha(0.5f) else Modifier
     val background = if (playing) MaterialTheme.colorScheme.secondaryContainer else container
     val content = if (playing) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
     Row(
@@ -142,10 +146,11 @@ fun SongRow(
                 textAlign = TextAlign.Center,
             )
         }
-        Cover(cover, title, 48.dp, corner = 12.dp)
+        Box(fade) { Cover(cover, title, 48.dp, corner = 12.dp) }
         Column(Modifier.weight(1f).padding(start = 14.dp, end = 8.dp)) {
             Text(
                 title,
+                modifier = fade,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = if (playing) FontWeight.Bold else FontWeight.Medium,
                 color = content,

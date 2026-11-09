@@ -56,21 +56,54 @@ object SyncMerge {
                 else -> conflicts += MergeConflict(id, b, l, r)
             }
         }
+        // 歌单和收藏按原规则选好之后，再把两边本地歌的线索（云端位置、匹配）并上去：
+        // 线索只会越并越全，不参与冲突判断，也不会让任何一首从歌单里消失
+        val (playlists, favorites) = SyncRefMerge.unite(
+            merged,
+            mergeFavorites(base?.favorites.orEmpty(), local.favorites, remote.favorites),
+            SyncRefMerge.index(local),
+            SyncRefMerge.index(remote),
+        )
         return MergeResult(
-            playlists = merged,
-            favorites = mergeFavorites(base?.favorites.orEmpty(), local.favorites, remote.favorites),
+            playlists = playlists,
+            favorites = favorites,
             cookies = mergeCookies(base?.cookies.orEmpty(), local.cookies, remote.cookies),
             conflicts = conflicts,
         )
     }
 
-    fun resolve(local: SyncPlaylist?, remote: SyncPlaylist?, strategy: SyncStrategy): SyncPlaylist? = when (strategy) {
-        SyncStrategy.Local -> local?.let(::normalize)
-        SyncStrategy.Remote -> remote?.let(::normalize)
-        SyncStrategy.Merge -> mergePlaylists(local, remote)?.let(::normalize)
+    fun resolve(local: SyncPlaylist?, remote: SyncPlaylist?, strategy: SyncStrategy): SyncPlaylist? {
+        val chosen = when (strategy) {
+            SyncStrategy.Local -> local?.let(::normalize)
+            SyncStrategy.Remote -> remote?.let(::normalize)
+            SyncStrategy.Merge -> mergePlaylists(local, remote)?.let(::normalize)
+        } ?: return null
+        // 选“保留本机”也不丢另一边记下的云端位置和匹配：那是同一首歌的事实，不是歌单的版本
+        return SyncRefMerge.unite(
+            listOf(chosen),
+            emptyList(),
+            SyncRefMerge.index(listOfNotNull(local), emptyList()),
+            SyncRefMerge.index(listOfNotNull(remote), emptyList()),
+        ).first.single()
     }
 
     fun applyStrategy(
+        local: SyncSnapshot,
+        remote: SyncSnapshot,
+        strategy: SyncStrategy,
+    ): SyncContent = uniteRefs(chooseContent(local, remote, strategy), local, remote)
+
+    private fun uniteRefs(content: SyncContent, local: SyncSnapshot, remote: SyncSnapshot): SyncContent {
+        val (playlists, favorites) = SyncRefMerge.unite(
+            content.playlists,
+            content.favorites,
+            SyncRefMerge.index(local),
+            SyncRefMerge.index(remote),
+        )
+        return content.copy(playlists = playlists, favorites = favorites)
+    }
+
+    private fun chooseContent(
         local: SyncSnapshot,
         remote: SyncSnapshot,
         strategy: SyncStrategy,

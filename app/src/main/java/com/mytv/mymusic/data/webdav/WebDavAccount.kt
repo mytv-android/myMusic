@@ -110,6 +110,13 @@ class WebDavAccountStore(context: Context, private val secrets: SecretStore) {
     private val _info = MutableStateFlow(readInfo())
     val info: StateFlow<WebDavAccountInfo?> = _info.asStateFlow()
 
+    /**
+     * 每次保存、清除都加一。只改密码时 [info] 前后相等、不会发新值，用账号的地方
+     * （云端副本的取流客户端）靠它知道要重建、之前记下的“密码不对”要作废。
+     */
+    private val _revision = MutableStateFlow(0)
+    val revision: StateFlow<Int> = _revision.asStateFlow()
+
     @get:Synchronized
     val usedForStorage: Boolean get() = preferences.getBoolean(KEY_STORAGE, false)
 
@@ -142,6 +149,7 @@ class WebDavAccountStore(context: Context, private val secrets: SecretStore) {
             }
             .apply()
         _info.value = readInfo()
+        _revision.value += 1
     }
 
     @Synchronized
@@ -155,6 +163,7 @@ class WebDavAccountStore(context: Context, private val secrets: SecretStore) {
         secrets.removeSecret(SECRET_PASSWORD)
         preferences.edit().clear().apply()
         _info.value = null
+        _revision.value += 1
     }
 
     private fun readInfo(): WebDavAccountInfo? {

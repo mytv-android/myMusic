@@ -56,7 +56,9 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
     /** 切歌过渡的离线分析缓存；播放侧在主线程上同步读 [AutomixAnalysisStore.cached]。 */
     lateinit var automixStore: com.mytv.mymusic.playback.AutomixAnalysisStore
     val automixAnalyzer by lazy {
-        com.mytv.mymusic.playback.AutomixAnalyzer(this, mediaCache, automixStore)
+        com.mytv.mymusic.playback.AutomixAnalyzer(this, mediaCache, automixStore) {
+            cloud.routing(androidx.media3.datasource.DefaultDataSource.Factory(this))
+        }
     }
     lateinit var sync: SyncCoordinator
     lateinit var update: UpdateRepository
@@ -68,9 +70,20 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val sleepTimer by lazy { SleepTimer(appScope) }
-    /** 本地音乐库：扫描、匹配、本地歌的播放解析和歌词。 */
+    /** 网易云盘、QQ 云盘、WebDAV 三种云端（本地歌的云端副本）；WebDAV 用同步里配好的账号。 */
+    val cloud by lazy { com.mytv.mymusic.data.cloud.CloudHub(settings, sync.webDavAccounts, appScope) }
+
+    /** 本地音乐库：扫描、匹配、本地歌的播放解析和歌词，以及跨设备的线索（云端副本、匹配、所在设备）。 */
     val localLibrary by lazy {
-        com.mytv.mymusic.data.local.LocalLibrary(this, database.localTracks(), settings, repository, appScope)
+        com.mytv.mymusic.data.local.LocalLibrary(
+            this,
+            database.localTracks(),
+            database.localRefs(),
+            settings,
+            repository,
+            cloud,
+            appScope,
+        )
     }
 
     override val viewModelStore = ViewModelStore()
@@ -142,6 +155,9 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
             scope = appScope,
         )
         update = UpdateRepository(this, settings)
+        // 本地歌的线索跟着歌单同步：建快照时从本地音乐库取，合并完写回；线索一变（换匹配、上传、删云端）就防抖同步
+        sync.localRefs = localLibrary.syncRefs
+        localLibrary.onRefsChanged = { sync.onLocalChange() }
         // 本地音乐：启动后等一会儿做一遍增量扫描（没给权限、没加文件夹时什么都不做）
         localLibrary.startupScan()
         // 日志导出用的设备和版本信息，启动时采一次就够

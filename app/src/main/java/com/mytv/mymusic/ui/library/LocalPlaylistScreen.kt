@@ -101,6 +101,7 @@ import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.PlaylistPickerSheet
+import com.mytv.mymusic.ui.InfoNote
 import com.mytv.mymusic.ui.TrackActionsSheet
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.AppLoading
@@ -118,9 +119,12 @@ import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.local.LocalSongBadge
+import com.mytv.mymusic.ui.local.LocalUnplayableSheets
+import com.mytv.mymusic.ui.local.localElsewhereNote
 import com.mytv.mymusic.ui.local.localSubtitle
-import com.mytv.mymusic.ui.local.rememberLocalAvailability
+import com.mytv.mymusic.ui.local.rememberLocalCopies
 import com.mytv.mymusic.ui.local.rememberLocalDisplay
+import com.mytv.mymusic.ui.local.rememberLocalUnplayableHost
 import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
@@ -245,7 +249,10 @@ fun LocalPlaylistScreen(
     val rowContainer = if (embedded) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLow
     // 本地歌：显示换成本机音乐库现在的信息（内嵌封面、匹配后的标题），并标出这台设备上有没有文件
     val localDisplay = rememberLocalDisplay()
-    val localAvailability = rememberLocalAvailability()
+    val localCopies = rememberLocalCopies()
+    // 哪里都放不了的本地歌：点了打开“只在 X 上”面板，不去播放（设计稿第 ⑧ 张）
+    val unplayable = rememberLocalUnplayableHost()
+    val elsewhereNote = remember(songs, localCopies) { localElsewhereNote(songs.mapNotNull(localCopies)) }
     val coverUrls = remember(songs) { songs.map { it.cover }.filter { it.isNotBlank() }.take(4) }
     // 以 songKey 作行 key，移动后焦点跟着这首歌走；重复的旧数据由 distinctKeys 追加序号
     val rowKeys = remember(entries) { distinctKeys(entries) { it.songKey } }
@@ -317,16 +324,23 @@ fun LocalPlaylistScreen(
                     null
                 }
                 val shown = localDisplay(song)
-                val local = localAvailability(song)
+                val local = localCopies(song)
                 SongRow(
                     title = shown.title,
                     subtitle = localSubtitle(shown, local),
                     cover = shown.cover,
                     index = index,
                     count = entries.size,
-                    onClick = { if (picking) selection.toggle(song.key) else actions.play(song, songs) },
+                    onClick = {
+                        when {
+                            picking -> selection.toggle(song.key)
+                            unplayable.intercept(song, local) -> Unit
+                            else -> actions.play(song, songs)
+                        }
+                    },
                     playing = state.current?.key == song.key,
-                    badges = local?.let { availability -> { LocalSongBadge(availability) } },
+                    dimmed = local?.gone == true,
+                    badges = local?.let { copy -> { LocalSongBadge(copy) } },
                     container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else rowContainer,
                     trailing = selectTrailing ?: durationTrailing,
                     onMore = rowMore,
@@ -347,6 +361,11 @@ fun LocalPlaylistScreen(
         }
     }
     val headerExtras: LazyListScope.() -> Unit = {
+        if (elsewhereNote.isNotBlank() && !editing) {
+            item(key = "elsewhere", contentType = "note") {
+                Box(Modifier.padding(bottom = 8.dp)) { InfoNote(elsewhereNote, "amber") }
+            }
+        }
         if (conflict) {
             item(key = "conflict", contentType = "card") {
                 ListRow(
@@ -590,6 +609,12 @@ fun LocalPlaylistScreen(
         }
     }
 
+    LocalUnplayableSheets(
+        host = unplayable,
+        removeLabel = "从歌单移除",
+        removeSummary = "所有设备上都会移除",
+        onRemove = { song -> entries.firstOrNull { it.songKey == song.key }?.let { entry -> remove(entry, song) } },
+    )
     actionEntry?.let { (song, entry) ->
         TrackActionsSheet(
             song = song,

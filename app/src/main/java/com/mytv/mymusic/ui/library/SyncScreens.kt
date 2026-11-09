@@ -192,6 +192,12 @@ fun SyncCenterScreen(
                 Box(Modifier.padding(top = 8.dp)) { InfoNote(sync.message) }
             }
         }
+        // 同步文件超过 1 MB：只提示，不拦同步、不删内容
+        if (sync.sizeNotice.isNotBlank() && sync.account != null) {
+            item(key = "sizeNotice", contentType = "message") {
+                Box(Modifier.padding(top = 8.dp)) { InfoNote(sync.sizeNotice, "amber") }
+            }
+        }
         if (sync.conflicts.isNotEmpty()) {
             item(key = "conflictHead", contentType = "header") { SectionLabel("待处理冲突", trailing = { CountTag("${sync.conflicts.size} 个") }) }
             items(sync.conflicts, key = { "conflict:${it.playlistId}" }, contentType = { "conflict" }) { conflict ->

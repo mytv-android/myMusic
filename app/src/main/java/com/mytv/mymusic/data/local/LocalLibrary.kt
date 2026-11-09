@@ -8,11 +8,28 @@ import android.net.Uri
 import android.os.Build
 import android.os.Process
 import android.provider.DocumentsContract
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.SettingsStore
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.AppLog
+import com.mytv.mymusic.data.cloud.CloudException
+import com.mytv.mymusic.data.cloud.CloudHub
+import com.mytv.mymusic.data.cloud.CloudMessages
+import com.mytv.mymusic.data.cloud.CloudProvider
+import com.mytv.mymusic.data.cloud.CloudRef
+import com.mytv.mymusic.data.cloud.CloudRefStatus
+import com.mytv.mymusic.data.cloud.cloudExtensionOf
+import com.mytv.mymusic.data.sync.LocalSyncRefs
+import com.mytv.mymusic.data.sync.SyncLocal
+import com.mytv.mymusic.data.sync.SyncMatch
+import com.mytv.mymusic.data.sync.SyncRefMerge
+import com.mytv.mymusic.data.sync.SyncRemote
+import com.mytv.mymusic.data.sync.SyncTime
+import com.mytv.mymusic.data.sync.SyncTrack
+import com.mytv.mymusic.data.sync.SyncTrackRefs
+import com.mytv.mymusic.data.sync.isWebUrl
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +45,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -46,6 +64,7 @@ import java.text.Collator
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** 本地音乐页和徽标用的一首：数据库记录、按设置算好的显示用 Song、匹配到的平台歌。 */
 data class LocalItem(
@@ -56,6 +75,8 @@ data class LocalItem(
     val visible: Boolean,
     /** 这台设备上现在能直接读到文件。 */
     val onDevice: Boolean,
+    /** 读不到时的说明：文件不在了 / 没有读取音乐的权限 / 位置已移出本地音乐；读得到为空。 */
+    val offReason: String = "",
 ) {
     val localId: String get() = row.localId
 }
@@ -67,6 +88,15 @@ data class LocalIndex(
     val byId: Map<String, LocalItem> = emptyMap(),
     val loaded: Boolean = false,
     val autoMatch: Boolean = true,
+    /** 本地歌的线索（文件所在设备、同步来的匹配），按身份查；这台设备没有文件的歌也在。 */
+    val refs: Map<String, LocalRefEntity> = emptyMap(),
+    /** 云端副本，按身份查，每个云端一行。 */
+    val remotes: Map<String, List<LocalRemoteEntity>> = emptyMap(),
+    /** [refs] 里的匹配解成的 Song（同步来的只有 ID 和歌名时是个占位）。 */
+    val refMatches: Map<String, Song> = emptyMap(),
+    /** 这台设备上配好了的云端（网易登录了、WebDAV 配好了）。 */
+    val clouds: Set<CloudProvider> = emptySet(),
+    val platformFallback: Boolean = true,
 ) {
     val totalBytes: Long get() = items.sumOf { it.row.size }
     val matchedCount: Int get() = items.count { it.row.matched }
@@ -79,6 +109,32 @@ data class LocalIndex(
     fun availability(localId: String): LocalAvailability {
         val item = byId[localId] ?: return LocalAvailability.Elsewhere
         return if (item.onDevice) LocalAvailability.OnDevice else LocalAvailability.Missing
+    }
+
+    /** 匹配到的平台歌：这台设备上的匹配优先，没有再用同步来的；这台设备点过“不匹配”就不用同步来的。 */
+    fun matchOf(localId: String): Song? {
+        val item = byId[localId]
+        item?.match?.let { return it }
+        if (item?.row?.matchMethod == LocalMatchMethod.REJECTED) return null
+        return refMatches[localId]
+    }
+
+    /** 文件所在设备（同步来的）；不知道为空。 */
+    fun device(localId: String): String = refs[localId]?.device.orEmpty()
+
+    /** 这首在这台设备上会放哪一份，徽标和点按行为按它来（设计稿第 ⑦⑨ 张）。 */
+    fun copyState(localId: String, now: Long = System.currentTimeMillis()): LocalCopyState {
+        val item = byId[localId]
+        return LocalCopyRules.state(
+            onDevice = item?.onDevice == true,
+            missingReason = item?.offReason.orEmpty(),
+            remotes = remotes[localId].orEmpty(),
+            configured = clouds,
+            match = matchOf(localId),
+            platformFallback = platformFallback,
+            device = device(localId),
+            now = now,
+        )
     }
 }
 
@@ -105,12 +161,19 @@ data class LocalMatchProgress(val done: Int = 0, val total: Int = 0) {
  * 播放解析和歌词。原文件只读，从不修改。
  *
  * 播放侧的接口：[resolve]（按解析链找能放的那份）、[availability]、[lyrics]；界面用 [index]、[scan]、[matching]。
+ *
+ * 跨设备（同步 v3）：歌单里的本地歌带着三组线索——文件（指纹、文件名、所在设备）、云端副本、匹配。
+ * 线索存在 local_refs / local_remotes，[syncRefs] 是同步层取 / 写线索的接口；上传队列传完一首调
+ * [recordRemote]，删云端副本调 [deleteRemote]。线索一变就 [onRefsChanged]（接到同步的防抖上传）。
  */
 class LocalLibrary(
     context: Context,
     private val dao: LocalTrackDao,
+    private val refDao: LocalRefDao,
     private val settings: SettingsStore,
     private val repository: MusicRepository,
+    /** 三种云端；为空时（测试、没接云端）云端副本这一步直接跳过。 */
+    private val cloud: CloudHub?,
     private val scope: CoroutineScope,
 ) {
     private val context = context.applicationContext
@@ -135,8 +198,19 @@ class LocalLibrary(
         .distinctUntilChanged()
         .stateIn(scope, SharingStarted.Eagerly, LocalMusicSettings())
 
-    val index: StateFlow<LocalIndex> = combine(dao.observeAll(), prefs, permissionTick) { rows, prefs, _ ->
-        buildIndex(rows, prefs)
+    /** 线索变了（匹配、云端位置）：MyMusicApp 接到同步的 onLocalChange，防抖后上传。 */
+    @Volatile var onRefsChanged: (() -> Unit)? = null
+
+    private val refState = combine(refDao.observeRefs(), refDao.observeRemotes()) { refs, remotes -> refs to remotes }
+
+    val index: StateFlow<LocalIndex> = combine(
+        dao.observeAll(),
+        refState,
+        prefs,
+        permissionTick,
+        cloud?.configured ?: flowOf(emptySet()),
+    ) { rows, (refs, remotes), prefs, _, clouds ->
+        buildIndex(rows, refs, remotes, prefs, clouds)
     }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, LocalIndex())
 
     private val _scan = MutableStateFlow(LocalScanState())
@@ -162,17 +236,36 @@ class LocalLibrary(
         if (request.skipFile) null else LocalPlayable.File(row.uri, request.item.song)
     }
 
-    private val platformStep = LocalResolveStep { request ->
-        if (!request.prefs.platformFallback) return@LocalResolveStep null
-        val match = request.item?.match ?: return@LocalResolveStep null
-        LocalPlayable.Platform(match, request.row?.matchConfidence ?: 0f)
-    }
+    private val cloudStep = LocalCloudStep(
+        storage = { provider -> cloud?.storage(provider) },
+        record = { localId, provider, state -> refDao.setCheck(localId, provider, state, System.currentTimeMillis()) },
+    )
 
-    private val resolveSteps = mutableListOf(fileStep, platformStep)
+    private val platformStep: LocalResolveStep = LocalPlatformStep
 
-    /** 插一步解析（云端副本），排在本机文件之后、平台版本之前。 */
+    private val resolveSteps = mutableListOf(fileStep, cloudStep, platformStep)
+
+    /** 再插一步解析，排在本机文件、云端副本之后，平台版本之前。 */
     fun addResolveStep(step: LocalResolveStep) {
         resolveSteps.add(resolveSteps.indexOf(platformStep).coerceAtLeast(1), step)
+    }
+
+    init {
+        // 换了账号、重新登录、改了 WebDAV 密码：这台设备之前记下的“云端文件已删除 / 要重新登录”作废，
+        // 不然换回正确的账号后还要等一小时才会再试
+        cloud?.let { hub ->
+            scope.launch(Dispatchers.IO) {
+                var previous: Map<CloudProvider, String>? = null
+                hub.accounts.collect { current ->
+                    val before = previous
+                    previous = current
+                    if (before == null) return@collect
+                    current.filter { (provider, key) -> before[provider] != key }.keys.forEach { provider ->
+                        runCatching { refDao.clearChecks(provider.id) }
+                    }
+                }
+            }
+        }
     }
 
     // ---- 权限和来源 ----
@@ -436,6 +529,7 @@ class LocalLibrary(
         matchJob = scope.launch(Dispatchers.IO) {
             val semaphore = Semaphore(MATCH_CONCURRENCY)
             try {
+                var changed = false
                 while (isActive && prefs.value.autoMatch) {
                     val enabled = index.value.byId
                     val pending = dao.all().filter {
@@ -449,44 +543,79 @@ class LocalLibrary(
                                 semaphore.withPermit {
                                     if (!prefs.value.autoMatch) return@withPermit
                                     attempted += row.localId
-                                    autoMatch(row)
+                                    if (autoMatch(row)) changed = true
                                     _matching.update { it.copy(done = it.done + 1) }
                                 }
                             }
                         }
                     }
                 }
+                // 匹配进了歌单里的本地歌时要同步出去；同步按指纹比对，没变的不会上传
+                if (changed) notifyRefsChanged()
             } finally {
                 _matching.value = LocalMatchProgress()
             }
         }
     }
 
-    private suspend fun autoMatch(row: LocalTrackEntity) {
+    /** 返回 true 表示写进了一个匹配。 */
+    private suspend fun autoMatch(row: LocalTrackEntity): Boolean {
+        // 别的设备已经匹配过（同步来的）就直接用：省一次搜索 / 识曲，几台设备上也是同一首
+        refDao.ref(row.localId)?.takeIf { it.matched && it.matchPayload.isNotBlank() }?.let { ref ->
+            var adopted = false
+            update(row.localId) { current ->
+                if (current.matchSettled) current else current.withRefMatch(ref).also { adopted = true }
+            }
+            if (adopted) return true
+        }
         val outcome = try {
             matcher.matchByTags(row) ?: matcher.matchByAudio(row)
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (_: LocalMatchNetworkException) {
             // 断网：不标“没匹配”，下次启动再试
-            return
+            return false
         } catch (error: Exception) {
             AppLog.w("LocalMusic", "匹配出错 ${row.displayName}：${error.message}")
             null
         }
+        var written = false
         update(row.localId) { current ->
             when {
                 // 用户在这期间手动处理过，以用户的为准
                 current.matchSettled -> current
                 outcome == null -> current.copy(matchMethod = LocalMatchMethod.NONE, matchedAt = System.currentTimeMillis())
-                else -> current.withMatch(outcome)
+                else -> current.withMatch(outcome).also { written = true }
             }
         }
+        return written
     }
 
-    /** 「换一个匹配」里点了「使用这个」。 */
+    /**
+     * 「换一个匹配」里点了「使用这个」。这台设备有过这个文件就改 local_tracks；
+     * 从没有过（别的设备加进歌单的）就记进线索表，随同步回到有文件的那台设备（设计稿第 ⑧ 张）。
+     * 用户自己选的记满分：合并时按分数取，手选的总能盖过各设备上的自动匹配。
+     */
     suspend fun applyMatch(localId: String, candidate: LocalCandidate) {
-        update(localId) { it.withMatch(candidate.copy(method = if (candidate.method == LocalMatchMethod.AUDIO) LocalMatchMethod.AUDIO else LocalMatchMethod.MANUAL)) }
+        val method = if (candidate.method == LocalMatchMethod.AUDIO) LocalMatchMethod.AUDIO else LocalMatchMethod.MANUAL
+        val chosen = candidate.copy(method = method, score = USER_CONFIDENCE)
+        if (dao.get(localId) != null) {
+            update(localId) { it.withMatch(chosen) }
+        } else {
+            val now = System.currentTimeMillis()
+            writeRef(localId) { ref ->
+                ref.copy(
+                    matchProvider = chosen.providerId,
+                    matchId = chosen.song.id,
+                    matchConfidence = chosen.score,
+                    matchMethod = chosen.method,
+                    matchedAt = now,
+                    matchPayload = json.encodeToString(chosen.song.copy(url = "")),
+                    updatedAt = now,
+                )
+            }
+        }
+        notifyRefsChanged()
     }
 
     /** 「不匹配」：清掉匹配，回到文件自己的标签和内嵌封面，自动匹配也不再碰它。 */
@@ -504,9 +633,51 @@ class LocalLibrary(
         }
     }
 
-    suspend fun search(localId: String, query: String, providerId: String): List<LocalCandidate> {
-        val row = dao.get(localId) ?: return emptyList()
+    /** [song] 是歌单里的那首：这台设备没有文件时拿它的歌名歌手当打分参考。 */
+    suspend fun search(localId: String, query: String, providerId: String, song: Song? = null): List<LocalCandidate> {
+        val row = dao.get(localId) ?: referenceRow(localId, song) ?: return emptyList()
         return matcher.search(row, query, providerId)
+    }
+
+    /** 没有文件的设备上搜平台版本时的打分参考：歌单里的歌名歌手时长 + 同步来的文件名。 */
+    private suspend fun referenceRow(localId: String, song: Song?): LocalTrackEntity? {
+        val ref = refDao.ref(localId)
+        if (song == null && ref == null) return null
+        return LocalTrackEntity(
+            localId = localId,
+            uri = "",
+            origin = "",
+            displayName = ref?.fileName.orEmpty().ifBlank { song?.extra?.get(EXTRA_FILE_NAME).orEmpty() },
+            relativePath = "",
+            dataPath = "",
+            title = song?.name.orEmpty(),
+            artist = song?.artist.orEmpty(),
+            album = song?.album.orEmpty(),
+            durationSec = song?.duration ?: 0,
+            size = ref?.fileSize ?: 0,
+            mimeType = "",
+            modifiedAt = 0,
+            addedAt = 0,
+            bitrate = 0,
+            sampleRate = 0,
+            bitsPerSample = 0,
+            tagsRead = true,
+            coverPath = "",
+            lrcUri = "",
+            missing = true,
+            matchProvider = ref?.matchProvider.orEmpty(),
+            matchId = ref?.matchId.orEmpty(),
+            matchConfidence = ref?.matchConfidence ?: 0f,
+            matchMethod = ref?.matchMethod.orEmpty(),
+            matchedAt = ref?.matchedAt ?: 0,
+            matchPayload = ref?.matchPayload.orEmpty(),
+            remoteProvider = "",
+            remoteId = "",
+            remotePlayableId = "",
+            remoteStatus = "",
+            remoteUpdatedAt = 0,
+            updatedAt = 0,
+        )
     }
 
     /** 「再听一次歌识曲」：换一段（第 60 秒起）重新识别。 */
@@ -529,6 +700,17 @@ class LocalLibrary(
         )
     }
 
+    /** 同步来的匹配写进这台设备的 local_tracks：匹配时间沿用原来的，往返同步时才不会被当成新匹配。 */
+    private fun LocalTrackEntity.withRefMatch(ref: LocalRefEntity): LocalTrackEntity = copy(
+        matchProvider = ref.matchProvider,
+        matchId = ref.matchId,
+        matchConfidence = ref.matchConfidence,
+        matchMethod = ref.matchMethod.ifBlank { LocalMatchMethod.MANUAL },
+        matchedAt = ref.matchedAt,
+        matchPayload = ref.matchPayload,
+        updatedAt = System.currentTimeMillis(),
+    )
+
     private suspend fun update(localId: String, transform: (LocalTrackEntity) -> LocalTrackEntity) {
         writeLock.withLock {
             val row = dao.get(localId) ?: return@withLock
@@ -545,27 +727,39 @@ class LocalLibrary(
     fun playableItem(localId: String): LocalItem? = index.value.byId[localId]?.takeIf { it.onDevice }
 
     /**
-     * 按解析链找这首本地歌能放的那份：本机文件 →（以后：云端副本）→ 匹配到的平台版本。
-     * 都不行返回 [LocalPlayable.Unavailable]，原因直接给用户看；歌单条目永远不删。
+     * 按解析链找这首本地歌能放的那份：本机文件 → 云端副本（网易云盘 → WebDAV → QQ 云盘）→ 匹配到的平台版本。
+     * 都不行返回 [LocalPlayable.Unavailable]，原因直接给用户看（云端那步的原因优先，其次“只在 X 上”）；
+     * 歌单条目永远不删，云端的 404 也只记在本机。
+     *
+     * [skipFile] / [skipCloud]：刚放失败的是本机文件或云端副本时跳过——两者是同一份内容，格式放不了就都放不了。
      */
-    suspend fun resolve(song: Song, skipFile: Boolean = false): LocalPlayable {
+    suspend fun resolve(song: Song, skipFile: Boolean = false, skipCloud: Boolean = false): LocalPlayable = withContext(Dispatchers.IO) {
         val row = dao.get(song.id)
         val item = index.value.byId[song.id]
+        val ref = refDao.ref(song.id)
+        val remotes = refDao.remotes(song.id)
+        val refMatch = ref?.takeUnless { row?.matchMethod == LocalMatchMethod.REJECTED }?.let(::decodeRefMatch)
         val prefs = prefs.value
-        val request = LocalResolveRequest(song, row, item, prefs, skipFile)
-        for (step in resolveSteps.toList()) {
-            step.resolve(request)?.let { return it }
+        val request = LocalResolveRequest(song, row, item, prefs, skipFile, ref, remotes, refMatch, skipCloud)
+        runResolveChain(resolveSteps.toList(), request)?.let { outcome ->
+            val note = request.notes.firstOrNull().orEmpty()
+            return@withContext if (outcome is LocalPlayable.Platform && note.isNotEmpty()) outcome.copy(note = note) else outcome
         }
         val latest = dao.get(song.id)
-        val reason = when {
-            latest == null -> REASON_ELSEWHERE
+        val fallback = when {
+            latest == null -> LocalCopyRules.elsewhere(ref?.device.orEmpty())
             latest.origin == LOCAL_ORIGIN_MEDIA && !hasAudioPermission() -> "没有读取音乐的权限"
             item?.onDevice == false && !latest.missing -> "文件所在位置已移出本地音乐"
             skipFile && !latest.missing -> "这台设备放不了这个文件"
             else -> "文件不在了"
         }
+        val reason = request.notes.firstOrNull() ?: fallback
         val searchable = LocalTags.hasUsableTags(song.name, song.artist, song.extra[EXTRA_FILE_NAME].orEmpty())
-        return LocalPlayable.Unavailable(reason, searchable = searchable && item?.match == null, fallbackAllowed = prefs.platformFallback)
+        LocalPlayable.Unavailable(
+            reason,
+            searchable = searchable && item?.match == null && refMatch == null,
+            fallbackAllowed = prefs.platformFallback,
+        )
     }
 
     private fun canOpen(uri: String): Boolean = runCatching {
@@ -574,13 +768,15 @@ class LocalLibrary(
 
     /**
      * 歌词：「同名 .lrc 优先」开着且找得到就用 .lrc；否则用匹配到的平台的歌词；平台也没有时再退回 .lrc。
-     * 这台设备上没扫到过的歌只能按传进来的 Song 里带的匹配信息取平台歌词（现在没有，返回空）。
+     * 这台设备上没扫到过的歌（放的是云端副本或平台版本）用同步来的匹配取平台歌词；
+     * 还没有时，网易云盘里的副本用云盘自己匹配到的那首的歌词。WebDAV 没有歌词，只能靠匹配。
      */
     suspend fun lyrics(song: Song, cookies: Map<String, String>): String = withContext(Dispatchers.IO) {
-        val row = dao.get(song.id) ?: return@withContext ""
+        val row = dao.get(song.id)
         val preferLrc = prefs.value.preferLrc
-        if (preferLrc) readSidecar(row)?.let { return@withContext it }
-        val match = decodeMatch(row)
+        if (row != null && preferLrc) readSidecar(row)?.let { return@withContext it }
+        val match = row?.let(::decodeMatch)
+            ?: refDao.ref(song.id)?.takeUnless { row?.matchMethod == LocalMatchMethod.REJECTED }?.let(::decodeRefMatch)
         if (match != null) {
             val text = try {
                 repository.lyrics(match, cookies[match.source].orEmpty())
@@ -591,8 +787,22 @@ class LocalLibrary(
             }
             if (text.isNotBlank()) return@withContext text
         }
-        if (!preferLrc) readSidecar(row)?.let { return@withContext it }
-        ""
+        if (row != null && !preferLrc) readSidecar(row)?.let { return@withContext it }
+        cloudLyrics(song.id)
+    }
+
+    /** 网易云盘里的副本：云盘会把上传的文件匹配到曲库里的一首，歌词按那首取。取不到就算了。 */
+    private suspend fun cloudLyrics(localId: String): String {
+        val hub = cloud ?: return ""
+        if (CloudProvider.NeteaseCloud !in hub.configured.value) return ""
+        val slot = refDao.remote(localId, CloudProvider.NeteaseCloud.id)?.takeIf { it.ready } ?: return ""
+        return try {
+            hub.netease.lyrics(slot.toCloudRef())
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     /** 同名 .lrc：文件夹扫描记下的文档 uri；媒体库的歌只在 Android 10 及以下能按路径找到旁边的文件。 */
@@ -641,7 +851,22 @@ class LocalLibrary(
         return song
     }
 
-    private fun buildIndex(rows: List<LocalTrackEntity>, prefs: LocalMusicSettings): LocalIndex {
+    fun decodeRefMatch(ref: LocalRefEntity): Song? {
+        if (ref.matchPayload.isBlank() || !ref.matched) return null
+        matchCache[ref.matchPayload]?.let { return it }
+        val song = runCatching { json.decodeFromString<Song>(ref.matchPayload) }.getOrNull() ?: return null
+        if (matchCache.size > 4096) matchCache.clear()
+        matchCache[ref.matchPayload] = song
+        return song
+    }
+
+    private fun buildIndex(
+        rows: List<LocalTrackEntity>,
+        refs: List<LocalRefEntity>,
+        remotes: List<LocalRemoteEntity>,
+        prefs: LocalMusicSettings,
+        clouds: Set<CloudProvider>,
+    ): LocalIndex {
         val mediaReadable = prefs.mediaStore && hasAudioPermission()
         val folders = prefs.folders.map { it.uri }.toHashSet()
         val items = rows.map { row ->
@@ -649,22 +874,396 @@ class LocalLibrary(
             val originOn = if (row.origin == LOCAL_ORIGIN_MEDIA) prefs.mediaStore else row.origin in folders
             val readable = if (row.origin == LOCAL_ORIGIN_MEDIA) mediaReadable else originOn
             val short = prefs.skipShort && row.durationSec in 1 until SHORT_SECONDS
+            val onDevice = readable && !row.missing
             LocalItem(
                 row = row,
                 song = songOf(row, match, prefs.titlePolicy),
                 match = match,
                 visible = originOn && !short,
-                onDevice = readable && !row.missing,
+                onDevice = onDevice,
+                offReason = when {
+                    onDevice -> ""
+                    row.missing -> "文件不在了"
+                    row.origin == LOCAL_ORIGIN_MEDIA && prefs.mediaStore -> "没有读取音乐的权限"
+                    else -> "文件所在位置已移出本地音乐"
+                },
             )
         }
         val collator = Collator.getInstance(Locale.CHINA)
         val visible = items.filter { it.visible }.sortedWith(compareBy(collator) { it.song.name })
-        return LocalIndex(visible, items.associateBy { it.localId }, loaded = true, autoMatch = prefs.autoMatch)
+        val refMap = refs.associateBy { it.localId }
+        return LocalIndex(
+            items = visible,
+            byId = items.associateBy { it.localId },
+            loaded = true,
+            autoMatch = prefs.autoMatch,
+            refs = refMap,
+            remotes = remotes.groupBy { it.localId },
+            refMatches = refs.mapNotNull { ref -> decodeRefMatch(ref)?.let { ref.localId to it } }.toMap(),
+            clouds = clouds,
+            platformFallback = prefs.platformFallback,
+        )
+    }
+
+    // ---- 跨设备线索（同步 v3） ----
+
+    /**
+     * 这台设备的名字，写进同步文件的 local.device，别的设备上显示“只在 Pixel 8 上”。
+     * 用户在系统设置里改过的设备名优先（Android 7.1 起有），没有就用型号。
+     */
+    val deviceName: String by lazy {
+        val named = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
+            runCatching { Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME) }.getOrNull()
+        } else {
+            null
+        }
+        named?.trim()?.takeIf { it.isNotBlank() } ?: modelName()
+    }
+
+    private fun modelName(): String {
+        val model = Build.MODEL.orEmpty().trim()
+        val maker = Build.MANUFACTURER.orEmpty().trim()
+        return when {
+            model.isBlank() -> maker.ifBlank { "另一台设备" }
+            maker.isBlank() || model.startsWith(maker, ignoreCase = true) -> model
+            else -> "${maker.replaceFirstChar { it.uppercase() }} $model"
+        }
+    }
+
+    private fun notifyRefsChanged() {
+        onRefsChanged?.invoke()
+    }
+
+    private val refLock = Mutex()
+
+    /** 改一行线索（没有就新建一行），在锁里读改写，免得同步写回和用户操作互相覆盖。 */
+    private suspend fun writeRef(localId: String, transform: (LocalRefEntity) -> LocalRefEntity) {
+        refLock.withLock {
+            val current = refDao.ref(localId) ?: LocalRefEntity(localId = localId)
+            val next = transform(current)
+            if (next != current) refDao.upsertRefs(listOf(next))
+        }
+    }
+
+    /**
+     * 上传队列传完一首后调用（以后的上传面板 ⑥ 用）：记下云端位置，标 ready，然后触发同步。
+     * 同一个云端再传一次就覆盖那一行；[ref] 里没写上传时间的按现在算。
+     * 文件名、大小、设备名一并补进线索，别的设备上“只在 X 上”和歌曲信息里要用。
+     */
+    suspend fun recordRemote(localId: String, ref: CloudRef) {
+        val now = System.currentTimeMillis()
+        val stamped = ref.copy(
+            localId = localId,
+            uploadedAt = ref.uploadedAt.ifBlank { SyncTime.toIso(now) },
+        )
+        refLock.withLock { refDao.upsertRemotes(listOf(LocalRemoteEntity.of(localId, stamped, now))) }
+        val row = dao.get(localId)
+        if (row != null) {
+            writeRef(localId) { current ->
+                current.copy(
+                    fileName = current.fileName.ifBlank { row.displayName },
+                    fileSize = if (current.fileSize > 0) current.fileSize else row.size,
+                    device = current.device.ifBlank { deviceName },
+                    updatedAt = now,
+                )
+            }
+        }
+        notifyRefsChanged()
+    }
+
+    /**
+     * 云端副本删掉了（这台设备上删的，或在云盘里删了、用户确认）：状态改成 deleted，上传时间不变——
+     * 合并时同一次上传里 deleted 胜出，别的设备也就不再去取；重新上传会带新的时间，自然盖过删除。
+     * 不碰本机文件，不动歌单。
+     */
+    suspend fun markRemoteDeleted(localId: String, provider: CloudProvider) {
+        val changed = refLock.withLock {
+            val slot = refDao.remote(localId, provider.id) ?: return@withLock false
+            if (slot.status == CloudRefStatus.DELETED) return@withLock false
+            refDao.upsertRemotes(
+                listOf(slot.copy(status = CloudRefStatus.DELETED, checkState = LocalCloudCheck.OK, checkedAt = 0, updatedAt = System.currentTimeMillis())),
+            )
+            true
+        }
+        if (changed) notifyRefsChanged()
+    }
+
+    /**
+     * 「从网易云盘删除 / 从 WebDAV 删除」：先删云端文件（本来就不在也算成功），再把位置标成 deleted。
+     * 失败抛 [CloudException]，message 直接给用户看。
+     */
+    suspend fun deleteRemote(localId: String, provider: CloudProvider) = withContext(Dispatchers.IO) {
+        val slot = refDao.remote(localId, provider.id) ?: return@withContext
+        val storage = cloud?.storage(provider)
+            ?: throw CloudException(com.mytv.mymusic.data.cloud.CloudErrorKind.NotLoggedIn, CloudMessages.notLoggedIn(provider), provider)
+        storage.delete(slot.toCloudRef())
+        markRemoteDeleted(localId, provider)
+    }
+
+    /** 同步层的接口：建快照时取线索、合并完写回。 */
+    val syncRefs: LocalSyncRefs = object : LocalSyncRefs {
+        override suspend fun snapshotRefs(keys: Set<String>): Map<String, SyncTrackRefs> = buildSyncRefs(keys)
+        override suspend fun applyRefs(tracks: Collection<SyncTrack>) = applySyncedRefs(tracks)
+    }
+
+    /**
+     * 建快照：每首本地歌的三组线索，都是确定的（同样的库得出同样的结果），同步后再建一次和合并结果一致，
+     * 不会每次同步都当成有变化：
+     * - local：线索表里有的字段优先（多半是同步来的、全局一致的那份），没有再用这台设备自己的文件；
+     * - match：这台设备的匹配和同步来的匹配按合并规则挑一个；
+     * - remote：各个云端里上传时间最新的那份（同步文件里一首只记一个云端位置）。
+     * 不放路径、地址、账号；封面只放匹配到的平台封面网址。
+     */
+    private suspend fun buildSyncRefs(keys: Set<String>): Map<String, SyncTrackRefs> = withContext(Dispatchers.IO) {
+        val prefix = "$LOCAL_SOURCE:"
+        val ids = keys.filter { it.startsWith(prefix) }.map { it.removePrefix(prefix) }.distinct()
+        if (ids.isEmpty()) return@withContext emptyMap()
+        val rows = HashMap<String, LocalTrackEntity>()
+        val refs = HashMap<String, LocalRefEntity>()
+        val remotes = HashMap<String, MutableList<LocalRemoteEntity>>()
+        ids.chunked(QUERY_CHUNK).forEach { chunk ->
+            dao.getMany(chunk).forEach { rows[it.localId] = it }
+            refDao.refs(chunk).forEach { refs[it.localId] = it }
+            refDao.remotesOf(chunk).forEach { remotes.getOrPut(it.localId) { mutableListOf() } += it }
+        }
+        val own = deviceName
+        val out = LinkedHashMap<String, SyncTrackRefs>()
+        for (id in ids) {
+            val row = rows[id]
+            val ref = refs[id]
+            val slots = remotes[id].orEmpty()
+            if (row == null && ref == null && slots.isEmpty()) continue
+            val local = SyncLocal(
+                hash = id,
+                fileName = ref?.fileName.orEmpty().ifBlank { row?.displayName.orEmpty() },
+                fileSize = ref?.fileSize?.takeIf { it > 0 } ?: row?.size ?: 0,
+                // 只有这台设备真有过这个文件才写自己的名字
+                device = ref?.device.orEmpty().ifBlank { if (row != null && !row.missing) own else "" },
+            )
+            val rowMatch = row?.takeIf { it.matched }?.let(::syncMatchOf)
+            val match = SyncRefMerge.match(rowMatch, ref?.syncMatch())
+            val remote = slots.sortedBy { it.provider }.mapNotNull { it.toSync() }
+                .fold(null as SyncRemote?) { best, next -> SyncRefMerge.remote(best, next) }
+            val matchSong = when {
+                match == null -> null
+                rowMatch == match -> row?.let(::decodeMatch)
+                else -> ref?.let(::decodeRefMatch)
+            }
+            out["$prefix$id"] = SyncTrackRefs(
+                local = local,
+                remote = remote,
+                match = match,
+                cover = matchSong?.cover?.takeIf(::isWebUrl).orEmpty(),
+            )
+        }
+        out
+    }
+
+    private fun syncMatchOf(row: LocalTrackEntity): SyncMatch = SyncMatch(
+        provider = row.matchProvider,
+        id = row.matchId,
+        confidence = row.matchConfidence,
+        method = row.matchMethod,
+        matchedAt = isoOrEmpty(row.matchedAt),
+    )
+
+    /**
+     * 合并后的线索写回：线索表按同样的合并规则并进来（同步来的一份当作“另一边”），云端位置写到对应云端那一行；
+     * 这台设备有文件、而同步来的匹配更好时，也写进 local_tracks（封面、歌词跟着换）——
+     * 用户在这台设备上点过“不匹配”、且比同步来的匹配更晚，就不动。
+     */
+    private suspend fun applySyncedRefs(tracks: Collection<SyncTrack>) = withContext(Dispatchers.IO) {
+        val prefix = "$LOCAL_SOURCE:"
+        val incoming = tracks.filter { it.key.startsWith(prefix) && it.hasRefs }.associateBy { it.key.removePrefix(prefix) }
+        if (incoming.isEmpty()) return@withContext
+        val now = System.currentTimeMillis()
+        val adopted = ArrayList<String>()
+        val stubbed = LinkedHashSet<String>()
+        incoming.keys.chunked(QUERY_CHUNK).forEach { chunk ->
+            refLock.withLock {
+                val refs = refDao.refs(chunk).associateBy { it.localId }
+                val slots = refDao.remotesOf(chunk).groupBy { it.localId }
+                val refRows = ArrayList<LocalRefEntity>()
+                val remoteRows = ArrayList<LocalRemoteEntity>()
+                for (id in chunk) {
+                    val track = incoming.getValue(id)
+                    val current = refs[id] ?: LocalRefEntity(localId = id)
+                    val next = mergeRef(current, track, now)
+                    if (next != current) {
+                        refRows += next
+                        if (next.matchPayload != current.matchPayload && isSyncedStub(next.matchPayload)) stubbed += id
+                    }
+                    val remote = track.remote ?: continue
+                    if (CloudProvider.of(remote.provider) == null) continue
+                    val slot = slots[id].orEmpty().firstOrNull { it.provider == remote.provider }
+                    mergeRemote(id, slot, remote, track, now)?.let { remoteRows += it }
+                }
+                if (refRows.isNotEmpty()) refDao.upsertRefs(refRows)
+                if (remoteRows.isNotEmpty()) refDao.upsertRemotes(remoteRows)
+            }
+            writeLock.withLock {
+                val rows = dao.getMany(chunk)
+                val changed = rows.mapNotNull { row ->
+                    val match = incoming.getValue(row.localId).match ?: return@mapNotNull null
+                    adoptMatch(row, match, incoming.getValue(row.localId), now)
+                }
+                if (changed.isNotEmpty()) {
+                    dao.upsert(changed)
+                    adopted += changed.map { it.localId }
+                    changed.filter { isSyncedStub(it.matchPayload) }.forEach { stubbed += it.localId }
+                }
+            }
+        }
+        if (adopted.isNotEmpty()) AppLog.i("LocalMusic", "采用同步来的匹配 ${adopted.size} 首")
+        refreshSyncedMatches(stubbed)
+    }
+
+    private fun isSyncedStub(payload: String): Boolean = payload.contains(EXTRA_SYNCED_MATCH)
+
+    /**
+     * 同步来的匹配只是占位（只有平台和 ID）。后台按这首的标签 / 文件名在那个平台搜一次，搜到同一个 ID
+     * 就换成完整信息（平台上的歌名、歌手、专辑、封面）：歌曲信息里写的、别的设备上放平台版本时显示的
+     * 才是那首歌。只是只读搜索；搜不到或断网就留着占位，不影响按 ID 播放和取歌词。
+     */
+    private fun refreshSyncedMatches(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        val pending = ids.toList()
+        scope.launch(Dispatchers.IO) {
+            for (id in pending) {
+                try {
+                    refreshSyncedMatch(id)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (error: Exception) {
+                    AppLog.w("LocalMusic", "补全同步来的匹配失败：${error.message}")
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshSyncedMatch(localId: String) {
+        val row = dao.get(localId)
+        val rowStub = row?.let(::decodeMatch)?.takeIf { isSyncedStub(row.matchPayload) }
+        val ref = refDao.ref(localId)
+        val refStub = ref?.let(::decodeRefMatch)?.takeIf { isSyncedStub(ref.matchPayload) }
+        val stub = rowStub ?: refStub ?: return
+        val reference = row ?: referenceRow(localId, stub) ?: return
+        val query = LocalTags.searchQuery(reference.title, reference.artist, reference.displayName)
+        val found = matcher.search(reference, query, stub.source).firstOrNull { it.song.id == stub.id }?.song ?: return
+        val full = json.encodeToString(found.copy(url = ""))
+        // 搜索期间用户可能又换了匹配：只替换还是同一首、还是占位的那份
+        if (rowStub != null) {
+            update(localId) { current ->
+                if (current.matchProvider == stub.source && current.matchId == stub.id && isSyncedStub(current.matchPayload)) {
+                    current.copy(matchPayload = full)
+                } else {
+                    current
+                }
+            }
+        }
+        if (refStub != null) {
+            writeRef(localId) { current ->
+                if (current.matchProvider == stub.source && current.matchId == stub.id && isSyncedStub(current.matchPayload)) {
+                    current.copy(matchPayload = full)
+                } else {
+                    current
+                }
+            }
+        }
+    }
+
+    private fun mergeRef(current: LocalRefEntity, track: SyncTrack, now: Long): LocalRefEntity {
+        val local = SyncRefMerge.local(current.syncLocal().takeUnless { it.isEmpty || it == SyncLocal(hash = current.localId) }, track.local)
+        val mine = current.syncMatch()
+        val match = SyncRefMerge.match(mine, track.match)
+        var next = current.copy(
+            fileName = local?.fileName.orEmpty().ifBlank { current.fileName },
+            fileSize = local?.fileSize?.takeIf { it > 0 } ?: current.fileSize,
+            device = local?.device.orEmpty().ifBlank { current.device },
+        )
+        if (match != null && match != mine) {
+            val sameSong = match.provider == current.matchProvider && match.id == current.matchId
+            next = next.copy(
+                matchProvider = match.provider,
+                matchId = match.id,
+                matchConfidence = match.confidence,
+                matchMethod = match.method,
+                matchedAt = SyncTime.toMillis(match.matchedAt),
+                // 同一首只是分数 / 时间变了就留着已有的完整信息；换了一首先放个占位（ID + 歌名 + 封面网址）
+                matchPayload = if (sameSong && current.matchPayload.isNotBlank()) current.matchPayload else stubPayload(match, track),
+            )
+        }
+        return if (next == current) current else next.copy(updatedAt = now)
+    }
+
+    /**
+     * 同步来的匹配只有平台和 ID：拿这首的歌名歌手时长、匹配封面拼一首占位，平台版本按 ID 现取地址。
+     * 歌名其实是歌单里的那个（常常就是文件名），不是平台上那首的名字，所以打上 [EXTRA_SYNCED_MATCH]，
+     * 歌曲信息里就不把它当平台歌名写出来。
+     */
+    private fun stubPayload(match: SyncMatch, track: SyncTrack): String = json.encodeToString(
+        Song(
+            id = match.id,
+            name = track.title,
+            artist = track.artist,
+            album = track.album,
+            duration = track.durationSec,
+            source = match.provider,
+            cover = track.cover.takeIf(::isWebUrl).orEmpty(),
+            extra = mapOf(EXTRA_SYNCED_MATCH to "1"),
+        ),
+    )
+
+    private fun mergeRemote(localId: String, slot: LocalRemoteEntity?, remote: SyncRemote, track: SyncTrack, now: Long): LocalRemoteEntity? {
+        val mine = slot?.toSync()
+        val winner = SyncRefMerge.remote(mine, remote)
+        if (winner == mine || winner == null) return null
+        val sameFile = slot != null && slot.remoteId == winner.id
+        val fileName = track.local?.fileName.orEmpty()
+        return LocalRemoteEntity(
+            localId = localId,
+            provider = winner.provider,
+            remoteId = winner.id,
+            playableId = winner.playableId,
+            fileName = if (sameFile) slot!!.fileName.ifBlank { fileName } else fileName,
+            fileSize = if (sameFile && slot!!.fileSize > 0) slot.fileSize else track.local?.fileSize ?: 0,
+            status = winner.status,
+            uploadedAt = winner.uploadedAt,
+            ext = if (sameFile) slot!!.ext else cloudExtensionOf(winner.id).ifBlank { cloudExtensionOf(fileName) },
+            md5 = if (sameFile) slot!!.md5 else "",
+            cloudSongId = if (sameFile) slot!!.cloudSongId else "",
+            // 换了位置或状态，这台设备之前的取流结果就不作数了
+            checkState = if (sameFile && slot!!.status == winner.status) slot.checkState else LocalCloudCheck.OK,
+            checkedAt = if (sameFile && slot!!.status == winner.status) slot.checkedAt else 0,
+            updatedAt = now,
+        )
+    }
+
+    private fun adoptMatch(row: LocalTrackEntity, match: SyncMatch, track: SyncTrack, now: Long): LocalTrackEntity? {
+        val mine = row.takeIf { it.matched }?.let(::syncMatchOf)
+        if (SyncRefMerge.match(mine, match) != match || mine == match) return null
+        val at = SyncTime.toMillis(match.matchedAt)
+        if (row.matchMethod == LocalMatchMethod.REJECTED && row.matchedAt >= at) return null
+        val sameSong = match.provider == row.matchProvider && match.id == row.matchId
+        return row.copy(
+            matchProvider = match.provider,
+            matchId = match.id,
+            matchConfidence = match.confidence,
+            matchMethod = match.method.ifBlank { LocalMatchMethod.MANUAL },
+            matchedAt = at,
+            matchPayload = if (sameSong && row.matchPayload.isNotBlank()) row.matchPayload else stubPayload(match, track),
+            updatedAt = now,
+        )
     }
 
     companion object {
         const val EXTRA_FILE_NAME = "local_file"
+        /** 匹配是别的设备同步来的占位（只知道平台和 ID，不知道平台上的歌名）。 */
+        const val EXTRA_SYNCED_MATCH = "synced_match"
         const val REASON_ELSEWHERE = "只在原来的设备上，这台设备没有这个文件"
+        /** 用户在「换一个匹配」里选的那首记满分，合并时总能盖过自动匹配。 */
+        const val USER_CONFIDENCE = 1f
+        private const val QUERY_CHUNK = 500
         private const val SHORT_SECONDS = 30
         private const val WRITE_BATCH = 25
         private const val TAG_BATCH = 10
@@ -693,9 +1292,13 @@ class LocalLibrary(
     }
 }
 
-/** 存进歌单、收藏、最近播放前去掉只在这台设备上有效的东西：本地地址、本机封面缓存路径。 */
+/**
+ * 存进歌单、收藏、最近播放前去掉只在这台设备上有效的东西：本地地址、本机封面缓存路径。
+ * 本地歌的地址一律不存：放的可能是云端副本的临时地址（网易云盘签名地址、WebDAV 地址），
+ * 下次播放按解析链重新找，不能让它跟着歌单进同步文件。
+ */
 fun Song.forStorage(): Song {
-    val stripUrl = url.startsWith("file:") || url.startsWith("content:")
+    val stripUrl = url.isNotEmpty() && (source == LOCAL_SOURCE || url.startsWith("file:") || url.startsWith("content:"))
     val stripCover = source == LOCAL_SOURCE && cover.isNotBlank() && !cover.startsWith("http")
     if (!stripUrl && !stripCover) return this
     return copy(url = if (stripUrl) "" else url, cover = if (stripCover) "" else cover)

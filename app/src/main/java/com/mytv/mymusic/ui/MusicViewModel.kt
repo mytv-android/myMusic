@@ -81,6 +81,7 @@ import com.mytv.mymusic.data.SavedSongTombstone
 import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.local.LOCAL_SOURCE
+import com.mytv.mymusic.data.local.LocalLibrary
 import com.mytv.mymusic.data.local.LocalPlayable
 import com.mytv.mymusic.data.local.forStorage
 import com.mytv.mymusic.data.TopList
@@ -642,7 +643,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             ) { id, index, prefs ->
                 id?.let { localId ->
                     val row = index.byId[localId]?.row
-                    localId to "${prefs.preferLrc}|${row?.matchProvider}:${row?.matchId}|${row?.lrcUri}"
+                    // 没有文件的设备上匹配是同步来的（或在这台设备上换的），也要跟着重取
+                    val match = index.matchOf(localId)
+                    localId to "${prefs.preferLrc}|${match?.source}:${match?.id}|${row?.lrcUri}"
                 }
             }.distinctUntilChanged().collect { now ->
                 val before = last
@@ -2333,7 +2336,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun download(song: Song) = viewModelScope.launch {
         if (song.source == LOCAL_SOURCE) {
-            message("「${song.title}」是本地音乐，文件已经在设备上")
+            // 云端副本只当在线歌放（可以进播放缓存），不另存一份到“下载”
+            if (app.localLibrary.playableItem(song.id) != null) {
+                message("「${song.title}」是本地音乐，文件已经在设备上")
+            } else {
+                message("「${song.title}」是另一台设备上的本地音乐，只能在线播放，不能下载")
+            }
             return@launch
         }
         if (!downloading.add(song.key)) {
@@ -3306,20 +3314,38 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 本地歌的解析：先问本地音乐库（本机文件 →〔以后：云端副本〕→ 匹配到的平台版本）；
+     * 本地歌的解析：先问本地音乐库（本机文件 → 云端副本 → 匹配到的平台版本）；
      * 这台设备上从没扫到过、也没有匹配记录（别的设备加进歌单的）时，「没有文件时用平台版本」开着
      * 就按歌名歌手走一遍现有的自动匹配。都不行返回 None，原因记在本地那条尝试里；歌单条目不动。
-     * 刚放失败的本机文件（[excludeProviders] 里有 local）不再拿回来，免得在同一个坏文件上来回重试。
+     * 刚放失败的本机文件或云端副本（[excludeProviders] 里有 local）不再拿回来：两者是同一份内容，
+     * 格式放不了换哪份都一样，直接去平台版本，免得在同一个坏文件上来回重试。
      */
     private suspend fun resolveLocal(track: CanonicalTrack, excludeProviders: Set<String>): AutoResolution {
         val source = track.sources.first { it.providerId == LOCAL_SOURCE }
-        val outcome = app.localLibrary.resolve(source.song, skipFile = LOCAL_SOURCE in excludeProviders)
+        val failedBefore = LOCAL_SOURCE in excludeProviders
+        val outcome = app.localLibrary.resolve(source.song, skipFile = failedBefore, skipCloud = failedBefore)
         if (outcome is LocalPlayable.File) {
             val ready = source.copy(song = outcome.song, availability = Availability.Playable)
             val updated = track.copy(sources = track.sources.map { if (it.providerId == LOCAL_SOURCE) ready else it })
             return AutoResolution(updated, Resolution.Ready(ready, outcome.uri, isPreview = false), autoMatched = false)
         }
-        val reason = (outcome as? LocalPlayable.Unavailable)?.reason ?: "这台设备上没有这个文件"
+        if (outcome is LocalPlayable.Cloud) {
+            // 云端副本还是这首本地歌（身份、显示不变），只是地址换成云端的临时地址；不提示“换了版本”
+            val ready = source.copy(song = outcome.song, availability = Availability.Playable)
+            val updated = track.copy(sources = track.sources.map { if (it.providerId == LOCAL_SOURCE) ready else it })
+            return AutoResolution(
+                updated,
+                Resolution.Ready(ready, outcome.stream.url, isPreview = outcome.stream.preview),
+                autoMatched = false,
+            )
+        }
+        val why = (outcome as? LocalPlayable.Platform)?.note?.ifBlank { null } ?: "这台设备上没有这个文件"
+        val reason = when (outcome) {
+            is LocalPlayable.Unavailable -> outcome.reason
+            // 匹配到的平台版本自己也放不了（会员、下架），而且别的平台也没找到：两件事都说清楚
+            is LocalPlayable.Platform -> "$why，匹配到的${providerName(outcome.song.source)}版本也放不了"
+            else -> why
+        }
         val failed = AutoResolution(
             track,
             Resolution.None(listOf(Attempt(source.copy(availability = Availability.Unavailable), reason))),
@@ -3339,7 +3365,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 withPlatform,
                 resolution,
                 autoMatched = true,
-                notice = "这台设备上没有这个文件，用${resolution.source.providerName}的版本播放",
+                notice = "$why，用${resolution.source.providerName}的版本播放",
             )
         }
         // 匹配到的那个平台放不了（会员、下架）时，和没匹配过的歌一样去其它平台找同一首
@@ -3353,9 +3379,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (searchOthers) {
             val tried = (outcome as? LocalPlayable.Platform)?.song?.source
+            // 有匹配时拿匹配到的那首（平台上的歌名歌手）去别的平台找同一首：本地歌的标题常常只是文件名，
+            // 拿它搜不准。同步来的占位匹配歌名就是歌单里那个，和本地歌一样，照旧用本地歌
+            val reference = (outcome as? LocalPlayable.Platform)?.song
+                ?.takeUnless { it.extra[LocalLibrary.EXTRA_SYNCED_MATCH] == "1" || it.name.isBlank() }
+                ?: source.song
             for (providerId in autoMatchProviders(exclude + listOfNotNull(tried))) {
                 val result = withTimeoutOrNull(AUTO_MATCH_TIMEOUT_MS) {
-                    runCatching { matchJob.matchOne(source.song, providerId) }.getOrNull()
+                    runCatching { matchJob.matchOne(reference, providerId) }.getOrNull()
                 } ?: continue
                 val song = result.song ?: continue
                 tryPlatform(song, result.score, result.method)?.let { return it }

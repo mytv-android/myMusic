@@ -50,6 +50,11 @@ import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.components.AdaptiveSheet
+import com.mytv.mymusic.ui.local.LocalSongBadge
+import com.mytv.mymusic.ui.local.LocalUnplayableSheets
+import com.mytv.mymusic.ui.local.localSubtitle
+import com.mytv.mymusic.ui.local.rememberLocalCopies
+import com.mytv.mymusic.ui.local.rememberLocalUnplayableHost
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
 import com.mytv.mymusic.ui.components.SongRow
 import com.mytv.mymusic.ui.components.SwitchRow
@@ -89,6 +94,9 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
     val currentIndex = state.queue.indexOfFirst { it.key == state.current?.key }
     val queueKeys = remember(state.queue) { distinctKeys(state.queue) { it.key } }
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (currentIndex - 1).coerceAtLeast(0))
+    // 本地歌标出会放哪份（本机 / 云端副本 / 平台版本）；哪里都放不了的点了打开“只在 X 上”面板
+    val localCopies = rememberLocalCopies()
+    val unplayable = rememberLocalUnplayableHost()
     AdaptiveSheet(
         onDismiss = onDismiss,
         title = "播放队列",
@@ -159,14 +167,17 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
                 contentType = { _, _ -> "queue" },
             ) { index, song ->
                 val playing = index == currentIndex
+                val local = localCopies(song)
                 SongRow(
                     title = song.title,
-                    subtitle = song.artist,
+                    subtitle = if (local != null) localSubtitle(song, local) else song.artist,
                     cover = song.cover,
                     index = index,
                     count = state.queue.size,
-                    onClick = { actions.playQueueIndex(index) },
+                    onClick = { if (!unplayable.intercept(song, local)) actions.playQueueIndex(index) },
                     playing = playing,
+                    dimmed = local?.gone == true,
+                    badges = local?.let { copy -> { LocalSongBadge(copy) } },
                     trailing = {
                         if (playing) {
                             // “正在播放”由 SongRow 的状态读出，这里只是装饰
@@ -179,6 +190,8 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
             }
         }
     }
+    // 队列里没有逐条移除，面板只给“找一首平台版本”
+    LocalUnplayableSheets(host = unplayable)
 }
 
 /**
