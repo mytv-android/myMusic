@@ -45,17 +45,10 @@ internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStageP
     val scheme = MaterialTheme.colorScheme
     val cover = song?.cover.orEmpty()
     val coverColors by produceState(blobColorCache.get(cover), cover) { value = coverBlobColors(context, cover) }
-    val colors = remember(scheme.onSurface, scheme.primary, scheme.tertiary, scheme.surface, coverColors) {
-        val fallback = listOf(scheme.primary, scheme.tertiary, scheme.secondary, scheme.primaryContainer)
-        StageColors(
-            text = scheme.onSurface,
-            dim = scheme.onSurface.copy(alpha = 0.28f),
-            accent = scheme.primary,
-            accentAlt = scheme.tertiary,
-            surface = scheme.surface,
-            cover = List(4) { coverColors?.getOrNull(it) ?: fallback[it] },
-        )
+    val colors = remember(scheme.onSurface, scheme.primary, scheme.secondary, scheme.tertiary, scheme.primaryContainer, scheme.surface, coverColors) {
+        stageColors(scheme, coverColors)
     }
+    ResolveStageDevice()
     BoxWithConstraints(
         modifier
             .clearAndSetSemantics {}
@@ -70,13 +63,16 @@ internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStageP
         val insets = remember { StageInsets() }
         val raw = prefs.pluginSettings[mode.id].orEmpty()
         val ctx = remember(mode, song, colors, raw, prefs.subline, textSp) {
-            val clock = StageClock().apply { publish(SAMPLE_LINES[0].startMs + SAMPLE_LINES[0].durationMs * 6 / 10, 0L, 0f) }
+            // 能拖动的列表类模式（Rush）在缩略图里看得到上下句，多给一句“上一句”；其它模式的缩略图照旧只有两句
+            val lines = if (mode.interactive) SAMPLE_LIST_LINES else SAMPLE_LINES
+            val current = if (mode.interactive) 1 else 0
+            val clock = StageClock().apply { publish(lines[current].startMs + lines[current].durationMs * 6 / 10, 0L, 0f) }
             LyricStageContext(
-                lines = SAMPLE_LINES,
+                lines = lines,
                 song = song ?: SAMPLE_SONG,
                 seed = stableHash(mode.id),
                 clock = clock,
-                lineIndex = mutableIntStateOf(0),
+                lineIndex = mutableIntStateOf(current),
                 paused = mutableStateOf(false),
                 colors = colors,
                 display = StageDisplay(textSp, reduceMotion = true, tv = false, wide = true, insets = insets),
@@ -161,5 +157,10 @@ private val SAMPLE_LINES = listOf(
     StageLine(0, 10_000L, 14_000L, "风吹过的地方都有光", emptyList(), "Where the wind goes, there is light", ""),
     StageLine(1, 14_500L, 18_500L, "我们沿着河走回家", emptyList(), "We walk home along the river", ""),
 )
+
+/** [SAMPLE_LINES] 前面加上 [SAMPLE_PREVIOUS]，序号顺延。 */
+private val SAMPLE_LIST_LINES = listOf(
+    StageLine(0, 5_500L, 9_500L, SAMPLE_PREVIOUS, emptyList(), "Street lamps light up one by one", ""),
+) + SAMPLE_LINES.map { StageLine(it.index + 1, it.startMs, it.endMs, it.text, it.words, it.translation, it.romanization) }
 
 private val SAMPLE_SONG = Song(id = "preview", name = "示例")

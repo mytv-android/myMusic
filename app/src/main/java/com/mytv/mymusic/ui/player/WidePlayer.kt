@@ -299,6 +299,7 @@ internal fun WidePlayer(
                             textSp = WIDE_STAGE_SP,
                             insets = stageInsets,
                             modifier = Modifier.fillMaxSize().graphicsLayer { alpha = focusAlpha() },
+                            seek = actions::seek,
                         )
                     }
                 },

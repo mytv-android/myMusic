@@ -170,7 +170,7 @@ fun AboutScreen(
                     count = 6,
                     onClick = onLicenses,
                     icon = Icons.Filled.Code,
-                    summary = "AGPL-3.0 · music-lib 与第三方依赖",
+                    summary = "AGPL-3.0 · music-lib、Folia 模组、Rush 与第三方依赖",
                 )
                 ListRow(
                     title = "项目主页",

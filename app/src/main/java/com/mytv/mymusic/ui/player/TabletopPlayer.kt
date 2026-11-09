@@ -255,6 +255,7 @@ private fun TabletopStage(
                     textSp = TABLETOP_STAGE_SP,
                     insets = insets,
                     edgeFade = TabletopStageFade,
+                    seek = actions::seek,
                     modifier = Modifier.fillMaxSize().layout { measurable, constraints ->
                         val side = maxOf(24.dp.toPx(), (constraints.maxWidth - TabletopLyricsMaxWidth.toPx()) / 2f + 24.dp.toPx())
                         val fade = TabletopStageFade.toPx()

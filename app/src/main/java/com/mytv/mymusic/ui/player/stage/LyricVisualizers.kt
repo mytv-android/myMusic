@@ -7,6 +7,7 @@ import com.mytv.mymusic.ui.player.stage.modes.CineramaVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.JumpVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.MisideDropVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.Rings52HzVisualizer
+import com.mytv.mymusic.ui.player.stage.modes.RushVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.StardriftVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.VinylDiscVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.WaveLightVisualizer
@@ -15,6 +16,7 @@ import com.mytv.mymusic.ui.player.stage.modes.WaveLightVisualizer
 object LyricVisualizers {
     val all: List<LyricVisualizer> = listOf(
         ClassicVisualizer,
+        RushVisualizer,
         AuroraVisualizer,
         Rings52HzVisualizer,
         MisideDropVisualizer,

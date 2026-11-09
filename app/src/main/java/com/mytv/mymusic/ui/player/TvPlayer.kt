@@ -234,6 +234,7 @@ internal fun TvPlayer(
                         textSp = TV_STAGE_SP,
                         insets = stageInsets,
                         modifier = Modifier.fillMaxSize().graphicsLayer { alpha = fade.value },
+                        seek = actions::seek,
                     )
                 }
             },

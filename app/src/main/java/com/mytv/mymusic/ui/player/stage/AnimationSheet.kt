@@ -97,6 +97,8 @@ internal fun AnimationSheet(
     LaunchedEffect(Unit) {
         if (!prefs.hintSeen) actions.setLyricStage { it.copy(hintSeen = true) }
     }
+    // 设备档位（模糊默认开不开）要在读设置表之前定下来
+    ResolveStageDevice()
     val mode = LyricVisualizers.byId(shown)
     AdaptiveSheet(onDismiss = onDismiss, title = "歌词动画", subtitle = "只在全屏歌词页生效") {
         Column(
@@ -355,7 +357,7 @@ private fun ModeSettings(mode: LyricVisualizer, prefs: LyricStagePrefs, actions:
         }
     }
     mode.origin?.let { origin ->
-        val hidden = if (mode.hiddenSettings > 0) "原模组另有 ${mode.hiddenSettings} 项保持默认值。" else ""
+        val hidden = if (mode.hiddenSettings > 0) "原${origin.kind}另有 ${mode.hiddenSettings} 项保持默认值。" else ""
         SheetNote("移植自 ${origin.mod} ${origin.version}（${origin.author}，${origin.license}）。$hidden")
     }
 }

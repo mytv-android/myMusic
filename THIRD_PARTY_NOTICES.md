@@ -183,6 +183,28 @@ These features were written from the mods' public descriptions only; none of the
 - Per-song random animation — lyric-style-switcher 1.2.1 (Huaq520, https://github.com/Huaq520/lyric-style-switcher).
 - Simplified-to-Traditional conversion and romanization use the transliterators built into Android (`android.icu.text.Transliterator`, Android 10+); no dictionary or library is bundled. opencc-traditional-lyrics and bilingual-ruby-lyrics were consulted only for the feature set.
 
+## Rush (full-screen lyric animation "Rush")
+
+- Upstream: https://github.com/shub39/Rush
+- Revision checked: 9fa1391c4b4b472f7d03c9bfbd47612330574463 (master on 2026-11-09, app version 7.2.1)
+- Copyright (C) 2026 Shubham Gorai
+- License: GNU General Public License v3.0 or (at your option) any later version
+- Location: `app/src/main/java/com/mytv/mymusic/ui/player/stage/modes/Rush*.kt`
+- Usage: the "Rush" lyric animation is a Kotlin rewrite of Rush's lyrics page:
+  the synced lyric list (current line anchored at one third of the viewport,
+  0.8 scale and distance blur for other lines, auto-scroll pause after dragging),
+  the per-word feathered highlight with optional duration-based font weight,
+  the three-dot interlude indicator, and the six lyric backgrounds (solid, blurred
+  album art, the "hypnotic" and "curve" AGSL shaders, the wave and gradient
+  visualizers). Audio input comes from myMusic's own PCM analysis instead of
+  android.media.audiofx.Visualizer. No fonts, icons, strings or other assets
+  from Rush are bundled.
+- These files keep the upstream GPL-3.0-or-later header and copyright line and
+  carry a notice of the changes made and the date. They are combined with the
+  AGPL-3.0 code of myMusic under section 13 of both licenses; the combined
+  work is distributed under AGPL-3.0, and the Rush-derived files remain
+  available under GPL-3.0-or-later.
+
 ## MaterialKolor
 
 - Upstream: https://github.com/jordond/MaterialKolor

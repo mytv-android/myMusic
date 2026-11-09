@@ -1,5 +1,6 @@
 package com.mytv.mymusic.ui.player.stage
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
@@ -12,12 +13,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
+import com.materialkolor.hct.Hct
+import com.materialkolor.ktx.toColor
+import com.materialkolor.ktx.toHct
 import com.mytv.mymusic.data.LyricSubline
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.playback.RHYTHM_BAND_COUNT
@@ -69,6 +74,18 @@ interface LyricVisualizer {
     /** true 才去开律动分析（[LyricStageContext.audio] 才有值）。 */
     val wantsAudio: Boolean get() = false
 
+    /**
+     * 按当前设置决定要不要律动分析，默认就是 [wantsAudio]。宿主只问这个：Rush 只有背景选“律动”时才要，
+     * 其它背景不该为它白跑分析。
+     */
+    fun wantsAudio(settings: SettingValues): Boolean = wantsAudio
+
+    /**
+     * true：舞台接收拖动和点按（列表能滚、点一句跳过去），宿主把 [LyricStageContext.seek] 接到播放器。
+     * 电视上没有触摸，宿主不给（[StageDisplay.touch] 为 false）；点在句子外面仍归宿主唤醒控件。现有模式都是 false。
+     */
+    val interactive: Boolean get() = false
+
     /** 没有同步歌词（纯音乐、电台）时也画；false 时宿主显示和经典一样的“这首歌没有歌词”。 */
     val drawsWithoutLyrics: Boolean get() = false
 
@@ -87,9 +104,9 @@ interface LyricVisualizer {
     fun Stage(ctx: LyricStageContext, modifier: Modifier)
 }
 
-/** 来源模组：名字、版本、作者、许可。 */
+/** 来源模组：名字、版本、作者、许可。[kind] 是面板里怎么称呼它（Rush 是独立的应用，不是 Folia 模组）。 */
 @Immutable
-data class ModOrigin(val mod: String, val version: String, val author: String, val license: String)
+data class ModOrigin(val mod: String, val version: String, val author: String, val license: String, val kind: String = "模组")
 
 /**
  * 设置表的一项。读的时候合并默认值、夹紧数值，写的时候丢掉未知键（见 [SettingValues]、[sanitizeSettings]），
@@ -387,7 +404,60 @@ data class StageColors(
     val surface: Color,
     /** 封面量化出的 4 个主色，取不到时用配色补。 */
     val cover: List<Color>,
+    /**
+     * 封面占比最大的颜色（[cover] 第一个）压到能当整页底色的深浅，和它降饱和、再压暗后的颜色，以及各自上面的文字色
+     * （黑白里对比度高的那个，至少 4.5:1）。播放页的页头和控件是浅色字，底色不能太亮，所以色调最高到 40。
+     */
+    val coverVibrant: Color,
+    val onCoverVibrant: Color,
+    val coverMuted: Color,
+    val onCoverMuted: Color,
 )
+
+/** 舞台配色，宿主和缩略图共用：播放页配色 [scheme] 加封面量化色 [cover]（还没取到时为 null）。 */
+internal fun stageColors(scheme: ColorScheme, cover: List<Color>?): StageColors {
+    val fallback = listOf(scheme.primary, scheme.tertiary, scheme.secondary, scheme.primaryContainer)
+    val colors = List(4) { cover?.getOrNull(it) ?: fallback[it] }
+    val (vibrant, muted) = coverTones(colors[0])
+    return StageColors(
+        text = scheme.onSurface,
+        dim = scheme.onSurface.copy(alpha = 0.28f),
+        accent = scheme.primary,
+        accentAlt = scheme.tertiary,
+        surface = scheme.surface,
+        cover = colors,
+        coverVibrant = vibrant,
+        onCoverVibrant = readableOn(vibrant),
+        coverMuted = muted,
+        onCoverMuted = readableOn(muted),
+    )
+}
+
+/**
+ * 封面主色 [seed] 的两种底色：鲜艳保持色相和彩度，色调夹到 22–40；柔和同色相、彩度降到四成以内（最多 14），
+ * 色调再低 10 左右（12–24）。都按 HCT 算，换算回 sRGB 时彩度超出色域会自动收。
+ */
+internal fun coverTones(seed: Color): Pair<Color, Color> {
+    val hct = seed.toHct()
+    val tone = hct.tone.coerceIn(VIBRANT_TONE_MIN, VIBRANT_TONE_MAX)
+    val vibrant = Hct.from(hct.hue, hct.chroma, tone).toColor()
+    val muted = Hct.from(hct.hue, (hct.chroma * 0.4).coerceAtMost(14.0), (tone - 10.0).coerceIn(12.0, 24.0)).toColor()
+    return vibrant to muted
+}
+
+/** 两个颜色的 WCAG 对比度（1..21）。 */
+internal fun contrastRatio(a: Color, b: Color): Float {
+    val la = a.luminance() + 0.05f
+    val lb = b.luminance() + 0.05f
+    return if (la > lb) la / lb else lb / la
+}
+
+/** [background] 上的文字：黑白里对比度高的那个。 */
+internal fun readableOn(background: Color): Color =
+    if (contrastRatio(Color.White, background) >= contrastRatio(Color.Black, background)) Color.White else Color.Black
+
+private const val VIBRANT_TONE_MIN = 22.0
+private const val VIBRANT_TONE_MAX = 40.0
 
 /**
  * 安全区：文字区相对舞台四边的内边距（px）。父布局在测量阶段写，模式在布局 / 绘制阶段读，不重组。
@@ -423,6 +493,8 @@ class StageDisplay(
     val insets: StageInsets,
     /** 安全区底部再让出的高度（像素）：频谱卡片开着时是卡片那一截，文字和宿主副行都不压它。 */
     val reserveBottom: Float = 0f,
+    /** 舞台接收拖动和点按：只有 [LyricVisualizer.interactive] 的模式、不在电视上、不是缩略图时为 true。 */
+    val touch: Boolean = false,
 ) {
     /** 安全区，在绘制阶段用。 */
     fun safeRect(size: Size): Rect {
@@ -455,6 +527,8 @@ class LyricStageContext internal constructor(
     val audio: StageAudio?,
     /** 歌词下面那一行放什么。 */
     val subline: LyricSubline,
+    /** 跳到某个时间（毫秒）播放；只给 [LyricVisualizer.interactive] 的模式用，缩略图里什么都不做。 */
+    val seek: (Long) -> Unit = {},
 ) {
     /** 当前句（句间为 null）。组合阶段读会随换句重组。 */
     val currentLine: StageLine? get() = lines.getOrNull(lineIndex.value)

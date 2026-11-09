@@ -64,6 +64,9 @@ import kotlin.math.roundToInt
  * - 其他模式：一个帧循环（电视限 30 帧）推进 [StageClock]、当前句和律动；模式切换时交叉淡入淡出。
  *   页面不在组合里时循环自然停；暂停时只在跳转后更新一次时间；减少动态效果时不跑循环，只在换句时更新。
  * - 宿主副行（翻译或罗马音）画在安全区底部，开着频谱时往上让 70dp；频谱图层在左下角。
+ * - 自己画背景的模式在等歌词时（加载中、换歌后新歌词还没到）留在模式里画空场，不退回经典：
+ *   这时宿主流光背景已经停了，经典会落在一块素底上，等歌词到了又闪回模式背景。
+ * - [seek] 接到播放器，只有 [LyricVisualizer.interactive] 的模式用它（点一句跳过去）。
  */
 @Composable
 internal fun LyricStage(
@@ -78,19 +81,28 @@ internal fun LyricStage(
     insets: StageInsets,
     modifier: Modifier = Modifier,
     edgeFade: Dp = 0.dp,
+    seek: (Long) -> Unit = {},
     classic: (@Composable (Modifier) -> Unit)? = null,
 ) {
+    // 设备档位（模糊默认开不开）要在读任何模式设置之前定下来
+    ResolveStageDevice()
+    // 换歌后头一两帧，解析器还拿着上一首的结果（新原文是空串，解析还没回来）：记下这份歌词是哪首歌时到的，对不上就是旧词。
+    // 空歌词不算：两首都没词时解析结果不会换，按“没有歌词”走
+    val lyricsSong = remember(lyrics) { song.key }
+    val stale = lyricsSong != song.key && lyrics.raw.isNotBlank()
     BoxWithConstraints(modifier) {
         val noLyrics = lyrics.raw.isBlank() && !loading
         val tooShort = maxHeight < MIN_STAGE_HEIGHT
+        val waiting = stale || (loading && (lyrics.raw.isBlank() || !lyrics.synced))
+        val holdInMode = waiting && !mode.hostBackground
         val useClassic = mode.id == ClassicVisualizer.id || tooShort ||
-            (noLyrics && !mode.drawsWithoutLyrics) || (!noLyrics && !lyrics.synced)
+            (!holdInMode && ((noLyrics && !mode.drawsWithoutLyrics) || (!noLyrics && !lyrics.synced)))
         if (useClassic) {
             classic?.invoke(Modifier.fillMaxSize().stageSafePadding(insets))
             return@BoxWithConstraints
         }
         Crossfade(mode, Modifier.fillMaxSize(), MaterialTheme.motionScheme.defaultEffectsSpec(), label = "lyricStageMode") { shown ->
-            StageHost(shown, lyrics, position, playing, song, prefs, textSp, insets, edgeFade)
+            StageHost(shown, lyrics, waiting, position, playing, song, prefs, textSp, insets, edgeFade, seek)
         }
     }
 }
@@ -159,6 +171,7 @@ private fun Modifier.stageEdgeFade(edge: Dp): Modifier {
 private fun StageHost(
     mode: LyricVisualizer,
     lyrics: ParsedLyrics,
+    waiting: Boolean,
     position: State<Long>,
     playing: Boolean,
     song: Song,
@@ -166,41 +179,48 @@ private fun StageHost(
     textSp: Float,
     insets: StageInsets,
     edgeFade: Dp,
+    seek: (Long) -> Unit,
 ) {
     val context = LocalContext.current
     val window = LocalAppWindow.current
     val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
     val tv = window.isTv
-    val lines = remember(lyrics) { stageLines(lyrics) }
+    // 等歌词时不给句子：模式画空场，不会把上一首的词再演一遍
+    val lines = remember(lyrics, waiting) { if (waiting) emptyList() else stageLines(lyrics) }
     val clock = remember { StageClock() }
     val lineIndex = remember { mutableIntStateOf(-1) }
     val paused = rememberUpdatedState(!playing)
     val analyzer = remember(context) { (context.applicationContext as? MyMusicApp)?.rhythmAnalyzer }
-    val wantsAudio = analyzer != null && !reduceMotion && (mode.wantsAudio || prefs.spectrum)
+    val raw = prefs.pluginSettings[mode.id].orEmpty()
+    val settings = remember(mode, raw) { SettingValues(mode.settings, raw) }
+    // 要不要律动按设置问模式：Rush 只有背景选“律动”时才要，换成别的背景就不再白跑分析
+    val modeAudio = mode.wantsAudio(settings)
+    val wantsAudio = analyzer != null && !reduceMotion && (modeAudio || prefs.spectrum)
     val audio = remember(wantsAudio) { if (wantsAudio) StageAudio() else null }
     if (wantsAudio) RhythmFeed(analyzer, playing)
 
     val scheme = MaterialTheme.colorScheme
     val coverColors by produceState(blobColorCache.get(song.cover), song.cover) { value = coverBlobColors(context, song.cover) }
-    val colors = remember(scheme.onSurface, scheme.primary, scheme.tertiary, scheme.surface, coverColors) {
-        val fallback = listOf(scheme.primary, scheme.tertiary, scheme.secondary, scheme.primaryContainer)
-        StageColors(
-            text = scheme.onSurface,
-            dim = scheme.onSurface.copy(alpha = 0.28f),
-            accent = scheme.primary,
-            accentAlt = scheme.tertiary,
-            surface = scheme.surface,
-            cover = List(4) { coverColors?.getOrNull(it) ?: fallback[it] },
-        )
+    val colors = remember(scheme.onSurface, scheme.primary, scheme.secondary, scheme.tertiary, scheme.primaryContainer, scheme.surface, coverColors) {
+        stageColors(scheme, coverColors)
     }
     // 频谱卡片开着时安全区底部让出卡片那一截（卡片本身按原来的安全区摆）
     val reserve = if (prefs.spectrum && audio != null) with(LocalDensity.current) { SpectrumReserve.toPx() } else 0f
-    val display = remember(textSp, reduceMotion, tv, window.widthDp, window.heightDp, insets, reserve) {
-        StageDisplay(textSp, reduceMotion, tv, wide = tv || window.widthDp > window.heightDp, insets = insets, reserveBottom = reserve)
+    val touch = mode.interactive && !tv
+    val display = remember(textSp, reduceMotion, tv, window.widthDp, window.heightDp, insets, reserve, touch) {
+        StageDisplay(
+            textSp,
+            reduceMotion,
+            tv,
+            wide = tv || window.widthDp > window.heightDp,
+            insets = insets,
+            reserveBottom = reserve,
+            touch = touch,
+        )
     }
-    val raw = prefs.pluginSettings[mode.id].orEmpty()
-    val settings = remember(mode, raw) { SettingValues(mode.settings, raw) }
-    val ctx = remember(lines, song.key, colors, display, settings, audio, prefs.subline, mode) {
+    val seekState = rememberUpdatedState(seek)
+    val seekToLine = remember { { ms: Long -> seekState.value(ms) } }
+    val ctx = remember(lines, song.key, colors, display, settings, audio, prefs.subline, mode, modeAudio) {
         LyricStageContext(
             lines = lines,
             song = song,
@@ -211,8 +231,9 @@ private fun StageHost(
             colors = colors,
             display = display,
             settings = settings,
-            audio = audio.takeIf { mode.wantsAudio },
+            audio = audio.takeIf { modeAudio },
             subline = prefs.subline,
+            seek = seekToLine,
         )
     }
 

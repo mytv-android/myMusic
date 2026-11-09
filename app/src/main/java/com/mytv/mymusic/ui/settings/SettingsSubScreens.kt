@@ -1738,6 +1738,7 @@ private fun platformReportSummary(providerId: String, state: MusicUiState): Stri
 
 private const val LICENSE_URL = "https://github.com/mytv-android/myMusic/blob/main/LICENSE"
 private const val NOTICES_URL = "https://github.com/mytv-android/myMusic/blob/main/THIRD_PARTY_NOTICES.md"
+private const val GPL3_URL = "https://www.gnu.org/licenses/gpl-3.0.html"
 
 /** 移植的 MIT 歌词动画模组：MIT 要求随副本附上版权行和许可原文，这里原样给出。 */
 private const val FOLIA_MIT_NOTICE =
@@ -1771,6 +1772,8 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
         "Folia 社区歌词动画模组" to "巨幕、跳一跳移植自 tumuyan 的 cinerama 1.0.0、visualizer-jump 1.2.0（AGPL-3.0）；" +
             "MiSide 掉落、动感波光、黑胶唱片、星潮·银河分别移植自 miside-drop、wave-light、vinyl-disc、stardrift（MIT），" +
             "“按速度”换动画的思路来自 bpm-style-director（MIT）。全部用 Kotlin 原生重写，不运行、也不打包原模组的代码和素材。",
+        "Rush（shub39）" to "歌词动画“Rush”照 Rush 7.2.1 的歌词页用 Kotlin 改写：封面取色底、左对齐大字、景深模糊、逐字羽化扫光、间奏三点和六种背景。" +
+            "GPL-3.0-or-later，与本应用的 AGPL-3.0 代码按两份许可的第 13 条组合分发。不打包它的字体和图标。",
     )
     SettingsPage(SettingsSection.Licenses, embedded, onBack) {
         item(key = "app", contentType = "licenseCard") {
@@ -1795,6 +1798,22 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
             contentType = { _, _ -> "license" },
         ) { index, (title, body) ->
             TextCard(title, body, index, thirdParty.size)
+        }
+        item(key = "gplHead", contentType = "sectionHeader") { SectionLabel("GPL-3.0 许可") }
+        item(key = "gpl", contentType = "licenseCard") {
+            TextCard(
+                title = "GNU General Public License v3.0（Rush 歌词样式）",
+                body = "Copyright (C) 2026 Shubham Gorai。改写的文件保留原文件头和版权行，注明修改内容和日期，按 GPL 第 3 版或更新版本分发。",
+                index = 0,
+                count = 1,
+                footer = {
+                    TextButton(onClick = { openUri(GPL3_URL) }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                        Text("查看完整文本")
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, null, Modifier.size(18.dp))
+                    }
+                },
+            )
         }
         item(key = "mitHead", contentType = "sectionHeader") { SectionLabel("MIT 许可原文") }
         item(key = "mit", contentType = "licenseCard") {

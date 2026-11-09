@@ -537,7 +537,7 @@ private class BlobPalette(initial: List<Color>) {
     }
 }
 
-private suspend fun loadBackdropCover(context: Context, url: String): ImageBitmap? {
+internal suspend fun loadBackdropCover(context: Context, url: String): ImageBitmap? {
     if (url.isBlank()) return null
     // 单独的缓存键：和大封面共用地址做键时，24px 的小图会顶掉内存里的大封面，每次切歌大封面都得重新解码
     val request = ImageRequest.Builder(context).data(url).size(BACKDROP_COVER_PX).memoryCacheKey("$url#backdrop").build()
