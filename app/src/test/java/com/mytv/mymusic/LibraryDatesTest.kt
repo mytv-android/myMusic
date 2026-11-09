@@ -3,7 +3,7 @@ package com.mytv.mymusic
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
-import com.mytv.mymusic.ui.library.DOWNLOAD_DONE
+import com.mytv.mymusic.data.DOWNLOAD_DONE
 import com.mytv.mymusic.ui.library.DownloadDiskStat
 import com.mytv.mymusic.ui.library.DownloadSnapshot
 import com.mytv.mymusic.ui.library.prepareDownloads

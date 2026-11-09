@@ -41,6 +41,8 @@ import com.mytv.mymusic.data.AppSettings
 import com.mytv.mymusic.data.CachedAccountProfile
 import com.mytv.mymusic.data.CanonicalSourceEntity
 import com.mytv.mymusic.data.CanonicalTrackEntity
+import com.mytv.mymusic.data.DOWNLOAD_ACTIVE
+import com.mytv.mymusic.data.DOWNLOAD_DONE
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.ListenTaskState
 import com.mytv.mymusic.data.native.SodaApplyFreeVipResult
@@ -109,6 +111,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -577,6 +580,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val coverSeeds = CoverSeedRepository(application, SingletonImageLoader.get(application))
 
     init {
+        val downloadsAtStart = System.currentTimeMillis()
+        viewModelScope.launch(Dispatchers.IO) {
+            // 「下载中」只活在当前进程：上次进程被杀留下的记录永远等不到「已完成」，
+            // 启动时连同半截文件一起清掉。只清本进程创建之前留下的，避免误删刚点的下载。
+            runCatching {
+                val dao = app.database.dao()
+                dao.downloads().first()
+                    .filter { it.state != DOWNLOAD_DONE && it.updatedAt < downloadsAtStart }
+                    .forEach { record ->
+                        File(record.path).delete()
+                        File("${record.path}.part").delete()
+                        dao.deleteDownload(record.key)
+                    }
+            }
+        }
         viewModelScope.launch {
             // 等磁盘上真正那一帧设置：失败也要放行，不能把界面关在门外
             runCatching { app.settings.state.first() }
@@ -2283,54 +2301,124 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         app.sync.onLocalChange()
     }
 
+    /** 同一首歌同时只跑一次下载；重复点击只提示，不并发写同一个文件。 */
+    private val downloading = mutableSetOf<String>()
+
     fun download(song: Song) = viewModelScope.launch {
-        val appContext = getApplication<Application>()
-        var failure: Throwable? = null
-        val stream = runCatching {
-            app.repository.playableStream(song, cookieFor(song.source), appContext.cacheDir)
-        }.onFailure {
-            if (it is CancellationException) throw it
-            failure = it
-        }.getOrNull()
-        val url = stream?.url.orEmpty()
-        if (url.isBlank()) {
-            message(failure?.message?.takeIf { it.isNotBlank() } ?: "没有可下载的地址", error = true)
+        if (!downloading.add(song.key)) {
+            message("「${song.title}」正在下载")
             return@launch
         }
+        try {
+            downloadSong(song)
+        } finally {
+            downloading.remove(song.key)
+        }
+    }
+
+    private suspend fun downloadSong(song: Song) {
+        val appContext = getApplication<Application>()
+        val dao = app.database.dao()
+        // 上一次已完成的结果：这次重下失败时还原，别把原来的记录和文件一起弄丢
+        val previous = runCatching {
+            dao.downloads().first().firstOrNull { it.key == song.key && it.state == DOWNLOAD_DONE }
+        }.getOrNull()
         val directory = appContext.getExternalFilesDir("music") ?: appContext.filesDir
-        // 真实音质优先：无损流按 flac 存盘，不要再用搜索结果的 mp3 猜测
+        fun targetFile(extension: String) = File(
+            directory,
+            "${song.name}-${song.artist}[${song.source}].$extension"
+                .replace(Regex("[\\\\/:*?\"<>|]"), "_"),
+        )
+        // 先落库再取流：汽水要整曲下载解密，跨源回退还要搜别的平台，第一次可能很慢。
+        // 这期间下载页要能看到「正在下载」，而不是一片空白。已经下好过的保留原记录，
+        // 重下期间和进程被杀时都不会把旧文件和记录一起顶掉。
+        val keepExisting = previous != null && File(previous.path).isFile
+        if (!keepExisting) {
+            dao.saveDownload(
+                DownloadRecord(
+                    song.key,
+                    json.encodeToString(song),
+                    targetFile(song.ext.ifBlank { "mp3" }.lowercase()).absolutePath,
+                    DOWNLOAD_ACTIVE,
+                    System.currentTimeMillis(),
+                )
+            )
+        }
+
+        var failure: Throwable? = null
+        val resolved = runCatching { resolvePlayable(canonicalForSong(song), forDownload = true) }
+            .onFailure {
+                if (it is CancellationException) throw it
+                failure = it
+            }
+            .getOrNull()
+        val ready = resolved?.resolution as? Resolution.Ready
+        if (resolved == null || ready == null || ready.url.isBlank()) {
+            restoreDownload(song.key, previous)
+            val text = resolved?.let { noSourceMessage(it.track, it.resolution) }
+                ?.takeIf { it.isNotBlank() }
+                ?: failure?.message?.takeIf { it.isNotBlank() }
+                ?: "没有可下载的地址"
+            message(text, error = true)
+            return
+        }
+        // 试听片段不是整曲，不能落成「已下载」（正常流程里 forDownload 已经排除了它，这里兜底）
+        if (ready.isPreview) {
+            restoreDownload(song.key, previous)
+            message("「${song.title}」当前账号只能试听，无法下载整曲", error = true)
+            return
+        }
+        val url = ready.url
+        // 只用这次取流拿到的真实后缀，不再拿搜索结果的元数据猜
         val extension = listOf(
-            stream?.ext.orEmpty(),
-            song.ext,
+            ready.source.song.ext,
             Uri.parse(url).path?.let { File(it).extension }.orEmpty(),
         ).firstOrNull { it.isNotBlank() }?.lowercase() ?: "mp3"
-        val safeName = "${song.name}-${song.artist}[${song.source}].$extension"
-            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
-        val file = File(directory, safeName)
-        app.database.dao().saveDownload(
-            DownloadRecord(song.key, json.encodeToString(song), file.absolutePath, "下载中", System.currentTimeMillis())
-        )
-        runCatching {
+        val file = targetFile(extension)
+        val temp = File(directory, "${file.name}.part")
+        val size = try {
             withContext(Dispatchers.IO) {
+                temp.delete()
                 if (url.startsWith("file:")) {
                     val cached = File(Uri.parse(url).path.orEmpty())
                     if (!cached.isFile) error("本地缓存文件不存在")
-                    cached.copyTo(file, overwrite = true)
+                    cached.copyTo(temp, overwrite = true)
                 } else {
                     http.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                        if (!response.isSuccessful) error(response.message)
-                        file.outputStream().use { output -> response.body.byteStream().copyTo(output) }
+                        if (!response.isSuccessful) error("下载失败：${response.code} ${response.message}")
+                        temp.outputStream().use { output -> response.body.byteStream().copyTo(output) }
                     }
                 }
+                if (temp.length() <= 0L) error("下载到的文件为空")
+                // 先写临时文件再改名：重下失败也不会把上一次下好的同名文件截断
+                if (!temp.renameTo(file)) error("无法保存文件")
+                file.length()
             }
-            app.database.dao().saveDownload(
-                DownloadRecord(song.key, json.encodeToString(song), file.absolutePath, "已完成", System.currentTimeMillis())
-            )
-            message("已下载「${song.title}」")
-        }.onFailure {
-            file.delete()
-            app.database.dao().deleteDownload(song.key)
-            message(it.message ?: "下载失败", error = true)
+        } catch (cancel: CancellationException) {
+            temp.delete()
+            // 协程已取消，Room 的挂起函数会立刻再抛取消；恢复记录要用 NonCancellable
+            withContext(NonCancellable) { restoreDownload(song.key, previous) }
+            throw cancel
+        } catch (error: Exception) {
+            temp.delete()
+            restoreDownload(song.key, previous)
+            message(error.message?.takeIf { it.isNotBlank() } ?: "下载失败", error = true)
+            return
+        }
+        val stored = song.copy(url = "", ext = extension, bitrate = ready.source.song.bitrate, size = size)
+        dao.saveDownload(
+            DownloadRecord(song.key, json.encodeToString(stored), file.absolutePath, DOWNLOAD_DONE, System.currentTimeMillis())
+        )
+        if (previous != null && previous.path != file.absolutePath) File(previous.path).delete()
+        message("已下载「${song.title}」（${extension.uppercase(Locale.ROOT)}）")
+    }
+
+    /** 下载没成时恢复上一次已完成的记录；没有旧记录就删掉「下载中」占位。 */
+    private suspend fun restoreDownload(key: String, previous: DownloadRecord?) {
+        if (previous != null && File(previous.path).isFile) {
+            app.database.dao().saveDownload(previous)
+        } else {
+            app.database.dao().deleteDownload(key)
         }
     }
 
@@ -3053,7 +3141,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val records = downloads.value
         if (records.isEmpty()) return null
         for (source in track.sources) {
-            val record = records.firstOrNull { it.key == source.song.key && it.state == "已完成" } ?: continue
+            val record = records.firstOrNull { it.key == source.song.key && it.state == DOWNLOAD_DONE } ?: continue
             val file = File(record.path)
             if (file.exists() && file.length() > 0) return source to file
         }
@@ -3088,12 +3176,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         track: CanonicalTrack,
         pinnedProvider: String? = null,
         excludeProviders: Set<String> = emptySet(),
+        forDownload: Boolean = false,
     ): AutoResolution {
+        // 下载只要整曲：试听片段和无损档位一样会被平台降级，回退时也优先能下整曲的源
+        fun policyFor(item: CanonicalTrack) = resolver.buildPolicy(item, pinnedProvider).let {
+            if (forDownload) it.copy(allowPreview = false, pinnedProvider = null) else it
+        }
         val initial = resolver.resolve(
             track,
             pinnedProvider,
             excludeProviders,
-            resolver.buildPolicy(track, pinnedProvider),
+            policyFor(track),
         )
         if (initial is Resolution.Ready) return AutoResolution(track, initial, autoMatched = false)
 
@@ -3121,7 +3214,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 current,
                 pinnedProvider,
                 excludeProviders,
-                resolver.buildPolicy(current, pinnedProvider),
+                policyFor(current),
             )
             if (resolution is Resolution.Ready) {
                 return AutoResolution(current, resolution, autoMatched = true)

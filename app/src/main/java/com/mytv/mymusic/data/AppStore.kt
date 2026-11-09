@@ -660,6 +660,10 @@ data class SavedSongTombstone(
     @ColumnInfo(name = "deleted_at") val deletedAt: Long,
 )
 
+/** 下载记录状态。进行中的记录只活在当前进程里，进程重启后由 ViewModel 清理。 */
+const val DOWNLOAD_ACTIVE = "下载中"
+const val DOWNLOAD_DONE = "已完成"
+
 @Entity(tableName = "downloads")
 data class DownloadRecord(@PrimaryKey val key: String, val payload: String, val path: String, val state: String, val updatedAt: Long)
 

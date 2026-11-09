@@ -65,6 +65,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mytv.mymusic.data.DOWNLOAD_DONE
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
@@ -465,7 +466,10 @@ fun DownloadsScreen(
             }
         }
         itemsIndexed(done, key = { _, it -> "done:${it.record.key}" }, contentType = { _, _ -> "download" }) { index, item ->
-            val detail = if (item.missing) "文件已不存在" else listOf(item.song.ext.uppercase(), formatBytes(item.size))
+            // 显示磁盘上文件的真实后缀：记录里的 Song 可能是下载前的搜索元数据，
+            // 平台标称无损、账号实际只拿到 mp3 时，两者会对不上。
+            val fileExt = File(item.record.path).extension.uppercase().ifBlank { item.song.ext.uppercase() }
+            val detail = if (item.missing) "文件已不存在" else listOf(fileExt, formatBytes(item.size))
                 .filter { it.isNotBlank() }.joinToString(" · ")
             SongRow(
                 title = item.song.title,

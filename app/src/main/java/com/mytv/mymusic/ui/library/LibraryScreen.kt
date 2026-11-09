@@ -111,6 +111,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.mytv.mymusic.data.DOWNLOAD_DONE
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.ListenTaskState
 import com.mytv.mymusic.ui.SodaWelfareUi
@@ -1378,8 +1379,6 @@ internal fun PaddingValues.withGutter(horizontal: Dp, extraBottom: Dp = 0.dp): P
     top = calculateTopPadding(),
     bottom = calculateBottomPadding() + extraBottom,
 )
-
-internal const val DOWNLOAD_DONE = "已完成"
 
 internal fun startOfToday(): Long {
     val zone = ZoneId.systemDefault()
