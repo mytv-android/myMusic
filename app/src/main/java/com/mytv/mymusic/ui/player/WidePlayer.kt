@@ -241,13 +241,6 @@ internal fun WidePlayer(
                 { if (showFocus) FocusHeader(song, focusAlpha) },
                 { if (showFocus) FocusDock(playing, actions, idle, !lyricsMode, focusChrome, onLyricsMode, onOpenQueue, stage.onOpenSheet) },
                 {
-                    if (showFocus) {
-                        WideGuard(null, !lyricsMode, Modifier.graphicsLayer { alpha = focusAlpha() }) {
-                            WavySeekBar(position, duration, playing, actions::seek, Modifier.fillMaxWidth(), amplitudeScale = waveScale, waveBpm = waveBpm)
-                        }
-                    }
-                },
-                {
                     // 专注歌词换成了动画舞台时，歌词栏随过渡淡出，稳定后不再组合
                     if (!stage.custom || showDefault) {
                         LyricsList(
@@ -575,9 +568,8 @@ private class WideStagePolicy(
         // 竖向工具栏按自然高度测量，太矮时由摆放阶段等比缩小
         val dock = measurables[SlotDock].firstOrNull()?.measure(Constraints(maxWidth = width))
         val dockWidth = dock?.width ?: DockWidth.roundToPx()
-        val frame = wideFocusFrame(width, height, dp, dockWidth, dock?.height ?: estimate.dock, estimate.header, lastSeek, split)
+        val frame = wideFocusFrame(width, height, dp, dockWidth, dock?.height ?: estimate.dock, estimate.header, split)
         val header = measurables[SlotHeader].firstOrNull()?.measure(Constraints(maxWidth = frame.lyricsWidth))
-        val focusSeek = measurables[SlotFocusSeek].firstOrNull()?.measure(Constraints.fixedWidth(frame.seekWidth))
         val miniSize = DockCoverSize.toPx() * frame.dockScale
         val miniX = frame.dockX + (dockWidth - DockCoverSize.toPx()) / 2f * frame.dockScale
         val miniY = frame.dockY + DockPadding.toPx() * frame.dockScale
@@ -628,7 +620,6 @@ private class WideStagePolicy(
                 translationX = -(1f - move.value) * slide
             }
             header?.place(frame.contentX, frame.headerY)
-            focusSeek?.placeWithLayer(frame.contentX, frame.seekY) { translationY = (1f - move.value) * slide / 2f }
             // 封面压在竖向工具栏上面，但在标题等默认控件下面：光晕画在封面边界外，不能盖住歌名
             val coverLeft = coverX.roundToInt()
             val coverTop = coverY.roundToInt()
@@ -757,7 +748,7 @@ internal fun wideFullTier(height: Int, dp: Float, meta: Int, seek: Int, coverMax
     return height - blocks - FullMinGaps.toPx(dp).sum() >= comfort
 }
 
-/** 专注歌词的摆放（像素）：竖向工具栏的位置和缩放，顶部标题行、歌词区和底部进度条。 */
+/** 专注歌词的摆放（像素）：竖向工具栏的位置和缩放，顶部标题行和歌词区。 */
 internal class WideFocusFrame(
     val dockX: Int,
     val dockY: Int,
@@ -767,15 +758,13 @@ internal class WideFocusFrame(
     val lyricsY: Int,
     val lyricsWidth: Int,
     val lyricsHeight: Int,
-    val seekY: Int,
-    val seekWidth: Int,
 )
 
 /**
- * 设计稿 1280×800（状态栏下 772dp 高）：工具栏 x 32、宽 88；标题行 x 180、距顶 12；歌词宽 1000、高 610；
- * 进度条宽 980、底边留 40。工具栏的中心放在进度条以上区域 45% 的高度，窗口太矮放不下就等比缩小。
+ * 设计稿 1280×800（状态栏下 772dp 高）：工具栏 x 32、宽 88；标题行 x 180、距顶 12；歌词宽 1000、底边留 40。
+ * 专注歌词不放进度条，歌词一直排到底边以上 18dp；工具栏的中心放在这块区域 45% 的高度，窗口太矮放不下就等比缩小。
  *
- * 有竖折痕（[split]，书本姿态、双竖）时专注歌词只占右页：标题行、歌词和进度条从右页起点再空 16dp 开始，
+ * 有竖折痕（[split]，书本姿态、双竖）时专注歌词只占右页：标题行和歌词从右页起点再空 16dp 开始，
  * 右边留 32dp；竖向工具栏放在左页正中，左页只剩它，不再贴着窗口左边。
  */
 internal fun wideFocusFrame(
@@ -785,7 +774,6 @@ internal fun wideFocusFrame(
     dockWidth: Int,
     dockHeight: Int,
     headerHeight: Int,
-    seekHeight: Int,
     split: FoldSplit? = null,
 ): WideFocusFrame {
     val book = split?.takeIf { it.vertical }
@@ -804,14 +792,13 @@ internal fun wideFocusFrame(
     val lyricsWidth = (width - contentX - right).coerceIn(0f, 1100 * dp).roundToInt()
     val headerY = (12 * dp).roundToInt()
     val lyricsY = headerY + headerHeight + (22 * dp).roundToInt()
-    val seekY = (height - seekHeight - (height * 0.052f).coerceIn(12 * dp, 40 * dp)).roundToInt()
-    val lyricsHeight = (seekY - (18 * dp).roundToInt() - lyricsY).coerceAtLeast(0)
+    val bottom = (height - (height * 0.052f).coerceIn(12 * dp, 40 * dp)).roundToInt()
+    val lyricsHeight = (bottom - (18 * dp).roundToInt() - lyricsY).coerceAtLeast(0)
     val margin = (12 * dp).roundToInt()
     val dockScale = ((height - margin * 2).toFloat() / dockHeight.coerceAtLeast(1)).coerceIn(0f, 1f)
     val shown = (dockHeight * dockScale).roundToInt()
-    val dockY = (seekY * 0.45f - shown / 2f).roundToInt().coerceIn(margin, (height - margin - shown).coerceAtLeast(margin))
-    val seekWidth = (lyricsWidth - 20 * dp).roundToInt().coerceAtLeast(0)
-    return WideFocusFrame(dockX, dockY, dockScale, contentX, headerY, lyricsY, lyricsWidth, lyricsHeight, seekY, seekWidth)
+    val dockY = (bottom * 0.45f - shown / 2f).roundToInt().coerceIn(margin, (height - margin - shown).coerceAtLeast(margin))
+    return WideFocusFrame(dockX, dockY, dockScale, contentX, headerY, lyricsY, lyricsWidth, lyricsHeight)
 }
 
 private fun IntArray.toPx(dp: Float): IntArray = IntArray(size) { (this[it] * dp).roundToInt() }
@@ -825,11 +812,10 @@ private const val SlotGroup = 5
 private const val SlotToolbar = 6
 private const val SlotHeader = 7
 private const val SlotDock = 8
-private const val SlotFocusSeek = 9
-private const val SlotLyrics = 10
-private const val SlotNotice = 11
-private const val SlotCover = 12
-private const val SlotStage = 13
+private const val SlotLyrics = 9
+private const val SlotNotice = 10
+private const val SlotCover = 11
+private const val SlotStage = 12
 
 /** 平板专注歌词舞台的正文字号（sp）。 */
 private const val WIDE_STAGE_SP = 40f

@@ -142,30 +142,28 @@ class WideStageLayoutTest {
 
     @Test
     fun focusFrameMatchesTheMock() {
-        // 设计稿：竖向工具栏 x 32、y 132（状态栏下 104）；歌词 x 180、y 84（56）、1000×610；进度条 y 716（宽 980）
-        val f = wideFocusFrame(1280, 772, 1f, dockWidth = 88, dockHeight = 413, headerHeight = 22, seekHeight = 48)
+        // 设计稿：竖向工具栏 x 32、y 132（状态栏下 104）；歌词 x 180、y 84（56）、宽 1000。
+        // 专注歌词没有进度条，歌词一直排到底边（772 − 40）以上 18dp
+        val f = wideFocusFrame(1280, 772, 1f, dockWidth = 88, dockHeight = 413, headerHeight = 22)
         assertEquals(32, f.dockX)
         assertEquals(180, f.contentX)
         assertEquals(1000, f.lyricsWidth)
         assertEquals(56, f.lyricsY)
-        assertEquals(610, f.lyricsHeight)
-        assertEquals(684, f.seekY)
-        assertEquals(980, f.seekWidth)
+        assertEquals(658, f.lyricsHeight)
         assertEquals(1f, f.dockScale)
-        assertTrue("dockY=${f.dockY}", f.dockY in 96..108)
+        assertTrue("dockY=${f.dockY}", f.dockY in 118..128)
     }
 
     @Test
     fun focusDockScalesDownOnShortWindows() {
         listOf(312, 360, 480, 528, 600).forEach { height ->
-            val f = wideFocusFrame(800, height, 1f, dockWidth = 88, dockHeight = 413, headerHeight = 22, seekHeight = 48)
+            val f = wideFocusFrame(800, height, 1f, dockWidth = 88, dockHeight = 413, headerHeight = 22)
             val shown = 413 * f.dockScale
             assertTrue("height=$height", f.dockY >= 12 && f.dockY + shown <= height - 12 + 0.5f)
             assertTrue(f.lyricsHeight > 0)
-            assertTrue(f.seekY + 48 <= height)
-            // 工具栏在歌词和进度条左边，不重叠
+            // 工具栏在歌词左边，不重叠
             assertTrue(f.dockX + 88 < f.contentX)
         }
-        assertEquals(1f, wideFocusFrame(960, 528, 1f, 88, 413, 22, 48).dockScale)
+        assertEquals(1f, wideFocusFrame(960, 528, 1f, 88, 413, 22).dockScale)
     }
 }

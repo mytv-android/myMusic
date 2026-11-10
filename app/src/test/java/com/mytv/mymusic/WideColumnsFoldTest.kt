@@ -46,8 +46,8 @@ class WideColumnsFoldTest {
         assertEquals(600, ref.lyricsX)
         assertEquals(616, ref.lyricsWidth)
         // 专注歌词同样不变
-        val f = wideFocusFrame(1280, 772, 1f, 88, 413, 22, 48)
-        val g = wideFocusFrame(1280, 772, 1f, 88, 413, 22, 48, null)
+        val f = wideFocusFrame(1280, 772, 1f, 88, 413, 22)
+        val g = wideFocusFrame(1280, 772, 1f, 88, 413, 22, null)
         assertEquals(f.dockX, g.dockX)
         assertEquals(f.contentX, g.contentX)
         assertEquals(f.lyricsWidth, g.lyricsWidth)
@@ -75,15 +75,15 @@ class WideColumnsFoldTest {
     @Test
     fun bookPostureFocusLyricsUseOnlyTheRightPage() {
         val s = split(841f, crease(420f))
-        val f = wideFocusFrame(841, 645, 1f, dockWidth = 88, dockHeight = 413, headerHeight = 22, seekHeight = 48, split = s)
+        val f = wideFocusFrame(841, 645, 1f, dockWidth = 88, dockHeight = 413, headerHeight = 22, split = s)
         // 竖向工具栏在左页正中，整条在折痕左缘之前
         assertEquals(((404 - 88) / 2f).toInt(), f.dockX)
         assertTrue(f.dockX + 88 <= 404)
-        // 标题、歌词、进度条从右页起点 + 16 开始，右边留 32，都不过折痕
+        // 标题、歌词从右页起点 + 16 开始，右边留 32，都不过折痕
         assertEquals(437 + 16, f.contentX)
         assertEquals(841 - 453 - 32, f.lyricsWidth)
         assertTrue(f.contentX >= 421 + 32)
-        assertTrue(f.contentX + f.seekWidth <= 841)
+        assertTrue(f.contentX + f.lyricsWidth <= 841)
         assertTrue(f.lyricsHeight > 0)
     }
 
@@ -111,8 +111,8 @@ class WideColumnsFoldTest {
             assertEquals(plain.left, withTable.left)
             assertEquals(plain.lyricsX, withTable.lyricsX)
             assertEquals(plain.lyricsWidth, withTable.lyricsWidth)
-            val f = wideFocusFrame(width, 645, 1f, 88, 413, 22, 48)
-            val g = wideFocusFrame(width, 645, 1f, 88, 413, 22, 48, table)
+            val f = wideFocusFrame(width, 645, 1f, 88, 413, 22)
+            val g = wideFocusFrame(width, 645, 1f, 88, 413, 22, table)
             assertEquals(f.dockX, g.dockX)
             assertEquals(f.contentX, g.contentX)
         }

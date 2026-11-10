@@ -203,15 +203,12 @@ internal fun PhonePlayer(
                         active = active,
                         stage = stage,
                         position = position,
-                        duration = duration,
                         playing = playing,
                         actions = actions,
                         idle = idle,
                         chrome = chrome,
                         blocked = !lyricsMode,
                         alpha = lyricsAlpha,
-                        waveScale = waveScale,
-                        waveBpm = waveBpm,
                         onLyricsMode = onLyricsMode,
                         onOpenQueue = onOpenQueue,
                         onSkip = onSkip,
@@ -575,7 +572,7 @@ private fun PhoneNotice(notice: String, alpha: () -> Float) {
 
 /**
  * 歌词页：左上角留给缩小成圆的封面（由封面舞台自己画），旁边是歌名、歌手、✦（歌词动画面板）和收藏；
- * 底部是波浪进度、小号按钮组和“歌词 / 队列”，空闲时底部淡出并拦截点按。
+ * 底部只有小号按钮组和“歌词 / 队列”，空闲时底部淡出并拦截点按（全屏歌词不放进度条）。
  * 中间是歌词舞台（[LyricStage]）：铺满整页，垫在顶栏和控件下面，文字排在两者之间的安全区里；
  * 经典模式就是原来的左对齐歌词列表，位置和原来一样（安全区 = 原来列表占的那块）。
  */
@@ -588,15 +585,12 @@ private fun PhoneLyricsPage(
     active: State<Int>,
     stage: StageBinding,
     position: State<Long>,
-    duration: Long,
     playing: Boolean,
     actions: MusicActions,
     idle: IdleState,
     chrome: State<Float>,
     blocked: Boolean,
     alpha: () -> Float,
-    waveScale: () -> Float,
-    waveBpm: () -> Float,
     onLyricsMode: (Boolean) -> Unit,
     onOpenQueue: () -> Unit,
     onSkip: (Int) -> Unit,
@@ -661,26 +655,23 @@ private fun PhoneLyricsPage(
                 }
             },
             {
+                // 全屏歌词不放进度条（要跳转点歌词行就行），底部只留小号按钮组和工具栏
                 IdleGuard(idle, false, Modifier.padding(start = 20.dp, end = 16.dp, bottom = 8.dp).graphicsLayer { this.alpha = chrome.value }) {
-                    val awake = !idle.idle
-                    Column {
-                        WavySeekBar(position, duration, playing && awake, actions::seek, Modifier.padding(start = 4.dp, end = 8.dp), amplitudeScale = waveScale, waveBpm = waveBpm, live = song.isLive)
-                        Row(
-                            Modifier.fillMaxWidth().padding(top = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            TransportButtonGroup(
-                                playing = playing,
-                                onPrevious = { onSkip(-1) },
-                                onPlayPause = { actions.transport("play") },
-                                onNext = { onSkip(1) },
-                                size = TransportGroupSize.Compact,
-                            )
-                            PlayerToolbar {
-                                ToolbarLyricsButton(on = true, onToggle = onLyricsMode)
-                                ToolbarQueueButton(onOpenQueue)
-                            }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        TransportButtonGroup(
+                            playing = playing,
+                            onPrevious = { onSkip(-1) },
+                            onPlayPause = { actions.transport("play") },
+                            onNext = { onSkip(1) },
+                            size = TransportGroupSize.Compact,
+                        )
+                        PlayerToolbar {
+                            ToolbarLyricsButton(on = true, onToggle = onLyricsMode)
+                            ToolbarQueueButton(onOpenQueue)
                         }
                     }
                 }
