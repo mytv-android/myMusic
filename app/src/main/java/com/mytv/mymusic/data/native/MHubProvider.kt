@@ -6,8 +6,12 @@ import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.Song
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -71,7 +75,7 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
     /** 同一个关键词 10 分钟内不重复打服务端；搜索页重进、换源重试都复用它。 */
     private val searchCache = mutableMapOf<String, CachedSearch>()
 
-    /** 多平台搜索串行排队，避免同时发出多路搜索撞限流。 */
+    /** 一次用户搜索只跑一轮，避免同关键词并发重复打服务端。 */
     private val searchGate = Mutex()
 
     @Volatile
@@ -86,23 +90,43 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
         cachedSearch(keyword)?.let { return it }
 
         val platforms = platforms()
-        val songs = mutableListOf<Song>()
         var rateLimited = false
         var lastError: Exception? = null
         val hit = searchGate.withLock {
             cachedSearch(keyword)?.let { return@withLock it }
-            platforms.forEachIndexed { index, platform ->
-                if (index > 0) delay(SEARCH_GAP_MS)
-                try {
-                    songs += searchPlatform(platform.id, keyword)
-                } catch (cancellation: CancellationException) {
-                    throw cancellation
-                } catch (error: Exception) {
-                    lastError = error
-                    if ("HTTP 429" in error.message.orEmpty()) rateLimited = true
+            // 各平台互不影响，服务端也按平台各自限速；并行才能赶在聚合搜索给
+            // 这个源的时限内返回，单平台慢或失败只丢它自己。
+            val outcomes = supervisorScope {
+                platforms.map { platform ->
+                    async {
+                        try {
+                            withTimeoutOrNull(PLATFORM_TIMEOUT_MS) { searchPlatform(platform.id, keyword) }
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (error: Exception) {
+                            error
+                        }
+                    }
+                }.awaitAll()
+            }
+            val songs = mutableListOf<Song>()
+            for (outcome in outcomes) {
+                when (outcome) {
+                    is List<*> -> songs += outcome.filterIsInstance<Song>()
+                    is Exception -> {
+                        if ("HTTP 429" in outcome.message.orEmpty()) rateLimited = true
+                        if (lastError == null) lastError = outcome
+                    }
+                    null -> if (lastError == null) lastError = IllegalStateException("music.op.wiki 搜索超时")
                 }
             }
-            songs.ifEmpty { null }?.also { cacheSearch(keyword, it) }
+            // 有结果就先用着；部分平台失败不丢整轮结果，但也别缓存残缺结果，下次重试补齐。
+            if (songs.isEmpty()) {
+                null
+            } else {
+                if (lastError == null) cacheSearch(keyword, songs)
+                songs
+            }
         }
         if (hit != null) return hit
         if (rateLimited) throw IllegalStateException("music.op.wiki 搜索被限流，请稍后再试")
@@ -722,8 +746,9 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
         const val POLL_INTERVAL_MS = 2_000L
         const val PREPARE_TIMEOUT_MS = 150_000L
         const val SEARCH_TTL_MS = 10L * 60 * 1000
-        const val SEARCH_GAP_MS = 300L
         const val SEARCH_LIMIT = 10
+        /** 单平台搜索预算；整轮并行搜索要落在聚合搜索给这个源的 15 秒之内。 */
+        const val PLATFORM_TIMEOUT_MS = 8_000L
         const val PLATFORM_TTL_MS = 6L * 60 * 60 * 1000
         const val RECOMMEND_PREFIX = "rec::"
         const val MINE_CATEGORY = "mine"

@@ -23,6 +23,8 @@ class AggregateSearchEngine(
     private val mergeOverrides: () -> Map<String, String> = { emptyMap() },
     private val limitPerProvider: Int = 20,
     private val timeoutMs: Long = 6_000,
+    /** 某些源在一次搜索里要串起多个上游（music.op.wiki），给它们单独放宽。 */
+    private val timeoutOverridesMs: Map<String, Long> = emptyMap(),
 ) {
     private val health = ProviderHealth()
     private val cache = LinkedHashMap<String, CachedSearch>()
@@ -79,7 +81,7 @@ class AggregateSearchEngine(
                     val outcome = semaphore.withPermit {
                         try {
                             Result.success(
-                                withTimeoutOrNull(timeoutMs) {
+                                withTimeoutOrNull(timeoutOverridesMs[provider.id] ?: timeoutMs) {
                                     repository.searchSongsPage(
                                         provider.id,
                                         cookies()[provider.id].orEmpty(),

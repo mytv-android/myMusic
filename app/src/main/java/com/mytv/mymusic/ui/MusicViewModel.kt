@@ -588,6 +588,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         settings = { settingsState.value.aggregation },
         splitOverrides = { splitOverrideKeys },
         mergeOverrides = { mergeTargets },
+        // music.op.wiki 一次搜索要等 MHub 去各上游平台检索，冷缓存单平台就可能 5 秒
+        timeoutOverridesMs = mapOf("mhub" to 15_000),
     )
     private val resolver = SourceResolver(
         repository = app.repository,
