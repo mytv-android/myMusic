@@ -127,6 +127,8 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.androidx.media3.exoplayer.dash)
     implementation(libs.androidx.media3.session)
+    // 内嵌 libFLAC：系统解码器吃不下 24 位无损（酷我），FLAC 统一走这个扩展
+    implementation(project(":lib-decoder-flac"))
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.okhttp)

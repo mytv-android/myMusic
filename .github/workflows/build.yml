@@ -23,7 +23,7 @@ jobs:
             SDKMANAGER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -name sdkmanager -type f | head -1)
           fi
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0"
+          "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x ./gradlew && ./gradlew test
 
@@ -42,7 +42,7 @@ jobs:
             SDKMANAGER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -name sdkmanager -type f | head -1)
           fi
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0"
+          "$SDKMANAGER" "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
       - name: Add signing properties
         run: |
           echo ${{ secrets.SIGNING_PROPERTIES }} > encoded_signing_properties

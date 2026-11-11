@@ -229,6 +229,21 @@ These features were written from the mods' public descriptions only; none of the
 - License: Apache License 2.0
 - Usage: blur behind the mini player, navigation bar and bottom player bar.
 
+## Media3 FLAC decoder extension
+
+- Upstream: https://github.com/androidx/media (`libraries/decoder_flac`, tag 1.11.1)
+- License: Apache License 2.0
+- Location: `lib-decoder-flac/src/main/java/androidx/media3/decoder/flac`, `lib-decoder-flac/src/main/jni`
+- Usage: bundled Java/JNI sources of `LibflacAudioRenderer`; `DefaultRenderersFactory` loads the renderer reflectively so FLAC bypasses the device's own decoders.
+
+## libFLAC
+
+- Upstream: https://github.com/xiph/flac
+- Version: 1.4.3
+- License: Xiph BSD 3-Clause (`COPYING.Xiph` in the vendored tree). Headers under `src/share/` used by libFLAC are LGPL-2.1 (`COPYING.LGPL`); the full license texts are shipped alongside the source.
+- Location: `lib-decoder-flac/src/main/jni/libflac`
+- Usage: software FLAC decoder behind the Media3 extension above. Local changes: encoder sources are excluded from the CMake target (decoder only), and `_FILE_OFFSET_BITS=32` is defined because minSdk 23's 32-bit bionic only declares `fseeko64` from API 24.
+
 ## Music platform brand marks
 
 The platform icons in `app/src/main/res/drawable/ic_provider_*.xml` are **monochrome vector adaptations of the platforms' real brand marks**. Their outlines are traced from the official application artwork previously sourced through Apple's public App Store Search API, with Jamendo's mark taken from the official Jamendo website icon (all retrieved 2026-11-05). The geometry is normalized to a shared 24 × 24 canvas, but the characteristic shapes, negative spaces and proportions are preserved rather than redesigned. QQ Music uses only its actual green-note silhouette (not the yellow app-icon backdrop), and Bilibili uses only the `bilibili` wordmark (not the temporary event caption).
