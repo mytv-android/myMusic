@@ -2127,12 +2127,12 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
         val chartFirst = isBuiltinChartId(id)
         return try {
-            if (chartFirst) fetchChartTopListSongs(cookie, id, limit)
+            if (chartFirst) fetchChartTopListSongs(id, limit)
             else fetchPlaylistTopListSongs(cookie, id, limit)
         } catch (firstError: Exception) {
             try {
                 if (chartFirst) fetchPlaylistTopListSongs(cookie, id, limit)
-                else fetchChartTopListSongs(cookie, id, limit)
+                else fetchChartTopListSongs(id, limit)
             } catch (secondError: Exception) {
                 throw IllegalStateException(
                     "soda toplist $id failed: ${firstError.message} (fallback: ${secondError.message})",
@@ -2142,8 +2142,8 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         }
     }
 
-    private suspend fun fetchChartTopListSongs(cookie: String, topListId: String, limit: Int): List<Song> {
-        val chart = fetchSodaChart(cookie, topListId)
+    private suspend fun fetchChartTopListSongs(topListId: String, limit: Int): List<Song> {
+        val chart = fetchSodaChart(topListId)
         val songs = chartSongs(chart, topListId, limit)
         if (songs.isEmpty()) throw IllegalStateException("soda toplist $topListId has no songs")
         return songs
@@ -2170,12 +2170,14 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return ranked
     }
 
-    private suspend fun fetchSodaChart(cookie: String, topListId: String): SodaChart {
+    // 榜单是公开接口：带登录 Cookie 会被服务端当成 PC 私有读请求，回 1000006
+    // ERR_REQUEST_FORBIDDEN（登录后榜单整页失败），所以这里一律匿名请求。
+    private suspend fun fetchSodaChart(topListId: String): SodaChart {
         return try {
-            fetchSodaPcChart(cookie, topListId)
+            fetchSodaPcChart(topListId)
         } catch (pcError: Exception) {
             try {
-                fetchSodaFallbackChart(cookie, topListId)
+                fetchSodaFallbackChart(topListId)
             } catch (fallbackError: Exception) {
                 throw IllegalStateException(
                     "soda toplist $topListId failed: ${pcError.message} (fallback: ${fallbackError.message})",
@@ -2185,20 +2187,18 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         }
     }
 
-    private suspend fun fetchSodaPcChart(cookie: String, topListId: String): SodaChart {
+    private suspend fun fetchSodaPcChart(topListId: String): SodaChart {
         val body = NativeHttp.get(
             "$TOP_LIST_API/$topListId?${buildQuery(pcAppParams())}",
             pcHeaders(),
-            cookie,
             userAgent = PC_APP_USER_AGENT,
         )
         return parseChartResponse(body).chart
     }
 
-    private suspend fun fetchSodaFallbackChart(cookie: String, topListId: String): SodaChart {
+    private suspend fun fetchSodaFallbackChart(topListId: String): SodaChart {
         val body = NativeHttp.get(
             "$TOP_LIST_FALLBACK_API/$topListId?${buildQuery(mapOf("charge" to "0"))}",
-            cookie = cookie,
             userAgent = SODA_USER_AGENT,
         )
         return parseChartResponse(body).chart
