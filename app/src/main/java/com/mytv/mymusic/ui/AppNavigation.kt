@@ -483,9 +483,9 @@ fun MyMusicApp(model: MusicViewModel) {
                 onDismiss = actions::closeMerge,
             )
         }
+        // 强制更新：哪一页都叠在上面，包括“关于与更新”；下载期间也不能继续用应用
         UpdateDialog(
             update = update,
-            suppressed = route == "settings/about",
             actions = actions,
             progress = { updateProgress.value.progress },
         )
