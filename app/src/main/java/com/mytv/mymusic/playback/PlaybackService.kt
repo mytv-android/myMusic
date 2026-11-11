@@ -5,6 +5,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -14,6 +15,8 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.drm.DefaultDrmSessionManager
 import androidx.media3.exoplayer.drm.DrmSessionManager
@@ -46,6 +49,22 @@ import com.mytv.mymusic.widget.WidgetLinks
 import com.mytv.mymusic.widget.WidgetTarget
 import kotlinx.coroutines.launch
 
+/**
+ * FLAC 优先用 AOSP 软件解码器。厂商的 FLAC 解码器在 24 位流上会卡住或直接报错，
+ * 酷我的无损档正好是 24 位；软件解码器能解，其它格式照旧交给默认顺序。
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
+private val PREFER_SOFTWARE_FLAC: MediaCodecSelector =
+    MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+        val decoders = MediaCodecSelector.DEFAULT
+            .getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+        if (mimeType == MimeTypes.AUDIO_FLAC) {
+            MediaCodecUtil.getDecoderInfosSortedBySoftwareOnly(decoders)
+        } else {
+            decoders
+        }
+    }
+
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -66,6 +85,11 @@ class PlaybackService : MediaSessionService() {
         )
         val app = application as? MyMusicApp
         val cache = app?.mediaCache
+        // 24 位 FLAC 只走软件解码器；这台设备没有软件解码器时酷我取流会退回 mp3，留一条日志方便对照
+        AppLog.i(
+            "PlaybackFlac",
+            "FLAC 软件解码器=${FlacDecoderSupport.softwareDecoderName ?: "无"}",
+        )
         // 冷启动竞态：媒体按键 / 续播可以在设置流首帧到达前把服务拉起来，那时候
         // AppleSession 还是空的，授权会白跑一次。先主动取一次。
         app?.appScope?.let { AppleSession.refreshAsync(app.settings, it) }
@@ -189,7 +213,8 @@ class PlaybackService : MediaSessionService() {
             .setMediaSourceFactory(mediaSourceFactory)
         app?.let {
             builder.setRenderersFactory(
-                RhythmRenderersFactory(this, it.rhythmAnalyzer, source, crossfadeParams[source]),
+                RhythmRenderersFactory(this, it.rhythmAnalyzer, source, crossfadeParams[source])
+                    .apply { setMediaCodecSelector(PREFER_SOFTWARE_FLAC) },
             )
         }
         val created = builder.build()

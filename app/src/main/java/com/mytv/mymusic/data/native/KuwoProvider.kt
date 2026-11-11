@@ -6,6 +6,7 @@ import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
+import com.mytv.mymusic.playback.FlacDecoderSupport
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -966,10 +967,21 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         )
     }
 
+    /**
+     * 酷我的无损档是 24 位 FLAC，只有 AOSP 软件解码器能解；设备上没有软件解码器时
+     * （不少 Android 6/8 老机器只有厂商解码器）直接要 mp3，不然整首放不出来。
+     */
+    private fun audioQualityTiers(): List<String> =
+        if (FlacDecoderSupport.hasSoftwareDecoder) {
+            listOf("2000kflac", "flac", "320kmp3", "128kmp3")
+        } else {
+            listOf("320kmp3", "128kmp3")
+        }
+
     private suspend fun fetchAudioUrl(cookie: String, rid: String): String {
         val randomId = "C_APK_guanwang_${System.currentTimeMillis() * 1_000_000L + Random.nextLong(1_000_000L)}"
         // 从最高档往下试；反过来会永远命中 128k，登录也拿不到无损
-        for (br in listOf("2000kflac", "flac", "320kmp3", "128kmp3")) {
+        for (br in audioQualityTiers()) {
             val url = "$MOBI_API?" + query(
                 "f" to "web",
                 "source" to "kwplayercar_ar_6.0.0.9_B_jiakong_vh.apk",
