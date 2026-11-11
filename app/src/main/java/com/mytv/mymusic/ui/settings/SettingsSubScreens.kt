@@ -1468,7 +1468,7 @@ private fun PasswordLoginDialog(
         text = {
             Column {
                 Text(
-                    "使用 music.op.wiki 的账号；没有账号请先在网站上注册。登录后可以同步自己的歌单。",
+                    "使用 music.op.wiki 的账号；没有账号请先在网站上注册。登录后可以同步、播放和修改自己的歌单；新建歌单仍在网站操作。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -51,7 +51,7 @@ private val MHUB_INFO = ProviderInfo(
     playlistWrite = true,
     playlistReorder = true,
     hotSongs = true,
-    note = "多平台兜底源；登录后同步自己的歌单，音频逐首准备",
+    note = "多平台兜底源；登录后同步并修改自己的歌单（新建请到网站），音频逐首准备",
 )
 
 class MHubProvider : BaseNativeProvider(MHUB_INFO) {
