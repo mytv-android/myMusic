@@ -16,6 +16,7 @@ object NativeProviders {
         addProvider { BilibiliProvider() }
         addProvider { FivesingProvider() }
         addProvider { JamendoProvider() }
+        addProvider { YouTubeMusicProvider() }
         addProvider { SodaProvider() }
         addProvider { YuntingProvider() }
     }
