@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 按 MHub 官方 app-icon.svg 的几何：圆角超椭圆底 + 5 根白色圆角竖条，竖条在此为镂空。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M6.95,1.75L17.05,1.75A5.2,5.2 0 0 1 22.25,6.95L22.25,17.05A5.2,5.2 0 0 1 17.05,22.25L6.95,22.25A5.2,5.2 0 0 1 1.75,17.05L1.75,6.95A5.2,5.2 0 0 1 6.95,1.75Z M2,8.9A1.5,1.5 0 0 1 5,8.9L5,15.1A1.5,1.5 0 0 1 2,15.1Z M6.25,6.3A1.5,1.5 0 0 1 9.25,6.3L9.25,17.7A1.5,1.5 0 0 1 6.25,17.7Z M10.5,9.9A1.5,1.5 0 0 1 13.5,9.9L13.5,14.1A1.5,1.5 0 0 1 10.5,14.1Z M14.75,6.3A1.5,1.5 0 0 1 17.75,6.3L17.75,17.7A1.5,1.5 0 0 1 14.75,17.7Z M19,8.9A1.5,1.5 0 0 1 22,8.9L22,15.1A1.5,1.5 0 0 1 19,15.1Z" />
+</vector>

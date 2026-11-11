@@ -36,6 +36,34 @@ class YouTubeMusicProviderTest {
         assertEquals(emptyMap<String, String>(), provider.authHeaders("SID=x; HSID=y"))
     }
 
+    /** 搜索结果第二列是「歌手 • 专辑 • 时长」，和歌单页的列含义不同。 */
+    @Test
+    fun parsesSearchTracks() {
+        val body = """
+            {"contents":{"musicResponsiveListItemRenderer":{
+              "flexColumns":[
+                {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"晴天"}]}}},
+                {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[
+                  {"text":"周杰倫"},{"text":" • "},{"text":"葉惠美"},{"text":" • "},{"text":"4:30"}
+                ]}}},
+                {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"207M plays"}]}}}
+              ],
+              "playlistItemData":{"videoId":"SJKoWAd5ySo"},
+              "thumbnail":{"musicThumbnailRenderer":{"thumbnail":{"thumbnails":[
+                {"url":"https://img.example/cover.jpg","width":400,"height":400}
+              ]}}}
+            }}}
+        """.trimIndent()
+        val songs = provider.parseSearchTracks(Json.parseToJsonElement(body))
+        assertEquals(1, songs.size)
+        val song = songs.single()
+        assertEquals("SJKoWAd5ySo", song.id)
+        assertEquals("晴天", song.name)
+        assertEquals("周杰倫", song.artist)
+        assertEquals("葉惠美", song.album)
+        assertEquals(270, song.duration)
+    }
+
     /** InnerTube 的 renderer 结构照真实响应裁剪；解析错一层就会整页空歌单。 */
     @Test
     fun parsesPlaylistTracks() {

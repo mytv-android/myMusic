@@ -21,6 +21,7 @@ class NativeProvidersTest {
             "bilibili",
             "apple",
             "youtubemusic",
+            "mhub",
             "yunting",
         )
         val providers = NativeProviders.all()

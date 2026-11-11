@@ -31,6 +31,8 @@ data class ProviderInfo(
     @SerialName("PlaylistWrite") val playlistWrite: Boolean = false,
     /** 能把整张歌单的新顺序写回平台；只对自建歌单有效。 */
     @SerialName("PlaylistReorder") val playlistReorder: Boolean = false,
+    /** 这个平台有没有需要用户登录的能力；纯公开 API 的平台（music.op.wiki）为 false。 */
+    @SerialName("LoginRequired") val loginRequired: Boolean = true,
     @SerialName("Unstable") val unstable: String = "",
     @SerialName("Note") val note: String = "",
 )

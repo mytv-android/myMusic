@@ -5,7 +5,6 @@ import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
@@ -20,27 +19,32 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
-import java.net.URLEncoder
 import java.security.MessageDigest
 
 private const val YTM_ID = "youtubemusic"
 private const val MUSIC_ORIGIN = "https://music.youtube.com"
 private const val INNERTUBE = "$MUSIC_ORIGIN/youtubei/v1"
-private const val OP_BASE = "https://music.op.wiki"
+private const val PLAYER_ORIGIN = "https://youtubei.googleapis.com/youtubei/v1"
 private const val CLIENT_NAME = "WEB_REMIX"
 private const val CLIENT_VERSION = "1.20241106.01.00"
 private const val CLIENT_ID = "67"
-private const val USER_AGENT =
+private const val WEB_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 /**
- * 音乐准备服务（music.op.wiki，开源 MHub 的公开实例）已经替客户端处理了
- * InnerTube 取流所需的签名与验证，所以这里只负责：搜索、准备任务轮询、
- * 用 InnerTube 浏览公开歌单/榜单/私人音乐库。
- *
- * 取流必须串行：服务端按 IP 限流（源码默认下载约 1 次/分钟），同一首歌只建一个
- * 任务，完成结果在本机复用 20 小时，绝不预取、不并行准备。
+ * visionOS 客户端是 2026 年少数仍然直接返回 googlevideo 直链、不要求 poToken
+ * 也不需要解 signatureCipher/n 参数的 YouTube 客户端。音频 itag 140 是 m4a，
+ * 兼容所有目标设备。
  */
+private const val VISIONOS_CLIENT_NAME = "VISIONOS"
+private const val VISIONOS_CLIENT_VERSION = "1.04"
+private const val VISIONOS_CLIENT_ID = "101"
+private const val VISIONOS_USER_AGENT =
+    "com.google.visionos.youtube/1.04(RealityDevice17,1; U; CPU visionOS 26_6_0 like Mac OS X; US)"
+
+/** ytmusicapi get_search_params() 的歌曲过滤参数（base64，JSON 里不用再做 URL 编码）。 */
+private const val SEARCH_PARAMS_SONGS = "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
+
 private val YTM_INFO = ProviderInfo(
     id = YTM_ID,
     name = "YouTube Music",
@@ -54,80 +58,75 @@ private val YTM_INFO = ProviderInfo(
     qrLogin = false,
     topLists = true,
     topListSongs = true,
-    note = "音频由 music.op.wiki 准备，逐首串行；私人歌单需要登录 Cookie",
+    note = "直连取流；私人歌单和账号资料需要登录 Cookie",
 )
 
 class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
     private val json = NativeHttp.json
 
-    private data class Prepared(val url: String, val ext: String, val bitrate: Int, val at: Long)
+    private data class StreamInfo(val url: String, val ext: String, val bitrate: Int, val at: Long)
 
-    /** 播放任务准备结果；同一首歌反复播放、换源重试都复用这一份地址。 */
-    private val prepared = mutableMapOf<String, Prepared>()
+    /** 直链有效期 6 小时，本机只缓存 20 分钟，避免切回旧队列时拿到过期地址。 */
+    private val streamCache = mutableMapOf<String, StreamInfo>()
+    private val streamLock = Any()
 
-    /** 服务端按 IP 限流，所有新建任务排成一队，一次只准备一首。 */
-    private val prepareGate = Mutex()
+    /** visionOS 播放请求必须带同一个 visitorData；从任意 InnerTube 响应里取一次即可。 */
+    @Volatile
+    private var visitorData: String = ""
+    private val visitorLock = Mutex()
 
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         if (keyword.isBlank()) return emptyList()
-        val url = buildString {
-            append(OP_BASE).append("/api/v1/search")
-            append("?platform=").append(YTM_ID)
-            append("&q=").append(URLEncoder.encode(keyword, "UTF-8"))
-            append("&limit=").append(20)
-        }
-        val body = NativeHttp.get(url, headers = mapOf("Accept" to "application/json"))
-        val items = runCatching { json.parseToJsonElement(body).jsonArray }.getOrElse {
-            throw IllegalStateException("YouTube Music 搜索返回异常：${body.take(160)}")
-        }
-        return items.mapNotNull { element ->
-            val item = element as? JsonObject ?: return@mapNotNull null
-            val id = item.str("id")
-            if (id.isBlank()) return@mapNotNull null
-            Song(
-                id = id,
-                name = item.str("song"),
-                artist = item.str("singer"),
-                source = YTM_ID,
-                cover = item.str("cover"),
-                link = watchLink(id),
-                ext = "m4a",
-                extra = mapOf("backend" to "mhub"),
-            )
-        }
+        val root = innerTube(
+            "search",
+            buildJsonObject {
+                put("query", keyword)
+                put("params", SEARCH_PARAMS_SONGS)
+            },
+            cookie,
+        )
+        return parseSearchTracks(root)
     }
 
     override suspend fun parseSong(cookie: String, link: String): Song {
         val id = extractVideoId(link) ?: throw IllegalArgumentException("不是 YouTube Music 歌曲链接：$link")
-        return fetchVideoInfo(id)
+        val details = visionPlayerDetails(id)
+        return Song(
+            id = id,
+            name = details.str("title"),
+            artist = details.str("author").removeSuffix(" - Topic"),
+            duration = details["lengthSeconds"]?.jsonPrimitive?.intOrNull ?: 0,
+            source = YTM_ID,
+            cover = details.thumbnailUrl(),
+            link = watchLink(id),
+            ext = "m4a",
+        )
     }
 
     override suspend fun downloadUrl(cookie: String, song: Song): String =
-        prepare(song.id, song.name, song.artist).url
+        resolveStream(cookie, song.id).url
 
     override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
-        val prepared = prepare(song.id, song.name, song.artist)
+        val stream = resolveStream(cookie, song.id)
         return PlayableStream(
-            url = prepared.url,
-            ext = prepared.ext,
-            bitrate = prepared.bitrate,
-            extra = mapOf("backend" to "mhub"),
+            url = stream.url,
+            ext = stream.ext,
+            bitrate = stream.bitrate,
         )
     }
 
     override suspend fun lyrics(cookie: String, song: Song): String {
-        val url = buildString {
-            append(OP_BASE).append("/api/v1/lyrics")
-            append("?platform=").append(YTM_ID)
-            append("&track_id=").append(URLEncoder.encode(song.id, "UTF-8"))
-            if (song.name.isNotBlank()) append("&title=").append(URLEncoder.encode(song.name, "UTF-8"))
-            if (song.artist.isNotBlank()) append("&artist=").append(URLEncoder.encode(song.artist, "UTF-8"))
-            if (song.duration > 0) append("&duration=").append(song.duration)
-        }
-        val body = NativeHttp.get(url, headers = mapOf("Accept" to "application/json"))
-        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return ""
-        if (root["available"]?.jsonPrimitive?.contentOrNull == "false") return ""
-        return root.str("plain")
+        if (song.id.isBlank()) return ""
+        val next = innerTube("next", buildJsonObject { put("videoId", song.id) }, cookie)
+        val lyricsId = next.collect("browseId")
+            .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            .firstOrNull { it.startsWith("MPLYt") }
+            ?: return ""
+        val page = innerTube("browse", buildJsonObject { put("browseId", lyricsId) }, cookie)
+        val description = page.collect("musicDescriptionShelfRenderer").firstOrNull()
+            ?.path("description")
+            ?: return ""
+        return description.runsText()
     }
 
     override suspend fun parsePlaylist(cookie: String, link: String): CollectionResult {
@@ -211,99 +210,131 @@ class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
         return AccountInfo(nickname = name, avatar = avatar, detail = "YouTube Music")
     }
 
-    // ---------------- 音乐准备服务 ----------------
+    // ---------------- 直连取流 ----------------
 
-    private suspend fun prepare(id: String, name: String, artist: String): Prepared {
-        if (id.isBlank()) throw IllegalArgumentException("YouTube Music 曲目 ID 为空")
-        synchronized(prepared) { prepared[id] }?.takeIf {
-            System.currentTimeMillis() - it.at < PREPARED_TTL_MS
+    private suspend fun resolveStream(cookie: String, videoId: String): StreamInfo {
+        if (videoId.isBlank()) throw IllegalArgumentException("YouTube Music 曲目 ID 为空")
+        synchronized(streamLock) { streamCache[videoId] }?.takeIf {
+            System.currentTimeMillis() - it.at < STREAM_TTL_MS
         }?.let { return it }
 
-        return prepareGate.withLock {
-            synchronized(prepared) { prepared[id] }?.takeIf {
-                System.currentTimeMillis() - it.at < PREPARED_TTL_MS
-            }?.let { return@withLock it }
-
-            val task = createPlayback(id, name, artist)
-            val result = awaitPlayback(task)
-            synchronized(prepared) { prepared[id] = result }
-            result
+        val first = visionPlayer(videoId, refreshVisitor = false)
+        val (status, player) = first
+        val usable = if (status == "OK") player else {
+            // visitorData 过期时 YouTube 会回 LOGIN_REQUIRED；换一份 visitor 再试一次。
+            val retry = visionPlayer(videoId, refreshVisitor = true)
+            if (retry.first != "OK") {
+                throw IllegalStateException(
+                    retry.second.playabilityReason().ifBlank { "YouTube 拒绝了这次取流，请登录后重试" },
+                )
+            }
+            retry.second
         }
+        val format = pickAudioFormat(usable)
+            ?: throw IllegalStateException("这条视频没有可播放的音频流")
+        val url = format.str("url")
+        if (url.isBlank()) throw IllegalStateException("YouTube 没有返回音频直链")
+        val mime = format.str("mimeType")
+        val info = StreamInfo(
+            url = url,
+            ext = when {
+                "mp4" in mime || "m4a" in mime -> "m4a"
+                "webm" in mime -> "webm"
+                else -> "m4a"
+            },
+            bitrate = (format["bitrate"]?.jsonPrimitive?.intOrNull ?: 0) / 1000,
+            at = System.currentTimeMillis(),
+        )
+        synchronized(streamLock) { streamCache[videoId] = info }
+        return info
     }
 
-    private data class TaskHandle(val statusUrl: String, val audioUrl: String)
+    /** 解析成元数据；复用同一次 visionOS 播放响应，不额外请求 player。 */
+    private suspend fun visionPlayerDetails(videoId: String): JsonObject {
+        val (status, player) = visionPlayer(videoId, refreshVisitor = false)
+        if (status != "OK") {
+            val retry = visionPlayer(videoId, refreshVisitor = true)
+            if (retry.first != "OK") {
+                throw IllegalStateException(
+                    retry.second.playabilityReason().ifBlank { "YouTube 拒绝了这次请求" },
+                )
+            }
+            return retry.second["videoDetails"] as? JsonObject
+                ?: throw IllegalStateException("YouTube 没有返回视频信息")
+        }
+        return player["videoDetails"] as? JsonObject
+            ?: throw IllegalStateException("YouTube 没有返回视频信息")
+    }
 
-    private suspend fun createPlayback(id: String, name: String, artist: String): TaskHandle {
+    private suspend fun visionPlayer(videoId: String, refreshVisitor: Boolean): Pair<String, JsonObject> {
+        val visitor = visitorData(refreshVisitor)
         val body = buildJsonObject {
-            put("platform", YTM_ID)
-            put("query", id)
-            put("selected_id", id)
-            put("quality", "high")
-            put("include_cover", false)
-            if (name.isNotBlank()) put("title", name)
-            if (artist.isNotBlank()) put("artist", artist)
+            put("videoId", videoId)
+            put("contentCheckOk", true)
+            put("racyCheckOk", true)
+            put("context", buildJsonObject {
+                put("client", buildJsonObject {
+                    put("clientName", VISIONOS_CLIENT_NAME)
+                    put("clientVersion", VISIONOS_CLIENT_VERSION)
+                    put("clientScreen", "WATCH")
+                    put("hl", "en")
+                    put("gl", "US")
+                    put("visitorData", visitor)
+                })
+                put("request", buildJsonObject {})
+            })
         }.toString()
-        val response = runCatching {
-            NativeHttp.postJson(
-                "$OP_BASE/api/v1/playbacks",
-                body,
-                headers = mapOf("Accept" to "application/json"),
-            )
-        }.getOrElse { error ->
-            val message = error.message.orEmpty()
-            throw IllegalStateException(
-                when {
-                    "HTTP 429" in message -> "music.op.wiki 正在限流，请稍后再试"
-                    "HTTP 5" in message -> "music.op.wiki 暂时不可用"
-                    else -> message.ifBlank { "音源请求失败" }
-                },
-            )
-        }
+        val response = NativeHttp.postJson(
+            "$PLAYER_ORIGIN/player?prettyPrint=false&id=$videoId",
+            body,
+            headers = mapOf(
+                "X-Youtube-Client-Name" to VISIONOS_CLIENT_ID,
+                "X-Youtube-Client-Version" to VISIONOS_CLIENT_VERSION,
+                "X-Goog-Api-Format-Version" to "2",
+                "Accept" to "application/json",
+            ),
+            userAgent = VISIONOS_USER_AGENT,
+        )
         val root = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrElse {
-            throw IllegalStateException("YouTube Music 音源准备失败：${response.body.take(160)}")
+            throw IllegalStateException("YouTube 播放接口返回异常：${response.body.take(160)}")
         }
-        val playback = root["playback"] as? JsonObject ?: root
-        if (playback.str("status") == "failed") {
-            throw IllegalStateException(playback.str("error").ifBlank { "音源准备失败" })
-        }
-        val statusUrl = root.str("status_url").ifBlank {
-            "/api/v1/playbacks/${playback.str("id")}"
-        }
-        return TaskHandle(absoluteUrl(statusUrl), absoluteUrl(playback.str("audio_url")))
+        val status = root.path("playabilityStatus", "status").str()
+        return status to root
     }
 
-    private suspend fun awaitPlayback(task: TaskHandle): Prepared {
-        val deadline = System.currentTimeMillis() + PREPARE_TIMEOUT_MS
-        var lastUrl = task.audioUrl
-        while (System.currentTimeMillis() < deadline) {
-            delay(POLL_INTERVAL_MS)
-            val body = try {
-                NativeHttp.get(task.statusUrl, headers = mapOf("Accept" to "application/json"))
-            } catch (error: Exception) {
-                if ("HTTP 404" in error.message.orEmpty()) {
-                    throw IllegalStateException("音源任务已失效，请重试")
-                }
-                continue
-            }
-            val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: continue
-            val status = root.str("status")
-            val audio = root.str("audio_url").ifBlank { lastUrl }
-            if (audio.isNotBlank()) lastUrl = absoluteUrl(audio)
-            when (status) {
-                "completed" -> {
-                    val url = absoluteUrl(root.str("audio_url").ifBlank { lastUrl })
-                    if (url.isBlank()) throw IllegalStateException("音源已就绪但没有播放地址")
-                    val ext = extensionOf(root.str("content_type"), root.str("format"))
-                    val bitrate = (root["bitrate"]?.jsonPrimitive?.intOrNull ?: 0) / 1000
-                    return Prepared(url = url, ext = ext, bitrate = bitrate, at = System.currentTimeMillis())
-                }
-                "failed" -> throw IllegalStateException(root.str("error").ifBlank { "音源准备失败" })
-            }
+    /** 优先 m4a（itag 140）：目标设备都支持，WebM/Opus 只作兜底。 */
+    private fun pickAudioFormat(player: JsonObject): JsonObject? {
+        val formats = (player.path("streamingData") as? JsonObject)
+            ?.get("adaptiveFormats") as? JsonArray ?: return null
+        val audio = formats.mapNotNull { it as? JsonObject }.filter {
+            it.str("mimeType").startsWith("audio/") && it.str("url").isNotBlank()
         }
-        throw IllegalStateException("音源准备超时，请稍后重试")
+        val order = listOf(140, 251, 139, 249, 250)
+        return audio.firstOrNull { it["itag"]?.jsonPrimitive?.intOrNull == 140 }
+            ?: audio.firstOrNull { it["itag"]?.jsonPrimitive?.intOrNull == 251 }
+            ?: audio.firstOrNull { it["itag"]?.jsonPrimitive?.intOrNull in order }
+            ?: audio.firstOrNull()
     }
 
-    // ---------------- InnerTube ----------------
+    private suspend fun visitorData(refresh: Boolean): String {
+        if (!refresh) {
+            val cached = visitorData
+            if (cached.isNotBlank()) return cached
+        }
+        return visitorLock.withLock {
+            if (!refresh) {
+                val cached = visitorData
+                if (cached.isNotBlank()) return@withLock cached
+            }
+            val root = innerTube("browse", buildJsonObject { put("browseId", "FEmusic_home") }, "")
+            val fresh = root.path("responseContext", "visitorData").str()
+            if (fresh.isBlank()) throw IllegalStateException("拿不到 YouTube 的 visitorData，无法直连取流")
+            visitorData = fresh
+            fresh
+        }
+    }
+
+    // ---------------- InnerTube 浏览 ----------------
 
     private suspend fun browse(cookie: String, browseId: String): JsonElement =
         innerTube("browse", buildJsonObject { put("browseId", browseId) }, cookie)
@@ -360,7 +391,7 @@ class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
             .orEmpty()
     }
 
-    /** 歌单/榜单/专辑页共用：把 musicResponsiveListItemRenderer 转成曲目。 */
+    /** 歌单/榜单/专辑页：把 musicResponsiveListItemRenderer 转成曲目。 */
     internal fun parseTracks(root: JsonElement): List<Song> {
         val out = mutableListOf<Song>()
         val seen = mutableSetOf<String>()
@@ -375,43 +406,59 @@ class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
                 .runsText()
             val title = column(0)
             if (title.isBlank()) return@forEach
-            val artist = column(1)
-            val album = column(2)
             out += Song(
                 id = videoId,
                 name = title,
-                artist = artist,
-                album = album,
-                duration = durationOf(item),  // 时长只在固定列里，取不到就留 0
+                artist = column(1),
+                album = column(2),
+                duration = durationOf(item),
                 source = YTM_ID,
                 cover = item.thumbnailUrl(),
                 link = watchLink(videoId),
                 ext = "m4a",
-                extra = mapOf("backend" to "mhub"),
             )
         }
         return out
     }
 
-    private suspend fun fetchVideoInfo(id: String): Song {
-        val body = NativeHttp.get(
-            "https://www.youtube.com/oembed?format=json&url=" +
-                URLEncoder.encode(watchLink(id), "UTF-8"),
-            headers = mapOf("Accept" to "application/json"),
-        )
-        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrElse {
-            throw IllegalStateException("YouTube Music 链接解析失败：${body.take(160)}")
+    /**
+     * 搜索结果的两行结构：第一列歌名，第二列是「歌手 • 专辑 • 4:30」，
+     * 第三列是播放次数。和歌单页的列含义不同，单独解析。
+     */
+    internal fun parseSearchTracks(root: JsonElement): List<Song> {
+        val out = mutableListOf<Song>()
+        val seen = mutableSetOf<String>()
+        root.collect("musicResponsiveListItemRenderer").forEach { element ->
+            val item = element as? JsonObject ?: return@forEach
+            val videoId = item.path("playlistItemData", "videoId").str()
+                .ifBlank { item.path("flexColumns").firstRunVideoId() }
+            if (videoId.isBlank() || !seen.add(videoId)) return@forEach
+            val columns = item["flexColumns"]?.jsonArray ?: JsonArray(emptyList())
+            fun text(index: Int): String = columns.getOrNull(index)
+                .path("musicResponsiveListItemFlexColumnRenderer", "text")
+                .runsText()
+            val title = text(0)
+            if (title.isBlank()) return@forEach
+            val segments = text(1).split("•").map(String::trim).filter { it.isNotBlank() }
+            val artist = segments.firstOrNull().orEmpty()
+            val album = segments.getOrNull(1)?.takeIf { CLOCK.find(it) == null } .orEmpty()
+            val duration = segments.mapNotNull { segment ->
+                val match = CLOCK.find(segment) ?: return@mapNotNull null
+                clockSeconds(match.groupValues[1])
+            }.firstOrNull() ?: 0
+            out += Song(
+                id = videoId,
+                name = title,
+                artist = artist,
+                album = album,
+                duration = duration,
+                source = YTM_ID,
+                cover = item.thumbnailUrl(),
+                link = watchLink(videoId),
+                ext = "m4a",
+            )
         }
-        return Song(
-            id = id,
-            name = root.str("title"),
-            artist = root.str("author_name").removeSuffix(" - Topic"),
-            source = YTM_ID,
-            cover = root.str("thumbnail_url"),
-            link = watchLink(id),
-            ext = "m4a",
-            extra = mapOf("backend" to "mhub"),
-        )
+        return out
     }
 
     private suspend fun innerTube(path: String, payload: JsonObject, cookie: String): JsonElement {
@@ -429,6 +476,7 @@ class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
                             put("gl", "US")
                         },
                     )
+                    put("request", buildJsonObject {})
                 },
             )
         }.toString()
@@ -444,7 +492,7 @@ class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
                 putAll(authHeaders(cookie))
             },
             cookie = cookie,
-            userAgent = USER_AGENT,
+            userAgent = WEB_USER_AGENT,
         )
         return runCatching { json.parseToJsonElement(response.body) }.getOrElse {
             throw IllegalStateException("YouTube Music 接口返回异常：${response.body.take(160)}")
@@ -454,7 +502,6 @@ class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
     /**
      * YouTube 的 Cookie 鉴权：用 SAPISID（或 __Secure-3PAPISID）对
      * `时间戳 空格 cookie 空格 origin` 做 SHA-1，放进 Authorization。
-     * 只有公开内容时不要带这个头，带了反而可能被当作登录态校验。
      */
     internal fun authHeaders(cookie: String, timestamp: Long = System.currentTimeMillis() / 1000): Map<String, String> {
         if (cookie.isBlank()) return emptyMap()
@@ -526,11 +573,11 @@ class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
     }
 
     private fun durationOf(item: JsonObject): Int {
-        val runs = mutableListOf<String>()
+        val texts = mutableListOf<String>()
         fun walk(element: JsonElement?) {
             when (element) {
                 is JsonObject -> {
-                    if (element["text"] is JsonPrimitive) runs += element.str("text")
+                    if (element["text"] is JsonPrimitive) texts += element.str("text")
                     element.forEach { (_, value) -> walk(value) }
                 }
                 is JsonArray -> element.forEach(::walk)
@@ -539,34 +586,25 @@ class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
         }
         walk(item["fixedColumns"])
         walk(item["flexColumns"])
-        return runs.firstNotNullOfOrNull { text ->
-            val match = CLOCK.find(text) ?: return@firstNotNullOfOrNull null
-            val parts = match.groupValues[1].split(':').mapNotNull(String::toIntOrNull)
-            when (parts.size) {
-                2 -> parts[0] * 60 + parts[1]
-                3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]
-                else -> null
-            }
+        return texts.firstNotNullOfOrNull { text ->
+            CLOCK.find(text)?.let { clockSeconds(it.groupValues[1]) }
         } ?: 0
     }
 
-    private fun extensionOf(contentType: String, format: String): String {
-        val type = contentType.lowercase()
-        return when {
-            "flac" in type -> "flac"
-            "mp4" in type || "m4a" in type || "aac" in type -> "m4a"
-            "mpeg" in type || "mp3" in type -> "mp3"
-            format.isNotBlank() -> format.lowercase()
-            else -> "m4a"
+    private fun clockSeconds(clock: String): Int {
+        val parts = clock.split(':').mapNotNull(String::toIntOrNull)
+        return when (parts.size) {
+            2 -> parts[0] * 60 + parts[1]
+            3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]
+            else -> 0
         }
     }
 
-    private fun absoluteUrl(url: String): String = when {
-        url.isBlank() -> ""
-        url.startsWith("http") -> url
-        url.startsWith("/") -> OP_BASE + url
-        else -> "$OP_BASE/$url"
-    }
+    private fun JsonObject.playabilityReason(): String =
+        path("playabilityStatus", "reason").str().ifBlank {
+            path("playabilityStatus", "errorScreen", "playerErrorMessageRenderer", "reason")
+                .runsText()
+        }
 
     private fun watchLink(id: String): String = "$MUSIC_ORIGIN/watch?v=$id"
 
@@ -589,10 +627,7 @@ class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
         val CLOCK = Regex("""^(\d{1,2}:\d{2}(?::\d{2})?)$""")
         val HEADER_TYPE_WORDS = setOf("Playlist", "Album", "Single", "EP", "Song", "Auto playlist", "Mix")
 
-        /** 服务端完成的音频按 24 小时缓存，本机提前一点过期，避免拿到旧 rev。 */
-        const val PREPARED_TTL_MS = 20L * 60 * 60 * 1000
-        const val POLL_INTERVAL_MS = 2_000L
-        const val PREPARE_TIMEOUT_MS = 150_000L
+        const val STREAM_TTL_MS = 20L * 60 * 1000
         const val MAX_PLAYLIST_PAGES = 5
 
         /** WEB_REMIX 的公开 key，网页与 ytmusicapi 都在用；不是账号密钥。 */

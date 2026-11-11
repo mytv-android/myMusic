@@ -43,6 +43,7 @@ fun providerIcon(id: String): Int? = when (id) {
     "qianqian" -> R.drawable.ic_provider_qianqian
     "jamendo" -> R.drawable.ic_provider_jamendo
     "youtubemusic" -> R.drawable.ic_provider_youtubemusic
+    "mhub" -> R.drawable.ic_provider_mhub
     "yunting" -> R.drawable.ic_provider_yunting
     "local" -> R.drawable.ic_provider_local
     else -> null
@@ -64,6 +65,7 @@ fun providerIconByName(name: String): Int? = when {
     name.contains("千千") -> R.drawable.ic_provider_qianqian
     name.contains("Jamendo", ignoreCase = true) -> R.drawable.ic_provider_jamendo
     name.contains("YouTube", ignoreCase = true) -> R.drawable.ic_provider_youtubemusic
+    name.contains("MHub", ignoreCase = true) || name.contains("op.wiki", ignoreCase = true) -> R.drawable.ic_provider_mhub
     name.contains("云听") -> R.drawable.ic_provider_yunting
     else -> null
 }

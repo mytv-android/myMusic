@@ -1180,6 +1180,7 @@ private fun AccountRow(
             val info = profile?.let { p -> listOf(p.nickname, p.detail).filter { it.isNotBlank() }.joinToString(" · ") }.orEmpty()
             info.ifBlank { "已登录" }
         }
+        !provider.loginRequired -> "无需登录"
         provider.qrLogin -> "未登录"
         tv -> "未登录 · 请在手机上登录"
         else -> "未登录 · 仅支持 Cookie"
@@ -1188,7 +1189,7 @@ private fun AccountRow(
         title = provider.name,
         index = index,
         count = count,
-        onClick = if (tv) null else onCookie,
+        onClick = if (tv || !provider.loginRequired) null else onCookie,
         leading = {
             if (loggedIn && avatar.isNotBlank()) {
                 AsyncImage(
@@ -1213,7 +1214,7 @@ private fun AccountRow(
                     Spacer(Modifier.width(6.dp))
                     Text("登录", Modifier.semantics { contentDescription = "扫码登录${provider.name}" })
                 }
-                !tv -> FilledTonalButton(onClick = onCookie) { Text("Cookie", Modifier.semantics { contentDescription = "用 Cookie 登录${provider.name}" }) }
+                provider.loginRequired && !tv -> FilledTonalButton(onClick = onCookie) { Text("Cookie", Modifier.semantics { contentDescription = "用 Cookie 登录${provider.name}" }) }
             }
         },
     )
@@ -1424,6 +1425,7 @@ private fun cookieHint(provider: ProviderInfo): String = when (provider.id) {
     // 私人歌单和账号资料靠 SAPISIDHASH 鉴权，缺 SAPISID 就只剩公开内容。
     "youtubemusic" -> "粘贴 music.youtube.com 的完整 Cookie，必须包含 SAPISID 或 __Secure-3PAPISID。" +
         "不登录也能搜索、播放和看公开歌单；登录后才会出现你的私人歌单。"
+    "mhub" -> "music.op.wiki 不需要登录，这个字段留空即可。"
     else -> "只保存在本机，换源与 VIP 检测会使用它。留空保存等于退出登录。"
 }
 
@@ -1850,7 +1852,7 @@ fun PrivacyScreen(onBack: () -> Unit, embedded: Boolean = false) {
         "本地音乐" to "扫描只读音频文件，不读图片和视频，也不改动文件本身；封面缓存和扫描记录只存在本机，匹配结果也只存在本机，除非这首歌加进了已同步的歌单或喜欢（见下）。自动匹配时，有标签的歌把歌名和歌手发给已启用平台的搜索；没有标签的截取 3 秒、降到 8 kHz 单声道算成指纹，只把指纹发给网易云音乐的听歌识曲，音频本身不离开设备。加进已同步歌单或喜欢的本地歌，同步文件里只有这些：歌名、歌手、专辑、时长、文件名、文件指纹、文件所在设备的名字、云端副本的位置和匹配结果（匹配到哪个平台的哪首歌）。不包含文件路径、音频、歌词和封面图片，也不包含播放地址和 WebDAV 密码。音频文件只在你点了上传时才会传出去：选网易云盘就传到你自己的网易云盘，选 WebDAV 就传到你自己的服务器；传的是原文件，默认只在 Wi-Fi 下传。把只在本机的歌加进已同步的歌单时只会提醒一句，从不自动上传。QQ 音乐云盘只读取列表、播放已匹配的歌，不会往里上传。",
         "歌词背景音频分析" to "“律动”只分析 ExoPlayer 已解码、正在输出的 PCM，不读取麦克风，不申请录音权限，也不保存或上传音频及频谱。暂停或离开播放页后停止分析。",
         "写入你选择的云端" to "启用同步后，自建歌单、收藏和平台账号 Cookie 会写入你的 GitHub Gist、Gitee 代码片段或 WebDAV 目录。Cookie 以明文保存，请勿公开文件链接或共享该目录；同步文件不包含同步令牌、WebDAV 密码、播放地址和下载文件。选 WebDAV 时，同步文件写在你的 WebDAV 目录里；WebDAV 密码只存在本机，不进同步文件。",
-        "网络请求" to "应用直接请求音乐平台上游接口、更新清单和同步服务，没有 myMusic 自建中转服务器。汽水播放签名器默认使用 SodaM 的公共签名服务（可在设置里关闭或换成自建实例），会员整曲的取流请求会带着 Cookie 和完整请求头发给该服务。YouTube Music 的音频由第三方 music.op.wiki 准备，只发送歌曲 ID，不发送 Cookie。第三方仍会看到其服务所需的常规请求信息。扫码登录的二维码在本机生成。",
+        "网络请求" to "应用直接请求音乐平台上游接口、更新清单和同步服务，没有 myMusic 自建中转服务器。汽水播放签名器默认使用 SodaM 的公共签名服务（可在设置里关闭或换成自建实例），会员整曲的取流请求会带着 Cookie 和完整请求头发给该服务。YouTube Music 直连 YouTube 取流；使用 music.op.wiki 音源时，音频由这个第三方服务准备，只发送歌曲 ID，不发送 Cookie。第三方仍会看到其服务所需的常规请求信息。扫码登录的二维码在本机生成。",
         "播放上报" to "开启“播放上报”（设置 › 播放上报，默认开）后，正在播放的曲目 ID、实际播放时长（暂停不计）、是否播完，以及切歌 / 暂停 / 换队列的原因会回传给该曲目所属的平台，用来让推荐流跟上你的口味；汽水还会把最近听过的曲目连时长一起带在推荐请求里。接入的平台有汽水音乐、网易云音乐、QQ音乐、酷我音乐和千千音乐；咪咕与 JOOX 公开面上没有可实现的上报接口。上报不带用户名、Cookie、播放地址或文件内容。关掉开关后一个请求都不发，已经发出去的服务端记录不会撤回。",
         "诊断信息" to "复制诊断只包含版本、设备型号、Android 版本、启用平台和最近错误；不包含 Cookie、令牌或完整播放 URL。",
     )
