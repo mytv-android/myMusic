@@ -32,8 +32,8 @@ class NativeProvidersTest {
     @Test
     fun playlistWriteCapabilitiesMatchImplementedProviders() {
         val write = NativeProviders.all().filter { it.info.playlistWrite }.map { it.info.id }.toSet()
-        assertEquals(setOf("netease", "qq", "kugou"), write)
+        assertEquals(setOf("netease", "qq", "kugou", "mhub"), write)
         val reorder = NativeProviders.all().filter { it.info.playlistReorder }.map { it.info.id }.toSet()
-        assertEquals(setOf("qq", "kugou"), reorder)
+        assertEquals(setOf("qq", "kugou", "mhub"), reorder)
     }
 }

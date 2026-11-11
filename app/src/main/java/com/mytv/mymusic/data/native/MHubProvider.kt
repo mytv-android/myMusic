@@ -2,12 +2,15 @@ package com.mytv.mymusic.data.native
 
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.Playlist
+import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.Song
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -18,6 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
 import java.net.URLEncoder
+import java.util.UUID
 
 private const val MHUB_ID = "mhub"
 private const val MHUB_BASE = "https://music.op.wiki"
@@ -36,12 +40,18 @@ private val MHUB_INFO = ProviderInfo(
     download = true,
     lyrics = true,
     parseSong = true,
+    recommendedPlaylists = true,
     playlistSongs = true,
+    playlistCategories = true,
     parsePlaylist = true,
     albumSongs = true,
     parseAlbum = true,
-    loginRequired = false,
-    note = "MHub 公共实例，匿名可用；音频逐首准备，曲库以 Apple Music 为主",
+    userPlaylists = true,
+    passwordLogin = true,
+    playlistWrite = true,
+    playlistReorder = true,
+    hotSongs = true,
+    note = "多平台兜底源；登录后同步自己的歌单，音频逐首准备",
 )
 
 class MHubProvider : BaseNativeProvider(MHUB_INFO) {
@@ -54,30 +64,103 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
     /** 一次只准备一首，避免撞上服务端的下载限流。 */
     private val prepareGate = Mutex()
 
+    private data class Platform(val id: String, val label: String)
+
+    private data class CachedSearch(val at: Long, val songs: List<Song>)
+
+    /** 同一个关键词 10 分钟内不重复打服务端；搜索页重进、换源重试都复用它。 */
+    private val searchCache = mutableMapOf<String, CachedSearch>()
+
+    /** 多平台搜索串行排队，避免同时发出多路搜索撞限流。 */
+    private val searchGate = Mutex()
+
+    @Volatile
+    private var platformCache: Pair<Long, List<Platform>>? = null
+
+    /**
+     * 搜的是 MHub 上的所有平台，未登录时它就是这些平台的兜底音源：
+     * 结果按平台分别标注，聚合时和原生平台的同名曲目归到一组，原生没登录也能播。
+     */
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         if (keyword.isBlank()) return emptyList()
+        cachedSearch(keyword)?.let { return it }
+
+        val platforms = platforms()
+        val songs = mutableListOf<Song>()
+        var rateLimited = false
+        var lastError: Exception? = null
+        val hit = searchGate.withLock {
+            cachedSearch(keyword)?.let { return@withLock it }
+            platforms.forEachIndexed { index, platform ->
+                if (index > 0) delay(SEARCH_GAP_MS)
+                try {
+                    songs += searchPlatform(platform.id, keyword)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Exception) {
+                    lastError = error
+                    if ("HTTP 429" in error.message.orEmpty()) rateLimited = true
+                }
+            }
+            songs.ifEmpty { null }?.also { cacheSearch(keyword, it) }
+        }
+        if (hit != null) return hit
+        if (rateLimited) throw IllegalStateException("music.op.wiki 搜索被限流，请稍后再试")
+        lastError?.let { throw it }
+        return emptyList()
+    }
+
+    private fun cachedSearch(keyword: String): List<Song>? =
+        synchronized(searchCache) { searchCache[keyword] }
+            ?.takeIf { System.currentTimeMillis() - it.at < SEARCH_TTL_MS }
+            ?.songs
+
+    private fun cacheSearch(keyword: String, songs: List<Song>) {
+        synchronized(searchCache) {
+            searchCache[keyword] = CachedSearch(System.currentTimeMillis(), songs)
+        }
+    }
+
+    private suspend fun searchPlatform(platform: String, keyword: String): List<Song> {
         val body = NativeHttp.get(
-            "$MHUB_BASE/api/v1/search?platform=applemusic&q=${encode(keyword)}&limit=20",
+            "$MHUB_BASE/api/v1/search?platform=$platform&q=${encode(keyword)}&limit=$SEARCH_LIMIT",
             headers = mapOf("Accept" to "application/json"),
         )
         val items = runCatching { json.parseToJsonElement(body) as JsonArray }.getOrElse {
             throw IllegalStateException("music.op.wiki 搜索返回异常：${body.take(160)}")
         }
         return items.mapNotNull { item ->
-            val obj = item as? JsonObject ?: return@mapNotNull null
-            val id = obj.str("id")
-            if (id.isBlank()) return@mapNotNull null
-            Song(
-                id = id,
-                name = obj.str("song"),
-                artist = obj.str("singer"),
-                source = MHUB_ID,
-                cover = obj.str("cover"),
-                link = "https://music.apple.com/song/$id",
-                ext = "m4a",
-                extra = mapOf("platform" to "applemusic"),
-            )
+            (item as? JsonObject)?.let { searchItemSong(it, platform) }
         }
+    }
+
+    /** 平台列表以服务端实际启用的为准；拿不到就退回文档里最常见的几个。 */
+    private suspend fun platforms(): List<Platform> {
+        platformCache?.takeIf { System.currentTimeMillis() - it.first < PLATFORM_TTL_MS }?.let {
+            return it.second
+        }
+        val body = runCatching {
+            NativeHttp.get("$MHUB_BASE/api/v1/platforms", headers = mapOf("Accept" to "application/json"))
+        }.getOrNull()
+        val parsed = body?.let { text ->
+            runCatching { json.parseToJsonElement(text) as JsonArray }.getOrNull()?.mapNotNull { element ->
+                val obj = element as? JsonObject ?: return@mapNotNull null
+                val id = obj.str("id")
+                id.takeIf { it.isNotBlank() }?.let { Platform(it, obj.str("label").ifBlank { it }) }
+            }
+        }.orEmpty()
+        val result = parsed.ifEmpty { DEFAULT_PLATFORMS.map { Platform(it, it) } }
+        platformCache = System.currentTimeMillis() to result
+        return result
+    }
+
+    private fun songLink(platform: String, id: String): String = when (platform) {
+        "applemusic" -> "https://music.apple.com/song/$id"
+        "youtubemusic" -> "https://music.youtube.com/watch?v=$id"
+        "netease" -> "https://music.163.com/song?id=$id"
+        "tencent" -> "https://y.qq.com/n/ryqq/songDetail/$id"
+        "bilibili" -> "https://www.bilibili.com/video/$id"
+        else -> ""
     }
 
     override suspend fun parseSong(cookie: String, link: String): Song {
@@ -112,17 +195,292 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
         return root.str("plain")
     }
 
+    /** MHub 的推荐首页（目前只有 Apple Music）；卡片按 URL 再解析成歌曲。 */
+    override suspend fun recommendedPlaylists(cookie: String): List<Playlist> {
+        val body = NativeHttp.get(
+            "$MHUB_BASE/api/v1/recommendations/home?platform=applemusic&limit=20",
+            headers = mapOf("Accept" to "application/json"),
+        )
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return emptyList()
+        val items = root["playlists"] as? JsonArray ?: return emptyList()
+        return items.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val url = obj.str("url")
+            val id = url.ifBlank { obj.str("recommendation_id") }
+            if (id.isBlank()) return@mapNotNull null
+            Playlist(
+                id = RECOMMEND_PREFIX + id,
+                name = obj.str("name"),
+                cover = obj.str("cover"),
+                creator = obj.str("curator"),
+                description = obj.str("description"),
+                source = MHUB_ID,
+                link = url,
+                extra = mapOf("platform" to "applemusic"),
+            )
+        }
+    }
+
+    /** 登录后把账号自己的歌单放进“歌单分类”，给用户一个能点进去、能绑定的入口。 */
+    override suspend fun categories(cookie: String): List<PlaylistCategory> {
+        if (cookie.isBlank()) return emptyList()
+        return listOf(
+            PlaylistCategory(id = MINE_CATEGORY, name = "我的歌单", group = "music.op.wiki", source = MHUB_ID),
+        )
+    }
+
+    override suspend fun categoryPlaylists(cookie: String, id: String, page: Int, limit: Int): List<Playlist> {
+        if (id != MINE_CATEGORY) return emptyList()
+        return userPlaylists(cookie, page, limit)
+    }
+
+    override suspend fun hotSongs(cookie: String, limit: Int): List<Song> {
+        val count = limit.coerceIn(1, 50)
+        val body = NativeHttp.get(
+            "$MHUB_BASE/api/v1/recommendations?platform=applemusic&limit=$count",
+            headers = mapOf("Accept" to "application/json"),
+        )
+        val items = runCatching { json.parseToJsonElement(body) as JsonArray }.getOrNull() ?: return emptyList()
+        return items.mapNotNull { item ->
+            val obj = item as? JsonObject ?: return@mapNotNull null
+            searchItemSong(obj, obj.str("platform").ifBlank { "applemusic" })
+        }
+    }
+
+    // ---------------- 账号 ----------------
+
+    private val deviceId: String by lazy { UUID.randomUUID().toString() }
+
+    override suspend fun passwordLogin(username: String, password: String): String {
+        val body = buildJsonObject {
+            put("username", username.trim())
+            put("password", password)
+            put("device_id", deviceId)
+            put("device_name", "myMusic")
+        }.toString()
+        val response = runCatching {
+            NativeHttp.postJson(
+                "$MHUB_BASE/api/v1/auth/password/login",
+                body,
+                headers = clientHeaders(),
+            )
+        }.getOrElse { error ->
+            val message = error.message.orEmpty()
+            throw IllegalStateException(
+                when {
+                    "HTTP 401" in message -> "用户名或密码不正确"
+                    "HTTP 429" in message -> "登录尝试过于频繁，请稍后再试"
+                    else -> message.ifBlank { "登录失败" }
+                },
+            )
+        }
+        val token = response.cookies["mhub_session"].orEmpty()
+        if (token.isBlank()) throw IllegalStateException("登录失败：服务端没有返回会话")
+        return "mhub_session=$token"
+    }
+
+    override suspend fun accountInfo(cookie: String): AccountInfo? {
+        if (cookie.isBlank()) return null
+        val body = runCatching {
+            NativeHttp.get("$MHUB_BASE/api/v1/auth/me", headers = clientHeaders(), cookie = cookie)
+        }.getOrNull() ?: return null
+        val user = runCatching {
+            (json.parseToJsonElement(body).jsonObject["user"]) as? JsonObject
+        }.getOrNull() ?: return null
+        val name = user.str("username")
+        if (name.isBlank()) return null
+        return AccountInfo(nickname = name, detail = "music.op.wiki")
+    }
+
+    // ---------------- 自己的歌单（MHub 账号的 JSON 库） ----------------
+
+    override suspend fun userPlaylists(cookie: String, page: Int, limit: Int): List<Playlist> {
+        if (cookie.isBlank() || page > 1) return emptyList()
+        val snapshot = librarySnapshot(cookie) ?: return emptyList()
+        val items = snapshot["playlists"] as? JsonArray ?: return emptyList()
+        return items.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val id = obj.str("id")
+            if (id.isBlank()) return@mapNotNull null
+            Playlist(
+                id = id,
+                name = obj.str("name"),
+                cover = obj.str("cover"),
+                trackCount = (obj["tracks"] as? JsonArray)?.size ?: 0,
+                source = MHUB_ID,
+                extra = mapOf("library" to "1"),
+            )
+        }
+    }
+
+    override suspend fun playlistWritable(cookie: String, id: String): Boolean? {
+        if (cookie.isBlank()) return false
+        val snapshot = librarySnapshot(cookie) ?: return null
+        val items = snapshot["playlists"] as? JsonArray ?: return false
+        return items.any { (it as? JsonObject)?.str("id") == id }
+    }
+
+    override suspend fun addPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        requireLogin(cookie)
+        if (songs.isEmpty()) return
+        val op = buildJsonObject {
+            put("op", "append")
+            put("id", playlistId)
+            put("tracks", JsonArray(songs.map(::trackMetaJson)))
+        }
+        postLibraryOps(cookie, listOf(op))
+    }
+
+    override suspend fun removePlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        requireLogin(cookie)
+        if (songs.isEmpty()) return
+        val ops = songs.map { song ->
+            buildJsonObject {
+                put("op", "remove")
+                put("id", playlistId)
+                put("key", trackKey(song))
+            }
+        }
+        postLibraryOps(cookie, ops)
+    }
+
+    override suspend fun reorderPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        requireLogin(cookie)
+        if (songs.size < 2) return
+        var previous: String? = null
+        val ops = songs.map { song ->
+            val key = trackKey(song)
+            buildJsonObject {
+                put("op", "move")
+                put("id", playlistId)
+                put("key", key)
+                if (previous == null) put("after", JsonNull) else put("after", previous)
+            }.also { previous = key }
+        }
+        postLibraryOps(cookie, ops)
+    }
+
     override suspend fun parsePlaylist(cookie: String, link: String): CollectionResult =
         resolveCollection(link, album = false)
 
-    override suspend fun playlistSongs(cookie: String, id: String): List<Song> =
-        resolveCollection(decodeCollectionId(id), album = false).songs
+    override suspend fun playlistSongs(cookie: String, id: String): List<Song> {
+        if (id.startsWith(RECOMMEND_PREFIX)) {
+            return resolveCollection(decodeCollectionId(id.removePrefix(RECOMMEND_PREFIX)), album = false).songs
+        }
+        libraryPlaylist(cookie, id)?.let { playlist ->
+            return (playlist["tracks"] as? JsonArray).orEmpty().mapNotNull { element ->
+                val track = element as? JsonObject ?: return@mapNotNull null
+                val platform = track.str("platform").ifBlank { "applemusic" }
+                val sourceId = track.str("source_id")
+                if (sourceId.isBlank()) return@mapNotNull null
+                Song(
+                    id = sourceId,
+                    name = track.str("title"),
+                    artist = track.str("artist"),
+                    source = MHUB_ID,
+                    cover = track.str("cover"),
+                    link = songLink(platform, sourceId),
+                    ext = "m4a",
+                    extra = mapOf("platform" to platform),
+                )
+            }
+        }
+        if (id.contains("::") || id.startsWith("http")) {
+            return resolveCollection(decodeCollectionId(id), album = false).songs
+        }
+        throw IllegalStateException("找不到这个 music.op.wiki 歌单，登录状态可能已失效")
+    }
 
     override suspend fun parseAlbum(cookie: String, link: String): CollectionResult =
         resolveCollection(link, album = true)
 
     override suspend fun albumSongs(cookie: String, id: String): List<Song> =
         resolveCollection(decodeCollectionId(id), album = true).songs
+
+    private fun requireLogin(cookie: String) {
+        if (cookie.isBlank()) {
+            throw PlaylistWriteException("登录 music.op.wiki 后才能修改歌单", PlaylistWriteFailure.NotLoggedIn)
+        }
+    }
+
+    private fun trackKey(song: Song): String =
+        "${platformOf(song).lowercase()}:${song.id}"
+
+    private fun trackMetaJson(song: Song): JsonObject = buildJsonObject {
+        put("platform", platformOf(song))
+        put("source_id", song.id)
+        put("title", song.name)
+        put("artist", song.artist)
+        put("cover", song.cover)
+    }
+
+    private fun clientHeaders(): Map<String, String> = mapOf(
+        "Accept" to "application/json",
+        "x-mhub-client" to "mymusic",
+    )
+
+    private suspend fun librarySnapshot(cookie: String): JsonObject? = runCatching {
+        val body = NativeHttp.get(
+            "$MHUB_BASE/api/v1/sync/library/json",
+            headers = clientHeaders(),
+            cookie = cookie,
+        )
+        json.parseToJsonElement(body).jsonObject
+    }.getOrNull()
+
+    private suspend fun libraryPlaylist(cookie: String, id: String): JsonObject? {
+        if (cookie.isBlank() || id.isBlank()) return null
+        val snapshot = librarySnapshot(cookie) ?: return null
+        val items = snapshot["playlists"] as? JsonArray ?: return null
+        return items.firstOrNull { (it as? JsonObject)?.str("id") == id } as? JsonObject
+    }
+
+    private suspend fun postLibraryOps(cookie: String, ops: List<JsonObject>) {
+        if (ops.isEmpty()) return
+        ops.chunked(400).forEach { chunk ->
+            val body = buildJsonObject { put("ops", JsonArray(chunk)) }.toString()
+            val response = runCatching {
+                NativeHttp.postJson(
+                    "$MHUB_BASE/api/v1/sync/library/json",
+                    body,
+                    headers = clientHeaders(),
+                    cookie = cookie,
+                )
+            }.getOrElse { error ->
+                val message = error.message.orEmpty()
+                throw PlaylistWriteException(
+                    when {
+                        "HTTP 401" in message || "HTTP 403" in message -> "登录状态已失效，请重新登录"
+                        "HTTP 429" in message -> "操作过于频繁，请稍后再试"
+                        else -> message.ifBlank { "修改歌单失败" }
+                    },
+                    if ("HTTP 401" in message || "HTTP 403" in message) {
+                        PlaylistWriteFailure.NotLoggedIn
+                    } else {
+                        PlaylistWriteFailure.Other
+                    },
+                )
+            }
+            if (response.code !in 200..299) {
+                throw PlaylistWriteException("修改歌单失败（HTTP ${response.code}）", PlaylistWriteFailure.Other)
+            }
+        }
+    }
+
+    private fun searchItemSong(obj: JsonObject, platform: String): Song? {
+        val id = obj.str("id")
+        if (id.isBlank()) return null
+        return Song(
+            id = id,
+            name = obj.str("song"),
+            artist = obj.str("singer"),
+            source = MHUB_ID,
+            cover = obj.str("cover"),
+            link = songLink(platform, id),
+            ext = "m4a",
+            extra = mapOf("platform" to platform),
+        )
+    }
 
     // ---------------- 音乐准备 ----------------
 
@@ -311,7 +669,11 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
         val value = link.trim()
         APPLE_ID.find(value)?.groupValues?.get(1)?.let { return "applemusic" to it }
         APPLE_LINK.find(value)?.groupValues?.get(1)?.let { return "applemusic" to it }
-        if (APPLE_COLLECTION.containsMatchIn(value)) return "applemusic" to value
+        if (APPLE_HOST.containsMatchIn(value) &&
+            (value.contains("/playlist/") || value.contains("/album/"))
+        ) {
+            return "applemusic" to value
+        }
         YT_ID.find(value)?.groupValues?.get(1)?.let { return "youtubemusic" to it }
         if (NETEASE_HOST.containsMatchIn(value)) return "netease" to value
         if (value.all(Char::isDigit) && value.isNotEmpty()) return "applemusic" to value
@@ -352,12 +714,19 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
     private companion object {
         val APPLE_ID = Regex("""[?&]i=(\d+)""")
         val APPLE_LINK = Regex("""/song/[^/]+/(\d+)""")
-        val APPLE_COLLECTION = Regex("""/(?:album|playlist)/[^/]+/[A-Za-z0-9._-]+""")
+        val APPLE_HOST = Regex("""https?://music\.apple\.com/""")
         val YT_ID = Regex("""(?:v=|youtu\.be/|/shorts/|/embed/)([A-Za-z0-9_-]{11})""")
         val NETEASE_HOST = Regex("""https?://(?:y\.)?music\.163\.com/""")
 
         const val PREPARED_TTL_MS = 20L * 60 * 60 * 1000
         const val POLL_INTERVAL_MS = 2_000L
         const val PREPARE_TIMEOUT_MS = 150_000L
+        const val SEARCH_TTL_MS = 10L * 60 * 1000
+        const val SEARCH_GAP_MS = 300L
+        const val SEARCH_LIMIT = 10
+        const val PLATFORM_TTL_MS = 6L * 60 * 60 * 1000
+        const val RECOMMEND_PREFIX = "rec::"
+        const val MINE_CATEGORY = "mine"
+        val DEFAULT_PLATFORMS = listOf("applemusic", "netease", "tencent", "bilibili", "youtubemusic")
     }
 }

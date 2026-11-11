@@ -5250,6 +5250,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 用户名密码登录（music.op.wiki）：成功后走和 Cookie 登录完全相同的保存与资料刷新流程。 */
+    fun loginWithPassword(providerId: String, username: String, password: String) {
+        if (username.isBlank() || password.isBlank()) return
+        loginJob?.cancel()
+        base.value = base.value.copy(login = null, loginStatus = "登录中…", loginProviderId = providerId)
+        loginJob = viewModelScope.launch {
+            val provider = NativeProviders.get(providerId)
+            if (provider == null) {
+                base.value = base.value.copy(loginStatus = "登录失败：找不到这个平台")
+                return@launch
+            }
+            val cookie = try {
+                provider.passwordLogin(username.trim(), password)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                base.value = base.value.copy(loginStatus = "登录失败：${error.message ?: "网络错误"}")
+                return@launch
+            }
+            saveCookie(providerId, cookie)
+            message("已登录${provider.info.name}")
+        }
+    }
+
     fun saveCookie(providerId: String = settingsState.value.provider, cookie: String) = viewModelScope.launch {
         if (providerId == SodaProvider.SODA_PROVIDER_ID) {
             AppLog.i(

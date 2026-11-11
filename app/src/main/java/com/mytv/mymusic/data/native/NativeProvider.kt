@@ -122,6 +122,10 @@ interface NativeProvider {
     suspend fun checkLogin(sessionId: String, key: String): QRCheckResult =
         throw UnsupportedOperationException("${info.name} 暂不支持扫码登录")
 
+    /** 用户名 + 密码登录，返回可直接存进平台账号的 Cookie 字符串。 */
+    suspend fun passwordLogin(username: String, password: String): String =
+        throw UnsupportedOperationException("${info.name} 暂不支持账号密码登录")
+
     /** 登录账号的昵称、头像、会员/等级；null 表示这个平台没有实现或资料不可用。 */
     suspend fun accountInfo(cookie: String): AccountInfo? = null
 

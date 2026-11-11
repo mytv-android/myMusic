@@ -22,6 +22,8 @@ data class ProviderInfo(
     @SerialName("ParseAlbum") val parseAlbum: Boolean = false,
     @SerialName("UserPlaylists") val userPlaylists: Boolean = false,
     @SerialName("QRLogin") val qrLogin: Boolean = false,
+    /** 支持用户名 + 密码登录（music.op.wiki 的 MHub 账号）。 */
+    @SerialName("PasswordLogin") val passwordLogin: Boolean = false,
     @SerialName("PlaylistCategories") val playlistCategories: Boolean = false,
     @SerialName("TopLists") val topLists: Boolean = false,
     @SerialName("TopListSongs") val topListSongs: Boolean = false,

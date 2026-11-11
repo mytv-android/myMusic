@@ -278,6 +278,8 @@ class MusicActions(private val model: MusicViewModel) {
     fun setCacheLimit(mb: Int) = model.setCacheLimit(mb)
     fun startLogin(providerId: String, type: String = "qq") = model.startLogin(providerId, type)
     fun saveCookie(providerId: String, cookie: String) = model.saveCookie(providerId, cookie)
+    fun loginWithPassword(providerId: String, username: String, password: String) =
+        model.loginWithPassword(providerId, username, password)
     fun saveSodaSigner(url: String, token: String, enabled: Boolean = true) =
         model.saveSodaSigner(url, token, enabled)
 
