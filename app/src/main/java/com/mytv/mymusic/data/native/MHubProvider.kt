@@ -41,7 +41,7 @@ private val MHUB_INFO = ProviderInfo(
     albumSongs = true,
     parseAlbum = true,
     loginRequired = false,
-    note = "MHub 公共实例，匿名可用；音频逐首准备，Apple Music 无损由服务端转换",
+    note = "MHub 公共实例，匿名可用；音频逐首准备，曲库以 Apple Music 为主",
 )
 
 class MHubProvider : BaseNativeProvider(MHUB_INFO) {
