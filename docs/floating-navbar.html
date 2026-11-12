@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>myMusic 底栏改用 FloatingToolbar · 设计稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Roboto+Flex:opsz,wdth,wght@8..144,25..151,100..1000&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --font-display:"Roboto Flex","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-body:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-mono:"JetBrains Mono","Cascadia Mono",Consolas,monospace;
+  --md-primary:#206a5f;--md-on-primary:#e2fff8;--md-primary-container:#a9f0e2;--md-on-primary-container:#095c52;
+  --md-secondary:#4b645f;--md-on-secondary:#e3fff8;--md-secondary-container:#cde8e1;--md-on-secondary-container:#3e5751;
+  --md-tertiary:#336577;--md-tertiary-container:#afe2f6;--md-on-tertiary-container:#1d5364;
+  --md-surface:#f6faf8;--md-surface-container-lowest:#ffffff;
+  --md-surface-container-low:#eef5f2;--md-surface-container:#e7f0ec;--md-surface-container-high:#e1eae7;
+  --md-surface-container-highest:#dae5e1;--md-on-surface:#2a3532;--md-on-surface-variant:#56615e;
+  --md-outline:#727d7a;--md-outline-variant:#a9b4b1;
+  --bg:var(--md-surface);--panel:var(--md-surface-container);--panel-2:var(--md-surface-container-high);
+  --fg:var(--md-on-surface);--muted:var(--md-on-surface-variant);--line:var(--md-outline-variant);
+  --accent:var(--md-primary);--accent-soft:var(--md-primary-container);
+  --bezel:#17191b;--bezel-2:#34383c;
+  --spring:linear(0,.009,.035 2.1%,.141,.281 6.7%,.723 12.9%,.938 16.7%,1.017,1.077,1.121,1.149 24.3%,1.159,1.163,1.161,1.154 29.9%,1.129 32.8%,1.051 39.6%,1.017 43.1%,.991,.977 51%,.974 53.8%,.975 57.1%,.997 69.8%,1.003 76.9%,1);
+  --ease:cubic-bezier(.2,0,0,1);
+}
+@media (prefers-color-scheme: dark){:root{
+  --md-primary:#9cd1c6;--md-on-primary:#114840;--md-primary-container:#275b52;--md-on-primary-container:#b9eee3;
+  --md-secondary:#b1ccc6;--md-on-secondary:#2c4540;--md-secondary-container:#27403b;--md-on-secondary-container:#aac5be;
+  --md-surface:#0a0f0e;--md-surface-container-lowest:#000000;
+  --md-surface-container-low:#0e1513;--md-surface-container:#131b19;--md-surface-container-high:#19211f;
+  --md-surface-container-highest:#1e2826;--md-on-surface:#dde8e4;--md-on-surface-variant:#a2adaa;
+  --md-outline:#6d7875;--md-outline-variant:#3f4a47;--bezel:#060708;--bezel-2:#2a2e31;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{margin:0;line-height:1.25;letter-spacing:-.02em}
+code{font-family:var(--font-mono);font-size:.86em;background:var(--panel-2);padding:.1em .38em;border-radius:6px}
+.wrap{max-width:1240px;margin-inline:auto;padding:0 24px}
+.ic{width:24px;height:24px;flex:none;fill:currentColor}
+.hero{padding:72px 0 44px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--md-surface-container-low),transparent)}
+.eyebrow{margin:0 0 14px;font-size:13px;font-weight:700;letter-spacing:.05em;color:var(--accent)}
+h1{font-size:clamp(34px,5.4vw,64px);font-weight:900;letter-spacing:-.035em}
+.lede{margin:18px 0 0;max-width:46em;font-size:17px;color:var(--muted)}
+section{padding:56px 0;border-bottom:1px solid var(--line)}
+.sec-label{margin:0 0 8px;font-size:13px;font-weight:700;color:var(--accent);letter-spacing:.03em}
+h2{font-size:clamp(24px,3vw,34px);font-weight:900;letter-spacing:-.03em}
+h3{margin:34px 0 10px;font-size:19px;font-weight:700}
+p{margin:10px 0}
+.muted{color:var(--muted)}
+
+/* ---------- 样机 ---------- */
+.stage{display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start;justify-content:center;margin-top:36px}
+.phone{position:relative;flex:none;padding:10px;border-radius:54px;background:var(--bezel);
+  box-shadow:0 40px 90px -40px color-mix(in srgb,var(--md-primary) 55%,transparent),0 18px 40px -18px rgb(0 0 0/.4),inset 0 0 0 2px var(--bezel-2)}
+.screen{position:relative;width:360px;height:780px;border-radius:44px;overflow:hidden;background:var(--md-surface);color:var(--md-on-surface);
+  font-family:var(--font-display);font-size:14px;line-height:1.4}
+.cap{margin-top:16px;text-align:center;font-size:13.5px;line-height:1.6;max-width:380px}
+.cap b{display:block;font-size:15px;font-weight:700;color:var(--fg)}
+.cap code{font-size:11.5px}
+
+.status{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:12.5px;font-weight:600;color:var(--md-on-surface-variant)}
+.status i{font-style:normal}
+.appbar{padding:6px 20px 14px;display:flex;align-items:center;justify-content:space-between}
+.appbar h4{font-size:26px;font-weight:900;letter-spacing:-.03em}
+.avatarb{width:36px;height:36px;border-radius:50%;background:var(--md-primary-container);display:grid;place-items:center;color:var(--md-on-primary-container);font-weight:700;font-size:14px}
+.chips{display:flex;gap:8px;padding:0 20px 14px;overflow:hidden}
+.chip{flex:none;height:32px;padding:0 14px;border-radius:16px;display:grid;place-items:center;font-size:13px;font-weight:600;
+  background:var(--md-surface-container-low);color:var(--md-on-surface-variant)}
+.chip.on{background:var(--md-secondary-container);color:var(--md-on-secondary-container)}
+.list{padding:0 12px}
+.row{display:flex;align-items:center;gap:14px;padding:9px 8px;border-radius:16px}
+.row .cv{width:52px;height:52px;border-radius:12px;flex:none;position:relative;overflow:hidden}
+.row .tx{min-width:0;flex:1}
+.row .tx b{display:block;font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .tx span{display:block;font-size:12.5px;color:var(--md-on-surface-variant);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .more{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:var(--md-on-surface-variant)}
+.cv::after{content:"";position:absolute;inset:0;background:var(--g)}
+.cv.c1{--g:linear-gradient(135deg,#f4a261,#e76f51 55%,#8d4b3f)}
+.cv.c2{--g:linear-gradient(135deg,#2a9d8f,#264653 60%,#1d3557)}
+.cv.c3{--g:linear-gradient(135deg,#e9c46a,#f4a261 50%,#bc6c25)}
+.cv.c4{--g:linear-gradient(135deg,#8ecae6,#219ebc 55%,#023047)}
+.cv.c5{--g:linear-gradient(135deg,#cdb4db,#ffc8dd 45%,#a2d2ff)}
+.cv.c6{--g:linear-gradient(135deg,#b7e4c7,#52b788 55%,#2d6a4f)}
+.home-ind{position:absolute;left:50%;bottom:7px;width:108px;height:4px;margin-left:-54px;border-radius:2px;background:var(--md-on-surface);opacity:.32;z-index:30}
+
+/* ---------- 现在的 ShortNavigationBar ---------- */
+.nav-docked{position:absolute;left:0;right:0;bottom:0;height:64px;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;
+  background:var(--md-surface-container);z-index:12}
+.nav-docked .item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11.5px;font-weight:500;color:var(--md-on-surface-variant)}
+.nav-docked .item.on{color:var(--md-on-surface);font-weight:700}
+.nav-docked .ind{width:56px;height:30px;border-radius:15px;display:grid;place-items:center}
+.nav-docked .item.on .ind{background:var(--md-secondary-container);color:var(--md-on-secondary-container)}
+
+/* ---------- FloatingToolbar ----------
+   规格取自 FloatingToolbarTokens：高 64dp、内容内边距 8dp、离屏幕边 16dp、
+   形状 CornerFull（全圆角）、标准色 SurfaceContainer、展开态 elevation Level0 = 0dp */
+.ftb{position:absolute;bottom:16px;height:64px;border-radius:32px;padding:0 8px;
+  display:flex;align-items:center;gap:4px;z-index:14;
+  background:var(--md-surface-container);color:var(--md-on-surface);
+  transition:left .35s var(--ease),right .35s var(--ease),background-color .3s}
+.ftb.centered{left:50%;transform:translateX(-50%)}
+.ftb.fill{left:16px;right:16px}
+.ftb.vibrant{background:var(--md-primary-container);color:var(--md-on-primary-container)}
+.ftb.raised{box-shadow:0 8px 24px -10px rgb(0 0 0/.34),0 2px 6px -3px rgb(0 0 0/.2)}
+
+/* FloatingToolbar 的一个槽位：图标按钮 48dp 点击区 */
+.ftb .slot{width:56px;height:48px;border-radius:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  color:var(--md-on-surface-variant);transition:background .25s,color .25s,width .35s var(--spring)}
+.ftb .slot .lb{font-size:10.5px;font-weight:600;line-height:1.1;letter-spacing:.01em}
+.ftb .slot.on{background:var(--md-surface-container-highest);color:var(--md-on-surface);font-weight:700}
+.ftb.vibrant .slot{color:var(--md-on-primary-container);opacity:.78}
+.ftb.vibrant .slot.on{background:var(--md-primary-container);opacity:1;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--md-on-primary-container) 22%,transparent);background:color-mix(in srgb,var(--md-surface) 92%,var(--md-primary-container))}
+/* 只图标，无文字（toolbar 的典型用法） */
+.ftb.icononly .slot{width:48px}
+.ftb.icononly .slot .lb{display:none}
+
+/* ---------- 迷你播放器 ---------- */
+.mini{position:absolute;left:12px;right:12px;height:64px;border-radius:20px;display:flex;align-items:center;gap:12px;padding:0 6px 0 8px;z-index:13;
+  background:color-mix(in srgb,var(--md-secondary-container) 90%,transparent);color:var(--md-on-secondary-container);
+  -webkit-backdrop-filter:blur(20px) saturate(1.4);backdrop-filter:blur(20px) saturate(1.4);
+  box-shadow:0 8px 22px -12px rgb(0 0 0/.4),0 2px 6px -3px rgb(0 0 0/.24)}
+.mini .cv{width:48px;height:48px;border-radius:12px;flex:none;overflow:hidden;position:relative}
+.mini .cv::after{content:"";position:absolute;inset:0;background:var(--g)}
+.mini .tx{flex:1;min-width:0}
+.mini .tx b{display:block;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini .tx span{display:block;font-size:11.5px;opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini .pp{width:40px;height:40px;border-radius:50%;background:var(--md-primary);color:var(--md-on-primary);display:grid;place-items:center;flex:none}
+.mini .nx{width:40px;height:40px;display:grid;place-items:center;flex:none}
+.mini .prog{position:absolute;left:0;right:0;bottom:0;height:2px;background:color-mix(in srgb,var(--md-on-secondary-container) 14%,transparent)}
+.mini .prog i{display:block;height:2px;width:38%;background:var(--md-primary)}
+
+/* 迷你播放器：有播放器时压住导航栏上方 8dp */
+.screen[data-mini="on"] .mini{bottom:72px}
+.screen[data-mini="off"] .mini{display:none}
+
+/* 规则：有播放器 → 贴底导航栏；没有 → FloatingToolbar */
+.screen[data-mini="on"] .ftb{display:none}
+.screen[data-mini="off"] .nav-docked{display:none}
+
+/* ---------- 控件 ---------- */
+.controls{display:flex;flex-direction:column;gap:18px;min-width:280px;max-width:340px;margin-top:36px}
+.ctl{display:flex;flex-direction:column;gap:8px}
+.ctl > span{font-size:13px;font-weight:700;color:var(--muted)}
+.seg{display:flex;gap:2px;border-radius:999px;background:var(--panel);padding:3px}
+.seg button{flex:1;border:0;background:transparent;border-radius:999px;padding:8px 10px;font-size:13px;color:var(--muted);transition:background .2s,color .2s;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--md-secondary-container);color:var(--md-on-secondary-container);font-weight:700}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.check{display:flex;align-items:center;gap:10px;font-size:14px}
+.check input{width:18px;height:18px;accent-color:var(--accent)}
+.readout{font-family:var(--font-mono);font-size:12.5px;color:var(--muted)}
+
+/* ---------- 表格 ---------- */
+.table-wrap{margin-top:26px;overflow-x:auto;border-radius:16px;border:1px solid var(--line)}
+table{border-collapse:collapse;width:100%;font-size:14px;background:var(--md-surface-container-lowest)}
+th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--panel);font-size:12.5px;color:var(--muted);font-weight:700;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:28px}
+.note{padding:18px 20px;border-radius:20px;background:var(--panel)}
+.note h4{font-size:14.5px;margin-bottom:6px}
+.note p{margin:0;font-size:13.5px;line-height:1.7;color:var(--muted)}
+.note.warn{background:color-mix(in srgb,var(--md-tertiary-container) 55%,var(--md-surface))}
+pre{margin:14px 0 0;padding:16px 18px;border-radius:16px;background:#0a0f0e;color:#dde8e4;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.75}
+pre .c{color:#7d8f8a}
+pre .k{color:#9cd1c6}
+pre .s{color:#e9c46a}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M7.5 21H2V9h5.5v12zm7.25-18h-5.5v18h5.5V3zM22 11h-5.5v10H22V11z"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18A3 3 0 1 0 19 17V8h3V6h-5z"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 5h-3v5.5a2.5 2.5 0 1 1-1-2V5h4v2zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
+</svg>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">myMusic · 底栏换组件 · 2026-11-12</p>
+    <h1>没歌在播时，底栏浮起来</h1>
+    <p class="lede">底栏按「有没有歌在播」分成两种形态：<strong>有迷你播放器时沿用现在的 <code>ShortNavigationBar</code></strong>，和播放器组成一组贴底；<strong>没有迷你播放器时换成 <code>HorizontalFloatingToolbar</code></strong>，单独浮在内容上。FloatingToolbar 的尺寸按库里的实值画：高 64dp、内边距 8dp、离屏幕边 16dp、形状 CornerFull、标准色 surfaceContainer。</p>
+  </div>
+</header>
+
+<main>
+
+<section id="compare">
+  <div class="wrap">
+    <p class="sec-label">两种状态</p>
+    <h2>分界线是「有没有歌在播」</h2>
+    <p class="lede" style="font-size:15.5px">前两个是最终的规则：有迷你播放器 → 导航栏贴底；没有 → FloatingToolbar 悬浮。后两个是 FloatingToolbar 的两种宽度可选（默认收缩居中，或撑满留 16dp）。</p>
+
+    <div class="stage">
+
+      <!-- 1. 有播放器：贴底导航栏 -->
+      <div>
+        <div class="phone">
+          <div class="screen" data-mini="on">
+            <div class="status"><i>9:41</i><i>●●● ⌁ ▮</i></div>
+            <div class="appbar"><h4>榜单</h4><div class="avatarb">我</div></div>
+            <div class="chips"><div class="chip on">热门</div><div class="chip">新歌</div><div class="chip">飙升</div></div>
+            <div class="list">
+              <div class="row"><div class="cv c1"></div><div class="tx"><b>晚风心里吹</b><span>阿梨粤</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c2"></div><div class="tx"><b>海底（Live）</b><span>一支榴莲</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c3"></div><div class="tx"><b>若把你</b><span>KIV</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c4"></div><div class="tx"><b>精神体验</b><span>草东没有派对</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c5"></div><div class="tx"><b>床边故事</b><span>周杰伦</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c6"></div><div class="tx"><b>慢冷</b><span>梁静茹</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+            </div>
+            <div class="mini"><div class="cv c2"></div><div class="tx"><b>海底（Live）</b><span>一支榴莲 · 网易云</span></div><div class="pp"><svg class="ic" style="width:22px;height:22px"><use href="#i-pause"/></svg></div><div class="nx"><svg class="ic" style="width:22px;height:22px"><use href="#i-next"/></svg></div><div class="prog"><i></i></div></div>
+            <div class="nav-docked">
+              <div class="item on"><div class="ind"><svg class="ic" style="width:22px;height:22px"><use href="#i-chart"/></svg></div>榜单</div>
+              <div class="item"><div class="ind"><svg class="ic" style="width:22px;height:22px"><use href="#i-queue"/></svg></div>歌单</div>
+              <div class="item"><div class="ind"><svg class="ic" style="width:22px;height:22px"><use href="#i-search"/></svg></div>搜索</div>
+              <div class="item"><div class="ind"><svg class="ic" style="width:22px;height:22px"><use href="#i-library"/></svg></div>我的</div>
+            </div>
+            <div class="home-ind"></div>
+          </div>
+        </div>
+        <div class="cap"><b>有歌在播 · 保持不变</b><code>ShortNavigationBar</code> 贴底满宽，和迷你播放器组成一组</div>
+      </div>
+
+      <!-- 2. 没有播放器：FloatingToolbar 居中收缩（默认行为） -->
+      <div>
+        <div class="phone">
+          <div class="screen" data-mini="off">
+            <div class="status"><i>9:41</i><i>●●● ⌁ ▮</i></div>
+            <div class="appbar"><h4>榜单</h4><div class="avatarb">我</div></div>
+            <div class="chips"><div class="chip on">热门</div><div class="chip">新歌</div><div class="chip">飙升</div></div>
+            <div class="list">
+              <div class="row"><div class="cv c1"></div><div class="tx"><b>晚风心里吹</b><span>阿梨粤</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c2"></div><div class="tx"><b>海底（Live）</b><span>一支榴莲</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c3"></div><div class="tx"><b>若把你</b><span>KIV</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c4"></div><div class="tx"><b>精神体验</b><span>草东没有派对</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c5"></div><div class="tx"><b>床边故事</b><span>周杰伦</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c6"></div><div class="tx"><b>慢冷</b><span>梁静茹</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+            </div>
+            <div class="mini"><div class="cv c2"></div><div class="tx"><b>海底（Live）</b><span>一支榴莲 · 网易云</span></div><div class="pp"><svg class="ic" style="width:22px;height:22px"><use href="#i-pause"/></svg></div><div class="nx"><svg class="ic" style="width:22px;height:22px"><use href="#i-next"/></svg></div><div class="prog"><i></i></div></div>
+            <div class="ftb centered">
+              <div class="slot on"><svg class="ic" style="width:22px;height:22px"><use href="#i-chart"/></svg><span class="lb">榜单</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-queue"/></svg><span class="lb">歌单</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-search"/></svg><span class="lb">搜索</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-library"/></svg><span class="lb">我的</span></div>
+            </div>
+            <div class="home-ind"></div>
+          </div>
+        </div>
+        <div class="cap"><b>没歌在播 · 居中收缩</b><code>HorizontalFloatingToolbar</code> 默认行为：宽度随内容，约 252dp，离屏幕底 16dp</div>
+      </div>
+
+      <!-- 3. 没有播放器：FloatingToolbar 撑满 -->
+      <div>
+        <div class="phone">
+          <div class="screen" data-mini="off">
+            <div class="status"><i>9:41</i><i>●●● ⌁ ▮</i></div>
+            <div class="appbar"><h4>榜单</h4><div class="avatarb">我</div></div>
+            <div class="chips"><div class="chip on">热门</div><div class="chip">新歌</div><div class="chip">飙升</div></div>
+            <div class="list">
+              <div class="row"><div class="cv c1"></div><div class="tx"><b>晚风心里吹</b><span>阿梨粤</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c2"></div><div class="tx"><b>海底（Live）</b><span>一支榴莲</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c3"></div><div class="tx"><b>若把你</b><span>KIV</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c4"></div><div class="tx"><b>精神体验</b><span>草东没有派对</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c5"></div><div class="tx"><b>床边故事</b><span>周杰伦</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c6"></div><div class="tx"><b>慢冷</b><span>梁静茹</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+            </div>
+            <div class="mini"><div class="cv c2"></div><div class="tx"><b>海底（Live）</b><span>一支榴莲 · 网易云</span></div><div class="pp"><svg class="ic" style="width:22px;height:22px"><use href="#i-pause"/></svg></div><div class="nx"><svg class="ic" style="width:22px;height:22px"><use href="#i-next"/></svg></div><div class="prog"><i></i></div></div>
+            <div class="ftb fill" style="justify-content:space-around">
+              <div class="slot on"><svg class="ic" style="width:22px;height:22px"><use href="#i-chart"/></svg><span class="lb">榜单</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-queue"/></svg><span class="lb">歌单</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-search"/></svg><span class="lb">搜索</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-library"/></svg><span class="lb">我的</span></div>
+            </div>
+            <div class="home-ind"></div>
+          </div>
+        </div>
+        <div class="cap"><b>没歌在播 · 撑满</b>加 <code>fillMaxWidth()</code>，左右仍留 16dp</div>
+      </div>
+
+      <!-- 4. vibrant -->
+      <div>
+        <div class="phone">
+          <div class="screen" data-mini="off">
+            <div class="status"><i>9:41</i><i>●●● ⌁ ▮</i></div>
+            <div class="appbar"><h4>榜单</h4><div class="avatarb">我</div></div>
+            <div class="chips"><div class="chip on">热门</div><div class="chip">新歌</div><div class="chip">飙升</div></div>
+            <div class="list">
+              <div class="row"><div class="cv c1"></div><div class="tx"><b>晚风心里吹</b><span>阿梨粤</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c2"></div><div class="tx"><b>海底（Live）</b><span>一支榴莲</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c3"></div><div class="tx"><b>若把你</b><span>KIV</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c4"></div><div class="tx"><b>精神体验</b><span>草东没有派对</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c5"></div><div class="tx"><b>床边故事</b><span>周杰伦</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c6"></div><div class="tx"><b>慢冷</b><span>梁静茹</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+            </div>
+            <div class="mini"><div class="cv c2"></div><div class="tx"><b>海底（Live）</b><span>一支榴莲 · 网易云</span></div><div class="pp"><svg class="ic" style="width:22px;height:22px"><use href="#i-pause"/></svg></div><div class="nx"><svg class="ic" style="width:22px;height:22px"><use href="#i-next"/></svg></div><div class="prog"><i></i></div></div>
+            <div class="ftb centered vibrant">
+              <div class="slot on"><svg class="ic" style="width:22px;height:22px"><use href="#i-chart"/></svg><span class="lb">榜单</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-queue"/></svg><span class="lb">歌单</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-search"/></svg><span class="lb">搜索</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-library"/></svg><span class="lb">我的</span></div>
+            </div>
+            <div class="home-ind"></div>
+          </div>
+        </div>
+        <div class="cap"><b>没歌在播 · vibrant 配色</b><code>vibrantFloatingToolbarColors()</code>，容器 primaryContainer</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="tune">
+  <div class="wrap">
+    <p class="sec-label">可调</p>
+    <h2>选一组参数</h2>
+    <p class="lede" style="font-size:15.5px">只调 FloatingToolbar 的尺寸，其余按库的默认值。你定下来之后我照着改 <code>PhoneBottomBar.kt</code>。</p>
+
+    <div class="stage" style="justify-content:flex-start">
+      <div>
+        <div class="phone">
+          <div class="screen" id="live" data-mini="on">
+            <div class="status"><i>9:41</i><i>●●● ⌁ ▮</i></div>
+            <div class="appbar"><h4>榜单</h4><div class="avatarb">我</div></div>
+            <div class="chips"><div class="chip on">热门</div><div class="chip">新歌</div><div class="chip">飙升</div></div>
+            <div class="list">
+              <div class="row"><div class="cv c1"></div><div class="tx"><b>晚风心里吹</b><span>阿梨粤</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c2"></div><div class="tx"><b>海底（Live）</b><span>一支榴莲</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c3"></div><div class="tx"><b>若把你</b><span>KIV</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c4"></div><div class="tx"><b>精神体验</b><span>草东没有派对</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c5"></div><div class="tx"><b>床边故事</b><span>周杰伦</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+              <div class="row"><div class="cv c6"></div><div class="tx"><b>慢冷</b><span>梁静茹</span></div><div class="more"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div></div>
+            </div>
+            <div class="mini" id="mini"><div class="cv c2"></div><div class="tx"><b>海底（Live）</b><span>一支榴莲 · 网易云</span></div><div class="pp"><svg class="ic" style="width:22px;height:22px"><use href="#i-pause"/></svg></div><div class="nx"><svg class="ic" style="width:22px;height:22px"><use href="#i-next"/></svg></div><div class="prog"><i></i></div></div>
+            <div class="nav-docked">
+              <div class="item on"><div class="ind"><svg class="ic" style="width:22px;height:22px"><use href="#i-chart"/></svg></div>榜单</div>
+              <div class="item"><div class="ind"><svg class="ic" style="width:22px;height:22px"><use href="#i-queue"/></svg></div>歌单</div>
+              <div class="item"><div class="ind"><svg class="ic" style="width:22px;height:22px"><use href="#i-search"/></svg></div>搜索</div>
+              <div class="item"><div class="ind"><svg class="ic" style="width:22px;height:22px"><use href="#i-library"/></svg></div>我的</div>
+            </div>
+            <div class="ftb centered" id="ftb">
+              <div class="slot on"><svg class="ic" style="width:22px;height:22px"><use href="#i-chart"/></svg><span class="lb">榜单</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-queue"/></svg><span class="lb">歌单</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-search"/></svg><span class="lb">搜索</span></div>
+              <div class="slot"><svg class="ic" style="width:22px;height:22px"><use href="#i-library"/></svg><span class="lb">我的</span></div>
+            </div>
+            <div class="home-ind"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="ctl">
+          <span>宽度</span>
+          <div class="seg" id="seg-w">
+            <button data-v="centered" aria-pressed="true">居中收缩</button>
+            <button data-v="fill" aria-pressed="false">撑满</button>
+          </div>
+          <div class="readout" id="v-w">约 256dp，按内容宽度</div>
+        </div>
+        <div class="ctl">
+          <span>离屏幕边距</span>
+          <input type="range" id="r-gap" min="8" max="32" step="4" value="16">
+          <div class="readout" id="v-gap">16dp（库默认 ContainerExternalPadding）</div>
+        </div>
+        <div class="ctl">
+          <span>配色</span>
+          <div class="seg" id="seg-c">
+            <button data-v="standard" aria-pressed="true">standard</button>
+            <button data-v="vibrant" aria-pressed="false">vibrant</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <span>槽位</span>
+          <div class="seg" id="seg-s">
+            <button data-v="label" aria-pressed="true">图标+文字</button>
+            <button data-v="icon" aria-pressed="false">仅图标</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <span>状态</span>
+          <div class="seg" id="seg-state">
+            <button data-v="mini" aria-pressed="true">有歌在播</button>
+            <button data-v="none" aria-pressed="false">没歌在播</button>
+          </div>
+          <div class="readout" id="v-state">有播放器 → 贴底 ShortNavigationBar</div>
+        </div>
+        <div class="ctl">
+          <span>其它</span>
+          <label class="check"><input type="checkbox" id="c-shadow"> 加投影（库默认 0dp）</label>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="spec">
+  <div class="wrap">
+    <p class="sec-label">规格</p>
+    <h2>库里的实值</h2>
+    <p class="lede" style="font-size:15.5px">下面这些不是估的，是从 <code>material3-1.5.0-alpha25</code> 的 <code>FloatingToolbarTokens</code> 和 <code>ElevationTokens</code> 里读出来的。</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Token</th><th>值</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>ContainerHeight</code></td><td>64dp</td><td>和现在的导航栏一样高</td></tr>
+          <tr><td><code>ContainerExternalPadding</code></td><td>16dp</td><td>离屏幕左右边、底边的距离（<code>FloatingToolbarDefaults.ScreenOffset</code>）</td></tr>
+          <tr><td><code>ContainerLeadingSpace</code> / <code>TrailingSpace</code></td><td>8dp</td><td>内容四周的内边距</td></tr>
+          <tr><td><code>ContainerBetweenSpace</code></td><td>4dp</td><td>槽位之间的间距</td></tr>
+          <tr><td><code>ContainerShape</code></td><td><code>CornerFull</code></td><td>全圆角（64dp 高 → 32dp 半径，胶囊）</td></tr>
+          <tr><td><code>StandardContainerColor</code></td><td><code>SurfaceContainer</code></td><td>和现在导航栏同一色，配色不用改</td></tr>
+          <tr><td><code>VibrantContainerColor</code></td><td><code>PrimaryContainer</code></td><td>vibrant 变体</td></tr>
+          <tr><td><code>ContainerExpandedElevation</code></td><td><code>Level0</code> = 0dp</td><td><strong>这一点和文档常说的“默认有 elevation”不一样：这版展开态是 0dp</strong></td></tr>
+          <tr><td><code>ContainerExpandedElevationWithFab</code></td><td><code>Level1</code> = 1dp</td><td>只在配 FAB 时才有 1dp</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>代码怎么改</h3>
+    <p><code>PhoneBottomBar.kt</code> 里按 <code>state.current != null</code> 分支：有歌在播照旧用 <code>ShortNavigationBar</code>（这段一行不动），没歌在播用 <code>HorizontalFloatingToolbar</code>。缩起的 toolbar 不留 16dp 竖向 padding，否则会多出一条空白。</p>
+
+<pre><span class="c">// PhoneBottomBar.kt —— 按有没有歌在播切底栏</span>
+<span class="k">if</span> (state.current != <span class="k">null</span>) {
+    <span class="c">// 有迷你播放器：现有导航栏，贴底满宽，和播放器组成一组</span>
+    ShortNavigationBar(
+        modifier = Modifier.frosted(<span class="k">if</span> (blur) container.copy(alpha = .72f) <span class="k">else</span> container),
+        containerColor = Color.Transparent,
+        windowInsets = WindowInsets.navigationBars,
+    ) { <span class="c">/* 四个 ShortNavigationBarItem 不变 */</span> }
+} <span class="k">else</span> {
+    <span class="c">// 没有播放器：悬浮 FloatingToolbar 自己贴底</span>
+    HorizontalFloatingToolbar(
+        expanded = <span class="k">true</span>,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = <span class="s">16.dp</span>)
+            .padding(bottom = <span class="s">16.dp</span> + navInset),
+        colors = FloatingToolbarDefaults.standardFloatingToolbarColors(),
+        contentPadding = FloatingToolbarDefaults.ContentPadding,
+    ) {
+        TopTab.entries.forEach { tab -&gt;
+            <span class="k">val</span> on = selected == tab.route
+            FilledIconButton(
+                onClick = { onSelect(tab.route) },
+                modifier = Modifier.weight(<span class="s">1f</span>),
+                colors = <span class="k">if</span> (on) FilledIconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                ) <span class="k">else</span> IconButtonDefaults.filledIconButtonColors(
+                    containerColor = Color.Transparent,
+                ),
+            ) {
+                Icon(<span class="k">if</span> (on) tab.selectedIcon <span class="k">else</span> tab.icon, tab.label)
+            }
+        }
+    }
+}</pre>
+
+    <div class="notes">
+      <div class="note warn">
+        <h4>留白要跟着分支算</h4>
+        <p><code>phoneOverlayHeight()</code> 现在是 64 + 迷你播放器。加一个参数区分两种状态：有播放器时 = 64 + 8 + 64 + 8；没有时 = 64 + 16 + 16，其中 16 是 FloatingToolbar 离屏幕的边距。<code>AppNavigation.kt:294</code> 靠它算内容底部留白，不分支会把列表最后一行压住。</p>
+      </div>
+      <div class="note">
+        <h4>叶子页面不受影响</h4>
+        <p>播放页、海报墙、设置子页这些叶子页面本来就盖住底栏，分支只在主界面这一处生效，不用挨个页面改。</p>
+      </div>
+      <div class="note">
+        <h4>只有 toolbar 那支会丢无障碍状态</h4>
+        <p><code>ShortNavigationBarItem</code> 自带 pill 指示器、标签语义、selected 状态。FloatingToolbar 槽位里要自己补：选中底色、<code>Role.Tab</code>、<code>selected</code> 语义、读屏文案。有播放器的那支完全不受影响。</p>
+      </div>
+      <div class="note warn">
+        <h4>规范上仍然有重叠</h4>
+        <p>Toolbars Guidelines 说 toolbar 和导航栏都在窗口底部、不能同屏，toolbar 装的是当前页动作。按这个规则，没歌在播时用 FloatingToolbar 装四个顶层目的地，等于用 toolbar 承担导航职责。这是你要的方案，我照做，只在这里记一笔。</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+</main>
+
+<script>
+const live = document.getElementById('live');
+const ftb  = document.getElementById('ftb');
+const mini = document.getElementById('mini');
+
+function tgl(id, v){
+  document.querySelectorAll('#'+id+' button').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.v===v)));
+}
+function val(id){
+  return document.querySelector('#'+id+' button[aria-pressed="true"]').dataset.v;
+}
+
+function apply(){
+  const w    = val('seg-w');
+  const c    = val('seg-c');
+  const s    = val('seg-s');
+  const st   = val('seg-state');
+  const gap  = +document.getElementById('r-gap').value;
+  const shad = document.getElementById('c-shadow').checked;
+  const hasMini = st === 'mini';
+
+  live.dataset.mini = hasMini ? 'on' : 'off';
+
+  ftb.classList.toggle('centered', w==='centered');
+  ftb.classList.toggle('fill', w==='fill');
+  ftb.classList.toggle('vibrant', c==='vibrant');
+  ftb.classList.toggle('icononly', s==='icon');
+  ftb.classList.toggle('raised', shad);
+
+  // gap 同时作用于底边和左右
+  if (w==='fill') { ftb.style.left = gap+'px'; ftb.style.right = gap+'px'; ftb.style.bottom = gap+'px'; }
+  else            { ftb.style.left = '50%'; ftb.style.right = 'auto'; ftb.style.bottom = gap+'px'; }
+
+  // 有播放器时 FloatingToolbar 不出现，控制项跟着灰掉
+  document.querySelector('#seg-w').closest('.ctl').style.opacity = hasMini ? .45 : 1;
+  document.querySelector('#seg-c').closest('.ctl').style.opacity = hasMini ? .45 : 1;
+  document.querySelector('#seg-s').closest('.ctl').style.opacity = hasMini ? .45 : 1;
+
+  document.getElementById('v-state').textContent = hasMini
+    ? '有播放器 → 贴底 ShortNavigationBar'
+    : '没播放器 → FloatingToolbar 悬浮';
+  document.getElementById('v-w').textContent = w==='centered'
+    ? (s==='label' ? '约 252dp，按内容宽度' : '约 224dp，按内容宽度')
+    : '屏宽 − ' + (gap*2) + 'dp';
+  document.getElementById('v-gap').textContent = gap + 'dp' + (gap===16 ? '（库默认）' : '');
+}
+
+['r-gap','c-shadow'].forEach(id=>document.getElementById(id).addEventListener('input', apply));
+['seg-w','seg-c','seg-s','seg-state'].forEach(id=>{
+  document.querySelectorAll('#'+id+' button').forEach(b=>{
+    b.addEventListener('click', ()=>{ tgl(id, b.dataset.v); apply(); });
+  });
+});
+// 初始：有歌在播，走贴底导航栏
+tgl('seg-state','mini');
+apply();
+</script>
+
+</body>
+</html>

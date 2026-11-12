@@ -8,12 +8,14 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
@@ -23,6 +25,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material3.FloatingToolbarDefaults
+import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +51,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,11 +76,17 @@ import kotlin.math.roundToInt
 private val NavBarHeight = 64.dp
 private val MiniHeight = 64.dp
 private val MiniGap = 8.dp
+/** FloatingToolbar 离屏幕底边和左右边的距离（ContainerExternalPadding）。 */
+private val FloatingMargin = 16.dp
 
-/** 浮层总高度（不含系统导航栏），列表底部要让出这么多。 */
-fun phoneOverlayHeight(hasMini: Boolean): Dp = NavBarHeight + if (hasMini) MiniHeight + MiniGap * 2 else 0.dp
+/**
+ * 浮层总高度（不含系统导航栏），列表底部要让出这么多。
+ * 有歌在播时是迷你播放器 + 短导航栏；没歌在播时只有悬浮工具栏，它离底边还有 16dp。
+ */
+fun phoneOverlayHeight(hasMini: Boolean): Dp =
+    if (hasMini) NavBarHeight + MiniHeight + MiniGap * 2 else NavBarHeight + FloatingMargin
 
-/** 手机底部：悬浮迷你播放器 + 短导航栏，都从内容区取模糊背景。 */
+/** 手机底部：有歌在播时是悬浮迷你播放器 + 贴底短导航栏；没歌在播时换成悬浮工具栏。 */
 @Composable
 fun PhoneBottomBar(
     state: MusicUiState,
@@ -86,6 +97,8 @@ fun PhoneBottomBar(
     onOpenQueue: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val blur = LocalBlurPolicy.current.enabled
+    val container = MaterialTheme.colorScheme.surfaceContainer
     Column(modifier.fillMaxWidth()) {
         AnimatedVisibility(
             visible = state.current != null,
@@ -94,21 +107,65 @@ fun PhoneBottomBar(
         ) {
             MiniPlayer(state, position, actions, onOpenQueue, Modifier.padding(horizontal = 12.dp, vertical = MiniGap))
         }
-        val blur = LocalBlurPolicy.current.enabled
-        val container = MaterialTheme.colorScheme.surfaceContainer
-        ShortNavigationBar(
-            modifier = Modifier.frosted(if (blur) container.copy(alpha = 0.72f) else container),
-            containerColor = Color.Transparent,
-            windowInsets = WindowInsets.navigationBars,
-        ) {
-            TopTab.entries.forEach { tab ->
-                val on = selected == tab.route
-                ShortNavigationBarItem(
-                    selected = on,
-                    onClick = { onSelect(tab.route) },
-                    icon = { Icon(if (on) tab.selectedIcon else tab.icon, null) },
-                    label = { Text(tab.label) },
-                )
+        if (state.current != null) {
+            ShortNavigationBar(
+                modifier = Modifier.frosted(if (blur) container.copy(alpha = 0.72f) else container),
+                containerColor = Color.Transparent,
+                windowInsets = WindowInsets.navigationBars,
+            ) {
+                TopTab.entries.forEach { tab ->
+                    val on = selected == tab.route
+                    ShortNavigationBarItem(
+                        selected = on,
+                        onClick = { onSelect(tab.route) },
+                        icon = { Icon(if (on) tab.selectedIcon else tab.icon, null) },
+                        label = { Text(tab.label) },
+                    )
+                }
+            }
+        } else {
+            FloatingToolbar(
+                selected = selected,
+                onSelect = onSelect,
+                blur = blur,
+                container = container,
+                modifier = Modifier.padding(horizontal = FloatingMargin).padding(bottom = FloatingMargin),
+            )
+        }
+    }
+}
+
+/** 没歌在播时的底栏：M3E 悬浮工具栏，选中项用 secondaryContainer 底，和贴底导航栏的指示器一致。 */
+@Composable
+private fun FloatingToolbar(
+    selected: String,
+    onSelect: (String) -> Unit,
+    blur: Boolean,
+    container: Color,
+    modifier: Modifier = Modifier,
+) {
+    val shape = FloatingToolbarDefaults.ContainerShape
+    HorizontalFloatingToolbar(
+        expanded = true,
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (blur) Modifier.frosted(container.copy(alpha = 0.72f), shape) else Modifier),
+        colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
+            toolbarContainerColor = if (blur) Color.Transparent else container,
+        ),
+    ) {
+        TopTab.entries.forEach { tab ->
+            val on = selected == tab.route
+            IconButton(
+                onClick = { onSelect(tab.route) },
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(percent = 50))
+                    .then(if (on) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
+                    .semantics { this.selected = on },
+            ) {
+                Icon(if (on) tab.selectedIcon else tab.icon, tab.label)
             }
         }
     }
