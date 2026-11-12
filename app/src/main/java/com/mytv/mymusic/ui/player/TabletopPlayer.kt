@@ -29,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -141,7 +142,9 @@ internal fun TabletopPlayer(
                 TabletopIdealGaps.sum().dp.toPx()
             frame.bottomHeight >= needed
         }
-        val policy = remember(frame) { TabletopPolicy(frame) }
+        val bottomChrome = LocalPlayerBottomChrome.current
+        DisposableEffect(bottomChrome) { onDispose { bottomChrome.clear(PlayerBottomChrome.Tabletop) } }
+        val policy = remember(frame, bottomChrome) { TabletopPolicy(frame, bottomChrome) }
         Layout(
             contents = listOf<@Composable () -> Unit>(
                 { TabletopTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, onClose, onOpenSource, onLyricsMode) },
@@ -392,7 +395,10 @@ private fun TabletopMeta(song: Song, favorite: Boolean, actions: MusicActions, t
  * 下半屏：歌名行、进度、按钮组、工具栏按 [tabletopControlSlots] 竖排，宽不超过 560dp、水平居中。
  * 内容（封面的光晕画在边界外）最先摆放，垫在顶栏和下半屏控件下面。
  */
-private class TabletopPolicy(private val frame: TabletopFrame) : MultiContentMeasurePolicy {
+private class TabletopPolicy(
+    private val frame: TabletopFrame,
+    private val bottomChrome: PlayerBottomChrome,
+) : MultiContentMeasurePolicy {
     override fun MeasureScope.measure(measurables: List<List<Measurable>>, constraints: Constraints): MeasureResult {
         val width = constraints.maxWidth
         val height = constraints.maxHeight
@@ -417,6 +423,10 @@ private class TabletopPolicy(private val frame: TabletopFrame) : MultiContentMea
         )
         val s = slots.scale
         val center = width / 2f
+        // 下半屏最下面一行是工具栏：胶囊让到它的顶边之上
+        val lastRow = rows.size - 1
+        val toolbarTop = (slots.tops[lastRow] * s).roundToInt()
+        bottomChrome.report(PlayerBottomChrome.Tabletop, (height - frame.bottomTop - toolbarTop).coerceAtLeast(0))
         return layout(width, height) {
             stage?.place(0, barHeight)
             bar?.place(0, 0)

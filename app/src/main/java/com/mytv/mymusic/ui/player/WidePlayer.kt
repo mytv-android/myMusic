@@ -564,6 +564,8 @@ private class WideStagePolicy(
         val coverSize = stack.cover
         val coverX = center - coverSize * s / 2f
         val coverY = stack.tops[0] * s
+        // 平板播放页的控件在左栏或竖向工具栏上（专注歌词时贴在左边缘），右侧是歌词栏。
+        // 更新胶囊靠右下角，和它们都不重叠，所以这里不上报，胶囊只按导航栏让位
 
         // 竖向工具栏按自然高度测量，太矮时由摆放阶段等比缩小
         val dock = measurables[SlotDock].firstOrNull()?.measure(Constraints(maxWidth = width))

@@ -41,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -185,6 +186,12 @@ fun PlayerScreen(
         derivedStateOf {
             if (lyrics.synced) LyricsParser.activeLineIndex(lyrics.lines, position.value) else -1
         }
+    }
+
+    // 播放页退出（含退场动画）时清掉上报的底部控件高度，更新胶囊不再为已经不存在的控件让位
+    val bottomChrome = LocalPlayerBottomChrome.current
+    DisposableEffect(bottomChrome) {
+        onDispose { bottomChrome.clearAll() }
     }
 
     // 换源结果在音源 chip 下方停留 8 秒

@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -146,9 +147,13 @@ internal fun TvPlayer(
     val stageShown by remember(fade) { derivedStateOf { fade.value > 0.001f } }
     val listHidden by remember(fade) { derivedStateOf { fade.value >= 0.999f } }
     val stageInsets = remember { StageInsets() }
+    val bottomChrome = LocalPlayerBottomChrome.current
+    DisposableEffect(bottomChrome) { onDispose { bottomChrome.clear(PlayerBottomChrome.Tv) } }
     val waveScale = remember(pulse) { { pulseWaveScale(pulse) } }
     val waveBpm = remember(pulse) { { pulseWaveBpm(pulse) } }
-    val policy = remember(progress, ambient, ambientClock, stageInsets) { TvStagePolicy(progress, ambient, ambientClock, stageInsets) }
+    val policy = remember(progress, ambient, ambientClock, stageInsets, bottomChrome) {
+        TvStagePolicy(progress, ambient, ambientClock, stageInsets, bottomChrome)
+    }
 
     Layout(
         contents = listOf<@Composable () -> Unit>(
@@ -483,6 +488,7 @@ private class TvStagePolicy(
     private val ambient: Boolean,
     private val clock: Boolean,
     private val stageInsets: StageInsets,
+    private val bottomChrome: PlayerBottomChrome,
 ) : MultiContentMeasurePolicy {
     override fun MeasureScope.measure(measurables: List<List<Measurable>>, constraints: Constraints): MeasureResult {
         val width = constraints.maxWidth
@@ -492,6 +498,8 @@ private class TvStagePolicy(
         val side = (TvDp.SideInset * unit).roundToInt()
         val dock = measurables[SlotDock].first().measure(Constraints.fixedWidth((width - side * 2).coerceAtLeast(0)))
         val dockTop = height - (TvDp.DockBottom * unit).roundToInt() - dock.height
+        // 控制条占的那一截（含它离底边的让位）；环境模式下控制条淡出，只剩细进度，仍按控制条让开，免得胶囊在唤醒前后跳一下
+        bottomChrome.report(PlayerBottomChrome.Tv, height - dockTop)
         val pill = measurables[SlotPill].firstOrNull()?.measure(Constraints(maxWidth = width))
         val frame = tvStageFrame(width.toFloat(), height.toFloat(), dockTop.toFloat(), (pill?.height ?: 0).toFloat(), clock, unit)
 

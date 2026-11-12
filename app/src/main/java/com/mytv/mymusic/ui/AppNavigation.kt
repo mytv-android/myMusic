@@ -62,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -89,6 +90,8 @@ import com.mytv.mymusic.ui.components.LocalPageChromeScheme
 import com.mytv.mymusic.ui.components.PageChromeScheme
 import com.mytv.mymusic.ui.components.rememberAppWindow
 import com.mytv.mymusic.ui.library.libraryRoutes
+import com.mytv.mymusic.ui.player.LocalPlayerBottomChrome
+import com.mytv.mymusic.ui.player.PlayerBottomChrome
 import com.mytv.mymusic.ui.player.PlayerScreen
 import com.mytv.mymusic.ui.player.QueueSheet
 import com.mytv.mymusic.ui.player.SleepTimerSheet
@@ -154,6 +157,8 @@ fun MyMusicApp(model: MusicViewModel) {
     val snackbar = remember { SnackbarHostState() }
     val nav = rememberNavController()
     val window = rememberAppWindow(state.appearance.layout)
+    // 播放页打开时它自己上报底部控件区的高度，更新胶囊读它让开
+    val playerChrome = remember { PlayerBottomChrome() }
     val hazeState = rememberHazeState()
     val pageChrome = remember { PageChromeScheme() }
     // 启动页只在建图时定一次；记住的是用户选的那个，切走的tab由返回栈同步
@@ -299,6 +304,16 @@ fun MyMusicApp(model: MusicViewModel) {
     // 队列海报墙在主界面之上、播放页之下；播放页可以盖在墙上，关掉回到墙
     val posterVisible = state.posterOpen && state.current != null
     val covered = playerVisible || posterVisible
+    // 更新胶囊要让开的那一截：播放页上报的控件区（测量里量的，已含它自己的底边让位）加系统导航栏——
+    // 电视播放页不套 safeDrawing、量到的就是整屏坐标，不用再加；底部播放条不铺在内容上，多出来的是整条高度；
+    // 海报墙让开右下角的按钮；其余就是普通底栏
+    val pillBottom = when {
+        playerVisible ->
+            (if (window.isTv) 0.dp else navInset) + with(LocalDensity.current) { playerChrome.bottomPx.toDp() }
+        posterVisible -> navInset + if (window.isTv) 0.dp else PosterWallBottomChrome
+        window.showBottomPlayerBar && state.current != null -> BottomPlayerBarHeight + navInset
+        else -> overlayBottom
+    }
     // 播放页还在组合里（含退场动画）：墙等它完全退场再拿遥控器焦点（播放页的焦点组退场途中不放焦点出去）
     val playerComposed = remember { mutableStateOf(false) }
     val enterSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
@@ -309,6 +324,8 @@ fun MyMusicApp(model: MusicViewModel) {
         LocalHazeState provides hazeState,
         LocalAppSnackbar provides snackbar,
         LocalPageChromeScheme provides pageChrome,
+        // 播放页在这里往上报底部控件高度，胶囊在同一个范围里读
+        LocalPlayerBottomChrome provides playerChrome,
     ) {
         // 共享元素：手机上正在播放的封面从迷你播放器飞到播放页。
         // 底色跟着页面的外壳配色走：平板右侧播放栏顶上状态栏那一条露的是它，深色页面（海报视图）时状态栏图标是浅色的
@@ -488,7 +505,7 @@ fun MyMusicApp(model: MusicViewModel) {
             update = update,
             actions = actions,
             progress = { updateProgress.value.progress },
-            bottomPadding = if (covered) navInset else overlayBottom,
+            bottomPadding = pillBottom,
         )
     }
 }

@@ -31,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -147,7 +148,12 @@ internal fun PhonePlayer(
     )
     val coverOnTop = rememberUpdatedState(lyricsMode)
     val short = LocalAppWindow.current.short
-    val policy = remember(coverMove, previewSpace, coverOnTop, short) { PhoneStagePolicy(coverMove, previewSpace, coverOnTop, short) }
+    val bottomChrome = LocalPlayerBottomChrome.current
+    // 这一份是播放页默认界面和控制区的量法；离开组合（换设备形态、关播放页）时撤掉
+    DisposableEffect(bottomChrome) { onDispose { bottomChrome.clear(PlayerBottomChrome.Panel) } }
+    val policy = remember(coverMove, previewSpace, coverOnTop, short, bottomChrome) {
+        PhoneStagePolicy(coverMove, previewSpace, coverOnTop, short, bottomChrome)
+    }
 
     Layout(
         contents = listOf<@Composable () -> Unit>(
@@ -596,6 +602,8 @@ private fun PhoneLyricsPage(
     onSkip: (Int) -> Unit,
 ) {
     val insets = remember { StageInsets() }
+    val bottomChrome = LocalPlayerBottomChrome.current
+    DisposableEffect(bottomChrome) { onDispose { bottomChrome.clear(PlayerBottomChrome.PanelLyrics) } }
     Layout(
         contents = listOf<@Composable () -> Unit>(
             {
@@ -683,6 +691,7 @@ private fun PhoneLyricsPage(
         val height = constraints.maxHeight
         val header = measurables[1].first().measure(Constraints(maxWidth = width, maxHeight = height))
         val controls = measurables[2].first().measure(Constraints(minWidth = width, maxWidth = width, maxHeight = height))
+        bottomChrome.report(PlayerBottomChrome.PanelLyrics, controls.height)
         // 安全区 = 原来歌词列表占的那块：顶栏下面、控件上面，左右各 16dp
         val side = 16.dp.toPx()
         insets.set(top = header.height.toFloat(), bottom = controls.height.toFloat(), start = side, end = side)
@@ -708,6 +717,7 @@ private class PhoneStagePolicy(
     private val previewSpace: State<Float>,
     private val coverOnTop: State<Boolean>,
     private val short: Boolean,
+    private val bottomChrome: PlayerBottomChrome,
 ) : MultiContentMeasurePolicy {
     private var lastCover = 0
     private var lastCoverX = 0
@@ -730,6 +740,8 @@ private class PhoneStagePolicy(
         val controls = measurables[SlotControls].firstOrNull()?.measure(Constraints(minWidth = width, maxWidth = width, maxHeight = height))
         val bottomMargin = 8.dp.roundToPx()
         val controlsY = height - bottomMargin - (controls?.height ?: 0)
+        // 歌词页稳定后默认控制区已移出组合：这时不报，让歌词页那一份说了算
+        if (controls != null) bottomChrome.report(PlayerBottomChrome.Panel, height - controlsY)
 
         if (meta != null && controls != null) {
             val slots = phoneStageSlots(
@@ -808,6 +820,7 @@ private class PhoneStagePolicy(
         controls?.let { lastShortControls = it.height }
         if (lastShortControls < 0) lastShortControls = ShortControlsEstimate.roundToPx()
         val slots = phoneShortSlots(width, height, top?.height ?: TopBarHeight.roundToPx(), lastShortControls, density)
+        bottomChrome.report(PlayerBottomChrome.Panel, height - slots.controlsY)
 
         val meta = measurables[SlotMeta].firstOrNull()?.measure(Constraints.fixedWidth(slots.textWidth))
         val metaHeight = meta?.height ?: 0

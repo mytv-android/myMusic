@@ -50,7 +50,7 @@ import com.mytv.mymusic.ui.components.tvFocusRing
 
 /** 浮层离屏幕左右边和底栏的距离。 */
 private val PillMargin = 16.dp
-/** 平板和电视上浮层的宽度；手机上撑满可用宽度。 */
+/** 平板、折叠屏和电视上浮层的宽度；手机上撑满可用宽度。 */
 private val PillWidth = 420.dp
 
 /**
@@ -75,7 +75,10 @@ fun UpdateOverlay(
         else -> false
     }
     if (!update.permissionRequired && !failure && !running) return
-    val tv = LocalAppWindow.current.isTv
+    val window = LocalAppWindow.current
+    // 只有手机是贴底整宽的一条；平板、折叠屏、电视都靠右下角，别横跨导航栏和播放窗格
+    val strip = window.isPhone
+    val tv = window.isTv
     val actionFocus = remember { FocusRequester() }
     LaunchedEffect(update.permissionRequired, tv) {
         if (update.permissionRequired && tv) runCatching { actionFocus.requestFocus() }
@@ -83,9 +86,9 @@ fun UpdateOverlay(
     // 不拦截触摸：只有浮层本身占的位置能点到，其余手势照常落到下面的页面
     Box(Modifier.fillMaxSize()) {
         val slot = Modifier
-            .align(if (tv) Alignment.BottomEnd else Alignment.BottomCenter)
+            .align(if (strip) Alignment.BottomCenter else Alignment.BottomEnd)
             .padding(start = PillMargin, end = PillMargin, bottom = bottomPadding + PillMargin)
-            .then(if (tv) Modifier.width(PillWidth) else Modifier.fillMaxWidth())
+            .then(if (strip) Modifier.fillMaxWidth() else Modifier.width(PillWidth))
         when {
             update.permissionRequired -> InstallPermissionCard(info, actions, actionFocus, slot)
             failure -> UpdateFailurePill(update, actions, slot)
