@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -124,13 +125,16 @@ fun PhoneBottomBar(
                 }
             }
         } else {
-            FloatingToolbar(
-                selected = selected,
-                onSelect = onSelect,
-                blur = blur,
-                container = container,
-                modifier = Modifier.padding(horizontal = FloatingMargin).padding(bottom = FloatingMargin),
-            )
+            // 外层占满整行只为居中，工具栏本身按内容收缩
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = FloatingMargin)
+                    .padding(bottom = FloatingMargin),
+                contentAlignment = Alignment.Center,
+            ) {
+                FloatingToolbar(selected = selected, onSelect = onSelect, blur = blur, container = container)
+            }
         }
     }
 }
@@ -148,7 +152,6 @@ private fun FloatingToolbar(
     HorizontalFloatingToolbar(
         expanded = true,
         modifier = modifier
-            .fillMaxWidth()
             .then(if (blur) Modifier.frosted(container.copy(alpha = 0.72f), shape) else Modifier),
         colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
             toolbarContainerColor = if (blur) Color.Transparent else container,
@@ -159,7 +162,6 @@ private fun FloatingToolbar(
             IconButton(
                 onClick = { onSelect(tab.route) },
                 modifier = Modifier
-                    .weight(1f)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(percent = 50))
                     .then(if (on) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
