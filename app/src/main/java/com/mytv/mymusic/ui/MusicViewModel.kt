@@ -5510,7 +5510,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- update ----------
 
-    /** 启动和回前台时检查更新；发现新版本直接开始下载，用户没有“稍后”可选。 */
+    /** 启动和回前台时检查更新；发现新版本直接开始下载，下载期间应用照常可用。 */
     private fun checkUpdatesInBackground() {
         lastUpdateAttemptAt = SystemClock.elapsedRealtime()
         viewModelScope.launch {
@@ -5525,6 +5525,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (updateState.value.phase == UpdatePhase.Available) downloadUpdate()
         }
     }
+
+    /** 收起下载失败的提示，应用不再被它占着；下次复查发现同一版本会重新下载。 */
+    fun dismissUpdate() = app.update.dismissUpdate()
 
     suspend fun checkForUpdatesNow(): UpdateUiState {
         app.update.check(manual = true)
@@ -5553,8 +5556,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 打开系统安装器。安装器和“安装未知来源”授权页都起不来时，
      * [UpdateRepository.install] 已经把更新包导出并给出手动安装路径，不再反复重试。
-     * 授权页能打开时，授权返回后由 [onAppForeground] 继续安装；授权页对这一版固件
-     * 不起作用的话最多再去一次，之后转手动安装，免得在设置页和弹窗之间来回打转。
+     * 需要授权时不再自动甩进系统设置页，而是留给浮层里的卡片说明并让用户点过去；
+     * 授权返回后由 [onAppForeground] 继续安装。
      */
     private suspend fun launchUpdateInstaller() {
         if (installLaunching) return
@@ -5564,14 +5567,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val result = app.update.install(file)
             lastInstallOutcome = result
             pendingUpdateInstall = false
-            if (result == InstallResult.NeedsPermission) {
-                if (installPermissionAttempts++ < MAX_INSTALL_PERMISSION_ATTEMPTS) {
-                    pendingUpdateInstall = app.update.openInstallPermissionSettings()
-                } else {
-                    // 授权过仍然装不上，说明这条路对这台设备走不通，让用户用文件管理器装
-                    app.update.exportForManualInstall()
-                }
-            }
         } finally {
             installLaunching = false
         }
@@ -5580,7 +5575,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun openInstallPermission() {
         viewModelScope.launch {
             if (installPermissionAttempts++ < MAX_INSTALL_PERMISSION_ATTEMPTS) {
-                app.update.openInstallPermissionSettings()
+                // 回来时要再试一次安装；设置页打不开时 openInstallPermissionSettings 已转手动安装提示
+                pendingUpdateInstall = app.update.openInstallPermissionSettings()
             } else {
                 app.update.exportForManualInstall()
             }
@@ -5619,8 +5615,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // 没拉起过（下载完时界面不在前台，比如组件在后台起播）也在这里拉起
             viewModelScope.launch { launchUpdateInstaller() }
         }
-        // 没有待安装的更新时定期复查，发现新版本同样立刻下载
-        if (updateState.value.phase == UpdatePhase.Idle &&
+        // 没有待安装的更新时定期复查，发现新版本同样立刻下载；上次失败也重试一次
+        val phase = updateState.value.phase
+        if ((phase == UpdatePhase.Idle || phase == UpdatePhase.Error) &&
             SystemClock.elapsedRealtime() - lastUpdateAttemptAt > UPDATE_RECHECK_INTERVAL_MS
         ) {
             checkUpdatesInBackground()

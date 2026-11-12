@@ -483,11 +483,12 @@ fun MyMusicApp(model: MusicViewModel) {
                 onDismiss = actions::closeMerge,
             )
         }
-        // 强制更新：哪一页都叠在上面，包括“关于与更新”；下载期间也不能继续用应用
-        UpdateDialog(
+        // 更新浮层：下载期间只占底栏上方一条，应用照常可用；只有安装被系统拦下时才要用户动手
+        UpdateOverlay(
             update = update,
             actions = actions,
             progress = { updateProgress.value.progress },
+            bottomPadding = if (covered) navInset else overlayBottom,
         )
     }
 }

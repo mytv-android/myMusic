@@ -591,6 +591,20 @@ class UpdateRepository(
         _state.update { it.copy(error = "") }
     }
 
+    /**
+     * 收起更新浮层。下载失败时清掉错误并回到 Idle，下一次定期复查会重新检查、重新下载；
+     * 安装权限卡片只是收起来，更新包留在缓存里，下次安装或关于页还能直接用。
+     */
+    fun dismissUpdate() {
+        _state.update {
+            if (it.phase == UpdatePhase.Error) {
+                it.copy(phase = UpdatePhase.Idle, info = null, error = "", permissionRequired = false)
+            } else {
+                it.copy(permissionRequired = false, error = "")
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "UpdateRepository"
         private const val INSTALL_RESULT_ACTION = "com.mytv.mymusic.action.INSTALL_RESULT"

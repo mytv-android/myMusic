@@ -9,6 +9,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -16,13 +17,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SkipNext
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.selected
@@ -125,10 +127,11 @@ fun PhoneBottomBar(
                 }
             }
         } else {
-            // 外层占满整行只为居中，工具栏本身按内容收缩
+            // 外层占满整行只为居中，工具栏本身按内容收缩；系统导航栏的高度也要让出来
             Box(
                 Modifier
                     .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(horizontal = FloatingMargin)
                     .padding(bottom = FloatingMargin),
                 contentAlignment = Alignment.Center,
@@ -138,6 +141,10 @@ fun PhoneBottomBar(
         }
     }
 }
+
+/** 槽位固定 56 × 48；工具栏自身只有 64dp 高的下界，子项不能撑满高度。 */
+private val SlotWidth = 56.dp
+private val SlotHeight = 48.dp
 
 /** 没歌在播时的底栏：M3E 悬浮工具栏，选中项用 secondaryContainer 底，和贴底导航栏的指示器一致。 */
 @Composable
@@ -159,15 +166,27 @@ private fun FloatingToolbar(
     ) {
         TopTab.entries.forEach { tab ->
             val on = selected == tab.route
-            IconButton(
-                onClick = { onSelect(tab.route) },
+            // 定宽定高，不用 fillMaxHeight：工具栏的内容行拿到的是整屏高度上限，撑满会把容器拉到屏幕高
+            Column(
                 modifier = Modifier
-                    .fillMaxHeight()
+                    .size(SlotWidth, SlotHeight)
                     .clip(RoundedCornerShape(percent = 50))
                     .then(if (on) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
-                    .semantics { this.selected = on },
+                    .clickable(role = Role.Tab) { onSelect(tab.route) }
+                    .semantics {
+                        this.selected = on
+                        contentDescription = tab.label
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
-                Icon(if (on) tab.selectedIcon else tab.icon, tab.label)
+                Icon(if (on) tab.selectedIcon else tab.icon, null, Modifier.size(22.dp))
+                Text(
+                    tab.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold,
+                    maxLines = 1,
+                )
             }
         }
     }

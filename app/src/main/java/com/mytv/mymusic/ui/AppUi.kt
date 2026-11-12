@@ -316,6 +316,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun openInstallPermission() = model.openInstallPermission()
     fun openReleasePage() = model.openReleasePage()
     fun clearUpdateError() = model.clearUpdateError()
+    fun dismissUpdate() = model.dismissUpdate()
 
     fun setEqEnabled(value: Boolean) = model.setEqualizerEnabled(value)
     fun selectEqPreset(id: String) = model.selectEqualizerPreset(id)
