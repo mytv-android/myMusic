@@ -155,11 +155,16 @@ private fun FloatingToolbar(
     container: Color,
     modifier: Modifier = Modifier,
 ) {
-    val shape = FloatingToolbarDefaults.ContainerShape
+    // FloatingToolbarDefaults.ContainerShape 走主题的 extraLarge（28dp），大屏手机上是圆角矩形而不是胶囊；
+    // 这里的槽位自己就是 50% 圆角，容器同样按 50% 裁，两端才是半圆
+    val shape = RoundedCornerShape(percent = 50)
     HorizontalFloatingToolbar(
         expanded = true,
         modifier = modifier
+            // frosted 的模糊层和底色都按矩形画，不裁的话胶囊会变成一个方角灰块
+            .clip(shape)
             .then(if (blur) Modifier.frosted(container.copy(alpha = 0.72f), shape) else Modifier),
+        shape = shape,
         colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
             toolbarContainerColor = if (blur) Color.Transparent else container,
         ),
