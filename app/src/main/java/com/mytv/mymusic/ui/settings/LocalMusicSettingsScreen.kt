@@ -126,7 +126,7 @@ internal fun LocalMusicSettingsScreen(
     var pickTarget by remember { mutableStateOf(false) }
     val access = rememberLocalAccess(library, prefs)
     val first = remember { FocusRequester() }
-    SettingsTvFocus(first)
+    if (!embedded) SettingsTvFocus(first)
     val perOrigin = remember(index) { index.items.groupingBy { it.row.origin }.eachCount() }
     val folders = prefs.folders
     val scanCount = 1 + folders.size + (if (access.canPickFolder) 1 else 0) + 1
