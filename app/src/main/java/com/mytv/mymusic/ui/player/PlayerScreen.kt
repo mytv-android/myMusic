@@ -134,8 +134,8 @@ fun PlayerScreen(
     // 暂停时也照样计时：控制栏几秒后淡出，按确认键或点按唤醒。桌面姿态下半屏是平放着用手点的那一面，不进入空闲
     var animationOpen by rememberSaveable { mutableStateOf(false) }
     val idle = rememberIdleState(holdAwake = sheetOpen || animationOpen || state.sourcePickerTrack != null || tabletop)
-    // 电视环境模式下按住左右键切歌的按键状态，跨重组保留到松开
-    val holdSkip = remember { HoldSkip() }
+    // 电视环境模式（全屏歌词页）里快退快进的浮层提示：按左右方向键时显示，1.2 秒淡出
+    val seekHint = remember { SeekHint() }
     PredictiveBackHandler { events ->
         // 电视上控制栏亮着时，返回键先收起控制栏；已经在环境模式下才退出播放页，和常见视频播放器一致
         val hideControls = window.isTv && !lyricsMode && idle.canAutoHide &&
@@ -207,6 +207,13 @@ fun PlayerScreen(
     val sourceDetail = source?.qualityLabel?.takeUnless { it == "音质未知" }.orEmpty()
     val playbackMode = modeLabel(state.aggregation.playbackMode)
     val onSkip: (Int) -> Unit = { direction -> actions.transport(if (direction > 0) "next" else "previous") }
+    // 电视全屏歌词页的快退快进：直播没有进度可拖，按了也不提示
+    val onSeekBy: (Long) -> Unit = { delta ->
+        if (!song.isLive) {
+            seekHint.show(delta)
+            actions.seek(seekStepTarget(position.value, delta, state.duration))
+        }
+    }
     val onOpenSource: () -> Unit = {
         state.currentTrack?.let { track -> actions.openSource(track, state.canonicalQueue.ifEmpty { listOf(track) }) }
     }
@@ -232,8 +239,8 @@ fun PlayerScreen(
             .wakeOnInput(
                 idle,
                 consumeKeyWhenIdle = window.isTv,
-                holdSkip = holdSkip.takeIf { window.isTv },
                 onSkip = onSkip,
+                onSeekBy = onSeekBy,
                 onAnyKey = { com.mytv.mymusic.playback.CrossfadeStatus.dismissActive() },
             ),
     ) {
@@ -280,6 +287,7 @@ fun PlayerScreen(
                 coverShape = state.coverShape,
                 transitionAnimation = state.crossfadeAnimation,
                 ambientClock = state.tvAmbientClock,
+                seekHint = seekHint,
                 onOpenQueue = onOpenQueue,
                 onOpenTimer = onOpenTimer,
                 onOpenSource = onOpenSource,

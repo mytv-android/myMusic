@@ -175,46 +175,64 @@ fun rememberScreenReaderOn(): Boolean {
 }
 
 /**
- * 电视上菜单收起（环境模式）时按住左右方向键切歌：按下第一下照旧立即唤醒控制栏，
- * 同一次按住到了长按再切一首（左上一首、右下一首），之后直到松开的事件都吃掉，
- * 免得唤醒后焦点被方向键带走、或被进度条当成快进。单击仍然只是唤出菜单。
+ * 电视全屏歌词页（环境模式，控制条已淡出）直接用遥控器控制播放：上下键切歌、左右键快退快进，
+ * 按一下就生效，不再先弹出控制条。要调出控制条按确认键（焦点回到播放键），返回键照旧退出播放页。
+ * 控制条亮着时不接管：那时焦点在按钮上，方向键照旧在按钮间走。
+ */
+internal enum class TvTransport { Previous, Next, SeekBack, SeekForward }
+
+/**
+ * 方向键在电视全屏歌词页里的一步动作；null 表示这个按键不归这里管。
+ * 切歌只在第一下生效（[repeatCount] 为 0），按住不会连着跳过一整列；
+ * 快退快进接自动重复，按住越久走得越远。
+ */
+internal fun tvTransportOf(key: Key, repeatCount: Int): TvTransport? = when (key) {
+    Key.DirectionUp -> if (repeatCount == 0) TvTransport.Previous else null
+    Key.DirectionDown -> if (repeatCount == 0) TvTransport.Next else null
+    Key.DirectionLeft -> TvTransport.SeekBack
+    Key.DirectionRight -> TvTransport.SeekForward
+    else -> null
+}
+
+/** 快退快进一步的毫秒数，和进度条上聚焦时的左右键同一步长。 */
+internal const val TvSeekStepMs = 10_000L
+
+/** 快退快进的目标位置：夹在 0 和 [duration] 之间（时长未知时只夹下界；直播由调用方挡住）。 */
+internal fun seekStepTarget(position: Long, stepMs: Long, duration: Long): Long {
+    val target = (position + stepMs).coerceAtLeast(0L)
+    return if (duration > 0) target.coerceAtMost(duration) else target
+}
+
+/**
+ * 电视全屏歌词页快退快进的浮层提示：记下最近一次的毫秒数和第几次（[tick] 每次 +1，用来重新开始收起计时），
+ * 由电视播放页里的提示浮层消费。
  */
 @Stable
-class HoldSkip {
-    private var key: Key? = null
-    private var fired = false
+class SeekHint {
+    /** 最近一次快退快进的毫秒数：正前进、负后退。 */
+    var deltaMs by mutableLongStateOf(0L)
+        internal set
+    /** 第几次操作；0 表示还没有提示过。 */
+    var tick by mutableLongStateOf(0L)
+        internal set
 
-    fun begin(key: Key) {
-        this.key = key
-        fired = false
-    }
-
-    /** 这次事件是否属于正在接管的那次按住。 */
-    fun tracking(key: Key): Boolean = this.key == key
-
-    /** 到长按返回切歌方向（+1 下一首，-1 上一首），同一次按住只返回一次。 */
-    fun progress(repeatCount: Int, longPress: Boolean): Int? {
-        val held = key ?: return null
-        if (fired || !(longPress || repeatCount > 0)) return null
-        fired = true
-        return if (held == Key.DirectionRight) 1 else -1
-    }
-
-    fun end() {
-        key = null
-        fired = false
+    internal fun show(deltaMs: Long) {
+        this.deltaMs = deltaMs
+        tick++
     }
 }
 
 /**
- * 任意按键唤醒控件。电视上额外接管环境模式里的左右键长按（[holdSkip]，见 [HoldSkip]）；
- * 非空时 [onSkip] 收到 ±1 通知切歌。
+ * 任意按键唤醒控件。电视上额外：
+ * - 唤醒的那一下吃掉（[consumeKeyWhenIdle]），否则焦点会被方向键带走、进度条会把它当成快进；
+ * - 全屏歌词页（控制条已淡出）方向键直接控制播放：上下键 [onSkip] ±1 切歌，左右键 [onSeekBy] 相对快退快进，
+ *   整次按键都吃掉，不唤醒控制条（见 [tvTransportOf]）。
  */
 fun Modifier.wakeOnInput(
     idle: IdleState,
     consumeKeyWhenIdle: Boolean,
-    holdSkip: HoldSkip? = null,
     onSkip: (Int) -> Unit = {},
+    onSeekBy: (Long) -> Unit = {},
     onAnyKey: (() -> Unit)? = null,
 ): Modifier = this
     .pointerInput(idle) {
@@ -231,15 +249,17 @@ fun Modifier.wakeOnInput(
         val down = event.type == KeyEventType.KeyDown
         // 过渡动画按任意键收掉（电视上），不拦按键
         if (down) onAnyKey?.invoke()
-        if (holdSkip != null) {
-            if (idle.idle && down && (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)) {
-                idle.poke()
-                holdSkip.begin(event.key)
-                return@onPreviewKeyEvent true
-            }
-            if (holdSkip.tracking(event.key)) {
-                if (down) holdSkip.progress(event.nativeKeyEvent.repeatCount, event.nativeKeyEvent.isLongPress)?.let(onSkip)
-                else holdSkip.end()
+        // 电视全屏歌词页：方向键直接控制播放，事件整次吃掉，焦点不会被带走、进度条也不会当成快进
+        if (consumeKeyWhenIdle && idle.idle) {
+            tvTransportOf(event.key, event.nativeKeyEvent.repeatCount)?.let { action ->
+                if (down) {
+                    when (action) {
+                        TvTransport.Previous -> onSkip(-1)
+                        TvTransport.Next -> onSkip(1)
+                        TvTransport.SeekBack -> onSeekBy(-TvSeekStepMs)
+                        TvTransport.SeekForward -> onSeekBy(TvSeekStepMs)
+                    }
+                }
                 return@onPreviewKeyEvent true
             }
         }

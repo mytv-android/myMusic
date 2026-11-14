@@ -1,8 +1,10 @@
 package com.mytv.mymusic.ui.player
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -24,6 +26,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GridView
@@ -38,7 +42,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -85,8 +91,10 @@ import com.mytv.mymusic.ui.player.stage.StageInsets
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatTime
 import com.mytv.mymusic.ui.theme.LocalAppearance
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 /**
  * 电视播放页（按 960×540dp 设计稿）：左边形状封面和音源胶囊，右边歌名和整栏歌词，底部一条浮动控制条。
@@ -95,6 +103,8 @@ import kotlin.math.roundToInt
  *
  * 控制条分两行：上行按钮组 + 定时 / 收藏 / 队列 / 海报墙 / 音源，下行整宽的波浪进度。进度条要吃掉左右键快退快进，
  * 按设计稿把它夹在按钮组和四个按钮中间的话，焦点一到进度条就再也走不到右边的按钮；分两行后用上下键换行。
+ * 控制条亮着时方向键照旧在按钮间走；淡出进入环境模式（全屏歌词页）后方向键直接控制播放：上下切歌、左右快退快进
+ * （`wakeOnInput` 里接管，提示见 [TvSeekHint]），按确认键才调出控制条。
  *
  * 重组边界：环境模式只在进出时重组一次；过渡进度只在测量、摆放和图层里读，播放进度只在小组件和绘制阶段读。
  * 过渡中歌词栏逐帧变高、字号逐帧变大，只重新测量歌词列表，不重组（见 [LyricsList]）。
@@ -122,6 +132,7 @@ internal fun TvPlayer(
     coverShape: CoverShapeChoice,
     transitionAnimation: CrossfadeAnimation,
     ambientClock: Boolean,
+    seekHint: SeekHint,
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
     onOpenSource: () -> Unit,
@@ -225,6 +236,10 @@ internal fun TvPlayer(
             },
             { TvThinProgress(position, duration, fade, song.isLive) },
             { if (ambientClock) TvClock(fade) },
+            {
+                // 全屏歌词页里快退快进的浮层提示：压在歌词上面，不挤动任何东西
+                TvSeekHint(seekHint, position, duration, song.isLive)
+            },
             {
                 // 环境模式的歌词动画舞台：整屏，文字排在时钟下面、细进度上面（安全区由摆放策略写）
                 if (custom && stageShown) {
@@ -480,6 +495,58 @@ private fun TvClock(fade: State<Float>) {
 }
 
 /**
+ * 全屏歌词页里快退快进的浮层提示：图标 + 步长 + 当前位置，压在细进度上面 1.2 秒后淡出。
+ * 直播没有进度可拖，[live] 为 true 时什么都不显示。连按时每次重新开始计时；
+ * 透明度只在图层里读，进出各重组一次，淡出过程不重组。
+ */
+@Composable
+private fun TvSeekHint(hint: SeekHint, position: State<Long>, duration: Long, live: Boolean) {
+    val tick = hint.tick
+    val alpha = remember { Animatable(0f) }
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(tick) {
+        if (tick == 0L) return@LaunchedEffect
+        alpha.snapTo(1f)
+        shown = true
+        delay(TvSeekHintMs)
+        alpha.animateTo(0f, tween(400))
+        shown = false
+    }
+    if (live || !shown) return
+    val forward = hint.deltaMs > 0
+    val step = abs(hint.deltaMs / 1_000L)
+    val elapsed = formatTime(position.value)
+    Surface(
+        Modifier.graphicsLayer { this.alpha = alpha.value },
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                if (forward) Icons.Filled.FastForward else Icons.Filled.FastRewind,
+                null,
+                Modifier.size(26.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text("$step 秒", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            // 时长未知（在线流没有 Content-Length）时报不出总长度，只报当前位置
+            Text(
+                if (duration > 0) "$elapsed / ${formatTime(duration)}" else elapsed,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** 快退快进提示停留时长：连按时每次重新开始计时。 */
+private const val TvSeekHintMs = 1_200L
+
+/**
  * 电视播放页的摆放：过渡进度 [stage]（0 控制条显示，1 环境模式）只在测量和摆放阶段读，逐帧不重组。
  * 封面按环境模式的大小测量一次，默认模式用图层缩小，过渡中不重新排版封面；歌词栏逐帧改高度（只重新测量列表）。
  */
@@ -518,6 +585,8 @@ private class TvStagePolicy(
         val thin = measurables[SlotThin].firstOrNull()
             ?.measure(Constraints.fixed((width - side * 2).coerceAtLeast(0), (TvDp.ThinHeight * unit).roundToInt()))
         val clockText = measurables[SlotClock].firstOrNull()?.measure(Constraints())
+        // 快退快进提示：不限制高度，内容自己定；只有按了方向键才组合
+        val hint = measurables[SlotHint].firstOrNull()?.measure(Constraints(maxWidth = width))
         // 歌词动画舞台整屏：左右按封面左边距留边，顶上让开时钟，底下让开细进度
         val stagePlaceable = measurables[SlotStage].firstOrNull()?.let {
             val edge = TvDp.CoverStart * unit
@@ -540,6 +609,11 @@ private class TvStagePolicy(
             thin?.place(side, height - (TvDp.DockBottom * unit).roundToInt())
             clockText?.place(width - (TvDp.ClockEnd * unit).roundToInt() - clockText.width, (TvDp.ClockTop * unit).roundToInt())
             notice?.place(frame.textX(0f).roundToInt(), dockTop - (TvDp.NoticeGap * unit).roundToInt() - notice.height)
+            // 提示浮在细进度上面：只在全屏歌词页出现，那时控制条是淡出的，位置上仍按它让开
+            hint?.place(
+                (width - hint.width) / 2,
+                height - ((TvDp.DockBottom + TvDp.ThinHeight + TvDp.HintGap) * unit).roundToInt() - hint.height,
+            )
             // 最后摆放：控制条盖在歌词栏和光晕上面
             dock.place(side, dockTop)
         }
@@ -628,6 +702,8 @@ internal object TvDp {
     const val PillDockGap = 16f
     const val NoticeGap = 10f
     const val ThinHeight = 3f
+    /** 快退快进提示离细进度的间距。 */
+    const val HintGap = 20f
     const val ClockEnd = 56f
     const val ClockTop = 40f
 
@@ -646,6 +722,7 @@ private const val SlotDock = 5
 private const val SlotThin = 6
 private const val SlotClock = 7
 private const val SlotStage = 8
+private const val SlotHint = 9
 
 /** 电视环境模式舞台的正文字号（sp）。 */
 private const val TV_STAGE_SP = 40f
