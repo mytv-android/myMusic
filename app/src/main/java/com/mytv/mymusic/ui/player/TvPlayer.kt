@@ -166,102 +166,109 @@ internal fun TvPlayer(
         TvStagePolicy(progress, ambient, ambientClock, stageInsets, bottomChrome)
     }
 
-    Layout(
-        contents = listOf<@Composable () -> Unit>(
-            {
-                CoverStage(
-                    cover = song.cover,
-                    title = song.title,
-                    trackKey = song.key,
-                    playing = playing,
-                    shapeChoice = coverShape,
-                    pulse = pulse,
-                    transitionAnimation = transitionAnimation,
-                    modifier = if (custom) Modifier.graphicsLayer { alpha = pageAlpha() } else Modifier,
-                )
-            },
-            { TvMeta(song, progress, ambient, pageAlpha) },
-            {
-                // 只展示：换源走控制条上的按钮，这里不能拿遥控器焦点，否则多出一个和右下角重复的焦点位
-                SourcePill(
-                    song,
-                    sourceProvider,
-                    sourceDetail,
-                    playbackMode,
-                    onOpenSource,
-                    Modifier.graphicsLayer { alpha = chromeAlpha() }.focusProperties { canFocus = false },
-                )
-            },
-            {
-                if (!(custom && listHidden)) LyricsList(
-                    lyrics,
-                    active,
-                    actions::seek,
-                    modifier = Modifier
-                        .graphicsLayer { alpha = pageAlpha() }
-                        // 歌词行能聚焦（确认键从这一句播放），上下键在行间走，往下要走完整首才回到控制条；
-                        // 左边没有别的焦点位，按左键直接回控制条上刚才那个按钮
-                        .onPreviewKeyEvent { event ->
-                            if (event.type != KeyEventType.KeyDown || event.key != Key.DirectionLeft) return@onPreviewKeyEvent false
-                            if (!dockRow.restoreFocusedChild()) playFocus.requestFocus()
-                            true
-                        },
-                    loading = lyricsLoading,
-                    position = position,
-                    playing = playing,
-                    sizing = if (ambient && !custom) LyricsSizing.TvAmbient else LyricsSizing.Tv,
-                )
-            },
-            { TvNotice(notice, chromeAlpha) },
-            {
-                TvDock(
-                    song = song,
-                    playing = playing,
-                    ambient = ambient,
-                    duration = duration,
-                    position = position,
-                    favorite = favorite,
-                    sleep = sleep,
-                    actions = actions,
-                    playFocus = playFocus,
-                    rowFocus = dockRow,
-                    waveScale = waveScale,
-                    waveBpm = waveBpm,
-                    alpha = chromeAlpha,
-                    onOpenQueue = onOpenQueue,
-                    onOpenTimer = onOpenTimer,
-                    onOpenSource = onOpenSource,
-                    onOpenSheet = stage.onOpenSheet,
-                )
-            },
-            { TvThinProgress(position, duration, fade, song.isLive) },
-            { if (ambientClock) TvClock(fade) },
-            {
-                // 全屏歌词页里快退快进的浮层提示：压在歌词上面，不挤动任何东西
-                TvSeekHint(seekHint, position, duration, song.isLive)
-            },
-            {
-                // 环境模式的歌词动画舞台：整屏，文字排在时钟下面、细进度上面（安全区由摆放策略写）
-                if (custom && stageShown) {
-                    LyricStage(
-                        mode = stage.mode,
-                        lyrics = stage.lyrics,
+    Box(Modifier.fillMaxSize()) {
+        Layout(
+            contents = listOf<@Composable () -> Unit>(
+                {
+                    CoverStage(
+                        cover = song.cover,
+                        title = song.title,
+                        trackKey = song.key,
+                        playing = playing,
+                        shapeChoice = coverShape,
+                        pulse = pulse,
+                        transitionAnimation = transitionAnimation,
+                        modifier = if (custom) Modifier.graphicsLayer { alpha = pageAlpha() } else Modifier,
+                    )
+                },
+                { TvMeta(song, progress, ambient, pageAlpha) },
+                {
+                    // 只展示：换源走控制条上的按钮，这里不能拿遥控器焦点，否则多出一个和右下角重复的焦点位
+                    SourcePill(
+                        song,
+                        sourceProvider,
+                        sourceDetail,
+                        playbackMode,
+                        onOpenSource,
+                        Modifier.graphicsLayer { alpha = chromeAlpha() }.focusProperties { canFocus = false },
+                    )
+                },
+                {
+                    if (!(custom && listHidden)) LyricsList(
+                        lyrics,
+                        active,
+                        actions::seek,
+                        modifier = Modifier
+                            .graphicsLayer { alpha = pageAlpha() }
+                            // 歌词行能聚焦（确认键从这一句播放），上下键在行间走，往下要走完整首才回到控制条；
+                            // 左边没有别的焦点位，按左键直接回控制条上刚才那个按钮
+                            .onPreviewKeyEvent { event ->
+                                if (event.type != KeyEventType.KeyDown || event.key != Key.DirectionLeft) return@onPreviewKeyEvent false
+                                if (!dockRow.restoreFocusedChild()) playFocus.requestFocus()
+                                true
+                            },
                         loading = lyricsLoading,
                         position = position,
                         playing = playing,
-                        song = song,
-                        prefs = stage.prefs,
-                        textSp = TV_STAGE_SP,
-                        insets = stageInsets,
-                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = fade.value },
-                        seek = actions::seek,
+                        sizing = if (ambient && !custom) LyricsSizing.TvAmbient else LyricsSizing.Tv,
                     )
-                }
-            },
-        ),
-        modifier = Modifier.fillMaxSize(),
-        measurePolicy = policy,
-    )
+                },
+                { TvNotice(notice, chromeAlpha) },
+                {
+                    TvDock(
+                        song = song,
+                        playing = playing,
+                        ambient = ambient,
+                        duration = duration,
+                        position = position,
+                        favorite = favorite,
+                        sleep = sleep,
+                        actions = actions,
+                        playFocus = playFocus,
+                        rowFocus = dockRow,
+                        waveScale = waveScale,
+                        waveBpm = waveBpm,
+                        alpha = chromeAlpha,
+                        onOpenQueue = onOpenQueue,
+                        onOpenTimer = onOpenTimer,
+                        onOpenSource = onOpenSource,
+                        onOpenSheet = stage.onOpenSheet,
+                    )
+                },
+                { TvThinProgress(position, duration, fade, song.isLive) },
+                { if (ambientClock) TvClock(fade) },
+                {
+                    // 环境模式的歌词动画舞台：整屏，文字排在时钟下面、细进度上面（安全区由摆放策略写）
+                    if (custom && stageShown) {
+                        LyricStage(
+                            mode = stage.mode,
+                            lyrics = stage.lyrics,
+                            loading = lyricsLoading,
+                            position = position,
+                            playing = playing,
+                            song = song,
+                            prefs = stage.prefs,
+                            textSp = TV_STAGE_SP,
+                            insets = stageInsets,
+                            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = fade.value },
+                            seek = actions::seek,
+                        )
+                    }
+                },
+            ),
+            modifier = Modifier.fillMaxSize(),
+            measurePolicy = policy,
+        )
+        // 快退快进的提示是浮层，不参与舞台摆放：放在 Layout 外面，免得给 measurables 添一个位置槽位
+        // （槽位下标对不上就会拿错误的约束去量别的槽位，环境模式进舞台时直接崩）
+        TvSeekHint(
+            hint = seekHint,
+            position = position,
+            duration = duration,
+            live = song.isLive,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = TvSeekHintBottom),
+        )
+    }
 }
 
 /** 歌名 34sp 粗体、歌手 20sp primary；环境模式缩到 30 / 19sp（图层缩放，过渡中不重新排版）。切歌时整块淡出淡入。 */
@@ -500,7 +507,7 @@ private fun TvClock(fade: State<Float>) {
  * 透明度只在图层里读，进出各重组一次，淡出过程不重组。
  */
 @Composable
-private fun TvSeekHint(hint: SeekHint, position: State<Long>, duration: Long, live: Boolean) {
+private fun TvSeekHint(hint: SeekHint, position: State<Long>, duration: Long, live: Boolean, modifier: Modifier = Modifier) {
     val tick = hint.tick
     val alpha = remember { Animatable(0f) }
     var shown by remember { mutableStateOf(false) }
@@ -517,7 +524,7 @@ private fun TvSeekHint(hint: SeekHint, position: State<Long>, duration: Long, li
     val step = abs(hint.deltaMs / 1_000L)
     val elapsed = formatTime(position.value)
     Surface(
-        Modifier.graphicsLayer { this.alpha = alpha.value },
+        modifier.graphicsLayer { this.alpha = alpha.value },
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f),
     ) {
@@ -545,6 +552,9 @@ private fun TvSeekHint(hint: SeekHint, position: State<Long>, duration: Long, li
 
 /** 快退快进提示停留时长：连按时每次重新开始计时。 */
 private const val TvSeekHintMs = 1_200L
+
+/** 快退快进提示离屏幕底边的距离：细进度上面 [TvDp.HintGap]。 */
+private val TvSeekHintBottom = (TvDp.DockBottom + TvDp.ThinHeight + TvDp.HintGap).dp
 
 /**
  * 电视播放页的摆放：过渡进度 [stage]（0 控制条显示，1 环境模式）只在测量和摆放阶段读，逐帧不重组。
@@ -585,8 +595,6 @@ private class TvStagePolicy(
         val thin = measurables[SlotThin].firstOrNull()
             ?.measure(Constraints.fixed((width - side * 2).coerceAtLeast(0), (TvDp.ThinHeight * unit).roundToInt()))
         val clockText = measurables[SlotClock].firstOrNull()?.measure(Constraints())
-        // 快退快进提示：不限制高度，内容自己定；只有按了方向键才组合
-        val hint = measurables[SlotHint].firstOrNull()?.measure(Constraints(maxWidth = width))
         // 歌词动画舞台整屏：左右按封面左边距留边，顶上让开时钟，底下让开细进度
         val stagePlaceable = measurables[SlotStage].firstOrNull()?.let {
             val edge = TvDp.CoverStart * unit
@@ -609,11 +617,6 @@ private class TvStagePolicy(
             thin?.place(side, height - (TvDp.DockBottom * unit).roundToInt())
             clockText?.place(width - (TvDp.ClockEnd * unit).roundToInt() - clockText.width, (TvDp.ClockTop * unit).roundToInt())
             notice?.place(frame.textX(0f).roundToInt(), dockTop - (TvDp.NoticeGap * unit).roundToInt() - notice.height)
-            // 提示浮在细进度上面：只在全屏歌词页出现，那时控制条是淡出的，位置上仍按它让开
-            hint?.place(
-                (width - hint.width) / 2,
-                height - ((TvDp.DockBottom + TvDp.ThinHeight + TvDp.HintGap) * unit).roundToInt() - hint.height,
-            )
             // 最后摆放：控制条盖在歌词栏和光晕上面
             dock.place(side, dockTop)
         }
@@ -722,7 +725,6 @@ private const val SlotDock = 5
 private const val SlotThin = 6
 private const val SlotClock = 7
 private const val SlotStage = 8
-private const val SlotHint = 9
 
 /** 电视环境模式舞台的正文字号（sp）。 */
 private const val TV_STAGE_SP = 40f
