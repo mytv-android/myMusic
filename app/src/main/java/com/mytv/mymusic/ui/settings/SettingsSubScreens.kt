@@ -1244,6 +1244,23 @@ private fun AccountRow(
     )
 }
 
+/**
+ * 一条扫码通道：[type] 传给平台层（QQ 的 "" 是 QQ 扫码、"wx" 是微信扫码），其余给界面。
+ */
+private data class QrChannel(val type: String, val label: String, val subtitle: String)
+
+/**
+ * QQ 的会员可能挂在 QQ 号、也可能挂在微信号上（同一个 QQ 音乐账号两种登录方式都认），
+ * 所以这里给两条扫码通道；其他平台只有默认一条。
+ */
+private fun qrLoginChannels(provider: ProviderInfo): List<QrChannel> = when (provider.id) {
+    "qq" -> listOf(
+        QrChannel("", "QQ 扫码", "用 QQ 扫描二维码，并在手机上确认登录"),
+        QrChannel("wx", "微信 扫码", "用微信扫描二维码，并在手机上确认登录"),
+    )
+    else -> listOf(QrChannel("", "扫码登录", "用${provider.name} App 扫描二维码，并在手机上确认登录"))
+}
+
 /** 扫码登录：手机是底部面板，平板和电视是居中对话框（电视二维码放大，方便在沙发上扫）。 */
 @Composable
 private fun QrLoginPanel(
@@ -1254,8 +1271,9 @@ private fun QrLoginPanel(
     onDismiss: () -> Unit,
 ) {
     val window = LocalAppWindow.current
-    val type = ""
-    SideEffect(provider.id, actions) { actions.startQrLogin(provider.id, type) }
+    val channels = remember(provider.id) { qrLoginChannels(provider) }
+    var type by remember(provider.id) { mutableStateOf(channels.first().type) }
+    SideEffect(provider.id, type, actions) { actions.startQrLogin(provider.id, type) }
     // 面板不经 onDismiss 离开组合时（旋转屏幕、窗口尺寸变化，qrFor 不会保存）也要停掉轮询
     DisposableEffect(provider.id) { onDispose { actions.cancelLogin() } }
     // 登录成功后 Cookie 会变，变了就关闭
@@ -1265,11 +1283,12 @@ private fun QrLoginPanel(
         if (cookie.isNotBlank() && cookie != initialCookie) onDismiss()
     }
     val title = "扫码登录${provider.name}"
-    val subtitle = "用${provider.name} App 扫描二维码，并在手机上确认登录"
+    val subtitle = channels.firstOrNull { it.type == type }?.subtitle
+        ?: "用${provider.name} App 扫描二维码，并在手机上确认登录"
     val refresh = { actions.startQrLogin(provider.id, type) }
     if (window.isPhone) {
         AdaptiveSheet(onDismiss = onDismiss, title = title, subtitle = subtitle) {
-            QrLoginBody(provider, state, refresh, onCookie)
+            QrLoginBody(provider, state, channels, type, { type = it }, refresh, onCookie)
         }
         return
     }
@@ -1293,7 +1312,7 @@ private fun QrLoginPanel(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                QrLoginBody(provider, state, refresh, onCookie)
+                QrLoginBody(provider, state, channels, type, { type = it }, refresh, onCookie)
             }
         }
     }
@@ -1304,6 +1323,9 @@ private fun QrLoginPanel(
 private fun QrLoginBody(
     provider: ProviderInfo,
     state: MusicUiState,
+    channels: List<QrChannel>,
+    type: String,
+    onTypeChange: (String) -> Unit,
     onRefresh: () -> Unit,
     onCookie: (() -> Unit)?,
 ) {
@@ -1320,6 +1342,21 @@ private fun QrLoginBody(
     val refreshFocus = remember { FocusRequester() }
     SettingsTvFocus(refreshFocus, ended)
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        // 通道不止一条时才给选择；切通道会重新取码，微信那条要用微信扫
+        if (channels.size > 1) {
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            ) {
+                channels.forEach { channel ->
+                    MusicChip(
+                        channel.label,
+                        type == channel.type,
+                        description = "扫码登录${provider.name}：${channel.label}",
+                    ) { onTypeChange(channel.type) }
+                }
+            }
+        }
         Box(
             Modifier
                 .size(qrSize)
