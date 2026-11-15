@@ -76,6 +76,27 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
   </tr>
 </table>
 
+### 模拟器实拍
+
+设计稿之外，下面是一套同一版本 `1.0 (67)` 的模拟器实拍：手机、平板、电视、折叠屏与双面屏各一张，看的是同一套部件在不同屏幕上的真实排布。
+
+<table>
+  <tr>
+    <td align="center"><img src="screenshots/phone.png" height="430" alt="myMusic 手机"/><br/><sub>手机 · 1080×2400</sub></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="screenshots/fold.png" width="430" alt="myMusic 折叠屏"/><br/><sub>折叠屏 · 2208×1840</sub></td>
+    <td align="center" width="50%"><img src="screenshots/dualscreen.png" width="520" alt="myMusic 双面屏"/><br/><sub>双面屏 · 2784×1800</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="screenshots/tablet.png" width="380" alt="myMusic 平板"/><br/><sub>平板 · 2560×1600</sub></td>
+    <td align="center"><img src="screenshots/tv.png" width="430" alt="myMusic 电视"/><br/><sub>电视 · 1920×1080</sub></td>
+  </tr>
+</table>
+
 ## 界面结构
 
 界面使用 Material 3 Expressive，配色由当前歌曲封面实时生成，浏览页与播放页带模糊背景。
