@@ -20,6 +20,7 @@ benchmarkMacro = "1.5.0"
 profileinstaller = "1.4.1"
 uiautomator = "2.4.0"
 media3 = "1.11.1"
+lyricon = "0.1.70"
 coil = "3.6.3"
 okhttp = "5.5.0"
 nanohttpd = "2.3.1"
@@ -68,6 +69,8 @@ androidx-media3-exoplayer-hls = { module = "androidx.media3:media3-exoplayer-hls
 androidx-media3-exoplayer-dash = { module = "androidx.media3:media3-exoplayer-dash", version.ref = "media3" }
 androidx-media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
 androidx-media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
+lyricon-provider = { module = "io.github.proify.lyricon:provider", version.ref = "lyricon" }
+lyricon-subscriber = { module = "io.github.proify.lyricon:subscriber", version.ref = "lyricon" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }

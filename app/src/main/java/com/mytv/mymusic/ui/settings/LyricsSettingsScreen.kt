@@ -61,6 +61,7 @@ import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.data.RHYTHM_OFFSET_MAX_MS
 import com.mytv.mymusic.data.RhythmIntensity
 import com.mytv.mymusic.data.TabletopTop
+import com.mytv.mymusic.lyricon.LyriconSubscriptionState
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
@@ -119,9 +120,10 @@ internal val MiniPlayerTarget.label: String
  * 点按迷你播放器打开什么；折叠屏展开时加桌面姿态上半屏放什么，电视上再加环境模式时钟。都只存在本机，改了立即生效。
  */
 @Composable
-fun LyricsSettingsScreen(
+internal fun LyricsSettingsScreen(
     state: MusicUiState,
     actions: MusicActions,
+    lyricon: LyriconSubscriptionState,
     onBack: () -> Unit,
     embedded: Boolean = false,
 ) {
@@ -250,7 +252,7 @@ fun LyricsSettingsScreen(
             )
         }
         item(key = "textNote", contentType = "note") {
-            SettingsNote("前三项对全屏歌词页、系统媒体播放条、桌面小组件和海报墙都生效；最后一项只影响播放页。歌词没有罗马音时，选“罗马音”显示翻译。")
+            SettingsNote("前三项对全屏歌词页、系统媒体播放条、桌面小组件、海报墙和词幕都生效；最后一项只影响播放页和词幕。歌词没有罗马音时，选“罗马音”显示翻译。")
         }
         item(key = "notificationHead", contentType = "sectionHeader") { SectionLabel("系统媒体播放条") }
         item(key = "notification", contentType = "switch") {
@@ -262,6 +264,35 @@ fun LyricsSettingsScreen(
                 count = 1,
                 summary = "把当前这句歌词放到系统通知、锁屏等媒体播放条的第二行，歌手名会被替换；歌词不同步时仍显示歌手。",
             )
+        }
+        item(key = "lyriconHead", contentType = "sectionHeader") { SectionLabel("词幕（Lyricon）") }
+        item(key = "lyriconSwitches", contentType = "lyriconSwitches") {
+            SegmentedGroup {
+                SwitchRow(
+                    title = "发送歌词到词幕",
+                    checked = state.lyriconProviderEnabled && lyricon.supported,
+                    onCheckedChange = actions::setLyriconProviderEnabled,
+                    index = 0,
+                    count = 2,
+                    summary = if (lyricon.supported) "发送当前歌曲、逐行 / 逐字歌词、翻译、罗马音和播放进度。" else "需要 Android 8.1 及以上",
+                    enabled = lyricon.supported,
+                )
+                SwitchRow(
+                    title = "接收其他播放器歌词",
+                    checked = state.lyriconSubscriberEnabled && lyricon.supported,
+                    onCheckedChange = actions::setLyriconSubscriberEnabled,
+                    index = 1,
+                    count = 2,
+                    summary = if (lyricon.supported) "在下方预览词幕当前活跃播放器的歌曲与当前歌词。" else "需要 Android 8.1 及以上",
+                    enabled = lyricon.supported,
+                )
+            }
+        }
+        if (state.lyriconSubscriberEnabled && lyricon.supported) {
+            item(key = "lyriconPreview", contentType = "lyriconPreview") { LyriconPreviewCard(lyricon) }
+        }
+        item(key = "lyriconNote", contentType = "note") {
+            SettingsNote("需要先安装并激活词幕核心服务。发送默认开启，接收默认关闭；连不上词幕不影响应用内歌词和播放。")
         }
         item(key = "appleLyricHead", contentType = "sectionHeader") { SectionLabel("Apple Music 歌词") }
         item(key = "appleLyricProxy", contentType = "switch") {

@@ -229,6 +229,14 @@ These features were written from the mods' public descriptions only; none of the
 - License: Apache License 2.0
 - Usage: blur behind the mini player, navigation bar and bottom player bar.
 
+## Lyricon / 词幕
+
+- Upstream: https://github.com/tomakino/lyricon
+- Version: Provider / Subscriber SDK 0.1.70
+- License: Apache License 2.0
+- Usage: the Provider SDK publishes myMusic's current song, timed and word-by-word lyrics, translation and playback position to Lyricon; the Subscriber SDK receives the active player's corresponding state. Integration follows the official documentation at https://tomakino.github.io/lyricon/zh-cn/developer/provider/ and https://tomakino.github.io/lyricon/zh-cn/developer/subscriber/.
+- Distribution: the SDK AARs and their lyric model dependency are resolved from Maven Central and packaged by Gradle. No upstream source files, images or other assets are vendored in this repository. The Android 6.0–8.0 no-op behaviour is provided by the SDK; the Binder / SharedMemory bridge requires Android 8.1 or later.
+
 ## Media3 FLAC decoder extension
 
 - Upstream: https://github.com/androidx/media (`libraries/decoder_flac`, tag 1.11.1)

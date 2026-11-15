@@ -97,6 +97,9 @@ import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.data.update.InstallResult
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
+import com.mytv.mymusic.lyricon.LyriconController
+import com.mytv.mymusic.lyricon.LyriconMapper
+import com.mytv.mymusic.lyricon.LyriconTrackInput
 import com.mytv.mymusic.playback.AppleWidevineDrmCallback
 import com.mytv.mymusic.playback.CrossfadeHandoff
 import com.mytv.mymusic.playback.MEDIA_EXTRA_DURATION_MS
@@ -204,6 +207,8 @@ data class MusicUiState(
     val appearance: Appearance = Appearance(),
     val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
     val notificationLyrics: Boolean = false,
+    val lyriconProviderEnabled: Boolean = true,
+    val lyriconSubscriberEnabled: Boolean = false,
     /** Apple Music 匿名歌词是否走第三方中转；见 [setThirdPartyLyrics]。 */
     val thirdPartyLyrics: Boolean = true,
     val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,
@@ -442,6 +447,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _position = MutableStateFlow(0L)
     val position: StateFlow<Long> = _position
 
+    private val lyricon = LyriconController(application)
+    internal val lyriconSubscription = lyricon.subscription
+
     val syncState = app.sync.state
     val syncEvents = app.sync.events
     val updateState = app.update.state
@@ -544,6 +552,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             appearance = settings.toAppearance(),
             lyricsBackground = settings.lyricsBackground,
             notificationLyrics = settings.notificationLyrics,
+            lyriconProviderEnabled = settings.lyriconProviderEnabled,
+            lyriconSubscriberEnabled = settings.lyriconSubscriberEnabled,
             thirdPartyLyrics = settings.thirdPartyLyrics,
             rhythmIntensity = settings.rhythmIntensity,
             coverShape = settings.coverShape,
@@ -628,6 +638,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             AppleLyricsConfig.configure(settingsState.value.thirdPartyLyrics)
             _settingsReady.value = true
         }
+        startLyricon()
         viewModelScope.launch {
             // 冷启动先把上次存下来的账号资料铺上：等各平台用户信息接口返回之前，
             // 账号卡片已经有头像和昵称可看，不然每次开 App 都要空一会儿
@@ -3671,6 +3682,36 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         base.value = base.value.copy(deepLink = "")
     }
 
+    private fun startLyricon() {
+        viewModelScope.launch {
+            // 等本机真实设置落下一帧再注册，不能把用户已关闭的互通短暂打开。
+            _settingsReady.first { it }
+            combine(base, settingsState) { ui, settings ->
+                val song = ui.current
+                LyriconTrackInput(
+                    song = song,
+                    durationMs = ui.duration,
+                    lyricsRaw = ui.lyrics,
+                    lyricsReady = song != null && ui.lyricsKey == song.key,
+                    lyricText = settings.lyricText,
+                    subline = settings.lyricStage.subline,
+                    playing = ui.playing,
+                    providerEnabled = settings.lyriconProviderEnabled,
+                    subscriberEnabled = settings.lyriconSubscriberEnabled,
+                )
+            }.distinctUntilChanged().collectLatest { input ->
+                // 简繁、拆双语和罗马音都走现有管线；快速切歌时取消上一首的转换。
+                val update = withContext(Dispatchers.Default) { LyriconMapper.prepare(input) }
+                lyricon.update(update)
+            }
+        }
+        viewModelScope.launch {
+            _settingsReady.first { it }
+            // 直接复用 UI 的 100ms 本地时钟，不读取 MediaSession 最长三秒才推送的快照。
+            position.collect(lyricon::updatePosition)
+        }
+    }
+
     private var lyricsJob: Job? = null
 
     private fun loadLyrics(song: Song) {
@@ -5114,6 +5155,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.settings.volumeNormalization(value) }
     fun setLyricsBackground(value: LyricsBackgroundMode) = viewModelScope.launch { app.settings.lyricsBackground(value) }
     fun setNotificationLyrics(value: Boolean) = viewModelScope.launch { app.settings.notificationLyrics(value) }
+    fun setLyriconProviderEnabled(value: Boolean) = viewModelScope.launch { app.settings.lyriconProviderEnabled(value) }
+    fun setLyriconSubscriberEnabled(value: Boolean) = viewModelScope.launch { app.settings.lyriconSubscriberEnabled(value) }
     fun setRhythmIntensity(value: RhythmIntensity) = viewModelScope.launch { app.settings.rhythmIntensity(value) }
     fun setCoverShape(value: CoverShapeChoice) = viewModelScope.launch { app.settings.coverShape(value) }
     fun setTvAmbientClock(value: Boolean) = viewModelScope.launch { app.settings.tvAmbientClock(value) }
@@ -5763,6 +5806,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        lyricon.destroy()
         progressJob?.cancel()
         aggregateSearchJob?.cancel()
         collectionSearchJob?.cancel()
