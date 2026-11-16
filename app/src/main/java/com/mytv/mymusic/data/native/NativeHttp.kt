@@ -23,6 +23,8 @@ data class NativeResponse(
     val bytes: ByteArray = ByteArray(0),
     /** 跟随跳转后的最终地址，用于短链还原；没有发生跳转时与请求地址相同。 */
     val finalUrl: String = "",
+    /** 302 的 Location 原值；只有传了 followRedirects = false 的请求才可能有值。 */
+    val location: String = "",
 )
 
 object NativeHttp {
@@ -45,6 +47,19 @@ object NativeHttp {
         .followSslRedirects(true)
         .build()
 
+    /**
+     * 不跟随跳转的客户端：OkHttp 自动跟随只把最终响应交出来，中间某一跳种下的 Set-Cookie 会丢掉
+     * （QQ 扫码登录的 p_skey 就是这样丢的），需要自己顺着 Location 走时用这个。
+     */
+    private val noRedirectClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(45, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
+
     suspend fun get(
         url: String,
         headers: Map<String, String> = emptyMap(),
@@ -60,13 +75,14 @@ object NativeHttp {
         randomIp: Boolean = false,
         userAgent: String = DEFAULT_USER_AGENT,
         binary: Boolean = false,
+        followRedirects: Boolean = true,
     ): NativeResponse {
         val request = Request.Builder()
             .url(url)
             .get()
             .applyCommonHeaders(headers, cookie, randomIp, userAgent)
             .build()
-        return execute(request, binary)
+        return execute(request, binary, followRedirects)
     }
 
     suspend fun postForm(
@@ -76,6 +92,7 @@ object NativeHttp {
         cookie: String = "",
         randomIp: Boolean = false,
         userAgent: String = DEFAULT_USER_AGENT,
+        followRedirects: Boolean = true,
     ): NativeResponse {
         val body = FormBody.Builder().apply {
             form.forEach { (key, value) -> add(key, value) }
@@ -85,7 +102,7 @@ object NativeHttp {
             .post(body)
             .applyCommonHeaders(headers, cookie, randomIp, userAgent)
             .build()
-        return execute(request)
+        return execute(request, followRedirects = followRedirects)
     }
 
     suspend fun postJson(
@@ -160,9 +177,9 @@ object NativeHttp {
         return execute(request, binary = true)
     }
 
-    private suspend fun execute(request: Request, binary: Boolean = false): NativeResponse =
+    private suspend fun execute(request: Request, binary: Boolean = false, followRedirects: Boolean = true): NativeResponse =
         suspendCancellableCoroutine { continuation ->
-            val call = client.newCall(request)
+            val call = (if (followRedirects) client else noRedirectClient).newCall(request)
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, error: IOException) {
@@ -173,7 +190,9 @@ object NativeHttp {
                     response.use {
                         val bytes = if (binary) runCatching { it.body?.bytes() }.getOrNull() ?: ByteArray(0) else ByteArray(0)
                         val body = if (binary) "" else runCatching { it.body?.string().orEmpty() }.getOrDefault("")
-                        if (!it.isSuccessful) {
+                        // 手动跟随跳转时 3xx 是正常回包：Location 才是要读的东西
+                        val isRedirect = !followRedirects && it.code in 300..399
+                        if (!it.isSuccessful && !isRedirect) {
                             if (continuation.isActive) {
                                 continuation.resumeWithException(
                                     IOException("HTTP ${it.code} ${it.message}: ${body.take(300)}")
@@ -192,7 +211,14 @@ object NativeHttp {
                         }
                         if (continuation.isActive) {
                             continuation.resume(
-                                NativeResponse(body, cookies, it.code, bytes, it.request.url.toString())
+                                NativeResponse(
+                                    body = body,
+                                    cookies = cookies,
+                                    code = it.code,
+                                    bytes = bytes,
+                                    finalUrl = it.request.url.toString(),
+                                    location = it.header("Location").orEmpty(),
+                                )
                             )
                         }
                     }

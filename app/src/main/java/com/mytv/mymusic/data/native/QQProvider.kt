@@ -1210,12 +1210,60 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     }
 
     override suspend fun checkLogin(sessionId: String, key: String): QRCheckResult {
-        val params = parseQuery(key)
-        val type = params["type"]?.trim().orEmpty()
-            .ifBlank { loginSessions[sessionId]?.type ?: "qq" }
-        val result = if (type == "wx") checkWxLogin(key) else checkQqLogin(key)
-        if (result.status == "success" || result.status == "expired") loginSessions.remove(sessionId)
+        val mode = loginSessions[sessionId]?.mode
+            ?: parseQuery(key)["mode"]?.trim().orEmpty().ifBlank {
+                parseQuery(key)["type"]?.trim().orEmpty().ifBlank { QQ_MODE_NATIVE }
+            }
+        val result = when (mode) {
+            QQ_MODE_WX -> checkWxLogin(key)
+            QQ_MODE_WEB -> checkQqWebLogin(sessionId)
+            else -> checkQqLogin(key)
+        }
+        if (result.status != "waiting" && result.status != "scanned") {
+            QQLoginPage.close()
+            loginSessions.remove(sessionId)
+        }
         return result
+    }
+
+    /** 用户关了面板：隐藏 WebView 跟着销毁，别让官方登录页在后台继续轮询。 */
+    override fun cancelLogin(sessionId: String) {
+        if (loginSessions.remove(sessionId)?.mode == QQ_MODE_WEB) QQLoginPage.close()
+    }
+
+    /**
+     * WebView 通道的轮询：页面自己在扫，本层只盯两件事——二维码被刷新了就跟着换图，
+     * 登录态落到 cookie 里了就收走 cookie 交给原生那步授权换 key。
+     */
+    private suspend fun checkQqWebLogin(sessionId: String): QRCheckResult {
+        val state = loginSessions[sessionId] ?: return QRCheckResult("failed", "qq login session missing", "")
+        // Activity 重建过，旧页面已经废了：明说，别让用户干等到超时
+        if (!QQLoginPage.isAlive()) return QRCheckResult("failed", "登录页已关闭，请重试", "")
+        val shown = state.cookies["qr"].orEmpty()
+        val current = QQLoginPage.qrImageUrl()
+        if (current.isNotEmpty() && current != shown) {
+            loginSessions[sessionId] = state.copy(cookies = state.cookies + ("qr" to current))
+            val dataUrl = QQLoginPage.qrImageDataUrl()
+            if (dataUrl.isNotEmpty()) {
+                return QRCheckResult(
+                    status = "waiting",
+                    message = "二维码已刷新，请重新扫描",
+                    cookie = "",
+                    imageUrl = dataUrl,
+                )
+            }
+        }
+        if (!QQLoginPage.hasLoginCookie()) {
+            return QRCheckResult("waiting", "等待扫码", "")
+        }
+        val cookieHeader = QQLoginPage.harvestCookies(QQ_LOGIN_COOKIE_URLS)
+        if (cookieHeader.isBlank()) return QRCheckResult("failed", "qq login cookie missing", "")
+        val cookies = LinkedHashMap<String, String>()
+        cookieHeader.split(";").forEach { part ->
+            val index = part.indexOf('=')
+            if (index > 0) cookies[part.substring(0, index).trim()] = part.substring(index + 1).trim()
+        }
+        return authorizeQQMusicLogin(cookies, "登录成功")
     }
 
     private suspend fun fetchSingerSongs(cookie: String, id: String): List<Song> {
@@ -1946,7 +1994,51 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         )
     }
 
+    /**
+     * 建 QQ 二维码。优先走隐藏 WebView：ptqrlogin 被 QQ 网关按请求形状拦（只有浏览器
+     * 发的 script 标签请求过得去），本机 HTTP 客户端一律 403，所以轮询必须交给官方页面自己做。
+     * WebView 起不来（没有前台 Activity 等）时退回原生取码，二维码至少能显示。
+     */
     private suspend fun createQqLogin(sessionId: String): QRCreateResult {
+        val pageUrl = qqLoginPageUrl()
+        val pageUp = runCatching { QQLoginPage.begin(pageUrl) }.getOrDefault(false)
+        if (pageUp) {
+            val imageUrl = QQLoginPage.qrImageUrl()
+            // 图必须从页面里读：ptqrshow 每调一次就换一张码，自己拉到的和页面轮询的那张对不上
+            val dataUrl = if (imageUrl.isNotEmpty()) QQLoginPage.qrImageDataUrl() else ""
+            if (imageUrl.isNotEmpty() && dataUrl.isNotEmpty()) {
+                loginSessions[sessionId] = QQLoginState(QQ_MODE_WEB, mapOf("qr" to imageUrl))
+                return QRCreateResult(
+                    sessionId = sessionId,
+                    session = QRSession(
+                        key = qqQuery("mode" to QQ_MODE_WEB),
+                        url = pageUrl,
+                        imageUrl = dataUrl,
+                    ),
+                )
+            }
+            QQLoginPage.close()
+        }
+        return createQqLoginNative(sessionId)
+    }
+
+    /** 官方登录页地址：参数与原生预热那一套一致，s_url 指向 QQ 音乐的 OAuth 回跳。 */
+    private fun qqLoginPageUrl(): String = QQ_QR_LOGIN_PAGE_API + "?" + qqQuery(
+        "appid" to "716027609",
+        "daid" to "383",
+        "style" to "33",
+        "login_text" to "登录",
+        "hide_title_bar" to "1",
+        "hide_border" to "1",
+        "target" to "self",
+        "s_url" to QQ_OAUTH_LOGIN_JUMP,
+        "pt_3rd_aid" to QQ_OAUTH_CLIENT_ID,
+        "pt_feedback_link" to "https://support.qq.com/products/77942?customInfo=.appid$QQ_OAUTH_CLIENT_ID",
+        "theme" to "2",
+        "verify_theme" to "",
+    )
+
+    private suspend fun createQqLoginNative(sessionId: String): QRCreateResult {
         val warmupQuery = qqQuery(
             "appid" to "716027609",
             "daid" to "383",
@@ -2004,7 +2096,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         if (loginSig.isNotEmpty()) keyParams["login_sig"] = loginSig
         val encodedState = encodeCookieState(cookies)
         if (encodedState.isNotEmpty()) keyParams["session"] = encodedState
-        loginSessions[sessionId] = QQLoginState("qq", cookies)
+        loginSessions[sessionId] = QQLoginState(QQ_MODE_NATIVE, cookies)
         return QRCreateResult(
             sessionId = sessionId,
             session = QRSession(
@@ -2091,18 +2183,24 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         message: String,
     ): QRCheckResult {
         return try {
-            val landing = NativeHttp.getResponse(
-                redirectUrl,
-                headers = mapOf(
-                    "Referer" to "https://xui.ptlogin2.qq.com/",
-                    "Accept" to "*/*",
-                ),
-                cookie = joinCookies(cookies),
-                userAgent = QQ_LOGIN_USER_AGENT,
-            )
-            landing.cookies.forEach { (name, value) ->
-                if (value.isNotBlank()) cookies[name] = value
-            }
+            // 跳转必须自己跟着走：OkHttp 自动跟随只暴露最终响应的 Set-Cookie，
+            // 而 p_skey 是 ptlogin 在中间某一跳种下的，自动跟随会把它整个丢掉
+            followQQRedirects(redirectUrl, cookies, "https://xui.ptlogin2.qq.com/")
+            authorizeQQMusicLogin(cookies, message)
+        } catch (error: Exception) {
+            QRCheckResult("failed", error.message ?: "qq login failed", "")
+        }
+    }
+
+    /**
+     * 拿 ptlogin 的登录态换 QQ 音乐的 key：先 authorize 拿 code，再 musicu.fcg 换 qm_keyst。
+     * 原生通道和 WebView 通道走到这里汇合（WebView 只负责把轮询那步扛过去）。
+     */
+    private suspend fun authorizeQQMusicLogin(
+        cookies: MutableMap<String, String>,
+        message: String,
+    ): QRCheckResult {
+        return try {
             val early = normalizeQQMusicCookies(cookies)
             if (firstNonEmpty(
                     early["qm_keyst"].orEmpty(),
@@ -2112,7 +2210,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             ) {
                 return QRCheckResult("success", message, joinCookies(early))
             }
-            val pSkey = cookies["p_skey"]?.trim().orEmpty()
+            val pSkey = firstNonEmpty(cookies["p_skey"].orEmpty(), cookies["skey"].orEmpty()).trim()
             if (pSkey.isEmpty()) return QRCheckResult("failed", "qq login missing p_skey", "")
 
             val form = linkedMapOf(
@@ -2140,11 +2238,18 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                 ),
                 cookie = joinCookies(cookies),
                 userAgent = QQ_LOGIN_USER_AGENT,
+                // authorize 用 302 回跳，自动跟随会把带 code 的 Location 一起吃掉
+                followRedirects = false,
             )
             authorize.cookies.forEach { (name, value) ->
                 if (value.isNotBlank()) cookies[name] = value
             }
-            val code = Regex("[?&]code=([^&\"'\\s]+)").find(authorize.body)?.groupValues?.get(1).orEmpty()
+            // code 在 Location 的 query 里；个别分支直接回 200 的页面，那就退回扫 body
+            val landing = resolveQQUrl(authorize.finalUrl, authorize.location)
+            val code = uriQueryValue(runCatching { URI(landing) }.getOrNull() ?: URI(QQ_OAUTH_AUTHORIZE), "code")
+                .ifEmpty {
+                    Regex("[?&]code=([^&\"'\\s]+)").find(authorize.body)?.groupValues?.get(1).orEmpty()
+                }
             if (code.isEmpty()) {
                 return QRCheckResult("failed", "qq oauth authorize missing code", "")
             }
@@ -2224,7 +2329,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             "uuid" to uuid,
             "state" to state,
         )
-        loginSessions[sessionId] = QQLoginState("wx", emptyMap())
+        loginSessions[sessionId] = QQLoginState(QQ_MODE_WX, emptyMap())
         return QRCreateResult(
             sessionId = sessionId,
             session = QRSession(
@@ -2695,7 +2800,47 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         return hash and 0x7fffffff
     }
 
-    private data class QQLoginState(val type: String, val cookies: Map<String, String>)
+    private data class QQLoginState(val mode: String, val cookies: Map<String, String>)
+
+    /**
+     * 手动跟随跳转，把每一跳的 Set-Cookie 都收进 [cookies]，返回最后落地的地址。
+     *
+     * QQ 扫码登录的 p_skey 是 ptlogin 在跳转链中间种下的，OkHttp 自动跟随只给最终响应的
+     * cookie，所以必须自己顺着 Location 走（Go 参考实现也是这么做的）。
+     */
+    private suspend fun followQQRedirects(
+        startUrl: String,
+        cookies: MutableMap<String, String>,
+        referer: String,
+        maxHops: Int = 8,
+    ): String {
+        var current = startUrl
+        var ref = referer
+        repeat(maxHops) {
+            val response = NativeHttp.getResponse(
+                current,
+                headers = mapOf("Referer" to ref, "Accept" to "*/*"),
+                cookie = joinCookies(cookies),
+                userAgent = QQ_LOGIN_USER_AGENT,
+                followRedirects = false,
+            )
+            response.cookies.forEach { (name, value) ->
+                if (value.isNotBlank()) cookies[name] = value
+            }
+            val location = response.location
+            if (location.isBlank()) return response.finalUrl
+            ref = response.finalUrl
+            current = resolveQQUrl(response.finalUrl, location)
+        }
+        return current
+    }
+
+    /** Location 可能是相对地址，按当前落地地址补全。 */
+    private fun resolveQQUrl(base: String, location: String): String {
+        val target = location.trim()
+        if (target.isEmpty()) return base
+        return runCatching { URI(base).resolve(target).toString() }.getOrDefault(target)
+    }
 
     private companion object {
         const val QQ_USER_AGENT =
@@ -2750,6 +2895,19 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         const val QQ_WX_REDIRECT_URI =
             "https://y.qq.com/portal/wx_redirect.html?login_type=2&surl=https://y.qq.com/"
         const val QQ_WX_APP_ID = "wx48db31d50e334801"
+
+        /** 扫码登录的三种通道：微信、QQ（隐藏 WebView）、QQ（原生取码，兜底）。 */
+        const val QQ_MODE_WX = "wx"
+        const val QQ_MODE_WEB = "qqweb"
+        const val QQ_MODE_NATIVE = "qq"
+
+        /** 登录态落在这些域下，授权前把它们都收进来。 */
+        val QQ_LOGIN_COOKIE_URLS = listOf(
+            "https://xui.ptlogin2.qq.com/",
+            "https://graph.qq.com/",
+            "https://y.qq.com/",
+            "https://u.y.qq.com/",
+        )
 
         val QQ_PLAYLIST_DETAIL_ENDPOINTS = listOf(
             "https://i.y.qq.com/qzone-music/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg",

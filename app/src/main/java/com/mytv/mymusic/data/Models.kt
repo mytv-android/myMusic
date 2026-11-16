@@ -129,7 +129,13 @@ data class QRSession(val key: String = "", val url: String = "", @SerialName("im
 data class QRCreateResult(@SerialName("session_id") val sessionId: String = "", val session: QRSession = QRSession())
 
 @Serializable
-data class QRCheckResult(val status: String = "", val message: String = "", val cookie: String = "")
+data class QRCheckResult(
+    val status: String = "",
+    val message: String = "",
+    val cookie: String = "",
+    /** 二维码被平台刷新时带回新图（QQ 的官方登录页会自己换码），界面跟着换。 */
+    @SerialName("image_url") val imageUrl: String = "",
+)
 
 enum class RepeatMode { Off, All, One }
 enum class SearchKind(val label: String) { Song("单曲"), Playlist("歌单"), Album("专辑"), Artist("歌手"), Link("链接") }

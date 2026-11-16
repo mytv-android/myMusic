@@ -5475,6 +5475,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         message("登录成功")
                         return@launch
                     }
+                    // 平台自己换了二维码（QQ 官方登录页会刷新），跟着换图，别让用户扫旧的
+                    "waiting" -> {
+                        val current = base.value.login?.session?.imageUrl.orEmpty()
+                        if (result.imageUrl.isNotBlank() && result.imageUrl != current) {
+                            base.value = base.value.copy(
+                                login = base.value.login?.let {
+                                    it.copy(session = it.session.copy(imageUrl = result.imageUrl))
+                                },
+                            )
+                        }
+                        base.value = base.value.copy(loginStatus = result.message.ifBlank { "等待扫码" })
+                    }
                     "scanned" -> base.value = base.value.copy(loginStatus = "已扫码，请在手机上确认")
                     "expired" -> {
                         base.value = base.value.copy(loginStatus = "二维码已过期")
@@ -5494,6 +5506,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelLogin() {
         loginJob?.cancel()
+        val sessionId = base.value.login?.sessionId.orEmpty()
+        if (sessionId.isNotBlank()) runCatching { app.repository.cancelLogin(sessionId) }
         base.value = base.value.copy(login = null, loginStatus = "", loginProviderId = "")
     }
 

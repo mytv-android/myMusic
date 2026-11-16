@@ -94,6 +94,11 @@ open class MusicRepository {
         return provider.checkLogin(sessionId, key)
     }
 
+    /** 放弃扫码登录：通知平台释放它占用的资源（隐藏 WebView、会话）。 */
+    fun cancelLogin(sessionId: String) {
+        NativeProviders.providerForSession(sessionId)?.cancelLogin(sessionId)
+    }
+
     /** 登录账号资料；失败或平台没实现时返回 null。 */
     suspend fun accountInfo(provider: String, cookie: String): AccountInfo? =
         runCatching { requireProvider(provider).accountInfo(cookie) }.getOrNull()
