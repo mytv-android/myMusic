@@ -1252,11 +1252,14 @@ private data class QrChannel(val type: String, val label: String, val subtitle: 
 /**
  * QQ 的会员可能挂在 QQ 号、也可能挂在微信号上（同一个 QQ 音乐账号两种登录方式都认），
  * 所以这里给两条扫码通道；其他平台只有默认一条。
+ *
+ * 微信放第一位：QQ 那条走 ptlogin2 三方登录，现在上游拿不到有效的设备风控参数，
+ * 二维码扫了也确认不了（ptqrlogin 直接 403），默认给一条能用的。
  */
 private fun qrLoginChannels(provider: ProviderInfo): List<QrChannel> = when (provider.id) {
     "qq" -> listOf(
-        QrChannel("", "QQ 扫码", "用 QQ 扫描二维码，并在手机上确认登录"),
         QrChannel("wx", "微信 扫码", "用微信扫描二维码，并在手机上确认登录"),
+        QrChannel("", "QQ 扫码", "用 QQ 扫描二维码，并在手机上确认登录"),
     )
     else -> listOf(QrChannel("", "扫码登录", "用${provider.name} App 扫描二维码，并在手机上确认登录"))
 }
