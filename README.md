@@ -30,12 +30,12 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 
 ## 界面
 
-下面的界面来自 [docs/](docs) 下的设计稿，按同一套视觉规则单独绘制；设计稿本身是可以直接操作的原型。汇总页见 <https://mytv-android.github.io/myMusic/>。
+下面是同一版本 `1.0 (67)` 在 Android 模拟器里的实拍，按页面一排排对应：浏览、播放、设置各一组，最后是海报墙。设计稿原型见 [docs/](docs)，汇总页 <https://mytv-android.github.io/myMusic/>。
 
 <table>
   <tr>
     <td align="center"><img src="docs/images/screens/ui-chart.png" width="176" alt="榜单"/><br/><sub>榜单：来源胶囊只决定榜单内容，播放仍按聚合策略自动换源</sub></td>
-    <td align="center"><img src="docs/images/screens/ui-chart-detail.png" width="176" alt="榜单详情"/><br/><sub>榜单详情：播放全部、换源设置与逐曲音源状态</sub></td>
+    <td align="center"><img src="docs/images/screens/ui-chart-detail.png" width="176" alt="榜单详情"/><br/><sub>榜单详情：播放全部、排序与视图切换、逐曲音源状态</sub></td>
     <td align="center"><img src="docs/images/screens/ui-playlists.png" width="176" alt="歌单"/><br/><sub>歌单：平台来源与推荐 / 分类切换</sub></td>
     <td align="center"><img src="docs/images/screens/ui-playlist-detail.png" width="176" alt="歌单详情"/><br/><sub>歌单详情：与榜单共用同一套媒体列表</sub></td>
   </tr>
@@ -46,7 +46,7 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
     <td align="center"><img src="docs/images/screens/ui-search.png" width="176" alt="聚合搜索"/><br/><sub>聚合搜索：按同一录音合并，逐条标出完整 / 试听 / VIP，异常平台单独显示</sub></td>
     <td align="center"><img src="docs/images/screens/ui-sources.png" width="176" alt="音源选择"/><br/><sub>音源选择：逐平台列出音源状态，可记住本曲的选择</sub></td>
     <td align="center"><img src="docs/images/screens/ui-library.png" width="176" alt="我的"/><br/><sub>我的：同步状态直接出现在歌单行上</sub></td>
-    <td align="center"><img src="docs/images/screens/ui-user-playlist.png" width="176" alt="自建歌单"/><br/><sub>自建歌单：播放全部、添加歌曲与编辑排序</sub></td>
+    <td align="center"><img src="docs/images/screens/ui-user-playlist.png" width="176" alt="自建歌单"/><br/><sub>自建歌单：添加歌曲、编辑排序与仅本机标记</sub></td>
   </tr>
 </table>
 
@@ -55,30 +55,20 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
     <td align="center"><img src="docs/images/screens/ui-player.png" width="176" alt="全屏播放"/><br/><sub>全屏播放：封面、当前播放源与换源入口常驻</sub></td>
     <td align="center"><img src="docs/images/screens/ui-lyrics.png" width="176" alt="歌词"/><br/><sub>歌词：逐行高亮，当前句保持视觉中心</sub></td>
     <td align="center"><img src="docs/images/screens/ui-queue.png" width="176" alt="播放队列"/><br/><sub>播放队列：切换页面不会丢失</sub></td>
-    <td align="center"><img src="docs/images/screens/beat-stage.png" width="176" alt="歌词背景律动"/><br/><sub>歌词背景律动：流光场随真实音频的低 / 中 / 高频变化</sub></td>
+    <td align="center"><img src="docs/images/screens/wall-poster-wall.png" width="176" alt="海报墙"/><br/><sub>海报墙：队列铺成封面墙，点一格就地放大，再点即从这首播放</sub></td>
   </tr>
 </table>
 
 <table>
   <tr>
-    <td align="center"><img src="docs/images/screens/player-layouts.png" width="300" alt="播放页三种排布"/><br/><sub>播放页：手机、平板、电视使用同一套部件，三种排法</sub></td>
-    <td align="center"><img src="docs/images/screens/fold-book.png" width="300" alt="折叠屏书本姿态"/><br/><sub>折叠屏书本姿态：左页封面与控制，右页歌词</sub></td>
-    <td align="center"><img src="docs/images/screens/wall-poster-wall.png" width="300" alt="海报墙"/><br/><sub>海报墙：队列铺成封面墙，点一格就地放大，再点即从这首播放</sub></td>
-  </tr>
-</table>
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/images/screens/widget-home.png" width="200" alt="桌面小组件"/><br/><sub>桌面小组件：长按添加，颜色与深浅跟随 App 外观设置</sub></td>
-    <td align="center"><img src="docs/images/screens/widget-now.png" width="220" alt="正在播放组件"/><br/><sub>正在播放：封面用播放页这首歌抽到的形状，带波浪进度条</sub></td>
-    <td align="center"><img src="docs/images/screens/widget-lyrics.png" width="220" alt="歌词组件"/><br/><sub>歌词：当前一句放大、下一句变淡</sub></td>
-    <td align="center"><img src="docs/images/screens/ui-tablet-tv.png" width="300" alt="平板与电视"/><br/><sub>平板与电视：左侧导航轨、内容网格与常驻播放窗格</sub></td>
+    <td align="center"><img src="docs/images/screens/ui-settings.png" width="176" alt="设置"/><br/><sub>设置：外观、播放页、播放与换源、均衡器、音乐源等分组入口</sub></td>
+    <td align="center"><img src="docs/images/screens/ui-sync.png" width="176" alt="音乐库同步"/><br/><sub>音乐库同步：GitHub Gist / Gitee / WebDAV，本机优先</sub></td>
   </tr>
 </table>
 
 ### 模拟器实拍
 
-设计稿之外，下面是一套同一版本 `1.0 (67)` 的模拟器实拍：手机、平板、电视、折叠屏与双面屏各一张，看的是同一套部件在不同屏幕上的真实排布。
+页面截图之外，下面是同一版本 `1.0 (67)` 在五种屏幕形态上的整机实拍：手机、平板、电视、折叠屏与双面屏各一张，看的是同一套部件在不同屏幕上的真实排布。
 
 <table>
   <tr>

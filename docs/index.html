@@ -190,7 +190,7 @@ footer .wrap{display:flex;gap:24px;flex-wrap:wrap;justify-content:space-between}
       <div>
         <p class="kicker">Screens</p>
         <h2>界面</h2>
-        <p>按同一套视觉规则单独绘制的界面稿。点下面的分类筛选；每张图都对应一个真实页面，不是概念图。</p>
+        <p>同一版本 <code>1.0 (67)</code> 在 Android 模拟器里的实拍，点下面的分类筛选；每张图都对应一个真实页面，不是概念图。</p>
       </div>
     </div>
     <div class="chips" id="chips"></div>
@@ -279,30 +279,19 @@ footer .wrap{display:flex;gap:24px;flex-wrap:wrap;justify-content:space-between}
 <script>
 const SHOTS = [
   {f:'images/screens/ui-chart.png', t:'榜单', c:'来源胶囊只决定榜单内容来源，播放仍按聚合策略自动换源', k:'浏览'},
-  {f:'images/screens/ui-chart-detail.png', t:'榜单详情', c:'播放全部、换源设置与逐曲音源状态', k:'浏览'},
+  {f:'images/screens/ui-chart-detail.png', t:'榜单详情', c:'播放全部、排序与视图切换，逐曲列出歌手与专辑', k:'浏览'},
   {f:'images/screens/ui-playlists.png', t:'歌单 · 推荐', c:'平台来源与推荐 / 分类切换，横向推荐行', k:'浏览'},
   {f:'images/screens/ui-playlist-detail.png', t:'平台歌单详情', c:'与榜单共用同一套媒体列表，操作位置一致', k:'浏览'},
   {f:'images/screens/ui-search.png', t:'聚合搜索', c:'按同一录音合并，逐条标出完整 / 试听 / VIP，异常平台单独显示', k:'搜索'},
   {f:'images/screens/ui-sources.png', t:'音源选择', c:'逐平台列出音源状态，可记住本曲使用的平台', k:'搜索'},
-  {f:'images/screens/ui-library.png', t:'我的 · 歌单', c:'同步状态直接出现在歌单行：已同步、待同步、有冲突', k:'我的'},
-  {f:'images/screens/ui-user-playlist.png', t:'自建歌单', c:'播放全部、添加歌曲、编辑排序与逐曲移除', k:'我的'},
-  {f:'images/screens/ui-sync.png', t:'同步中心', c:'连接状态、同步结果、冲突入口与后端选择', k:'我的'},
+  {f:'images/screens/ui-library.png', t:'我的 · 歌单', c:'喜欢、最近播放、下载与自建歌单一屏可达', k:'我的'},
+  {f:'images/screens/ui-user-playlist.png', t:'自建歌单', c:'添加歌曲、编辑排序与仅本机标记', k:'我的'},
+  {f:'images/screens/ui-sync.png', t:'音乐库同步', c:'GitHub Gist / Gitee / WebDAV，本机优先，可导入导出', k:'我的'},
+  {f:'images/screens/ui-settings.png', t:'设置', c:'索引式设置，改动即保存，不需要保存按钮', k:'设置'},
   {f:'images/screens/ui-player.png', t:'全屏播放', c:'封面铺满延伸到状态栏，当前播放源与换源入口常驻', k:'播放'},
   {f:'images/screens/ui-lyrics.png', t:'歌词', c:'逐行高亮与自动滚动，当前句保持视觉中心', k:'播放'},
   {f:'images/screens/ui-queue.png', t:'播放队列', c:'队列不属于任何页签，切换页面不会丢失', k:'播放'},
-  {f:'images/screens/beat-stage.png', t:'歌词背景律动', c:'流光场随真实音频的低 / 中 / 高频与鼓点变化', k:'播放'},
-  {f:'images/screens/player-shapes.png', t:'封面形状', c:'十二瓣、九瓣等形状随机抽取，暂停时变圆角方形', k:'播放'},
-  {f:'images/screens/player-layouts.png', t:'播放页三种排布', c:'手机、平板、电视使用同一套部件，三种排法', k:'播放', wide:true},
-  {f:'images/screens/fold-book.png', t:'折叠屏书本姿态', c:'左页封面与控制，右页歌词，按折痕分栏', k:'折叠', wide:true},
-  {f:'images/screens/wall-poster-wall.png', t:'海报墙', c:'队列铺成封面墙，点一格就地放大，再点从这首播放', k:'折叠', wide:true},
-  {f:'images/screens/wall-queue-panel.png', t:'从队列进入', c:'队列面板标题栏的网格按钮，或播放页“更多”菜单', k:'折叠'},
-  {f:'images/screens/wall-detail.png', t:'详情页海报视图', c:'歌单、专辑、榜单一键切成海报视图，下次打开沿用', k:'折叠'},
-  {f:'images/screens/widget-home.png', t:'桌面上的样子', c:'六款组件长按添加，颜色与深浅跟随 App 外观设置', k:'小组件'},
-  {f:'images/screens/widget-now.png', t:'正在播放', c:'七档尺寸，2×3 起有波浪进度条，4×3 带两句歌词', k:'小组件'},
-  {f:'images/screens/widget-lyrics.png', t:'歌词组件', c:'当前一句放大、下一句变淡，有翻译时跟在下面', k:'小组件'},
-  {f:'images/screens/widget-chart.png', t:'榜单组件', c:'任选一张榜，显示前几名与排名变化', k:'小组件'},
-  {f:'images/screens/ui-tablet-tv.png', t:'平板与电视', c:'左侧导航轨、内容网格与常驻播放窗格；遥控器按阅读顺序移动焦点', k:'平板电视', wide:true},
-  {f:'images/screens/ui-settings.png', t:'设置', c:'索引式设置，改动即保存；关于与更新用圆点提示有可用版本', k:'平板电视'}
+  {f:'images/screens/wall-poster-wall.png', t:'海报墙', c:'队列铺成封面墙，点一格就地放大，再点从这首播放', k:'播放', wide:true},
 ];
 
 const gallery = document.getElementById('gallery');
