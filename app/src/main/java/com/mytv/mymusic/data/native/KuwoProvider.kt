@@ -31,6 +31,7 @@ import java.util.Locale
 import java.util.zip.InflaterInputStream
 import kotlin.math.roundToLong
 import kotlin.random.Random
+import java.io.File
 
 private val KUWO_INFO = ProviderInfo(
     id = "kuwo",
@@ -56,6 +57,8 @@ private val KUWO_INFO = ProviderInfo(
 class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
     private val json = NativeHttp.json
     private val artistNameCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    /** 音质探测结果按 cookie 缓存：四档要各打一次取流接口，不能每次进设置页都重跑。 */
+    private val availableQualityCache = java.util.concurrent.ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     override val supportsSearchPagination: Boolean = true
 
@@ -116,11 +119,58 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         return fetchFullSongInfo(cookie, match.groupValues[1])
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
         if (song.source != "kuwo") throw IllegalArgumentException("source mismatch")
-        if (song.url.isNotEmpty()) return song.url
         val rid = song.extra["rid"]?.takeIf { it.isNotEmpty() } ?: song.id
+        if (quality != AudioQuality.Auto) return downloadAtQuality(cookie, rid, quality)
+        if (song.url.isNotEmpty()) return song.url
         return fetchAudioUrl(cookie, rid)
+    }
+
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
+        // 指定档位时不能用 song.url：解析歌曲时抓到的那条可能是自动选档的最高档
+        val url = if (quality != AudioQuality.Auto) {
+            downloadUrl(cookie, song, quality)
+        } else {
+            song.url.ifBlank { downloadUrl(cookie, song, AudioQuality.Auto) }
+        }
+        return PlayableStream(url = url, ext = extensionFromUrl(url).ifBlank { song.ext }, bitrate = song.bitrate)
+    }
+
+    /** 按档位取流：接口回的码率/格式低于请求档位就报错，不返回降档地址。 */
+    private suspend fun downloadAtQuality(cookie: String, rid: String, quality: AudioQuality): String {
+        val candidate = KUWO_QUALITY_CANDIDATES.firstOrNull { it.option.value == quality }
+            ?: throw IllegalStateException("unsupported kuwo audio quality: ${quality.id}")
+        if (rid.trim().isEmpty()) throw IllegalStateException("kuwo rid is empty")
+        val info = fetchKuwoAudioInfo(cookie, rid, candidate.br)
+            ?: throw IllegalStateException("kuwo audio quality ${quality.id} unavailable")
+        val actual = kuwoAudioQuality(info.bitrate, info.format)
+        if (actual != quality) {
+            throw IllegalStateException("kuwo returned ${actual.id} instead of ${quality.id}")
+        }
+        return info.url
+    }
+
+    /**
+     * 探测账号实际能选的档位：用固定曲目逐档取流，能取到才保留。
+     * 酷我的 VIP 档不是账号属性而是单曲版权，逐档探比只看会员标记准。
+     */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        val cacheKey = NativeCrypto.md5Hex(cookie)
+        availableQualityCache[cacheKey]?.let { return it }
+        val options = KUWO_QUALITY_CANDIDATES
+            .filter { candidate ->
+                try {
+                    downloadAtQuality(cookie, KUWO_QUALITY_PROBE_RID, candidate.option.value)
+                    true
+                } catch (error: Exception) {
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    false
+                }
+            }
+            .map { it.option }
+        availableQualityCache[cacheKey] = options
+        return options
     }
 
     /**
@@ -1114,6 +1164,27 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
         )
     }
 
+    /** 按 br 单档取流；接口不给 data.url 视为这一档不可用，返回 null。 */
+    private suspend fun fetchKuwoAudioInfo(cookie: String, rid: String, br: String): KuwoAudioInfo? {
+        val randomId = "C_APK_guanwang_${System.currentTimeMillis() * 1_000_000L + Random.nextLong(1_000_000L)}"
+        val url = "$MOBI_API?" + query(
+            "f" to "web",
+            "source" to "kwplayercar_ar_6.0.0.9_B_jiakong_vh.apk",
+            "from" to "PC",
+            "type" to "convert_url_with_sign",
+            "br" to br,
+            "rid" to rid,
+            "user" to randomId,
+        )
+        val body = runCatching {
+            NativeHttp.get(url, cookie = cookie, randomIp = true, userAgent = KUWO_USER_AGENT)
+        }.getOrNull() ?: return null
+        val data = runCatching { json.decodeFromString<KuwoMobiResponse>(body).data }.getOrNull()
+            ?: return null
+        if (data.url.isBlank()) return null
+        return KuwoAudioInfo(data.url, data.bitrate, data.format)
+    }
+
     private suspend fun fetchAudioUrl(cookie: String, rid: String): String {
         val randomId = "C_APK_guanwang_${System.currentTimeMillis() * 1_000_000L + Random.nextLong(1_000_000L)}"
         // 从最高档往下试；反过来会永远命中 128k，登录也拿不到无损
@@ -2051,6 +2122,8 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
 
     private data class KuwoFormatInfo(val format: String, val bitrate: String, val size: Long)
 
+    private data class KuwoAudioInfo(val url: String, val bitrate: Int, val format: String)
+
     private data class KuwoBangMenuItem(
         val id: String,
         val name: String,
@@ -2125,6 +2198,37 @@ class KuwoProvider : BaseNativeProvider(KUWO_INFO) {
             "apos" to "'",
             "nbsp" to " ",
         )
+    }
+}
+
+/** 一个音质档与它的取流接口参数：br 是 mobi 接口的取值（如 "flac"），不是码率。 */
+internal data class KuwoQualityCandidate(val option: AudioQualityOption, val br: String)
+
+internal val KUWO_QUALITY_CANDIDATES: List<KuwoQualityCandidate> = listOf(
+    KuwoQualityCandidate(AudioQualityOption(AudioQuality.HiRes, "Hi-Res 无损", "flac"), "2000kflac"),
+    KuwoQualityCandidate(AudioQualityOption(AudioQuality.Lossless, "无损音质", "flac", vip = true), "flac"),
+    KuwoQualityCandidate(AudioQualityOption(AudioQuality.High, "高品质 320k", "mp3", 320), "320kmp3"),
+    KuwoQualityCandidate(AudioQualityOption(AudioQuality.Standard, "标准音质 128k", "mp3", 128), "128kmp3"),
+)
+
+/** 酷我的可选音质档，从高到低。 */
+internal val KUWO_QUALITY_LADDER: AudioQualityLadder =
+    AudioQualityLadder.of(KUWO_QUALITY_CANDIDATES.map { it.option })
+
+/** 探测用的固定曲目：曲库常青，四档都有。 */
+private const val KUWO_QUALITY_PROBE_RID = "624683929"
+
+/** 取回来的流实际是哪一档；接口不给码率时按格式判断，和 Go 侧 kuwoAudioQuality 一致。 */
+internal fun kuwoAudioQuality(bitrate: Int, format: String): AudioQuality {
+    val normalizedFormat = format.trim().lowercase(Locale.ROOT)
+    val kbps = if (bitrate > 100_000) bitrate / 1000 else bitrate
+    return when {
+        normalizedFormat.contains("flac") && kbps >= 1000 -> AudioQuality.HiRes
+        normalizedFormat.contains("flac") -> AudioQuality.Lossless
+        kbps >= 280 -> AudioQuality.High
+        kbps >= 180 -> AudioQuality.Higher
+        kbps >= 96 -> AudioQuality.Standard
+        else -> AudioQuality.Low
     }
 }
 

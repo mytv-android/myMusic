@@ -25,6 +25,12 @@ import java.net.URLEncoder
 import java.util.Base64
 import java.util.Locale
 
+/** 探测用的曲目（music-lib apple/quality.go 同款）；Apple 只会给这一首的官方试听。 */
+private const val APPLE_QUALITY_PROBE_SONG_ID = "255921025"
+
+/** Apple 唯一可明文播放的档：官方试听片段。 */
+private val APPLE_PREVIEW_QUALITY = AudioQualityOption(AudioQuality.Preview, "试听片段", "m4a")
+
 private val APPLE_INFO = ProviderInfo(
     id = "apple",
     name = "Apple Music",
@@ -52,6 +58,9 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
 
     @Volatile
     private var cachedToken: String = ""
+
+    /** 只有一档，探测成本低；仍按 cookie 缓存，避免每次进设置页重复解析。 */
+    private val availableQualityCache = java.util.concurrent.ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     /**
      * 榜单 feed 的短期内存缓存。榜单页一次加载会为同一个商店拉三遍：8 个商店的封面、
@@ -86,13 +95,28 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
         return songFromCatalog(resource, storefront(cookie))
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
+        // 除预览外没有明文整曲（整曲要 DRM 解密），明确报错而不是悄悄退回试听
+        if (quality != AudioQuality.Auto && quality != AudioQuality.Preview) {
+            throw IllegalArgumentException("apple full-quality streams require DRM support; only preview is available")
+        }
         if (song.url.isNotBlank()) return song.url
         val parsed = parseSong(cookie, song.id)
         if (parsed.url.isBlank()) {
             throw IllegalStateException("apple music: no preview URL available")
         }
         return parsed.url
+    }
+
+    /** Apple 没有 DRM 解密就只能拿官方试听片段，这是唯一一档。 */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        availableQualityCache[cookie]?.let { return it }
+        val url = runCatching { downloadUrl(cookie, Song(source = "apple", id = APPLE_QUALITY_PROBE_SONG_ID), AudioQuality.Auto) }
+            .getOrNull()
+        if (url.isNullOrBlank()) return emptyList()
+        val options = listOf(APPLE_PREVIEW_QUALITY)
+        availableQualityCache[cookie] = options
+        return options
     }
 
     /**
@@ -103,7 +127,16 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
      * `SourceResolver` 会合进 `Song.extra`，最终由 `MusicViewModel.mediaItem()`
      * 拼成 `MediaItem.DrmConfiguration`。
      */
-    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
+        if (quality != AudioQuality.Auto && quality != AudioQuality.Preview) {
+            throw IllegalArgumentException("apple full-quality streams require DRM support; only preview is available")
+        }
+        // 明确要试听片段就不再拉整曲清单；自动档保持整曲优先、失败退回试听
+        if (quality == AudioQuality.Preview) {
+            val preview = song.url.ifBlank { parseSong(cookie, song.id).url }
+            if (preview.isBlank()) throw IllegalStateException("apple music: 没有可播放的地址")
+            return PlayableStream(url = preview, ext = "m4a", bitrate = 0, preview = true)
+        }
         // 官方客户端（MusicKit v3 prepareCatalogSong）走 /v1/play/assets 拿清单，和目录里
         // enhancedHls 指向的**不是同一份资产**：后者有一类只带 FairPlay 密钥（安卓放不了），
         // play/assets 回的那份带 Widevine。按这个顺序试，前一份拿不到 Widevine 再换下一份。

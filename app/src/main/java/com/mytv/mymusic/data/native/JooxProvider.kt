@@ -18,6 +18,7 @@ import kotlinx.serialization.json.jsonObject
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.Base64
+import java.io.File
 
 private val JOOX_INFO = ProviderInfo(
     id = "joox",
@@ -37,6 +38,8 @@ private val JOOX_INFO = ProviderInfo(
 
 class JooxProvider : BaseNativeProvider(JOOX_INFO) {
     private val json = NativeHttp.json
+    /** 音质探测结果按 cookie 缓存：探测要抓一首曲目的完整详情，不能每次进设置页都重跑。 */
+    private val availableQualityCache = java.util.concurrent.ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         val url = SEARCH_API + "?" + encodeParams(
@@ -67,12 +70,179 @@ class JooxProvider : BaseNativeProvider(JOOX_INFO) {
         return fetchSongInfo(cookie, songId)
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
         if (song.source != "joox") throw IllegalArgumentException("source mismatch")
-        // The interface returns only a URL, so a resolved URL/format cannot be written back to Song.
-        if (song.url.isNotEmpty()) return song.url
-        val songId = song.extra["songid"]?.takeIf { it.isNotEmpty() } ?: song.id
-        return fetchSongInfo(cookie, songId).url
+        if (quality == AudioQuality.Auto) {
+            // The interface returns only a URL, so a resolved URL/format cannot be written back to Song.
+            if (song.url.isNotEmpty()) return song.url
+            val songId = song.extra["songid"]?.takeIf { it.isNotEmpty() } ?: song.id
+            return fetchSongInfo(cookie, songId).url
+        }
+        val songId = (song.extra["songid"]?.takeIf { it.isNotEmpty() } ?: song.id).trim()
+        if (songId.isEmpty()) throw IllegalArgumentException("joox song id is empty")
+        // 指定档位：只认这一档，拿到低档就报错，不回退到 320k
+        return jooxDownloadUrlWithQuality(cookie, songId, quality)
+    }
+
+    /** 探测账号能拿到的档：用搜索结果的前几首取详情，只报实际返回了地址的档。 */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        availableQualityCache[cookie]?.let { return it }
+        val songs = runCatching { searchSongs(cookie, JOOX_QUALITY_PROBE_KEYWORD) }
+            .getOrDefault(emptyList())
+        val options = runCatching {
+            for (song in songs.take(5)) {
+                val detail = fetchJooxSongDetail(cookie, song.id)
+                val found = detail.availableQualityOptions()
+                if (found.isNotEmpty()) return@runCatching found
+            }
+            emptyList<AudioQualityOption>()
+        }.getOrDefault(emptyList())
+        availableQualityCache[cookie] = options
+        return options
+    }
+
+    private suspend fun jooxDownloadUrlWithQuality(cookie: String, songId: String, quality: AudioQuality): String {
+        if (jooxQualityCandidateFor(quality) == null) {
+            throw IllegalArgumentException("unsupported joox audio quality: $quality")
+        }
+        val detail = fetchJooxSongDetail(cookie, songId)
+        return detail.candidateUrl(quality)
+            ?: throw IllegalStateException("joox audio quality $quality is unavailable")
+    }
+
+    /**
+     * 两条链路：先试 openjoox2 的 track（记得带 jooxTrackSecret 签名），拿不到再退回
+     * legacy web-fcgi-bin/web_get_songinfo。与 music-lib 的 fetchSongDetail 一致。
+     */
+    private suspend fun fetchJooxSongDetail(cookie: String, songIdInput: String): JooxSongDetail {
+        val songId = songIdInput.trim()
+        if (songId.isEmpty()) throw IllegalArgumentException("joox song id is empty")
+        var openError: Exception? = null
+        var legacyError: Exception? = null
+        val open = try {
+            fetchJooxOpenTrack(cookie, songId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            openError = error
+            null
+        }
+        if (open != null) {
+            val detail = JooxSongDetail.fromOpen(open)
+            if (detail.bestUrl().isNotEmpty()) return detail
+        }
+        val legacy = try {
+            fetchJooxLegacyDetail(cookie, songId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            legacyError = error
+            null
+        }
+        if (legacy != null && legacy.bestUrl().isNotEmpty()) return legacy
+        when {
+            open != null && legacy != null -> throw IllegalStateException("joox returned no playable stream")
+            open == null && legacy == null ->
+                throw IllegalStateException("joox track: ${openError?.message}; legacy song info: ${legacyError?.message}")
+            open != null -> throw IllegalStateException("joox legacy song info: ${legacyError?.message}")
+            else -> throw IllegalStateException("joox track: ${openError?.message}; legacy returned no playable stream")
+        }
+    }
+
+    private suspend fun fetchJooxOpenTrack(cookie: String, songId: String): JooxOpenTrackResponse {
+        val values = jooxCookieValues(cookie)
+        val uid = values["wmid"].orEmpty().ifBlank { "142420656" }
+        val usk = values["session_key"].orEmpty().ifBlank { "2a5d97d05dc8fe238150184eaf3519ad" }
+        val signed = listOf(
+            "country" to COUNTRY,
+            "lang" to LANG,
+            "lyric" to "1",
+            "fs" to "1",
+            "im" to "0",
+            "uid" to uid,
+            "usk" to usk,
+            "id" to songId,
+        )
+        val secret = jooxTrackSecret(signed)
+        val query = (signed.dropLast(1).map { (key, value) -> "$key=${jooxPercentEncode(value)}" } +
+            "secret=$secret").joinToString("&")
+        val pathId = songId.replace("/", "_")
+        val url = "https://cache.api.joox.com/openjoox2/v1/track/$pathId?$query"
+        val body = jooxGet(
+            url,
+            cookie,
+            headers = mapOf(
+                "Accept" to "application/json, text/plain, */*",
+                "Origin" to HOME,
+                "Referer" to "$HOME/",
+            ),
+        )
+        val response = json.decodeFromString<JooxOpenTrackResponse>(body)
+        if (response.id.isBlank() && response.name.isBlank()) {
+            throw IllegalStateException("joox open track returned an empty response")
+        }
+        return response
+    }
+
+    private suspend fun fetchJooxLegacyDetail(cookie: String, songId: String): JooxSongDetail {
+        val url = SONG_INFO_API + "?" + encodeParams(
+            mapOf("songid" to songId, "lang" to LANG, "country" to COUNTRY)
+        )
+        var body = jooxGet(url, cookie)
+        if (body.startsWith("MusicInfoCallback(")) {
+            body = body.removePrefix("MusicInfoCallback(").removeSuffix(")")
+        }
+        return JooxSongDetail.legacy(json.decodeFromString<JooxSongInfoResponse>(body))
+    }
+
+    /** 签名：salt + 排序好的 key=percentEncode(value) 求 md5。与 Go 的 jooxTrackSecret 一致。 */
+    private fun jooxTrackSecret(params: List<Pair<String, String>>): String {
+        val joined = params.joinToString("&") { (key, value) -> "$key=${jooxPercentEncode(value)}" }
+        return NativeCrypto.md5Hex(JOOX_OPEN_TRACK_SALT + joined)
+    }
+
+    /** 与 Go 的 jooxPercentEncode 一致：保留 !*'() 不转义，其余非 unreserved 字节转大写 %HH。 */
+    private fun jooxPercentEncode(value: String): String {
+        val safe = "!*'()"
+        val builder = StringBuilder()
+        for (byte in value.toByteArray(Charsets.UTF_8)) {
+            val code = byte.toInt() and 0xff
+            val char = code.toChar()
+            if (char in 'a'..'z' || char in 'A'..'Z' || char in '0'..'9' ||
+                char == '-' || char == '.' || char == '_' || char == '~' || safe.contains(char)
+            ) {
+                builder.append(char)
+            } else {
+                builder.append('%').append(HEX_UPPER[code ushr 4]).append(HEX_UPPER[code and 0x0f])
+            }
+        }
+        return builder.toString()
+    }
+
+    private fun jooxCookieValues(cookie: String): Map<String, String> {
+        val values = mutableMapOf<String, String>()
+        for (item in cookie.split(";")) {
+            val trimmed = item.trim()
+            val index = trimmed.indexOf('=')
+            if (index <= 0) continue
+            values[trimmed.substring(0, index).trim()] = trimmed.substring(index + 1).trim()
+        }
+        return values
+    }
+
+    /** 指定档位时不能走基类的 song.url 短路（那是自动选的最高档），必须重新按档取流。 */
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
+        val url = if (quality == AudioQuality.Auto) {
+            song.url.ifBlank { downloadUrl(cookie, song, AudioQuality.Auto) }
+        } else {
+            downloadUrl(cookie, song, quality)
+        }
+        val option = jooxQualityCandidateFor(quality)?.option
+        return PlayableStream(
+            url = url,
+            ext = option?.format ?: song.ext.ifBlank { extensionFromUrl(url) },
+            bitrate = option?.bitrate?.takeIf { it > 0 } ?: song.bitrate,
+        )
     }
 
     override suspend fun lyrics(cookie: String, song: Song): String {
@@ -638,10 +808,10 @@ class JooxProvider : BaseNativeProvider(JOOX_INFO) {
         return page
     }
 
-    private suspend fun jooxGet(url: String, cookie: String): String =
+    private suspend fun jooxGet(url: String, cookie: String, headers: Map<String, String> = emptyMap()): String =
         NativeHttp.get(
             url,
-            headers = mapOf("X-Forwarded-For" to X_FORWARDED_FOR),
+            headers = mapOf("X-Forwarded-For" to X_FORWARDED_FOR) + headers,
             cookie = cookie.ifEmpty { DEFAULT_COOKIE },
             userAgent = USER_AGENT,
         )
@@ -831,6 +1001,7 @@ class JooxProvider : BaseNativeProvider(JOOX_INFO) {
         const val DEFAULT_COOKIE =
             "wmid=142420656; user_type=1; country=id; session_key=2a5d97d05dc8fe238150184eaf3519ad;"
         const val X_FORWARDED_FOR = "36.73.34.109"
+        const val HEX_UPPER = "0123456789ABCDEF"
         const val COUNTRY = "sg"
         const val LANG = "zh_cn"
         const val HOME = "https://www.joox.com"
@@ -1154,3 +1325,144 @@ private data class JooxSongInfoResponse(
 private data class JooxLyricResponse(
     val lyric: String = "",
 )
+
+@Serializable
+private data class JooxOpenTrackResponse(
+    val id: String = "",
+    val name: String = "",
+    @SerialName("album_name") val albumName: String = "",
+    @SerialName("play_url_list") val playUrlList: List<String> = emptyList(),
+)
+
+/** 探测关键词，与 music-lib joox/quality.go 一致。 */
+private const val JOOX_QUALITY_PROBE_KEYWORD = "周杰伦"
+
+/** open track 签名盐，与 Go 的 jooxOpenTrackSalt 一致。 */
+private const val JOOX_OPEN_TRACK_SALT = "Jo0x@t3Nc3nT"
+
+private data class JooxQualityCandidate(
+    val option: AudioQualityOption,
+    /** legacy 响应里 kbps_map 用的键；无损档没有对应的键，只认 open 链路。 */
+    val key: String,
+    val legacyUrl: (JooxSongInfoResponse) -> String,
+)
+
+/**
+ * JOOX 的音质档，从高到低。无损只在 open track 的 play_url_list 里出现（地址含 /F000），
+ * legacy 的三个地址只能给到 320k。标签/格式/码率照抄 music-lib 的 model.AudioQualityOption。
+ */
+private val JOOX_QUALITY_CANDIDATES = listOf(
+    JooxQualityCandidate(
+        AudioQualityOption(AudioQuality.Lossless, "无损音质", "flac", vip = true),
+        key = "",
+    ) { "" },
+    JooxQualityCandidate(
+        AudioQualityOption(AudioQuality.High, "高品质", "mp3", 320),
+        key = "320",
+    ) { it.r320Url },
+    JooxQualityCandidate(
+        AudioQualityOption(AudioQuality.Higher, "较高品质", "mp3", 192),
+        key = "192",
+    ) { it.r192Url },
+    JooxQualityCandidate(
+        AudioQualityOption(AudioQuality.Standard, "标准音质", "m4a", 128),
+        key = "128",
+    ) { it.mp3Url },
+    JooxQualityCandidate(
+        AudioQualityOption(AudioQuality.Low, "低品质", "m4a", 96),
+        key = "96",
+    ) { it.m4aUrl },
+)
+
+internal val JOOX_QUALITY_LADDER: AudioQualityLadder =
+    AudioQualityLadder.of(JOOX_QUALITY_CANDIDATES.map { it.option })
+
+private fun jooxQualityCandidateFor(quality: AudioQuality): JooxQualityCandidate? =
+    JOOX_QUALITY_CANDIDATES.firstOrNull { it.option.value == quality }
+
+/** 从地址里认出档位：open 链路的播放地址按目录名区分（与 Go 的 jooxQualityFromStreamURL 一致）。 */
+private fun jooxQualityFromStreamUrl(streamUrl: String): AudioQuality? {
+    val upper = streamUrl.uppercase()
+    return when {
+        upper.contains("/F000") || upper.contains(".FLAC") -> AudioQuality.Lossless
+        upper.contains("/M800") -> AudioQuality.High
+        upper.contains("/M400") -> AudioQuality.Higher
+        upper.contains("/M500") || upper.contains("/C400") -> AudioQuality.Standard
+        upper.contains("/C200") || upper.contains("/M200") -> AudioQuality.Low
+        else -> null
+    }
+}
+
+/** 一首歌两个来源的详情：open track 的地址只按档位归好，legacy 的走 kbps_map 可用性判断。 */
+private class JooxSongDetail(
+    private val openUrls: Map<AudioQuality, String>?,
+    private val legacy: JooxSongInfoResponse?,
+    private val kbps: Map<String, JsonElement>,
+) {
+    fun candidateUrl(quality: AudioQuality): String? {
+        val candidate = jooxQualityCandidateFor(quality) ?: return null
+        if (openUrls != null) return openUrls[quality]
+        val resp = legacy ?: return null
+        val streamUrl = candidate.legacyUrl(resp).trim()
+        if (streamUrl.isEmpty()) return null
+        if (kbps.isEmpty()) return streamUrl
+        val value = kbps[candidate.key] ?: return null
+        return if (jooxKbpsValueAvailable(value)) streamUrl else null
+    }
+
+    fun availableQualityOptions(): List<AudioQualityOption> =
+        JOOX_QUALITY_CANDIDATES.mapNotNull { candidate ->
+            if (candidateUrl(candidate.option.value) != null) candidate.option else null
+        }
+
+    fun bestUrl(): String {
+        for (candidate in JOOX_QUALITY_CANDIDATES) {
+            candidateUrl(candidate.option.value)?.let { if (it.isNotEmpty()) return it }
+        }
+        return legacy?.let { firstJooxLegacyUrl(it) }.orEmpty()
+    }
+
+    companion object {
+        fun fromOpen(resp: JooxOpenTrackResponse): JooxSongDetail {
+            val urls = mutableMapOf<AudioQuality, String>()
+            for (raw in resp.playUrlList) {
+                val url = unescapeJooxHtml(raw).trim()
+                if (url.isEmpty()) continue
+                val quality = jooxQualityFromStreamUrl(url) ?: continue
+                if (urls[quality] == null) urls[quality] = url
+            }
+            // 认不出档位时按 Go 的做法把第一条当高品质
+            if (urls.isEmpty() && resp.playUrlList.isNotEmpty()) {
+                val first = unescapeJooxHtml(resp.playUrlList[0]).trim()
+                if (first.isNotEmpty()) urls[AudioQuality.High] = first
+            }
+            return JooxSongDetail(openUrls = urls, legacy = null, kbps = emptyMap())
+        }
+
+        fun legacy(resp: JooxSongInfoResponse): JooxSongDetail {
+            val raw = resp.kbpsMap
+            val kbps: Map<String, JsonElement> = when {
+                raw == null || raw is JsonNull -> emptyMap()
+                raw is JsonPrimitive && raw.isString ->
+                    runCatching { NativeHttp.json.parseToJsonElement(raw.content).jsonObject }.getOrNull().orEmpty()
+                raw is JsonObject -> raw
+                else -> emptyMap()
+            }
+            return JooxSongDetail(openUrls = null, legacy = resp, kbps = kbps)
+        }
+    }
+}
+
+private fun jooxKbpsValueAvailable(value: JsonElement): Boolean {
+    if (value is JsonNull) return false
+    val primitive = value as? JsonPrimitive ?: return false
+    if (primitive.isString) return primitive.content.trim().let { it.isNotEmpty() && it != "0" }
+    return (primitive.content.toDoubleOrNull() ?: 0.0) > 0
+}
+
+private fun firstJooxLegacyUrl(resp: JooxSongInfoResponse): String =
+    listOf(resp.r320Url, resp.r192Url, resp.mp3Url, resp.m4aUrl).firstOrNull { it.trim().isNotEmpty() }.orEmpty()
+
+private fun unescapeJooxHtml(value: String): String =
+    value.replace("&amp;", "&").replace("&#34;", "\"").replace("&#39;", "'")
+        .replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">")

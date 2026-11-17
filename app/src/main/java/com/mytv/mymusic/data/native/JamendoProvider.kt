@@ -8,13 +8,25 @@ import com.mytv.mymusic.data.Song
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.File
+import java.io.IOException
 import java.net.URLEncoder
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.random.Random
 
 private val JAMENDO_INFO = ProviderInfo(
@@ -42,6 +54,7 @@ private val JAMENDO_INFO = ProviderInfo(
 
 class JamendoProvider : BaseNativeProvider(JAMENDO_INFO) {
     private val json = NativeHttp.json
+    private val availableQualityCache = ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         val body = searchByType(cookie, keyword, "track")
@@ -54,23 +67,86 @@ class JamendoProvider : BaseNativeProvider(JAMENDO_INFO) {
         return getTrackByID(cookie, match.groupValues[1], JamendoTrackMeta())
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
         if (song.source != "jamendo") throw IllegalArgumentException("source mismatch")
-        if (song.url.isNotEmpty()) return song.url
+        if (quality == AudioQuality.Auto) {
+            if (song.url.isNotEmpty()) return song.url
 
-        val trackId = song.extra["track_id"]?.takeIf { it.isNotEmpty() } ?: song.id
-        if (trackId.isEmpty()) throw IllegalArgumentException("id missing")
+            val trackId = song.extra["track_id"]?.takeIf { it.isNotEmpty() } ?: song.id
+            if (trackId.isEmpty()) throw IllegalArgumentException("id missing")
 
-        val info = getTrackByID(
-            cookie,
-            trackId,
-            JamendoTrackMeta(
-                artistName = song.artist,
-                albumName = song.album,
-                albumId = song.albumId,
-            ),
+            val info = getTrackByID(
+                cookie,
+                trackId,
+                JamendoTrackMeta(
+                    artistName = song.artist,
+                    albumName = song.album,
+                    albumId = song.albumId,
+                ),
+            )
+            return info.url
+        }
+
+        // 指定档位：只取这一档地址并确认能访问，接口没给或 404 直接报错
+        val candidate = jamendoQualityCandidateFor(quality)
+            ?: throw IllegalArgumentException("unsupported jamendo audio quality: $quality")
+        val trackId = (song.extra["track_id"]?.takeIf { it.isNotEmpty() } ?: song.id).trim()
+        if (trackId.isEmpty()) throw IllegalArgumentException("jamendo track id is empty")
+        val item = fetchTrackItem(cookie, trackId)
+        val streamUrl = jamendoQualityUrl(item, candidate)
+        if (streamUrl.isEmpty()) throw IllegalStateException("jamendo audio quality $quality is unavailable")
+        jamendoProbeStream(streamUrl)
+        return streamUrl
+    }
+
+    /**
+     * 探测账号能拿到的档：Jamendo 会挂出 mp33 地址但存储后端对该曲 404，所以必须真请求一遍。
+     * 抓一批曲目、每档逐个试，有一首能通就算这一档可用。
+     */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        availableQualityCache[cookie]?.let { return it }
+        val items = runCatching { jamendoQualityProbeItems(cookie) }.getOrNull() ?: return emptyList()
+        val options = buildList {
+            for (candidate in JAMENDO_QUALITY_CANDIDATES) {
+                for (item in items) {
+                    val streamUrl = jamendoQualityUrl(item, candidate)
+                    if (streamUrl.isEmpty()) continue
+                    if (runCatching { jamendoProbeStream(streamUrl) }.isSuccess) {
+                        add(candidate.option)
+                        break
+                    }
+                }
+            }
+        }
+        availableQualityCache[cookie] = options
+        return options
+    }
+
+    private suspend fun jamendoQualityProbeItems(cookie: String): List<JamendoTrackItem> {
+        val body = searchByType(cookie, JAMENDO_QUALITY_PROBE_KEYWORD, "track")
+        return json.decodeFromString<List<JamendoTrackItem>>(body).take(8)
+    }
+
+    private suspend fun fetchTrackItem(cookie: String, id: String): JamendoTrackItem {
+        val body = apiGet(cookie, "$TRACK_API?" + encodeParams(mapOf("id" to id)), TRACK_API_PATH)
+        val results = json.decodeFromString<List<JamendoTrackItem>>(body)
+        if (results.isEmpty()) throw IllegalStateException("track not found")
+        return results[0]
+    }
+
+    /** 指定档位时不能走基类的 song.url 短路（那是自动选的最高档），必须重新按档取流。 */
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
+        val url = if (quality == AudioQuality.Auto) {
+            song.url.ifBlank { downloadUrl(cookie, song, AudioQuality.Auto) }
+        } else {
+            downloadUrl(cookie, song, quality)
+        }
+        val option = jamendoQualityCandidateFor(quality)?.option
+        return PlayableStream(
+            url = url,
+            ext = option?.format ?: song.ext.ifBlank { extensionFromUrl(url) },
+            bitrate = option?.bitrate?.takeIf { it > 0 } ?: song.bitrate,
         )
-        return info.url
     }
 
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
@@ -401,6 +477,37 @@ class JamendoProvider : BaseNativeProvider(JAMENDO_INFO) {
         return "" to ""
     }
 
+    /** Jamendo 对不存在的档也会给地址，真发一个 HEAD 才知道 404；不能 GET，整曲文件太大。 */
+    private suspend fun jamendoProbeStream(streamUrl: String) {
+        val request = Request.Builder()
+            .url(streamUrl)
+            .head()
+            .header("User-Agent", USER_AGENT)
+            .header("Referer", REFERER)
+            .build()
+        suspendCancellableCoroutine<Unit> { continuation ->
+            val call = JAMENDO_PROBE_CLIENT.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, error: IOException) {
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        if (!it.isSuccessful) {
+                            if (continuation.isActive) {
+                                continuation.resumeWithException(IOException("HTTP ${it.code}"))
+                            }
+                            return
+                        }
+                        if (continuation.isActive) continuation.resume(Unit)
+                    }
+                }
+            })
+        }
+    }
+
     private fun pickJamendoDescription(description: Map<String, String?>): String {
         for (key in DESCRIPTION_LANGUAGES) {
             val value = description[key]?.trim().orEmpty()
@@ -455,6 +562,70 @@ class JamendoProvider : BaseNativeProvider(JAMENDO_INFO) {
         val QUALITY_ORDER = listOf("flac", "mp33", "mp32", "mp3", "ogg")
         val DESCRIPTION_LANGUAGES = listOf("en", "fr", "de", "es", "it", "ru", "pt", "pl")
     }
+}
+
+private const val JAMENDO_QUALITY_PROBE_KEYWORD = "love"
+
+/** 探测流是否存在的 HEAD 客户端：整曲文件太大，不能 GET。 */
+private val JAMENDO_PROBE_CLIENT: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .callTimeout(20, TimeUnit.SECONDS)
+        .build()
+}
+
+private data class JamendoQualitySource(val field: String, val stream: Boolean = false)
+
+private data class JamendoQualityCandidate(
+    val option: AudioQualityOption,
+    val sources: List<JamendoQualitySource>,
+)
+
+/**
+ * Jamendo 的可下载档，从高到低。一首曲的 download / stream 两个 map 里字段名不同，
+ * 每档按顺序找第一个有值的地址。标签照抄 music-lib 的 model.AudioQualityOption。
+ */
+private val JAMENDO_QUALITY_CANDIDATES = listOf(
+    JamendoQualityCandidate(
+        AudioQualityOption(AudioQuality.Lossless, "无损音质", "flac"),
+        listOf(JamendoQualitySource("flac"), JamendoQualitySource("flac", stream = true)),
+    ),
+    JamendoQualityCandidate(
+        AudioQualityOption(AudioQuality.High, "高品质", "mp3", 320),
+        listOf(JamendoQualitySource("mp33"), JamendoQualitySource("mp33", stream = true)),
+    ),
+    JamendoQualityCandidate(
+        AudioQualityOption(AudioQuality.Higher, "较高品质", "mp3", 192),
+        listOf(
+            JamendoQualitySource("mp32"),
+            JamendoQualitySource("mp32", stream = true),
+            JamendoQualitySource("mp3"),
+        ),
+    ),
+    JamendoQualityCandidate(
+        AudioQualityOption(AudioQuality.Standard, "标准音质", "ogg", 112),
+        listOf(JamendoQualitySource("ogg"), JamendoQualitySource("ogg", stream = true)),
+    ),
+    JamendoQualityCandidate(
+        AudioQualityOption(AudioQuality.Low, "低品质", "mp3", 96),
+        listOf(JamendoQualitySource("mp3", stream = true)),
+    ),
+)
+
+internal val JAMENDO_QUALITY_LADDER: AudioQualityLadder =
+    AudioQualityLadder.of(JAMENDO_QUALITY_CANDIDATES.map { it.option })
+
+private fun jamendoQualityCandidateFor(quality: AudioQuality): JamendoQualityCandidate? =
+    JAMENDO_QUALITY_CANDIDATES.firstOrNull { it.option.value == quality }
+
+private fun jamendoQualityUrl(item: JamendoTrackItem, candidate: JamendoQualityCandidate): String {
+    for (source in candidate.sources) {
+        val streams = if (source.stream) item.stream else item.download
+        val url = streams[source.field]?.trim().orEmpty()
+        if (url.isNotEmpty()) return url
+    }
+    return ""
 }
 
 private fun albumLink(id: String): String = "https://www.jamendo.com/album/$id"

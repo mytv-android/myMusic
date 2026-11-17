@@ -77,6 +77,8 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     private val json = NativeHttp.json
     private val urlCache = ConcurrentHashMap<String, CachedUrl>()
     private val shortLinkCache = ConcurrentHashMap<String, String>()
+    /** 音质探测结果按 cookie 缓存：探测要打十几次取流接口，不能每次进设置页都重跑。 */
+    private val availableQualityCache = ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     override val supportsSearchPagination: Boolean = true
 
@@ -156,18 +158,54 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         return if (url.isNotBlank()) song.copy(url = url) else song
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String = resolveStream(cookie, song).url
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String =
+        resolveStream(cookie, song, quality).url
 
-    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
-        val stream = resolveStream(cookie, song)
+    override suspend fun playableStream(
+        cookie: String,
+        song: Song,
+        workDir: File,
+        quality: AudioQuality,
+    ): PlayableStream {
+        val stream = resolveStream(cookie, song, quality)
         return PlayableStream(stream.url, stream.ext, stream.bitrate, stream.level, preview = stream.preview, extra = stream.extra)
     }
 
-    private suspend fun resolveStream(cookie: String, song: Song): NeteaseStream {
+    /**
+     * 探测当前账号实际能选的音质档。先用一首固定的热门曲目从最高档往下探，探不到再换成搜索
+     * 结果里的前几首——单曲可能缺某一档（没上架无损、地区限制），换歌才有结论。
+     */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        availableQualityCache[cookie]?.let { return it }
+        val probeSongs = buildList {
+            add(Song(id = NETEASE_QUALITY_PROBE_SONG_ID, source = "netease"))
+            val searched = runCatching { searchSongs(cookie, NETEASE_QUALITY_PROBE_KEYWORD) }
+                .getOrDefault(emptyList())
+                .filter { it.id != NETEASE_QUALITY_PROBE_SONG_ID }
+                .take(4)
+            addAll(searched)
+        }
+        for (song in probeSongs) {
+            for (option in NETEASE_QUALITY_LADDER.options) {
+                if (runCatching { resolveStream(cookie, song, option.value) }.isSuccess) {
+                    // 会员能力是区间：拿到高档也意味着低档可用，免得单曲低档端点一时拒绝就把低档全删掉
+                    val options = NETEASE_QUALITY_LADDER.ladderFrom(option.value)
+                    availableQualityCache[cookie] = options
+                    return options
+                }
+            }
+        }
+        availableQualityCache[cookie] = emptyList()
+        return emptyList()
+    }
+
+    private suspend fun resolveStream(cookie: String, song: Song, quality: AudioQuality): NeteaseStream {
         if (song.source != "netease") throw IllegalArgumentException("source mismatch")
         val songId = song.extra["song_id"]?.takeIf { it.isNotBlank() } ?: song.id
-        val levels = preferredLevels(song)
-        val cacheKey = "$songId:${levels.joinToString(",")}:${NativeCrypto.md5Hex(cookie)}"
+        // 指定了档位就只准那一档：拿不到报错，不静默降到 128k
+        val pinned = quality != AudioQuality.Auto && NETEASE_QUALITY_LADDER.supports(quality)
+        val levels = if (pinned) neteaseLevelsForQuality(quality) else preferredLevels(song)
+        val cacheKey = "$songId:${levels.joinToString(",")}:$quality:${NativeCrypto.md5Hex(cookie)}"
         urlCache[cacheKey]?.let { cached ->
             if (cached.expiresAt > System.currentTimeMillis()) return cached.stream
             urlCache.remove(cacheKey)
@@ -179,8 +217,12 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         if (cookie.isNotBlank()) {
             for (level in levels) {
                 val stream = runCatching { getEapiStream(cookie, songId, level) }.getOrNull() ?: continue
+                if (pinned && !NETEASE_QUALITY_LADDER.atLeast(inferAudioQuality(stream.level, stream.ext, stream.bitrate, NETEASE_STREAM_QUALITY_BY_LEVEL), quality)) continue
                 urlCache[cacheKey] = CachedUrl(stream, System.currentTimeMillis() + CACHE_TTL_MS)
                 return stream
+            }
+            if (pinned) {
+                throw IllegalStateException("netease $quality unavailable (might be vip or copyright restricted)")
             }
         }
 
@@ -194,6 +236,8 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
                 .getOrNull()?.data?.firstOrNull() ?: continue
             val url = item.url
             if (url.isNotBlank()) {
+                // 指定高档时不允许用 128k 兜底：接口对没权限的档就是这么“降级”的
+                if (pinned && br != 320000) continue
                 val stream = NeteaseStream(
                     url = url,
                     level = "",
@@ -202,6 +246,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
                     preview = item.preview,
                     extra = item.volumeExtra(),
                 )
+                if (pinned && !NETEASE_QUALITY_LADDER.atLeast(inferAudioQuality(stream.level, stream.ext, stream.bitrate, NETEASE_STREAM_QUALITY_BY_LEVEL), quality)) continue
                 urlCache[cacheKey] = CachedUrl(stream, System.currentTimeMillis() + CACHE_TTL_MS)
                 return stream
             }
@@ -1318,7 +1363,57 @@ internal fun neteaseAlbumType(type: String, subType: String): String {
 }
 
 /** 取流档位从高到低：母带 > 沉浸环绕 > 高清环绕 > Hi-Res > 无损 > 极高。 */
-internal val NETEASE_LEVEL_ORDER = listOf("jymaster", "sky", "jyeffect", "hires", "lossless", "exhigh")
+internal val NETEASE_LEVEL_ORDER =listOf("jymaster", "sky", "jyeffect", "hires", "lossless", "exhigh")
+
+/** 探测账号音质权限用的固定曲目与关键词。 */
+private const val NETEASE_QUALITY_PROBE_SONG_ID = "496869422"
+private const val NETEASE_QUALITY_PROBE_KEYWORD = "周杰伦"
+
+/**
+ * 网易云的可选音质档，从高到低。档名与 [NETEASE_LEVEL_ORDER] 是一套：阶梯给界面和
+ * 「有没有降档」判断用，档名给取流接口用。移植自 music-lib 的 netease/quality.go。
+ */
+internal val NETEASE_QUALITY_LADDER: AudioQualityLadder = AudioQualityLadder.of(
+    listOf(
+        AudioQualityOption(AudioQuality.Master, "超清母带", "wav", vip = true),
+        AudioQualityOption(AudioQuality.Spatial, "沉浸环绕声", "flac", vip = true),
+        AudioQualityOption(AudioQuality.Vivid, "臻音全景声", "mp3", vip = true),
+        AudioQualityOption(AudioQuality.Atmos, "杜比全景声", "flac", vip = true),
+        AudioQualityOption(AudioQuality.HiRes, "Hi-Res 无损", "flac", vip = true),
+        AudioQualityOption(AudioQuality.Lossless, "无损音质", "flac", vip = true),
+        AudioQualityOption(AudioQuality.High, "高品质 320k", "mp3", 320),
+        AudioQualityOption(AudioQuality.Higher, "较高品质 192k", "mp3", 192),
+        AudioQualityOption(AudioQuality.Standard, "标准音质 128k", "mp3", 128),
+    ),
+)
+
+/** 音质档 → 取流档位。一档可能对应多个档名（sky 与 jyeffect 都是沉浸环绕声）。 */
+internal fun neteaseLevelsForQuality(quality: AudioQuality): List<String> = when (quality) {
+    AudioQuality.Master -> listOf("jymaster")
+    AudioQuality.Spatial -> listOf("sky", "jyeffect")
+    AudioQuality.Vivid -> listOf("vivid")
+    AudioQuality.Atmos -> listOf("dolby")
+    AudioQuality.HiRes -> listOf("hires")
+    AudioQuality.Lossless -> listOf("lossless")
+    AudioQuality.High -> listOf("exhigh")
+    AudioQuality.Higher -> listOf("higher")
+    AudioQuality.Standard -> listOf("standard")
+    else -> emptyList()
+}
+
+/** 取回来的流实际是哪一档：接口回的 level 优先，退回按格式+码率推断。 */
+private val NETEASE_STREAM_QUALITY_BY_LEVEL = mapOf(
+    "jymaster" to AudioQuality.Master,
+    "sky" to AudioQuality.Spatial,
+    "jyeffect" to AudioQuality.Spatial,
+    "vivid" to AudioQuality.Vivid,
+    "dolby" to AudioQuality.Atmos,
+    "hires" to AudioQuality.HiRes,
+    "lossless" to AudioQuality.Lossless,
+    "exhigh" to AudioQuality.High,
+    "higher" to AudioQuality.Higher,
+    "standard" to AudioQuality.Standard,
+)
 
 /**
  * 取流尝试的档位序列：从歌曲标注的最高档开始逐级下探到 exhigh。

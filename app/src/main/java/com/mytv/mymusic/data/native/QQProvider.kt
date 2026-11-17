@@ -75,6 +75,8 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     private val vipCache = ConcurrentHashMap<String, Boolean>()
     private val loginSessions = ConcurrentHashMap<String, QQLoginState>()
     private val volumeCache = ConcurrentHashMap<String, CachedVolume>()
+    /** 音质探测结果按 cookie 缓存：一次要打七八个档位的取流接口，不能每次进设置页都重跑。 */
+    private val availableQualityCache = ConcurrentHashMap<String, List<AudioQualityOption>>()
     /** dissid → (dirid, tid)；写歌单用，只在本进程内缓存。 */
     private val dirIdCache = ConcurrentHashMap<String, Pair<Int, Int>>()
 
@@ -120,7 +122,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                 val songId = uriQueryValue(uri, "songid")
                 if (songId.isNotEmpty()) {
                     val song = fetchSongDetailByID(cookie, songId)
-                    val url = runCatching { downloadUrl(cookie, song) }.getOrNull().orEmpty()
+                    val url = runCatching { downloadUrl(cookie, song, AudioQuality.Auto) }.getOrNull().orEmpty()
                     return if (url.isNotBlank()) song.copy(url = url) else song
                 }
                 val mid = uriQueryValue(uri, "songmid")
@@ -129,26 +131,47 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         }
         if (songMid.isBlank()) throw IllegalArgumentException("invalid qq music link")
         val song = fetchSongDetail(cookie, songMid)
-        val url = runCatching { downloadUrl(cookie, song) }.getOrNull().orEmpty()
+        val url = runCatching { downloadUrl(cookie, song, AudioQuality.Auto) }.getOrNull().orEmpty()
         return if (url.isNotBlank()) song.copy(url = url) else song
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
         if (song.source != "qq") throw IllegalArgumentException("source mismatch")
         val songMid = song.extra["songmid"]?.takeIf { it.isNotBlank() } ?: song.id
-        val isVip = isVipAccount(cookie)
-        val prefixes: List<String>
-        val extensions: List<String>
-        if (isVip) {
-            prefixes = listOf("AI00", "Q001", "Q000", "F000", "O801", "M800", "M500")
-            extensions = listOf("flac", "flac", "flac", "flac", "ogg", "mp3", "mp3")
-        } else {
-            prefixes = listOf("M800", "M500")
-            extensions = listOf("mp3", "mp3")
+        if (songMid.isBlank()) throw IllegalStateException("qq song id is empty")
+
+        // 指定了档位就只请求那一档：purl 为空就是这首歌/这个账号拿不到，不退回低档
+        if (quality != AudioQuality.Auto) {
+            val candidate = qqQualityCandidateFor(quality)
+                ?: throw IllegalStateException("unsupported qq audio quality: ${quality.id}")
+            val purls = requestQualityURLs(cookie, songMid, listOf(candidate))
+            val purl = purls[qqQualityFilename(songMid, candidate)].orEmpty()
+            if (purl.isEmpty()) {
+                throw IllegalStateException("qq audio quality ${quality.id} is unavailable for this song or account")
+            }
+            return "https://ws.stream.qqmusic.qq.com/$purl"
         }
-        val filenames = prefixes.mapIndexed { index, prefix ->
-            "$prefix$songMid$songMid.${extensions[index]}"
+
+        // 自动档照旧从最高档往下取第一个有 purl 的；没有权限的档位接口只是不给 purl
+        val purls = runCatching { requestQualityURLs(cookie, songMid, QQ_QUALITY_CANDIDATES) }
+            .getOrDefault(emptyMap())
+        for (candidate in QQ_QUALITY_CANDIDATES) {
+            val purl = purls[qqQualityFilename(songMid, candidate)].orEmpty()
+            if (purl.isNotEmpty()) return "https://ws.stream.qqmusic.qq.com/$purl"
         }
+        throw IllegalStateException("no valid download url found or vip required")
+    }
+
+    /**
+     * 一次请求多个 filename 拿 purl。会员的档位（母带、全景声、无损）都在这里，
+     * 接口对没有权限的 filename 只是不给 purl，不会报错。
+     */
+    private suspend fun requestQualityURLs(
+        cookie: String,
+        songMid: String,
+        candidates: List<QQQualityCandidate>,
+    ): Map<String, String> {
+        val filenames = candidates.map { qqQualityFilename(songMid, it) }
         val body = buildJsonObject {
             putJsonObject("comm") {
                 put("cv", 4747474)
@@ -184,18 +207,47 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             userAgent = QQ_USER_AGENT,
         )
         val parsed = json.decodeFromString<QQVkeyResponse>(response.body)
-        for (expected in filenames) {
-            for (info in parsed.req1.data.midUrlInfo) {
-                if (info.filename == expected && info.purl.isNotEmpty()) {
-                    return "https://ws.stream.qqmusic.qq.com/" + info.purl
-                }
-            }
+        if (parsed.req1.code != 0) {
+            throw IllegalStateException("qq geturl api error code: ${parsed.req1.code}")
         }
-        throw IllegalStateException("no valid download url found or vip required")
+        return parsed.req1.data.midUrlInfo
+            .filter { it.filename.isNotEmpty() && it.purl.isNotEmpty() }
+            .associate { it.filename to it.purl }
     }
 
-    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
-        val url = song.url.ifBlank { downloadUrl(cookie, song) }
+    /**
+     * 探测当前账号实际能取的音质档。用一首固定的热门曲目一次问齐所有 filename，
+     * 有 purl 的才算可用。匿名时接口回 code 1000，此时缓存空表——搜索还能用，但没有可播档位。
+     */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        val cacheKey = NativeCrypto.md5Hex(cookie)
+        availableQualityCache[cacheKey]?.let { return it }
+        val purls = try {
+            requestQualityURLs(cookie, QQ_QUALITY_PROBE_SONG_MID, QQ_QUALITY_CANDIDATES)
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            if (cookie.isBlank()) {
+                vipCache[cacheKey] = false
+                availableQualityCache[cacheKey] = emptyList()
+                return emptyList()
+            }
+            throw error
+        }
+        val options = QQ_QUALITY_CANDIDATES
+            .filter { purls[qqQualityFilename(QQ_QUALITY_PROBE_SONG_MID, it)].orEmpty().isNotEmpty() }
+            .map { it.quality }
+        availableQualityCache[cacheKey] = options
+        vipCache[cacheKey] = options.any { it.vip }
+        return options
+    }
+
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
+        // 指定档位时不能用 song.url：那是自动选档时抓到的地址，可能是低档
+        val url = if (quality != AudioQuality.Auto) {
+            downloadUrl(cookie, song, quality)
+        } else {
+            song.url.ifBlank { downloadUrl(cookie, song, AudioQuality.Auto) }
+        }
         val songMid = song.extra["songmid"]?.takeIf { it.isNotBlank() } ?: song.id
         val extra = if (songMid.isBlank()) {
             emptyMap()
@@ -1792,53 +1844,18 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         )
     }
 
+    /**
+     * 会员判断直接从音质探测结果推导：能拿到 VIP 档就说明账号有会员。
+     * 单独探一个 128k 地址只能说明“能播”，分不出会员。
+     */
     private suspend fun isVipAccount(cookie: String): Boolean {
         if (cookie.isBlank()) return false
         val cacheKey = NativeCrypto.md5Hex(cookie)
         vipCache[cacheKey]?.let { return it }
         return try {
-            val songMid = "004YZbkL2MNHoY"
-            val filename = "M500$songMid$songMid.mp3"
-            val body = buildJsonObject {
-                putJsonObject("comm") {
-                    put("cv", 4747474)
-                    put("ct", 24)
-                    put("format", "json")
-                    put("inCharset", "utf-8")
-                    put("outCharset", "utf-8")
-                    put("notice", 0)
-                    put("platform", "yqq.json")
-                    put("needNewCode", 1)
-                    put("uin", 0)
-                }
-                putJsonObject("req_1") {
-                    put("module", "music.vkey.GetVkey")
-                    put("method", "UrlGetVkey")
-                    putJsonObject("param") {
-                        put("guid", randomGuid())
-                        putJsonArray("songmid") { add(JsonPrimitive(songMid)) }
-                        putJsonArray("songtype") { add(JsonPrimitive(0)) }
-                        put("uin", "0")
-                        put("loginflag", 1)
-                        put("platform", "20")
-                        putJsonArray("filename") { add(JsonPrimitive(filename)) }
-                    }
-                }
-            }
-            val response = NativeHttp.postJson(
-                QQ_MUSICU_API,
-                body.toString(),
-                headers = mapOf("Referer" to QQ_DOWNLOAD_REFERER),
-                cookie = cookie,
-                randomIp = true,
-                userAgent = QQ_USER_AGENT,
-            )
-            val parsed = json.decodeFromString<QQVkeyResponse>(response.body)
-            val isVip = parsed.req1.data.midUrlInfo.firstOrNull()?.purl?.isNotEmpty() == true
-            if (!isVip && parsed.req1.code != 0) return false
-            vipCache[cacheKey] = isVip
-            isVip
-        } catch (_: Exception) {
+            availableQualityOptions(cookie).any { it.vip }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
             false
         }
     }
@@ -3138,6 +3155,39 @@ internal fun qqMembershipLabel(data: JsonObject?): String? {
 
 @Serializable
 private data class QQSearchResponse(val data: QQSearchData = QQSearchData())
+
+/** 一个音质档在 vkey 接口里的 filename 前缀与扩展名。 */
+internal data class QQQualityCandidate(
+    val prefix: String,
+    val ext: String,
+    val quality: AudioQualityOption,
+)
+
+/** 探测账号音质权限用的固定曲目：热门且各档齐全，单曲缺档时换歌反而更不可靠。 */
+private const val QQ_QUALITY_PROBE_SONG_MID = "0039MnYb0qxYhV"
+
+internal val QQ_QUALITY_CANDIDATES: List<QQQualityCandidate> = listOf(
+    QQQualityCandidate("AI00", "flac", AudioQualityOption(AudioQuality.Master, "臻品母带", "flac", vip = true)),
+    QQQualityCandidate("Q001", "flac", AudioQualityOption(AudioQuality.Atmos51, "全景声 5.1", "flac", vip = true)),
+    QQQualityCandidate("Q000", "flac", AudioQualityOption(AudioQuality.Atmos, "全景声 2.0", "flac", vip = true)),
+    QQQualityCandidate("F000", "flac", AudioQualityOption(AudioQuality.Lossless, "无损音质", "flac", vip = true)),
+    QQQualityCandidate("O801", "ogg", AudioQualityOption(AudioQuality.Ultra, "超高品质", "ogg", 640, vip = true)),
+    QQQualityCandidate("M800", "mp3", AudioQualityOption(AudioQuality.High, "高品质", "mp3", 320)),
+    QQQualityCandidate("M500", "mp3", AudioQualityOption(AudioQuality.Standard, "标准音质", "mp3", 128)),
+)
+
+/** QQ 的可选音质档，从高到低；顺序就是自动选档的优先级。 */
+internal val QQ_QUALITY_LADDER: AudioQualityLadder = AudioQualityLadder.of(
+    QQ_QUALITY_CANDIDATES.map { it.quality },
+)
+
+/** 档位 → 请求的 filename 前缀；平台没有这一档时返回 null，由调用方按“不支持”处理。 */
+internal fun qqQualityCandidateFor(quality: AudioQuality): QQQualityCandidate? =
+    QQ_QUALITY_CANDIDATES.firstOrNull { it.quality.value == quality }
+
+/** vkey 接口按 filename 回 purl：前缀 + songmid + songmid + 扩展名。 */
+internal fun qqQualityFilename(songMid: String, candidate: QQQualityCandidate): String =
+    "${candidate.prefix}$songMid$songMid.${candidate.ext}"
 
 @Serializable
 private data class QQSearchData(val song: QQSearchSong = QQSearchSong())

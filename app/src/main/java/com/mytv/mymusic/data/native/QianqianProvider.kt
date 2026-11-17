@@ -37,6 +37,8 @@ private val QIANQIAN_INFO = ProviderInfo(
 class QianqianProvider : BaseNativeProvider(QIANQIAN_INFO) {
     private val json = NativeHttp.json
     private val volumeCache = ConcurrentHashMap<String, Map<String, String>>()
+    /** 音质探测结果按 cookie 缓存：每档都要打取流接口，不能每次进设置页都重跑。 */
+    private val availableQualityCache = ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         val body = getSigned(
@@ -86,15 +88,47 @@ class QianqianProvider : BaseNativeProvider(QIANQIAN_INFO) {
         return if (url.isNotEmpty()) song.copy(url = url) else song
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
         if (song.source != SOURCE) throw IllegalArgumentException("source mismatch")
-        if (song.url.isNotEmpty()) return song.url
         val tsid = song.extra["tsid"].orEmpty().ifEmpty { song.id }
-        return fetchDownloadUrl(cookie, tsid)
+        if (quality == AudioQuality.Auto) {
+            if (song.url.isNotEmpty()) return song.url
+            return fetchDownloadUrl(cookie, tsid)
+        }
+        // 指定档位时不能复用 song.url：那是自动选出来的最高档，不一定是请求的那一档
+        val candidate = qianqianQualityCandidateFor(quality)
+            ?: throw IllegalArgumentException("unsupported qianqian audio quality: $quality")
+        return fetchDownloadUrlWithRate(cookie, tsid, candidate.rate)
     }
 
-    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
-        val url = song.url.ifBlank { downloadUrl(cookie, song) }
+    /** 探测当前账号能拿到哪些档：拿一批搜索结果逐档试流，单曲可能缺档（没上架无损、版权限制）。 */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        availableQualityCache[cookie]?.let { return it }
+        val songs = runCatching { searchSongs(cookie, QIANQIAN_QUALITY_PROBE_KEYWORD) }
+            .getOrDefault(emptyList())
+            .take(5)
+        val options = buildList {
+            for (candidate in QIANQIAN_QUALITY_CANDIDATES) {
+                for (song in songs) {
+                    val tsid = song.extra["tsid"].orEmpty().ifEmpty { song.id }
+                    if (runCatching { fetchDownloadUrlWithRate(cookie, tsid, candidate.rate) }.isSuccess) {
+                        add(candidate.option)
+                        break
+                    }
+                }
+            }
+        }
+        availableQualityCache[cookie] = options
+        return options
+    }
+
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
+        // 指定档位时走 downloadUrl，才能保证拿到请求的那一档；自动档沿用 song.url 的既有行为
+        val url = if (quality == AudioQuality.Auto) {
+            song.url.ifBlank { downloadUrl(cookie, song, AudioQuality.Auto) }
+        } else {
+            downloadUrl(cookie, song, quality)
+        }
         val hasVolume = song.extra.containsKey("qianqian_mean_volume") ||
             song.extra.containsKey("qianqian_replay_gain")
         val extra = if (hasVolume) {
@@ -102,10 +136,11 @@ class QianqianProvider : BaseNativeProvider(QIANQIAN_INFO) {
         } else {
             fetchVolume(cookie, song.extra["tsid"].orEmpty().ifEmpty { song.id })
         }
+        val candidate = qianqianQualityCandidateFor(quality)
         return PlayableStream(
             url = url,
-            ext = extensionFromUrl(url).ifBlank { song.ext },
-            bitrate = song.bitrate,
+            ext = candidate?.option?.format ?: extensionFromUrl(url).ifBlank { song.ext },
+            bitrate = candidate?.option?.bitrate?.takeIf { it > 0 } ?: song.bitrate,
             extra = extra,
         )
     }
@@ -373,6 +408,16 @@ class QianqianProvider : BaseNativeProvider(QIANQIAN_INFO) {
             if (downloadUrl.isNotEmpty()) return downloadUrl
         }
         throw IllegalStateException("download url not found")
+    }
+
+    /** 指定档位取流：只要这一档，接口没给就报错，不向上/向下找别的档。 */
+    private suspend fun fetchDownloadUrlWithRate(cookie: String, tsid: String, rate: String): String {
+        if (tsid.isBlank()) throw IllegalArgumentException("qianqian tsid is empty")
+        val body = getSigned(cookie, TRACK_LINK_API, mapOf("TSID" to tsid, "appid" to APP_ID, "rate" to rate))
+        val data = json.decodeFromString<QianqianTrackLinkResponse>(body).data
+        val downloadUrl = data.path.ifEmpty { data.trailAudioInfo.path }
+        if (downloadUrl.isEmpty()) throw IllegalStateException("qianqian track link is empty")
+        return downloadUrl
     }
 
     private suspend fun searchAlbumItems(
@@ -734,6 +779,29 @@ class QianqianProvider : BaseNativeProvider(QIANQIAN_INFO) {
 }
 
 private class RetryWithSanitizedKeywordException(message: String) : Exception(message)
+
+/** 探测账号音质用的关键词，与 music-lib qianqian/quality.go 一致。 */
+private const val QIANQIAN_QUALITY_PROBE_KEYWORD = "痛仰乐队"
+
+private data class QianqianQualityCandidate(val option: AudioQualityOption, val rate: String)
+
+/**
+ * 千千的可选音质档，从高到低。档位标签与 music-lib 的 model.AudioQualityOption 一字不差地对应；
+ * `rate` 是 tracklink 接口的档位参数（3000 = 无损）。
+ */
+private val QIANQIAN_QUALITY_CANDIDATES = listOf(
+    QianqianQualityCandidate(AudioQualityOption(AudioQuality.Lossless, "无损音质", "flac"), "3000"),
+    QianqianQualityCandidate(AudioQualityOption(AudioQuality.High, "高品质 320k", "mp3", 320), "320"),
+    QianqianQualityCandidate(AudioQualityOption(AudioQuality.Standard, "标准音质 128k", "mp3", 128), "128"),
+    QianqianQualityCandidate(AudioQualityOption(AudioQuality.Low, "低品质 64k", "mp3", 64), "64"),
+)
+
+internal val QIANQIAN_QUALITY_LADDER: AudioQualityLadder =
+    AudioQualityLadder.of(QIANQIAN_QUALITY_CANDIDATES.map { it.option })
+
+private fun qianqianQualityCandidateFor(quality: AudioQuality): QianqianQualityCandidate? =
+    QIANQIAN_QUALITY_CANDIDATES.firstOrNull { it.option.value == quality }
+
 
 @Serializable
 private data class QianqianArtistDto(

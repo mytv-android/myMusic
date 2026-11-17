@@ -75,6 +75,8 @@ private val KUGOU_INFO = ProviderInfo(
 class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
     private val json = NativeHttp.json
     private val volumeCache = ConcurrentHashMap<String, Map<String, String>>()
+    /** 音质探测结果按 cookie 缓存：一次会试完所有档位，进设置页不能每次都重跑。 */
+    private val availableQualityCache = ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     override val supportsSearchPagination: Boolean = true
 
@@ -230,8 +232,9 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         return fetchSongInfo(cookie, match.groupValues[1])
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
         if (song.source != "kugou") throw IllegalArgumentException("source mismatch")
+        if (quality != AudioQuality.Auto) return downloadAtQuality(cookie, song, quality)
         if (song.url.isNotEmpty()) return song.url
 
         val hash = song.extra["hash"].orEmpty().ifEmpty { song.id }
@@ -252,8 +255,121 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         return fetchSongInfo(cookie, hash).url
     }
 
-    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
-        val url = song.url.ifBlank { downloadUrl(cookie, song) }
+    /**
+     * 酷狗同一首歌有多个 hash，每个 hash 对应一档音质。按请求档位挑 hash，
+     * 取回的流再按 ext+码率复核：接口给低了就换下一个 hash，绝不返回低档地址。
+     */
+    private suspend fun downloadAtQuality(cookie: String, song: Song, quality: AudioQuality): String {
+        val hashes = kugouHashesForQuality(song, quality)
+        if (hashes.isEmpty()) {
+            throw IllegalStateException("kugou audio quality ${quality.id} is unavailable for this song")
+        }
+        var lastError: Exception? = null
+        for (hash in hashes) {
+            val candidate = song.copy(
+                id = hash,
+                extra = mapOf(
+                    "hash" to hash,
+                    "album_audio_id" to firstNonEmpty(
+                        song.extra["album_audio_id"].orEmpty(),
+                        song.extra["audio_id"].orEmpty(),
+                    ),
+                    "album_id" to firstNonEmpty(song.extra["album_id"].orEmpty(), song.albumId),
+                    "privilege" to song.extra["privilege"].orEmpty(),
+                ),
+            )
+            val info = try {
+                fetchKugouQualityInfo(cookie, candidate, hash)
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                lastError = error
+                continue
+            }
+            if (info.url.isBlank()) continue
+            val actual = kugouSongQuality(info)
+            if (actual != quality) {
+                lastError = IllegalStateException("kugou returned ${actual.id} instead of ${quality.id}")
+                continue
+            }
+            return info.url
+        }
+        throw IllegalStateException(
+            "kugou audio quality ${quality.id} unavailable: ${lastError?.message ?: "no playable hash"}",
+            lastError,
+        )
+    }
+
+    /** 依次试 VIP 下载、songinfo v2、tracker 和匿名取流；前一个失败就退下一个。 */
+    private suspend fun fetchKugouQualityInfo(cookie: String, song: Song, hash: String): Song {
+        var lastError: Exception? = null
+        try {
+            val info = fetchVipSongInfo(cookie, song, VipCache())
+            if (info != null && info.url.isNotEmpty()) return info
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            lastError = error
+        }
+        val attempts: List<suspend () -> Song> = listOf(
+            { fetchSonginfoV2(cookie, hash) },
+            { fetchTrackerSongInfo(cookie, hash) },
+            { fetchSongInfo(cookie, hash) },
+        )
+        for (attempt in attempts) {
+            try {
+                val info = attempt()
+                if (info.url.isNotEmpty()) return info
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                lastError = error
+            }
+        }
+        throw lastError ?: IllegalStateException("kugou download url not found")
+    }
+
+    /**
+     * 探测账号实际能取的音质档：逐首试，第一首能唱出任何一档就停——音质是曲目属性，
+     * 拿很多首无关歌曲去补缺档只会更慢。搜索词固定，结果可复现。
+     */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        val cacheKey = NativeCrypto.md5Hex(cookie)
+        availableQualityCache[cacheKey]?.let { return it }
+        val probeSongs = buildList {
+            val searched = try {
+                searchSongs(cookie, KUGOU_QUALITY_PROBE_KEYWORD)
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                emptyList()
+            }
+            addAll(searched.take(3))
+            add(KUGOU_QUALITY_PROBE_SONG)
+        }
+        var result: List<AudioQualityOption> = emptyList()
+        for (song in probeSongs) {
+            val available = KUGOU_QUALITY_LADDER.options.filter { option ->
+                try {
+                    downloadAtQuality(cookie, song, option.value)
+                    true
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    false
+                }
+            }
+            if (available.isNotEmpty()) {
+                result = available
+                break
+            }
+        }
+        availableQualityCache[cacheKey] = result
+        return result
+    }
+
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
+        // 指定档位时不能用 song.url（那是搜索时的最高档 hash），必须按档位重新取
+        val url = if (quality != AudioQuality.Auto) {
+            downloadUrl(cookie, song, quality)
+        } else {
+            song.url.ifBlank { downloadUrl(cookie, song, AudioQuality.Auto) }
+        }
         val hash = song.extra["hash"].orEmpty().ifEmpty { song.id }
         return PlayableStream(
             url = url,
@@ -3273,6 +3389,97 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         val WHITESPACE_REGEX = Regex("""\s+""")
     }
 }
+
+/** 酷狗的可选音质档，从高到低。移植自 music-lib 的 kugou/quality.go。 */
+internal val KUGOU_QUALITY_LADDER: AudioQualityLadder = AudioQualityLadder.of(
+    listOf(
+        AudioQualityOption(AudioQuality.HiRes, "Hi-Res 无损", "flac", vip = true),
+        AudioQualityOption(AudioQuality.Lossless, "无损音质", "flac", vip = true),
+        AudioQualityOption(AudioQuality.High, "高品质 320k", "mp3", 320),
+        AudioQualityOption(AudioQuality.Higher, "较高品质 192k", "ogg", 192),
+        AudioQualityOption(AudioQuality.Standard, "标准音质 128k", "mp3", 128),
+        AudioQualityOption(AudioQuality.Low, "低品质 64k", "mp3", 64),
+    ),
+)
+
+/** 固定探测曲目：hardcode 的各档 hash 齐全，换歌反而可能缺档。 */
+internal val KUGOU_QUALITY_PROBE_SONG: Song = Song(
+    id = "83368470292244265486BF864701222C",
+    albumId = "82564821",
+    source = "kugou",
+    extra = mapOf(
+        "hash" to "83368470292244265486BF864701222C",
+        "ogg_320_hash" to "878D0D6E847F402299D29D4295BC21CB",
+        "ogg_128_hash" to "A76E5E3C04E98737DBDD0C8C550EDAE5",
+        "sq_hash" to "83368470292244265486BF864701222C",
+        "file_hash" to "AB05B8F658851282DCB2CBAD548AEB9B",
+        "res_hash" to "983AA9AF17E1688CC70EDEAAF6256D5B",
+        "hq_hash" to "7DD13522B6C143A39E10507B74B0A876",
+        "album_audio_id" to "590964610",
+        "album_id" to "82564821",
+        "privilege" to "10",
+    ),
+)
+
+private const val KUGOU_QUALITY_PROBE_KEYWORD = "痛仰乐队"
+
+/**
+ * 档位 → 候选 hash。同一首歌不同档对应不同 hash：低档优先 ogg_128，320k 用 ogg_320/hq，
+ * 无损用 sq，Hi-Res 用 res。返回空表表示这首歌没有这一档。
+ */
+internal fun kugouHashesForQuality(song: Song, quality: AudioQuality): List<String> {
+    val keys = when (quality) {
+        AudioQuality.Low, AudioQuality.Standard -> listOf("ogg_128_hash", "file_hash", "hash")
+        AudioQuality.Higher -> listOf("ogg_320_hash", "hq_hash", "res_hash", "hash")
+        AudioQuality.High -> listOf("ogg_320_hash", "hq_hash", "res_hash", "file_hash", "hash")
+        AudioQuality.Lossless -> listOf("sq_hash", "hash")
+        AudioQuality.HiRes -> listOf("res_hash", "sq_hash", "hash")
+        else -> return emptyList()
+    }
+    val seen = HashSet<String>()
+    val result = mutableListOf<String>()
+    for (key in keys) {
+        val hash = song.extra[key].orEmpty().trim().lowercase(Locale.ROOT)
+        if (!kugouValidHash(hash) || !seen.add(hash)) continue
+        result += hash
+    }
+    val id = song.id.trim().lowercase(Locale.ROOT)
+    if (kugouValidHash(id) && seen.add(id)) result += id
+    return result
+}
+
+/**
+ * 取回来的流实际是哪一档：接口给的码率优先，缺码率时按 size/时长反推。
+ * 用于「不静默降档」校验，口径与 Go 侧 kugouSongQuality 一致。
+ */
+internal fun kugouSongQuality(song: Song): AudioQuality {
+    val ext = song.ext.trim().lowercase(Locale.ROOT)
+    val bitrate = kugouInferBitrate(song.bitrate, song.size, song.duration)
+    return when {
+        ext == "flac" && bitrate >= 1000 -> AudioQuality.HiRes
+        kugouLooksLossless(ext, bitrate, song.size) -> AudioQuality.Lossless
+        bitrate >= 280 -> AudioQuality.High
+        bitrate >= 180 -> AudioQuality.Higher
+        bitrate >= 96 -> AudioQuality.Standard
+        else -> AudioQuality.Low
+    }
+}
+
+private fun kugouInferBitrate(bitrate: Int, size: Long, duration: Int): Int {
+    val normalized = if (bitrate > 1000) bitrate / 1000 else bitrate
+    if (normalized > 0) return normalized
+    val seconds = if (duration > 1000) duration / 1000 else duration
+    if (size <= 0 || seconds <= 0) return 0
+    return (size * 8 / seconds / 1000).toInt()
+}
+
+private fun kugouLooksLossless(ext: String, bitrate: Int, size: Long): Boolean {
+    if (ext == "flac" || ext == "ape" || ext == "wav") return true
+    return bitrate >= 700 || size >= 20L * 1024 * 1024
+}
+
+private fun kugouValidHash(hash: String): Boolean =
+    hash.isNotEmpty() && hash != "00000000000000000000000000000000"
 
 /**
  * 酷狗会员产品：user_type 的 16 位是超级VIP，vip_type=6 是豪华VIP，

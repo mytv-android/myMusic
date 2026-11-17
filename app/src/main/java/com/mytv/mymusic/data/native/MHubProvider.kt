@@ -197,10 +197,10 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
         }
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String =
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String =
         prepare(song).url
 
-    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
         val prepared = prepare(song)
         return PlayableStream(url = prepared.url, ext = prepared.ext, bitrate = prepared.bitrate)
     }

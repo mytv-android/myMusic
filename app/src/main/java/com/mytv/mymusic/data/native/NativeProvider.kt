@@ -51,17 +51,32 @@ interface NativeProvider {
     suspend fun parseSong(cookie: String, link: String): Song =
         throw UnsupportedOperationException("${info.name} 暂不支持歌曲链接解析")
 
-    suspend fun downloadUrl(cookie: String, song: Song): String =
+    /**
+     * 播放地址。[quality] 非 auto 时只准拿这一档，拿不到就报错——不静默降到低档，
+     * 否则用户选了无损、实际播的是 128k，界面上还看不出来。
+     */
+    suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality = AudioQuality.Auto): String =
         throw UnsupportedOperationException("${info.name} 暂不支持播放地址解析")
 
     /**
      * 交给播放器的地址。默认沿用 downloadUrl；需要下载后解密的平台（汽水加密流）
      * 会先把明文写到 [workDir] 并返回本地文件 URI。
      */
-    suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
-        val url = song.url.ifBlank { downloadUrl(cookie, song) }
+    suspend fun playableStream(
+        cookie: String,
+        song: Song,
+        workDir: File,
+        quality: AudioQuality = AudioQuality.Auto,
+    ): PlayableStream {
+        val url = song.url.ifBlank { downloadUrl(cookie, song, quality) }
         return PlayableStream(url = url, ext = song.ext.ifBlank { extensionFromUrl(url) }, bitrate = song.bitrate)
     }
+
+    /**
+     * 当前账号在这个平台上实际能选的音质档，从高到低。默认空表：界面只显示“自动”，
+     * 不暴露平台其实不支持的档位。移植自 music-lib 的 `provider.AudioQualityProvider`。
+     */
+    suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> = emptyList()
 
     suspend fun lyrics(cookie: String, song: Song): String =
         throw UnsupportedOperationException("${info.name} 暂不支持歌词")

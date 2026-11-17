@@ -10,7 +10,34 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.File
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
+
+/** 探测账号音质用的稳定曲目（music-lib fivesing/quality.go 同款）。 */
+private const val FIVESING_QUALITY_PROBE_SONG_ID = "3529943"
+private const val FIVESING_QUALITY_PROBE_SONG_TYPE = "yc"
+
+private data class FivesingQualityCandidate(val option: AudioQualityOption, val tier: String)
+
+/**
+ * 5sing 暴露的 MP3 档，从高到低。sq/hq/lq 是 getSongUrl 同一响应里的三个字段。
+ * 标签照抄 music-lib 的 model.AudioQualityOption。
+ */
+private val FIVESING_QUALITY_CANDIDATES = listOf(
+    FivesingQualityCandidate(AudioQualityOption(AudioQuality.High, "高品质", "mp3", 320), "sq"),
+    FivesingQualityCandidate(AudioQualityOption(AudioQuality.Higher, "较高品质", "mp3", 192), "hq"),
+    FivesingQualityCandidate(AudioQualityOption(AudioQuality.Standard, "标准音质", "mp3", 128), "lq"),
+)
+
+internal val FIVESING_QUALITY_LADDER: AudioQualityLadder =
+    AudioQualityLadder.of(FIVESING_QUALITY_CANDIDATES.map { it.option })
+
+private fun fivesingQualityCandidateFor(quality: AudioQuality): FivesingQualityCandidate? =
+    FIVESING_QUALITY_CANDIDATES.firstOrNull { it.option.value == quality }
+
+/** 三档地址，探测器按字段判断可用档。 */
+private data class FivesingAudioLinks(val sq: String, val hq: String, val lq: String)
 
 private val FIVESING_INFO = ProviderInfo(
     id = "fivesing",
@@ -36,6 +63,7 @@ private val FIVESING_INFO = ProviderInfo(
 
 class FivesingProvider : BaseNativeProvider(FIVESING_INFO) {
     private val json = NativeHttp.json
+    private val availableQualityCache = ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         val url = "$SEARCH_API?" + encodeParams(
@@ -72,11 +100,56 @@ class FivesingProvider : BaseNativeProvider(FIVESING_INFO) {
         return fetchSongInfo(cookie, match.groupValues[2], match.groupValues[1])
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
         if (song.source != "fivesing") throw IllegalArgumentException("source mismatch")
-        if (song.url.isNotBlank()) return song.url
+        if (quality == AudioQuality.Auto) {
+            if (song.url.isNotBlank()) return song.url
+            val (songId, songType) = songParts(song)
+            return fetchAudioLink(cookie, songId, songType)
+        }
+        // 指定档位：只拿这一档，接口没给就报错；不能复用 song.url（自动选的最高档）
+        val candidate = fivesingQualityCandidateFor(quality)
+            ?: throw IllegalArgumentException("unsupported 5sing audio quality: $quality")
         val (songId, songType) = songParts(song)
-        return fetchAudioLink(cookie, songId, songType)
+        val links = fetchAudioLinks(cookie, songId, songType)
+        val streamUrl = when (candidate.tier) {
+            "sq" -> links.sq
+            "hq" -> links.hq
+            else -> links.lq
+        }
+        if (streamUrl.isBlank()) throw IllegalStateException("5sing audio quality ${candidate.option.value} is unavailable")
+        return streamUrl
+    }
+
+    /** 用一个稳定曲目探测哪些档真正可解析：5sing 的 sq/hq/lq 是同一响应的三个字段。 */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        availableQualityCache[cookie]?.let { return it }
+        val links = runCatching { fetchAudioLinks(cookie, FIVESING_QUALITY_PROBE_SONG_ID, FIVESING_QUALITY_PROBE_SONG_TYPE) }
+            .getOrNull() ?: return emptyList()
+        val options = FIVESING_QUALITY_CANDIDATES.filter { candidate ->
+            when (candidate.tier) {
+                "sq" -> links.sq.isNotBlank()
+                "hq" -> links.hq.isNotBlank()
+                else -> links.lq.isNotBlank()
+            }
+        }.map { it.option }
+        availableQualityCache[cookie] = options
+        return options
+    }
+
+    /** 指定档位时不能走基类的 song.url 短路（那是自动选的最高档），必须重新按档取流。 */
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
+        val url = if (quality == AudioQuality.Auto) {
+            song.url.ifBlank { downloadUrl(cookie, song, AudioQuality.Auto) }
+        } else {
+            downloadUrl(cookie, song, quality)
+        }
+        val candidate = fivesingQualityCandidateFor(quality)
+        return PlayableStream(
+            url = url,
+            ext = candidate?.option?.format ?: song.ext.ifBlank { extensionFromUrl(url) },
+            bitrate = candidate?.option?.bitrate?.takeIf { it > 0 } ?: song.bitrate,
+        )
     }
 
     override suspend fun lyrics(cookie: String, song: Song): String {
@@ -164,20 +237,29 @@ class FivesingProvider : BaseNativeProvider(FIVESING_INFO) {
     }
 
     private suspend fun fetchAudioLink(cookie: String, songId: String, songType: String): String {
+        val links = fetchAudioLinks(cookie, songId, songType)
+        return firstValid(links.sq, links.hq, links.lq).ifBlank {
+            throw IllegalStateException("no valid download url found")
+        }
+    }
+
+    /** 一次取回 sq/hq/lq 三档地址，供选档与探测共用。 */
+    private suspend fun fetchAudioLinks(cookie: String, songId: String, songType: String): FivesingAudioLinks {
         val body = apiGet(
             "$SONG_URL_API?" + encodeParams(mapOf("songid" to songId, "songtype" to songType)),
             cookie,
         )
         val parsed = json.decodeFromString<FivesingUrlResponse>(body)
         if (parsed.code != 1000) throw IllegalStateException("5sing api returned error code ${parsed.code}")
-        return firstValid(
-            parsed.data.squrl,
-            parsed.data.squrlBackup,
-            parsed.data.hqurl,
-            parsed.data.hqurlBackup,
-            parsed.data.lqurl,
-            parsed.data.lqurlBackup,
-        ).ifBlank { throw IllegalStateException("no valid download url found") }
+        val links = FivesingAudioLinks(
+            sq = firstValid(parsed.data.squrl, parsed.data.squrlBackup),
+            hq = firstValid(parsed.data.hqurl, parsed.data.hqurlBackup),
+            lq = firstValid(parsed.data.lqurl, parsed.data.lqurlBackup),
+        )
+        if (links.sq.isBlank() && links.hq.isBlank() && links.lq.isBlank()) {
+            throw IllegalStateException("no valid download url found")
+        }
+        return links
     }
 
     private suspend fun fetchCreatorName(cookie: String, id: String): String {

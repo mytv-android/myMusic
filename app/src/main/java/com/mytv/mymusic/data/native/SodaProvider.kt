@@ -74,6 +74,9 @@ private val SODA_INFO = ProviderInfo(
 
 class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
+    /** 音质探测结果按 cookie 缓存：探测要把整首曲目的所有流抓一遍，不能每次进设置页都重跑。 */
+    private val availableQualityCache = java.util.concurrent.ConcurrentHashMap<String, List<AudioQualityOption>>()
+
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         val body = fetchAndroidSearch(cookie, "track", keyword, 1, ANDROID_SEARCH_PAGE_SIZE)
         val resp = decodeSodaJson<SodaSearchResponse>(body, "soda search json parse error")
@@ -95,21 +98,26 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return fetchSongDetail(cookie, trackId)
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
         if (song.source.isNotEmpty() && song.source != SODA_SOURCE) {
             throw IllegalArgumentException("source mismatch")
         }
         val trackId = songTrackId(song)
         val cached = cachedDownloadInfo(song)
         if (trackId.isNotEmpty()) {
-            val info = try {
-                resolveDownloadInfo(cookie, trackId, null)
-            } catch (error: Exception) {
-                if (cached != null && cached.url.isNotEmpty()) return downloadInfoUrl(cached)
-                throw error
+            val info = if (quality == AudioQuality.Auto) {
+                try {
+                    resolveDownloadInfo(cookie, trackId, null)
+                } catch (error: Exception) {
+                    if (cached != null && cached.url.isNotEmpty()) return downloadInfoUrl(cached)
+                    throw error
+                }
+            } else {
+                resolveDownloadInfoWithQuality(cookie, trackId, song, quality)
             }
             return downloadInfoUrl(info)
         }
+        if (quality != AudioQuality.Auto) throw IllegalStateException("track id is empty")
         if (cached != null && cached.url.isNotEmpty()) return downloadInfoUrl(cached)
         throw IllegalStateException("track id is empty")
     }
@@ -118,13 +126,14 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
      * 播放地址。加密流（带 play_auth）没法直接交给 ExoPlayer，先下载并按 CENC
      * 解密到缓存文件，返回本地 URI；明文流仍返回原始地址。
      */
-    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
         if (song.source.isNotEmpty() && song.source != SODA_SOURCE) {
             throw IllegalArgumentException("source mismatch")
         }
         val trackId = songTrackId(song)
         if (trackId.isEmpty()) throw IllegalStateException("track id is empty")
-        findCachedFile(trackId, workDir)?.let {
+        // 指定档位时不能用按 trackId 命中的缓存文件：它可能是别的档，等于静默降档
+        if (quality == AudioQuality.Auto) findCachedFile(trackId, workDir)?.let {
             // 文件名末段是播放信息里的原始码率（bps）；旧版本存下的 Song.bitrate 可能也是 bps，不能照搬
             val cachedBitrate = it.nameWithoutExtension.substringAfterLast('-').toIntOrNull()?.takeIf { br -> br > 0 }
             AppLog.d(TAG, "取流命中本地缓存 track=$trackId 文件=${it.name}")
@@ -140,7 +149,11 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             "取流开始 track=$trackId vip=${song.isVip} 签名器=${signerSummary()} " +
                 "cookie=${describeCookie(cookie)}",
         )
-        val info = resolveDownloadInfo(cookie, trackId, null)
+        val info = if (quality == AudioQuality.Auto) {
+            resolveDownloadInfo(cookie, trackId, null)
+        } else {
+            resolveDownloadInfoWithQuality(cookie, trackId, song, quality)
+        }
         if (info.url.trim().isEmpty()) throw IllegalStateException("player info url not found")
         val url = if (info.playAuth.trim().isEmpty()) {
             downloadInfoUrl(info)
@@ -927,6 +940,192 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         }
         if (lastError != null) throw lastError
         throw IllegalStateException("player info url not found")
+    }
+
+    /**
+     * 指定档位取流：把该曲目所有可选流抓回来，按档位挑一条。挑不到就报错，
+     * 绝不退回更低档（会员曲拿不到无损时接口会悄悄给试听/64k，必须拦住）。
+     */
+    private suspend fun resolveDownloadInfoWithQuality(
+        cookie: String,
+        trackId: String,
+        song: Song,
+        quality: AudioQuality,
+    ): DownloadInfo {
+        if (!SODA_QUALITY_LADDER.supports(quality)) {
+            throw IllegalArgumentException("unsupported soda audio quality: $quality")
+        }
+        val streams = try {
+            collectAvailableStreams(cookie, trackId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            // 抓流失败时，若歌曲里缓存的地址正好是请求的档位就直接用
+            val cached = cachedDownloadInfo(song)
+            if (cached != null && sodaDownloadInfoQuality(cached) == quality) return cached
+            throw error
+        }
+        return selectSodaQualityStream(streams, quality)
+            ?: throw IllegalStateException("soda audio quality $quality is unavailable for this song or account")
+    }
+
+    /** 探测当前账号能拿到哪些档：用一首会员曲把所有流抓一遍，再按推断出的档位归类。 */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        availableQualityCache[cookie]?.let { return it }
+        val streams = runCatching { collectAvailableStreams(cookie, SODA_QUALITY_PROBE_TRACK_ID) }
+            .getOrNull() ?: return emptyList()
+        val options = SODA_QUALITY_CANDIDATES.filter { candidate ->
+            streams.any { sodaDownloadInfoQuality(it) == candidate.value }
+        }
+        availableQualityCache[cookie] = options
+        return options
+    }
+
+    /** 两段式第一段：把 web track_v2 与签名 pc track_v2 里的全部流汇总、去重。 */
+    private suspend fun collectAvailableStreams(cookie: String, trackId: String): List<DownloadInfo> {
+        val id = trackId.trim()
+        if (id.isEmpty()) throw IllegalArgumentException("track id is empty")
+        val webResp = fetchWebTrackV2(cookie, id)
+        var fullDuration = trackDurationSeconds(webResp.primaryTrack())
+        val streams = mutableListOf<DownloadInfo>()
+        streams += downloadInfosFromVideoModel(webResp.trackPlayer.videoModel)
+        val webPlayerUrl = webResp.trackPlayer.urlPlayerInfo
+        if (webPlayerUrl.isNotEmpty()) {
+            val playerResult = runCatching { fetchPlayerInfoList(cookie, webPlayerUrl) }
+            playerResult.getOrNull()?.let { streams += it }
+            // videoModel 也没有流时才让播放信息这一步的错误上抛
+            if (playerResult.isFailure && streams.isEmpty()) throw playerResult.exceptionOrNull()!!
+        }
+
+        if (isSignerConfigured() && cookie.isNotBlank() && webResp.primaryTrack().labelInfo.isVip()) {
+            val pcResp = try {
+                fetchPcTrackV2Signed(cookie, id)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (pcResp != null) {
+                val pcDuration = trackDurationSeconds(pcResp.primaryTrack())
+                if (pcDuration > 0) fullDuration = pcDuration
+                streams += downloadInfosFromVideoModel(pcResp.trackPlayer.videoModel)
+                if (pcResp.trackPlayer.urlPlayerInfo.isNotEmpty()) {
+                    runCatching { fetchPlayerInfoList(cookie, pcResp.trackPlayer.urlPlayerInfo) }
+                        .getOrNull()
+                        ?.let { streams += it }
+                }
+            }
+        }
+
+        val seen = mutableSetOf<String>()
+        val filtered = streams.filter { info ->
+            if (info.url.trim().isEmpty()) return@filter false
+            seen.add(info.url + "\u0000" + info.playAuth)
+        }.map { info ->
+            // 是否试听要按整曲时长判定，videoModel 的流抓回来时还没带上
+            if (!info.preview && downloadInfoIsPreview(info, fullDuration)) info.copy(preview = true) else info
+        }
+        if (filtered.isEmpty()) throw IllegalStateException("soda player info not found")
+        return filtered
+    }
+
+    /** videoModel 不是只挑最好的一条，而是把每个条目都摊平成流，供按档位挑选。 */
+    private fun downloadInfosFromVideoModel(raw: JsonElement?): List<DownloadInfo> {
+        if (raw == null || raw is JsonNull) return emptyList()
+        var text = raw.toString().trim()
+        if (text.isEmpty() || text == "null") return emptyList()
+        var depth = 0
+        while (depth < 3 && text.startsWith("\"")) {
+            val nested = runCatching { SODA_JSON.parseToJsonElement(text) }.getOrNull()
+            if (nested !is JsonPrimitive || !nested.isString) break
+            text = nested.content.trim()
+            depth++
+        }
+        val value = runCatching { SODA_JSON.parseToJsonElement(text) }.getOrNull() ?: return emptyList()
+        val entries = mutableListOf<SodaVideoModelEntry>()
+        collectVideoModelEntries(value, "", "", 0.0, entries)
+        return entries.mapNotNull { entry ->
+            var url = entry.mainPlayUrl.trim()
+            if (url.isEmpty()) url = entry.backupPlayUrl.trim()
+            if (url.isEmpty()) return@mapNotNull null
+            DownloadInfo(
+                url = url,
+                playAuth = entry.playAuth.trim(),
+                format = entry.format.trim(),
+                size = entry.size,
+                duration = entry.duration,
+                bitrate = entry.bitrate,
+                quality = entry.quality.trim(),
+            )
+        }
+    }
+
+    private suspend fun fetchPlayerInfoList(cookie: String, playerInfoUrl: String): List<DownloadInfo> {
+        val body = NativeHttp.get(playerInfoUrl, cookie = cookie, userAgent = SODA_USER_AGENT)
+        val resp = decodeSodaJson<SodaPlayerInfoResponse>(body, "parse play info response error")
+        val list = resp.result.data.playInfoList
+        if (list.isEmpty()) {
+            val message = resp.responseMetadata.error.message
+            throw IllegalStateException(message.ifEmpty { "no audio stream found" })
+        }
+        return list.mapNotNull { stream ->
+            var url = stream.mainPlayUrl.trim()
+            if (url.isEmpty()) url = stream.backupPlayUrl.trim()
+            if (url.isEmpty()) return@mapNotNull null
+            DownloadInfo(
+                url = url,
+                playAuth = stream.playAuth.trim(),
+                format = stream.format.trim(),
+                size = stream.size,
+                duration = stream.duration,
+                bitrate = stream.bitrate,
+                quality = stream.quality.trim(),
+            )
+        }.ifEmpty { throw IllegalStateException("no audio stream found") }
+    }
+
+    /** 按 ext + 码率推断实际档位，用于「不静默降档」判断与探测归类。 */
+    private fun sodaDownloadInfoQuality(info: DownloadInfo?): AudioQuality {
+        info ?: return AudioQuality.Low
+        if (info.preview) return AudioQuality.Preview
+        val q = info.quality.trim().lowercase().replace("-", "").replace("_", "").replace(" ", "")
+        val format = info.format.trim().lowercase()
+        val rank = qualityRank(info.quality, info.format, info.bitrate)
+        return when {
+            q.contains("spatial") || q.contains("atmos") || q.contains("dolby") -> AudioQuality.Spatial
+            rank >= 110 -> AudioQuality.HiRes
+            rank >= 100 -> AudioQuality.Lossless
+            format.contains("flac") || format.contains("alac") || format.contains("wav") -> AudioQuality.Lossless
+            rank >= 80 || normalizeSodaBitrate(info.bitrate) >= 280 -> AudioQuality.High
+            rank >= 70 || normalizeSodaBitrate(info.bitrate) >= 192 -> AudioQuality.Higher
+            rank >= 50 || normalizeSodaBitrate(info.bitrate) >= 96 -> AudioQuality.Standard
+            else -> AudioQuality.Low
+        }
+    }
+
+    /** 从候选里挑请求档位的那一条；同一档取非试听、时长/码率更高的那条。 */
+    private fun selectSodaQualityStream(streams: List<DownloadInfo>, quality: AudioQuality): DownloadInfo? {
+        var best: DownloadInfo? = null
+        for (info in streams) {
+            if (sodaDownloadInfoQuality(info) != quality) continue
+            val current = best
+            if (current == null) {
+                best = info
+                continue
+            }
+            if (current.preview && !info.preview) {
+                best = info
+                continue
+            }
+            if (betterStreamCandidate(
+                    info.duration, info.quality, info.format, info.bitrate, info.size,
+                    current.duration, current.quality, current.format, current.bitrate, current.size,
+                )
+            ) {
+                best = info
+            }
+        }
+        return best
     }
 
     private suspend fun fetchPlayerInfo(cookie: String, playerInfoUrl: String): DownloadInfo {
@@ -3046,6 +3245,25 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 // -------------------------------------------------------------------------
 
 private val SODA_JSON = NativeHttp.json
+
+/** 探测账号音质用的会员曲（music-lib soda/quality.go 同款）。 */
+private const val SODA_QUALITY_PROBE_TRACK_ID = "7304719759323564095"
+
+/**
+ * 汽水的可选音质档，从高到低。标签/格式/码率/VIP 标记照抄 music-lib 的 model.AudioQualityOption。
+ * 汽水不一定严格按档位返回，实际档位由 [sodaDownloadInfoQuality] 按 ext+码率推断。
+ */
+internal val SODA_QUALITY_CANDIDATES: List<AudioQualityOption> = listOf(
+    AudioQualityOption(AudioQuality.HiRes, "Hi-Res 无损", "flac", vip = true),
+    AudioQualityOption(AudioQuality.Lossless, "无损音质", "flac", vip = true),
+    AudioQualityOption(AudioQuality.Spatial, "空间音频", "m4a", vip = true),
+    AudioQualityOption(AudioQuality.High, "高品质 320k", "m4a", 320),
+    AudioQualityOption(AudioQuality.Higher, "较高品质 128k", "m4a", 128),
+    AudioQualityOption(AudioQuality.Standard, "标准音质 64k", "m4a", 64),
+    AudioQualityOption(AudioQuality.Preview, "试听片段", "m4a"),
+)
+
+internal val SODA_QUALITY_LADDER: AudioQualityLadder = AudioQualityLadder.of(SODA_QUALITY_CANDIDATES)
 
 private val SODA_RAW_CLIENT: OkHttpClient by lazy {
     OkHttpClient.Builder()

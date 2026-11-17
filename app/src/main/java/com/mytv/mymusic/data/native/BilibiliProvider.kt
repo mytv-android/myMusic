@@ -12,6 +12,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
+import java.io.File
 
 private val BILIBILI_INFO = ProviderInfo(
     id = "bilibili",
@@ -50,6 +51,8 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
     private val json = NativeHttp.json
     private val vipCache = ConcurrentHashMap<String, Boolean>()
     private val loginSessions = ConcurrentHashMap<String, BilibiliLoginSession>()
+    /** 音质探测结果按 cookie 缓存：探测要打一次 playurl，不能每次进设置页都重跑。 */
+    private val availableQualityCache = ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         val body = NativeHttp.get(
@@ -147,10 +150,39 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         )
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
         if (song.source != "bilibili") throw IllegalArgumentException("source mismatch")
-        if (song.url.isNotEmpty()) return song.url
+        if (quality == AudioQuality.Auto && song.url.isNotEmpty()) return song.url
 
+        val (bvid, cid) = bilibiliSongIdentity(song)
+        val isVip = isVipAccount(cookie)
+        if (quality == AudioQuality.Auto) return fetchAudioUrl(cookie, bvid, cid, isVip)
+
+        // 指定档位：只认这一档的 DASH 音频 id，拿不到就报错，不退到低档
+        if (!BILIBILI_QUALITY_DEFINITIONS.containsKey(quality)) {
+            throw IllegalArgumentException("unsupported bilibili audio quality: $quality")
+        }
+        val candidates = fetchAudioCandidates(cookie, bvid, cid, isVip)
+        return candidates.firstOrNull { it.option.value == quality }?.url
+            ?: throw IllegalStateException("bilibili audio quality $quality is unavailable")
+    }
+
+    /** 探测账号能拿到的档：拿公开音乐视频的 playurl 回包里实际出现的档位去重。 */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        availableQualityCache[cookie]?.let { return it }
+        val isVip = isVipAccount(cookie)
+        val candidates = runCatching {
+            fetchAudioCandidates(cookie, BILIBILI_QUALITY_PROBE_BVID, BILIBILI_QUALITY_PROBE_CID, isVip)
+        }.getOrNull() ?: return emptyList()
+        val seen = mutableSetOf<AudioQuality>()
+        val options = candidates.mapNotNull { candidate ->
+            if (!seen.add(candidate.option.value)) null else candidate.option
+        }
+        availableQualityCache[cookie] = options
+        return options
+    }
+
+    private fun bilibiliSongIdentity(song: Song): Pair<String, String> {
         var bvid = song.extra["bvid"].orEmpty()
         var cid = song.extra["cid"].orEmpty()
         if (bvid.isEmpty() || cid.isEmpty()) {
@@ -162,11 +194,22 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
                 throw IllegalArgumentException("invalid id structure")
             }
         }
+        return bvid to cid
+    }
 
-        // Go stores the resolved URL on the Song; Kotlin Song is immutable, so the
-        // URL is returned to the caller instead of mutating Song.Ext/url in place.
-        val isVip = isVipAccount(cookie)
-        return fetchAudioUrl(cookie, bvid, cid, isVip)
+    /** 指定档位时不能走基类的 song.url 短路（那是自动选的最高档），必须重新按档取流。 */
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
+        val url = if (quality == AudioQuality.Auto) {
+            song.url.ifBlank { downloadUrl(cookie, song, AudioQuality.Auto) }
+        } else {
+            downloadUrl(cookie, song, quality)
+        }
+        val option = BILIBILI_QUALITY_DEFINITIONS[quality]?.option
+        return PlayableStream(
+            url = url,
+            ext = option?.format ?: song.ext.ifBlank { extensionFromUrl(url) },
+            bitrate = option?.bitrate?.takeIf { it > 0 } ?: song.bitrate,
+        )
     }
 
     override suspend fun lyrics(cookie: String, song: Song): String {
@@ -641,6 +684,54 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         throw IllegalStateException("no audio found")
     }
 
+    /** 拉一次 playurl，把 flac / dolby / dash 三处的音频流都摊平成候选，供按档位选择。 */
+    private suspend fun fetchAudioCandidates(
+        cookie: String,
+        bvid: String,
+        cid: String,
+        isVip: Boolean,
+    ): List<BilibiliAudioCandidate> {
+        if (bvid.isBlank() || cid.isBlank()) throw IllegalArgumentException("bilibili bvid or cid is empty")
+        val fnval = if (isVip) 4048 else 80
+        val url = "$BILIBILI_PLAY_URL_API?fnval=$fnval&qn=127&bvid=$bvid&cid=$cid"
+        val body = NativeHttp.get(
+            url,
+            headers = mapOf("Referer" to BILIBILI_REFERER),
+            cookie = effectiveCookie(cookie),
+            userAgent = BILIBILI_USER_AGENT,
+        )
+        val response = json.decodeFromString<BilibiliPlayUrlResponse>(body)
+        if (response.code != 0) {
+            throw IllegalStateException("bilibili playurl api error: ${response.code}")
+        }
+        val data = response.data ?: BilibiliPlayUrlData()
+        val dash = data.dash
+        val candidates = mutableListOf<BilibiliAudioCandidate>()
+        dash?.flac?.audio?.let { audio -> bilibiliCandidateOrNull(audio)?.let { candidates += it } }
+        for (audio in dash?.dolby?.audio.orEmpty()) bilibiliCandidateOrNull(audio)?.let { candidates += it }
+        for (audio in dash?.audio.orEmpty()) bilibiliCandidateOrNull(audio)?.let { candidates += it }
+        if (candidates.isEmpty()) {
+            // durl 无独立分档，按标准音质处理
+            val option = BILIBILI_QUALITY_DEFINITIONS.getValue(AudioQuality.Standard).option
+            for (durl in data.durl.orEmpty()) {
+                if (durl.url.isBlank()) continue
+                candidates += BilibiliAudioCandidate(option, durl.url, 0)
+            }
+        }
+        return candidates.sortedWith(
+            compareByDescending<BilibiliAudioCandidate> { BILIBILI_QUALITY_DEFINITIONS[it.option.value]?.rank ?: 0 }
+                .thenByDescending { it.id },
+        )
+    }
+
+    private fun bilibiliCandidateOrNull(audio: BilibiliAudioStream): BilibiliAudioCandidate? {
+        val baseUrl = audio.baseUrl.trim()
+        if (baseUrl.isEmpty()) return null
+        val quality = bilibiliQualityForId(audio.id) ?: return null
+        val option = BILIBILI_QUALITY_DEFINITIONS[quality]?.option ?: return null
+        return BilibiliAudioCandidate(option, baseUrl, audio.id)
+    }
+
     private suspend fun isVipAccount(cookie: String): Boolean {
         val effective = effectiveCookie(cookie)
         val cacheKey = NativeCrypto.md5Hex(effective)
@@ -849,6 +940,61 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         val seasonTitle: String,
         val seasonCover: String,
     )
+}
+
+private const val BILIBILI_QUALITY_PROBE_BVID = "BV1zYWB6qED9"
+private const val BILIBILI_QUALITY_PROBE_CID = "43575806705"
+
+/** 一个 DASH 音频候选：档位、地址、流的音频 id（同档时 id 越大越好）。 */
+private data class BilibiliAudioCandidate(val option: AudioQualityOption, val url: String, val id: Int)
+
+private data class BilibiliQualityDefinition(val option: AudioQualityOption, val rank: Int)
+
+/**
+ * Bilibili 的音频档，从高到低。rank 只用于候选排序，和 ID 映射表一起照搬
+ * music-lib 的 bilibili/quality.go；标签/格式/码率一字不差。
+ */
+private val BILIBILI_QUALITY_DEFINITIONS: Map<AudioQuality, BilibiliQualityDefinition> = mapOf(
+    AudioQuality.HiRes to BilibiliQualityDefinition(
+        AudioQualityOption(AudioQuality.HiRes, "Hi-Res 无损", "flac", vip = true),
+        5,
+    ),
+    AudioQuality.Atmos to BilibiliQualityDefinition(
+        AudioQualityOption(AudioQuality.Atmos, "全景声", "m4a", vip = true),
+        4,
+    ),
+    AudioQuality.High to BilibiliQualityDefinition(
+        AudioQualityOption(AudioQuality.High, "高品质", "m4a", 192),
+        3,
+    ),
+    AudioQuality.Standard to BilibiliQualityDefinition(
+        AudioQualityOption(AudioQuality.Standard, "标准音质", "m4a", 132),
+        2,
+    ),
+    AudioQuality.Low to BilibiliQualityDefinition(
+        AudioQualityOption(AudioQuality.Low, "低品质", "m4a", 64),
+        1,
+    ),
+)
+
+internal val BILIBILI_QUALITY_LADDER: AudioQualityLadder = AudioQualityLadder.of(
+    listOf(
+        AudioQuality.HiRes,
+        AudioQuality.Atmos,
+        AudioQuality.High,
+        AudioQuality.Standard,
+        AudioQuality.Low,
+    ).map { BILIBILI_QUALITY_DEFINITIONS.getValue(it).option },
+)
+
+/** DASH 音频 id → 档位，映射照搬 music-lib 的 bilibiliQualityForID。 */
+private fun bilibiliQualityForId(id: Int): AudioQuality? = when (id) {
+    30251 -> AudioQuality.HiRes
+    30250 -> AudioQuality.Atmos
+    30280 -> AudioQuality.High
+    30232 -> AudioQuality.Standard
+    30216 -> AudioQuality.Low
+    else -> null
 }
 
 @Serializable

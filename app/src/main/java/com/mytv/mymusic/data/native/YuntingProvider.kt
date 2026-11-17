@@ -94,7 +94,7 @@ class YuntingProvider : BaseNativeProvider(YUNTING_INFO) {
      * 直播地址里的 token 是签发时刻生成的，队列里放久了会失效：
      * 播放前按省重新拉一次列表换新地址，拉不到就退回原地址再试。
      */
-    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
         if (song.extra["live"] != "1") {
             return PlayableStream(url = song.url, ext = song.ext.ifBlank { "m4a" })
         }

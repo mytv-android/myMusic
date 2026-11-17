@@ -20,6 +20,7 @@ class NativeProvidersTest {
             "joox",
             "bilibili",
             "apple",
+            "spotify",
             "youtubemusic",
             "mhub",
             "yunting",

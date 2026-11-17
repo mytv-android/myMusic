@@ -3,11 +3,11 @@
 ## music-lib
 
 - Upstream: https://github.com/guohuiyuan/music-lib
-- Revision included: 7cc4467b4e300547edd5d3d5bf0eff1c21ffc2ec
+- Revision included: 90b29428b64605db373d767ae80968a8a65fd2a9
 - License: GNU Affero General Public License v3.0
 - Location: third_party/music-lib
 
-The vendored Go source is retained as the reference for the Kotlin native port in `app/src/main/java/com/mytv/mymusic/data/native`. This includes the word-timing lyric conversions ported from `lyrics/lyrics.go` (`ParseLRC` / `ParseYRC` / `ParseQRC` / `ParseKRC` / `ConvertVerbatimLRC` → the verbatim-LRC output in `QQProvider.kt`, `KugouProvider.kt`, `NetEaseProvider.kt`). The Kotlin port is a derivative work distributed under AGPL-3.0. Modifications must retain this notice and the AGPL-3.0 terms.
+The vendored Go source is retained as the reference for the Kotlin native port in `app/src/main/java/com/mytv/mymusic/data/native`. This includes the word-timing lyric conversions ported from `lyrics/lyrics.go` (`ParseLRC` / `ParseYRC` / `ParseQRC` / `ParseKRC` / `ConvertVerbatimLRC` → the verbatim-LRC output in `QQProvider.kt`, `KugouProvider.kt`, `NetEaseProvider.kt`), the `spotify/` package (anonymous Web Player search, the public-embed and chart-mirror fallbacks, the Web API credential/token flow → `SpotifyProvider.kt`), and the audio-quality ladders from `model/quality.go` plus each platform's `quality.go` (`AudioQuality` / `AudioQualityOption` / `NormalizeAudioQuality`, the per-platform candidate ladders, and the "never silently downgrade a requested tier" rule → `AudioQuality.kt` and the per-provider `availableQualityOptions` / `downloadUrlWithQuality`). The Kotlin port is a derivative work distributed under AGPL-3.0. Modifications must retain this notice and the AGPL-3.0 terms.
 
 ## SodaM / libresoda
 

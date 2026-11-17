@@ -8,6 +8,9 @@ import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonArray
@@ -48,6 +51,8 @@ private val MIGU_INFO = ProviderInfo(
 
 class MiguProvider : BaseNativeProvider(MIGU_INFO) {
     private val json = NativeHttp.json
+    /** 音质探测结果按 cookie 缓存：从高往低逐档取流，不能每次进设置页都重跑。 */
+    private val availableQualityCache = java.util.concurrent.ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     override val supportsSearchPagination: Boolean = true
 
@@ -81,12 +86,13 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
         val contentId = SONG_LINK.find(link)?.groupValues?.getOrNull(1)
             ?: throw IllegalArgumentException("invalid migu link")
         val song = fetchSongDetail(cookie, contentId)
-        val url = runCatching { downloadUrl(cookie, song) }.getOrNull().orEmpty()
+        val url = runCatching { downloadUrl(cookie, song, AudioQuality.Auto) }.getOrNull().orEmpty()
         return if (url.isNotBlank()) song.copy(url = url) else song
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String {
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String {
         if (song.source.isNotBlank() && song.source != "migu") throw IllegalArgumentException("source mismatch")
+        if (quality != AudioQuality.Auto) return downloadAtQuality(cookie, song, quality)
         val parts = song.id.split("|")
         val contentId = song.extra["content_id"]?.takeIf { it.isNotBlank() } ?: parts.getOrNull(0).orEmpty()
         if (contentId.isBlank()) throw IllegalStateException("invalid id structure and missing content id")
@@ -908,8 +914,145 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
         return path.contains("wav_3d/") && !path.contains("wav_3d_60s/")
     }
 
-    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
-        val url = song.url.ifBlank { downloadUrl(cookie, song) }
+    /**
+     * 按档位取流：只请求这一档对应的 tone，接口回的档位对不上就报错，
+     * 不把低档地址当成功——会员区里最常见的就是「请求 ZQ32 回了 HQ」。
+     * [fallbackTones] 打开时还会问歌曲自带档和 HQ/PQ，用它们的地址改写路径升档。
+     */
+    private suspend fun downloadAtQuality(
+        cookie: String,
+        song: Song,
+        quality: AudioQuality,
+        fallbackTones: Boolean = true,
+    ): String {
+        val candidate = MIGU_QUALITY_CANDIDATES.firstOrNull { it.option.value == quality }
+            ?: throw IllegalStateException("unsupported migu audio quality: ${quality.id}")
+        val parts = song.id.split("|")
+        val contentId = song.extra["content_id"]?.takeIf { it.isNotBlank() } ?: parts.getOrNull(0).orEmpty()
+        if (contentId.isBlank()) throw IllegalStateException("invalid id structure and missing content id")
+        val resourceType = song.extra["resource_type"]?.takeIf { it.isNotBlank() }
+            ?: parts.getOrNull(1).orEmpty().ifBlank { "2" }
+        val copyrightId = song.extra["copyright_id"].orEmpty()
+        val songId = song.extra["song_id"].orEmpty()
+        val albumId = song.extra["album_id"].orEmpty().ifBlank { song.albumId }
+
+        // 接口拒绝显式 VIP tone 时仍会回低档地址，低档地址改写路径就是拿高档的正路；
+        // 所以除了目标 tone，还要把歌曲自带的档和 HQ/PQ 一起问一遍
+        val sourceTone = normalizeTone(song.extra["format_type"].orEmpty().ifBlank { parts.getOrNull(2).orEmpty() })
+        val requestTones = buildList {
+            addAll(candidate.tones)
+            if (fallbackTones) {
+                add(sourceTone)
+                add("HQ")
+                add("PQ")
+            }
+        }.filter { it.isNotBlank() }.distinct()
+
+        var firstUsableUrl = ""
+        for (tone in requestTones) {
+            val params = buildMap {
+                put("netType", "01")
+                put("resourceType", resourceType)
+                put("contentId", contentId)
+                put("toneFlag", tone)
+                if (copyrightId.isNotBlank()) put("copyrightId", copyrightId)
+                if (songId.isNotBlank()) put("songId", songId)
+                if (albumId.isNotBlank()) put("albumId", albumId)
+            }
+            val body = runCatching { miguGet(LISTEN_URL, params, cookie, ANDROID_UA, "https://music.migu.cn/") }
+                .getOrNull() ?: continue
+            val response = runCatching { json.decodeFromString<MiguListenResponse>(body) }.getOrNull() ?: continue
+            if (response.code.isNotBlank() && response.code != "000000") continue
+            val url = normalizeDownloadUrl(response.data.url)
+            if (url.isBlank() || isEncryptedDirectUrl(url)) continue
+            // 接口常不回 formatType，此时按 CDN 目录认档（Go 侧也是这么判的），
+            // 两者都缺才按请求的 tone 算
+            val actual = normalizeTone(response.data.formatType)
+                .ifBlank { miguToneFromUrl(url) }
+                .ifBlank { tone }
+            if (firstUsableUrl.isBlank()) firstUsableUrl = url
+            if (candidate.matchesTone(actual)) return url
+        }
+        // 接口拒了显式 VIP tone 时，同一个文件其实能靠改写 CDN 路径加到高档；
+        // 咪咕就是这么「只给低档地址、档位靠目录名区分」的
+        if (fallbackTones && firstUsableUrl.isNotBlank()) {
+            miguRewrittenToneUrl(firstUsableUrl, candidate.tones.first())
+                ?.takeIf { miguDirectUrlPlayable(cookie, it) }
+                ?.let { return it }
+        }
+        throw IllegalStateException("migu audio quality ${quality.id} unavailable")
+    }
+
+    /**
+     * 地址是否真的能播：只读前 64 字节看音频文件头。咪咕的 CDN 对没有版权的改写路径
+     * 会回 200 的错误页，不验文件头就会把 HTML 当音频交给播放器。
+     *
+     * 这里自己开连接而不用 [NativeHttp]：那个接口会把整个响应体读完，一首无损就是几十 MB，
+     * 只为了 64 字节不值得。
+     */
+    private suspend fun miguDirectUrlPlayable(cookie: String, url: String): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val connection = (java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 5_000
+                    readTimeout = 8_000
+                    instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", ANDROID_UA)
+                    setRequestProperty("Referer", "https://music.migu.cn/")
+                    setRequestProperty("Range", "bytes=0-63")
+                    if (cookie.isNotBlank()) setRequestProperty("Cookie", cookie)
+                }
+                try {
+                    if (connection.responseCode !in 200..299) return@runCatching false
+                    val header = ByteArray(64)
+                    val read = connection.inputStream.use { it.read(header) }
+                    if (read < 4) return@runCatching false
+                    val magic = String(header, 0, 4, Charsets.ISO_8859_1)
+                    magic == "fLaC" ||
+                        (magic == "RIFF" && read >= 12 &&
+                            String(header, 8, 4, Charsets.ISO_8859_1) == "WAVE") ||
+                        magic == "OggS" ||
+                        (read >= 12 && String(header, 4, 4, Charsets.ISO_8859_1) == "ftyp") ||
+                        ((header[0].toInt() and 0xff) == 0xFF && (header[1].toInt() and 0xE0) == 0xE0) ||
+                        (read >= 3 && String(header, 0, 3, Charsets.ISO_8859_1) == "ID3")
+                } finally {
+                    connection.disconnect()
+                }
+            }.getOrDefault(false)
+        }
+
+    /**
+     * 从最高档往下探，第一档能取到就用「该档及以下」作为账号可用档位。
+     * 咪咕会把 FLAC 通过改写普通地址给出，逐档看 VIP 标记不如真实取流准。
+     */
+    override suspend fun availableQualityOptions(cookie: String): List<AudioQualityOption> {
+        val cacheKey = NativeCrypto.md5Hex(cookie)
+        availableQualityCache[cacheKey]?.let { return it }
+        var result: List<AudioQualityOption> = emptyList()
+        for (option in MIGU_QUALITY_LADDER.options) {
+            val playable = try {
+                downloadAtQuality(cookie, MIGU_QUALITY_PROBE_SONG, option.value, fallbackTones = false)
+                true
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                false
+            }
+            if (playable) {
+                result = MIGU_QUALITY_LADDER.ladderFrom(option.value)
+                break
+            }
+        }
+        availableQualityCache[cacheKey] = result
+        return result
+    }
+
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
+        // 指定档位时不能用 song.url：那是搜索时抓到的最高档地址，可能不是请求的档
+        val url = if (quality != AudioQuality.Auto) {
+            downloadUrl(cookie, song, quality)
+        } else {
+            song.url.ifBlank { downloadUrl(cookie, song, AudioQuality.Auto) }
+        }
         return PlayableStream(
             url = url,
             ext = extensionFromUrl(url).ifBlank { song.ext },
@@ -1057,6 +1200,102 @@ internal fun miguTrialUrl(url: String): Boolean {
     val path = runCatching { java.net.URI(url).path }.getOrNull().orEmpty()
     return Regex("/[^/]*_60s/").containsMatchIn(path)
 }
+
+/** 一个音质档与它的 tone 参数；同一档可能有多个 tone（24bit 有 ZQ24 和 ZQ 两种写法）。 */
+internal data class MiguQualityCandidate(val option: AudioQualityOption, val tones: List<String>) {
+    fun matchesTone(tone: String): Boolean {
+        val normalized = tone.trim().uppercase(Locale.ROOT)
+        return tones.any { it == normalized }
+    }
+}
+
+internal val MIGU_QUALITY_CANDIDATES: List<MiguQualityCandidate> = listOf(
+    MiguQualityCandidate(AudioQualityOption(AudioQuality.Master, "32bit 母带", "wav", vip = true), listOf("ZQ32")),
+    MiguQualityCandidate(AudioQualityOption(AudioQuality.Spatial, "空间音频", "wav", vip = true), listOf("Z3D", "I3D", "3D60")),
+    MiguQualityCandidate(AudioQualityOption(AudioQuality.HiRes, "24bit 无损", "flac", vip = true), listOf("ZQ24", "ZQ")),
+    MiguQualityCandidate(AudioQualityOption(AudioQuality.Lossless, "无损音质", "flac", vip = true), listOf("SQ")),
+    MiguQualityCandidate(AudioQualityOption(AudioQuality.High, "高品质 320k", "mp3", 320), listOf("HQ")),
+    MiguQualityCandidate(AudioQualityOption(AudioQuality.Standard, "标准音质 128k", "mp3", 128), listOf("PQ")),
+    MiguQualityCandidate(AudioQualityOption(AudioQuality.Low, "低品质 64k", "mp3", 64), listOf("LQ")),
+)
+
+/** 咪咕的可选音质档，从高到低。移植自 music-lib 的 migu/quality.go。 */
+internal val MIGU_QUALITY_LADDER: AudioQualityLadder =
+    AudioQualityLadder.of(MIGU_QUALITY_CANDIDATES.map { it.option })
+
+/** 从 CDN 路径反推档位；路径里没有已知目录时返回空串。 */
+internal fun miguToneFromUrl(url: String): String {
+    val path = runCatching { java.net.URI(url).path }.getOrNull().orEmpty()
+    // flac_24bit 必须在 flac 之前判，否则 24bit 会被认成普通无损
+    for (tone in listOf("ZQ32", "ZQ24", "SQ", "HQ", "LQ", "PQ")) {
+        val tonePath = MIGU_TONE_PATHS[tone] ?: continue
+        if (path.contains(tonePath)) return tone
+    }
+    return ""
+}
+
+/** 档位 → CDN 目录与扩展名；和 Go 侧 miguTonePaths / miguToneExtensions 一致。 */
+internal val MIGU_TONE_PATHS = mapOf(
+    "LQ" to "全曲试听/Mp3_64_22_16",
+    "PQ" to "标清高清/MP3_128_16_Stero",
+    "HQ" to "标清高清/MP3_320_16_Stero",
+    "SQ" to "歌曲下载/flac",
+    "ZQ" to "歌曲下载/flac_24bit",
+    "ZQ24" to "歌曲下载/flac_24bit",
+    "ZQ32" to "歌曲下载/wav_32bit",
+)
+
+internal val MIGU_TONE_EXTENSIONS = mapOf(
+    "LQ" to "mp3",
+    "PQ" to "mp3",
+    "HQ" to "mp3",
+    "SQ" to "flac",
+    "ZQ" to "flac",
+    "ZQ24" to "flac",
+    "ZQ32" to "wav",
+    "Z3D" to "wav",
+    "I3D" to "m4a",
+    "3D60" to "wav",
+)
+
+/** 空间音频三个 tone 走加密地址，目录改写拿不到明文。 */
+private val MIGU_UNREWRITABLE_TONES = setOf("Z3D", "I3D", "3D60")
+
+/**
+ * 把 CDN 路径里的音质目录换成目标档（`歌曲下载/flac` → `歌曲下载/wav_32bit`）。
+ * 咪咕按目录区分档位，同一文件改路径就能拿到更高档；空间音频走加密地址，不能改写。
+ */
+internal fun miguRewrittenToneUrl(rawUrl: String, tone: String): String? {
+    val targetPath = MIGU_TONE_PATHS[tone.trim().uppercase(Locale.ROOT)] ?: return null
+    val targetExt = MIGU_TONE_EXTENSIONS[tone.trim().uppercase(Locale.ROOT)] ?: return null
+    if (tone.trim().uppercase(Locale.ROOT) in MIGU_UNREWRITABLE_TONES) return null
+    val parsed = runCatching { java.net.URI(rawUrl) }.getOrNull() ?: return null
+    val path = parsed.path ?: return null
+    val sourcePath = MIGU_TONE_PATHS.entries
+        .sortedWith(compareByDescending<Map.Entry<String, String>> { it.value.length })
+        .firstOrNull { path.contains(it.value) }?.value ?: return null
+    var newPath = path.replaceFirst(sourcePath, targetPath)
+    if (newPath == path) return null
+    val oldExt = newPath.substringAfterLast('/', "").substringAfterLast('.', "")
+    if (oldExt.isNotEmpty()) newPath = newPath.removeSuffix(".$oldExt")
+    newPath += ".$targetExt"
+    return runCatching {
+        java.net.URI(parsed.scheme, parsed.authority, newPath, parsed.query, parsed.fragment).toString()
+    }.getOrNull()
+}
+
+/** 探测用的固定曲目：热歌、版权清楚，各档基本齐全。 */
+internal val MIGU_QUALITY_PROBE_SONG: Song = Song(
+    id = "600902000006889366|2|HQ",
+    albumId = "1138997327",
+    source = "migu",
+    extra = mapOf(
+        "content_id" to "600902000006889366",
+        "resource_type" to "2",
+        "format_type" to "HQ",
+        "copyright_id" to "60054701923",
+    ),
+)
 
 @Serializable
 private data class MiguSearchResponse(val songResultData: MiguSongResult = MiguSongResult())

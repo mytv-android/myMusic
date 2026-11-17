@@ -103,10 +103,10 @@ class YouTubeMusicProvider : BaseNativeProvider(YTM_INFO) {
         )
     }
 
-    override suspend fun downloadUrl(cookie: String, song: Song): String =
+    override suspend fun downloadUrl(cookie: String, song: Song, quality: AudioQuality): String =
         resolveStream(cookie, song.id).url
 
-    override suspend fun playableStream(cookie: String, song: Song, workDir: File): PlayableStream {
+    override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
         val stream = resolveStream(cookie, song.id)
         return PlayableStream(
             url = stream.url,
