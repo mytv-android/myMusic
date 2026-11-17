@@ -99,6 +99,7 @@ import com.mytv.mymusic.data.local.LOCAL_SOURCE
 import com.mytv.mymusic.data.local.LocalLibrary
 import com.mytv.mymusic.data.local.LocalPlayable
 import com.mytv.mymusic.data.local.forStorage
+import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.TrackOverrideEntity
 import com.mytv.mymusic.data.native.AppleLyricsConfig
@@ -4630,6 +4631,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // 放起来了就把这一轮的排除记录清掉，下次出错重新从所有源里挑
             if (playbackState == Player.STATE_READY) {
                 base.value.currentTrack?.id?.let(failoverExcluded::remove)
+                base.value.current?.key?.let(LxSources::clearPlaybackFailures)
             }
         }
 
@@ -4703,13 +4705,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 failedSource?.let { resolver.invalidate(it) }
+                val customFailed = failedSource?.song?.extra?.containsKey("lx_source_id") == true
+                if (customFailed) LxSources.reportPlaybackFailure(failedSource.song)
                 // 排除集要跨重试累积：只排除上一次失败的那个源，两个源会互相顶替、来回切个不停
                 // （真机上 DRM 每轮都失败，就一直在「排除 apple」「排除 netease」之间打转）。
                 val excluded = if (live) {
                     emptySet()
                 } else {
                     failoverExcluded.getOrPut(track.id) { mutableSetOf() }
-                        .apply { failedSource?.providerId?.let(::add) }
+                        .apply { if (!customFailed) failedSource?.providerId?.let(::add) }
                         .toSet()
                 }
                 AppLog.w(

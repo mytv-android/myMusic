@@ -137,6 +137,9 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.okhttp)
     implementation(libs.nanohttpd)
+    // 落雪自定义音源：与官方移动版相同的 QuickJS 脚本环境 + 执行中断
+    implementation(libs.quickjs.android)
+    implementation(project(":lib-runtime-lx"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.datastore.preferences)

@@ -59,6 +59,8 @@ data class TrackSource(
         song.bitrate.takeIf { it > 0 }?.let { "$it kbps" },
         song.ext.takeIf { it.isNotBlank() }?.uppercase(Locale.ROOT),
     ).joinToString(" · ").ifBlank { "音质未知" }
+    val actualProviderName: String get() = song.extra["lx_source"]?.takeIf { it.isNotBlank() }
+        ?.let { "$providerName · $it" } ?: providerName
 }
 
 data class SourcePolicy(

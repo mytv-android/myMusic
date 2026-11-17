@@ -810,6 +810,9 @@ internal fun SourcesSettingsScreen(state: MusicUiState, actions: MusicActions, o
         item(key = "note", contentType = "note") {
             SettingsNote("顺序同时决定聚合搜索、榜单和歌单的来源条、换源面板和播放换源的先后。")
         }
+        item(key = "lxSources", contentType = "lxSources") {
+            Box(Modifier.padding(top = 16.dp)) { LxSourcesSettingsSection(state) }
+        }
         item(key = "reset", contentType = "settingRow") {
             ListRow(
                 title = "恢复默认平台与顺序",
@@ -817,7 +820,7 @@ internal fun SourcesSettingsScreen(state: MusicUiState, actions: MusicActions, o
                 count = 1,
                 onClick = actions::resetSources,
                 icon = Icons.Filled.Refresh,
-                summary = "只动音乐源；换源模式、匹配严格度这些不受影响",
+                summary = "只动内置音乐源；自定义脚本、换源模式和匹配严格度不受影响",
             )
         }
     }
@@ -1930,6 +1933,7 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
         "MHub / music.op.wiki" to "YouTube Music 的音频准备接口来源：MHub 公开实例（AGPL-3.0）。应用只调用它的 HTTP API，不打包其代码；音频由服务端逐首准备，客户端按它的限流要求串行请求。",
         "AndroidX、Media3、Coil、Room、WorkManager" to "均按其 Apache-2.0 或对应开源许可使用；完整列表随应用和仓库提供。",
         "二维码生成" to "扫码登录的二维码按 Nayuki QR Code generator（MIT）的算法在本机生成。",
+        "LX Music / QuickJS" to "自定义音源使用落雪音乐移动版的自定义源协议适配层（Apache-2.0）与 QuickJS Wrapper 2.4.0（Apache-2.0）。pdone 音源合集仅作为导入入口，应用不内置其中的脚本。",
         "MaterialKolor、Haze" to "动态配色（MIT）与模糊效果（Apache-2.0）。",
         "Lyricon / 词幕" to "使用官方 Provider / Subscriber SDK 0.1.70 与本机词幕服务互通歌曲、歌词和播放状态（Apache-2.0）。",
         "YesPlayMusic" to "歌词背景“律动”的分频段自适应增益与频谱通量鼓点检测参考其 MIT 实现；音频分析改由本机 ExoPlayer PCM 完成。",
@@ -2014,6 +2018,7 @@ fun PrivacyScreen(onBack: () -> Unit, embedded: Boolean = false) {
         "词幕歌词互通" to "“发送歌词到词幕”默认开启，把当前歌曲名、歌手、歌词和播放进度通过本机的词幕核心服务提供给其他应用；不包含音频、Cookie、令牌或播放地址。“接收其他播放器歌词”默认关闭，开启后只在本机显示词幕收到的歌曲和歌词。两项均可在设置 › 播放页关闭，数据不经 myMusic 服务器。",
         "写入你选择的云端" to "启用同步后，自建歌单、收藏和平台账号 Cookie 会写入你的 GitHub Gist、Gitee 代码片段或 WebDAV 目录。Cookie 以明文保存，请勿公开文件链接或共享该目录；同步文件不包含同步令牌、WebDAV 密码、播放地址和下载文件。选 WebDAV 时，同步文件写在你的 WebDAV 目录里；WebDAV 密码只存在本机，不进同步文件。",
         "网络请求" to "应用直接请求音乐平台上游接口、更新清单和同步服务，没有 myMusic 自建中转服务器。汽水播放签名器默认使用 SodaM 的公共签名服务（可在设置里关闭或换成自建实例），会员整曲的取流请求会带着 Cookie 和完整请求头发给该服务。YouTube Music 直连 YouTube 取流；使用 music.op.wiki 音源时，搜索和音频由这个第三方服务提供，取流只发送歌曲 ID，不发送 Cookie。用 music.op.wiki 账号登录时，用户名和密码只发给它，本机只保存会话 Cookie。第三方仍会看到其服务所需的常规请求信息。扫码登录的二维码在本机生成。",
+        "自定义音源" to "只有你主动导入时才会运行落雪自定义音源脚本。脚本保存在本机，不随音乐库同步；它可以通过自己的接口访问网络，并会收到待播放歌曲的歌名、歌手、平台歌曲 ID、时长和封面等取流所需信息，但不会收到 myMusic 保存的平台 Cookie。在线更新会重新下载原地址的脚本；删除音源会删除本机脚本。请只导入信任的脚本。",
         "播放上报" to "开启“播放上报”（设置 › 播放上报，默认开）后，正在播放的曲目 ID、实际播放时长（暂停不计）、是否播完，以及切歌 / 暂停 / 换队列的原因会回传给该曲目所属的平台，用来让推荐流跟上你的口味；汽水还会把最近听过的曲目连时长一起带在推荐请求里。接入的平台有汽水音乐、网易云音乐、QQ音乐、酷我音乐和千千音乐；咪咕与 JOOX 公开面上没有可实现的上报接口。上报不带用户名、Cookie、播放地址或文件内容。关掉开关后一个请求都不发，已经发出去的服务端记录不会撤回。",
         "诊断信息" to "复制诊断只包含版本、设备型号、Android 版本、启用平台和最近错误；不包含 Cookie、令牌或完整播放 URL。",
     )

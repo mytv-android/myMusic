@@ -13,6 +13,7 @@ import com.mytv.mymusic.data.AccountProfileStore
 import com.mytv.mymusic.data.ListenTaskStore
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.SettingsStore
+import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.data.native.AppleTokenCache
 import com.mytv.mymusic.data.native.NativeProviders
 import com.mytv.mymusic.data.native.SodaPlayReporter
@@ -119,6 +120,7 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        LxSources.attach(this)
         AppleTokenCache.attach(this)
         val backgroundWork = BackgroundWork.available(this)
         if (!backgroundWork) {

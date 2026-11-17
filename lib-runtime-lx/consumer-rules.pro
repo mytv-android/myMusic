@@ -1,0 +1,1 @@
+-keep class com.mytv.mymusic.lxruntime.LxQuickJsInterrupt { *; }

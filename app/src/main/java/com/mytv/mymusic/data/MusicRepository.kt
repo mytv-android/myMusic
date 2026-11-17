@@ -1,5 +1,7 @@
 package com.mytv.mymusic.data
 
+import com.mytv.mymusic.data.lx.LxPlayback
+import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.data.native.AccountInfo
 import com.mytv.mymusic.data.native.AudioQuality
 import com.mytv.mymusic.data.native.NativeProvider
@@ -9,7 +11,9 @@ import com.mytv.mymusic.data.native.SongSearchPage
 import java.io.File
 
 /** open 供测试替身覆写 playableStream，不发起真实网络请求。 */
-open class MusicRepository {
+open class MusicRepository(
+    private val lxPlayback: LxPlayback = LxSources,
+) {
     suspend fun providers(): List<ProviderInfo> = NativeProviders.infos()
 
     suspend fun searchSongs(provider: String, cookie: String, keyword: String): List<Song> =
@@ -34,13 +38,17 @@ open class MusicRepository {
         cookie: String,
         workDir: File,
         quality: AudioQuality = AudioQuality.Auto,
-    ): PlayableStream =
-        requireProvider(song.source).playableStream(cookie, song, workDir, quality)
+    ): PlayableStream {
+        lxPlayback.resolve(song, quality.id)?.let { return it }
+        return requireProvider(song.source).playableStream(cookie, song, workDir, quality)
+    }
 
     /** 当前账号在这个平台上实际能选的音质档，从高到低；空表表示只有“自动”。 */
     suspend fun availableQualityOptions(provider: String, cookie: String) =
         requireProvider(provider).availableQualityOptions(cookie)
 
+    open fun supportsCustomSource(provider: String): Boolean = lxPlayback.supports(provider)
+    open fun customSourceGeneration(): Long = lxPlayback.generation
 
     suspend fun lyrics(song: Song, cookie: String): String =
         requireProvider(song.source).lyrics(cookie, song)

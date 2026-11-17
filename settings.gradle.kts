@@ -18,3 +18,4 @@ rootProject.name = "myMusic"
 include(":app")
 include(":baselineprofile")
 include(":lib-decoder-flac")
+include(":lib-runtime-lx")

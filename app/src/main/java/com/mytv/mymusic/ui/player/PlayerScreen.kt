@@ -207,7 +207,7 @@ fun PlayerScreen(
     }
 
     val source = state.currentSource
-    val sourceProvider = source?.providerName
+    val sourceProvider = source?.actualProviderName
     val sourceDetail = source?.qualityLabel?.takeUnless { it == "音质未知" }.orEmpty()
     val playbackMode = modeLabel(state.aggregation.playbackMode)
     val onSkip: (Int) -> Unit = { direction -> actions.transport(if (direction > 0) "next" else "previous") }

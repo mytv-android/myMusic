@@ -9,6 +9,16 @@
 
 The vendored Go source is retained as the reference for the Kotlin native port in `app/src/main/java/com/mytv/mymusic/data/native`. This includes the word-timing lyric conversions ported from `lyrics/lyrics.go` (`ParseLRC` / `ParseYRC` / `ParseQRC` / `ParseKRC` / `ConvertVerbatimLRC` → the verbatim-LRC output in `QQProvider.kt`, `KugouProvider.kt`, `NetEaseProvider.kt`), the `spotify/` package (anonymous Web Player search, the public-embed and chart-mirror fallbacks, the Web API credential/token flow → `SpotifyProvider.kt`), and the audio-quality ladders from `model/quality.go` plus each platform's `quality.go` (`AudioQuality` / `AudioQualityOption` / `NormalizeAudioQuality`, the per-platform candidate ladders, and the "never silently downgrade a requested tier" rule → `AudioQuality.kt` and the per-provider `availableQualityOptions` / `downloadUrlWithQuality`). The Kotlin port is a derivative work distributed under AGPL-3.0. Modifications must retain this notice and the AGPL-3.0 terms.
 
+## LX Music custom-source runtime / QuickJS
+
+- Upstream: https://github.com/lyswhut/lx-music-mobile
+- Reference revision: 0669d1b6d419967822ff52ec06e50b9613bfd136 (2026-11-17)
+- License: Apache License 2.0; the upstream license text is bundled at `app/src/main/assets/lx/LICENSE`.
+- Bundled source: `app/src/main/assets/lx/user-api-preload.js` is the official mobile `android/app/src/main/assets/script/user-api-preload.js`, unchanged except for the attribution header. It supplies the LX `request` / `inited` / `updateAlert` event bridge, Buffer and crypto helpers, timers, and the restricted JavaScript global environment.
+- Native host: `data/lx/LxScriptEngine.kt`, `LxSources.kt`, and the related Kotlin files implement the Android/OkHttp host, source metadata persistence, platform song-field mapping, validation, playback fallback, and settings UI around that preload. The native bridge follows the official mobile protocol (`QuickJS.java`, `UserApiModule.java`, and `src/core/init/userApi/request.js`).
+- JavaScript engine: `wang.harlon.quickjs:wrapper-android:2.4.0` from https://github.com/HarlonWang/quickjs-wrapper (Apache License 2.0), the same wrapper used by LX Music mobile. `lib-runtime-lx` calls the wrapper's exported QuickJS `JS_SetInterruptHandler` ABI so timed-out or closed scripts can be interrupted before their context is destroyed.
+- `https://github.com/pdone/lx-music-source` is linked as a user-facing catalog only. No script from that repository is bundled or executed unless the user explicitly imports it. Imported scripts remain in the app's private local storage and are not included in music-library sync.
+
 ## SodaM / libresoda
 
 - Upstream: https://github.com/sodahub-org/sodam and https://github.com/sodahub-org/libresoda
