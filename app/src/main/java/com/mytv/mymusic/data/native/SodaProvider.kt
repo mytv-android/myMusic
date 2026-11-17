@@ -2,6 +2,7 @@ package com.mytv.mymusic.data.native
 
 import android.net.Uri
 import com.mytv.mymusic.AppLog
+import com.mytv.mymusic.data.AlbumDetail
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
@@ -384,6 +385,11 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
     override suspend fun albumSongs(cookie: String, id: String): List<Song> =
         fetchAlbumDetail(cookie, id).second
+
+    override suspend fun albumDetail(cookie: String, id: String): AlbumDetail {
+        val (album, songs) = fetchAlbumDetail(cookie, id)
+        return AlbumDetail(album.toLooseAlbumSummary(), songs)
+    }
 
     override suspend fun parseAlbum(cookie: String, link: String): CollectionResult {
         val albumId = extractAlbumId(link)

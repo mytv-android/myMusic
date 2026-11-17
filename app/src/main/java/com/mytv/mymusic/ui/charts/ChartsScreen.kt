@@ -973,6 +973,10 @@ internal fun SongActionsSheet(
     onDismiss: () -> Unit,
     onWallLocate: (() -> Unit)? = null,
     onWallSettings: (() -> Unit)? = null,
+    /** 歌手页里打开时传这位歌手：面板里不再给“查看歌手：他自己”。 */
+    currentArtist: String = "",
+    /** 专辑页里打开时传这张专辑：面板里不再给“查看专辑”。 */
+    currentAlbum: String = "",
 ) {
     TrackActionsSheet(
         song = target.song,
@@ -989,6 +993,10 @@ internal fun SongActionsSheet(
         onDismiss = onDismiss,
         onWallLocate = onWallLocate,
         onWallSettings = onWallSettings,
+        onOpenArtist = { name -> actions.openArtistByName(name, target.song) },
+        onOpenAlbum = { actions.openAlbumOf(target.song) },
+        hideArtist = currentArtist,
+        hideAlbum = currentAlbum,
     )
 }
 

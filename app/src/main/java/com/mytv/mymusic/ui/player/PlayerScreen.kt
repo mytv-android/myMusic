@@ -32,6 +32,10 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.ui.text.style.TextOverflow
+import com.mytv.mymusic.ui.artist.splitArtistNames
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -458,6 +462,23 @@ internal fun MoreMenu(
             // 收起播放页，露出队列海报墙
             DropdownMenuItem(text = { Text("海报墙") }, leadingIcon = { Icon(Icons.Filled.GridView, null) }, onClick = { open = false; actions.openPosterWall() })
             DropdownMenuItem(text = { Text("选择音源") }, leadingIcon = { Icon(Icons.Filled.SwapHoriz, null) }, onClick = { open = false; onOpenSource() })
+            // 收起播放页，打开歌手页 / 专辑页；直播（电台）没有这两项
+            if (!song.isLive) {
+                splitArtistNames(song.artist).take(3).forEach { name ->
+                    DropdownMenuItem(
+                        text = { Text("歌手：$name", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingIcon = { Icon(Icons.Filled.Person, null) },
+                        onClick = { open = false; actions.openArtistByName(name, song) },
+                    )
+                }
+                if (song.album.isNotBlank()) {
+                    DropdownMenuItem(
+                        text = { Text("专辑：${song.album}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingIcon = { Icon(Icons.Filled.Album, null) },
+                        onClick = { open = false; actions.openAlbumOf(song) },
+                    )
+                }
+            }
             DropdownMenuItem(text = { Text("下载到本机") }, leadingIcon = { Icon(Icons.Filled.Download, null) }, onClick = { open = false; actions.download(song) })
             if (deepLink.isNotBlank()) {
                 DropdownMenuItem(text = { Text("在平台打开") }, onClick = { open = false; actions.openDeepLink() })

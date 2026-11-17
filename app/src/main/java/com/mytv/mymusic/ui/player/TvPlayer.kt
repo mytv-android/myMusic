@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Person
+import com.mytv.mymusic.ui.artist.splitArtistNames
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -395,6 +397,11 @@ private fun TvDock(
                 DockAction(Icons.AutoMirrored.Filled.QueueMusic, "播放队列", onOpenQueue)
                 DockAction(Icons.Filled.GridView, "海报墙", actions::openPosterWall)
                 DockAction(Icons.Filled.SwapHoriz, "换音源", onOpenSource)
+                // 收起播放页，打开第一位歌手的歌手页（专辑在歌手页里点得到）
+                val artist = if (song.isLive) "" else splitArtistNames(song.artist).firstOrNull().orEmpty()
+                if (artist.isNotBlank()) {
+                    DockAction(Icons.Filled.Person, "歌手：$artist", { actions.openArtistByName(artist, song) })
+                }
                 DockAction(Icons.Filled.AutoAwesome, "歌词动画", onOpenSheet)
             }
         }

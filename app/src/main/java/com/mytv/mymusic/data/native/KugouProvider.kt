@@ -1,5 +1,10 @@
 package com.mytv.mymusic.data.native
 
+import com.mytv.mymusic.data.AlbumDetail
+import com.mytv.mymusic.data.AlbumSummary
+import com.mytv.mymusic.data.ArtistAlbumPage
+import com.mytv.mymusic.data.ArtistDetail
+import com.mytv.mymusic.data.ArtistProfile
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
@@ -9,6 +14,9 @@ import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.QRSession
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
+import com.mytv.mymusic.data.normalizePublishTime
+import com.mytv.mymusic.data.toAlbumSummary
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -703,6 +711,93 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             return CollectionResult(playlist, songs)
         }
         throw IllegalArgumentException("invalid kugou album link")
+    }
+
+    /** 歌手资料：singer/info 给头像、歌曲 / 专辑 / MV 数和简介；没有粉丝数和生日这类资料。 */
+    override suspend fun artistDetail(cookie: String, id: String): ArtistDetail {
+        val singerId = id.trim()
+        if (singerId.isEmpty() || !singerId.all { it.isDigit() }) {
+            throw IllegalArgumentException("invalid kugou singer id: $id")
+        }
+        val url = "http://mobilecdn.kugou.com/api/v3/singer/info?" + query(
+            mapOf("singerid" to singerId, "with_res_tag" to "1")
+        )
+        val body = NativeHttp.get(url, cookie = cookie, randomIp = true, userAgent = MOBILE_USER_AGENT)
+        return ArtistDetail(parseSingerProfile(body, singerId))
+    }
+
+    internal fun parseSingerProfile(body: String, singerId: String): ArtistProfile {
+        val resp = json.decodeFromString<KugouSingerInfoResponse>(kugouStripTag(body))
+        if (resp.errcode != 0 || resp.status != 1) {
+            throw IllegalStateException("kugou singer info api error: status=${resp.status} errcode=${resp.errcode}")
+        }
+        val info = resp.data
+        val id = info.singerId.takeIf { it > 0 }?.toString() ?: singerId
+        // profile 是带段落的完整简介，intro 是短的旧简介，mix_intro 是 HTML 版
+        val description = artistPlainText(info.profile)
+            .ifBlank { artistPlainText(info.intro) }
+            .ifBlank { artistPlainText(info.mixIntro) }
+        return ArtistProfile(
+            id = id,
+            name = info.singerName,
+            source = "kugou",
+            avatar = info.imgUrl.replace("{size}", KUGOU_ARTIST_AVATAR_SIZE),
+            alias = info.alias.trim(),
+            description = description,
+            songCount = info.songCount,
+            albumCount = info.albumCount,
+            mvCount = info.mvCount,
+            link = "https://www.kugou.com/singer/$id.html",
+        )
+    }
+
+    /** 歌手专辑：singer/album 默认按发行时间从新到旧，响应外面也包着 KG_TAG_RES 注释。 */
+    override suspend fun artistAlbums(cookie: String, id: String, page: Int, limit: Int): ArtistAlbumPage {
+        val singerId = id.trim()
+        if (singerId.isEmpty() || !singerId.all { it.isDigit() }) {
+            throw IllegalArgumentException("invalid kugou singer id: $id")
+        }
+        val pageNo = page.coerceAtLeast(1)
+        val size = limit.coerceIn(1, 100)
+        val url = "http://mobilecdn.kugou.com/api/v3/singer/album?" + query(
+            mapOf(
+                "singerid" to singerId,
+                "page" to pageNo.toString(),
+                "pagesize" to size.toString(),
+                "with_res_tag" to "1",
+            )
+        )
+        val body = NativeHttp.get(url, cookie = cookie, randomIp = true, userAgent = MOBILE_USER_AGENT)
+        return parseSingerAlbums(body, singerId, pageNo, size)
+    }
+
+    internal fun parseSingerAlbums(body: String, singerId: String, page: Int, limit: Int): ArtistAlbumPage {
+        val resp = json.decodeFromString<KugouSingerAlbumsResponse>(kugouStripTag(body))
+        if (resp.errcode != 0 || resp.status != 1) {
+            throw IllegalStateException("kugou singer albums api error: status=${resp.status} errcode=${resp.errcode} error=${resp.error}")
+        }
+        val items = resp.data.info
+        val albums = items.filter { it.albumId > 0 }.map { item ->
+            AlbumSummary(
+                id = item.albumId.toString(),
+                name = item.albumName.trim(),
+                source = "kugou",
+                cover = item.imgUrl.replaceFirst("{size}", "240"),
+                artist = item.singerName.trim(),
+                artistId = singerId,
+                publishTime = normalizePublishTime(item.publishTime),
+                trackCount = item.songCount,
+                link = "https://www.kugou.com/album/${item.albumId}.html",
+            )
+        }
+        val total = resp.data.total
+        val hasMore = if (total > 0) (page - 1) * limit + items.size < total else items.size >= limit
+        return ArtistAlbumPage(albums = albums, total = total, hasMore = hasMore)
+    }
+
+    override suspend fun albumDetail(cookie: String, id: String): AlbumDetail {
+        val (playlist, songs) = fetchAlbumDetail(cookie, id)
+        return AlbumDetail(playlist.toAlbumSummary(), songs)
     }
 
     override suspend fun categories(cookie: String): List<PlaylistCategory> {
@@ -1730,11 +1825,13 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             description = info.data.intro,
             source = "kugou",
             link = "https://www.kugou.com/album/$id.html",
-            extra = mapOf(
-                "type" to "album",
-                "album_id" to firstNonEmpty(info.data.albumId.toString(), id),
-                "publish_time" to info.data.publishTime,
-            ),
+            extra = buildMap {
+                put("type", "album")
+                put("album_id", firstNonEmpty(info.data.albumId.toString(), id))
+                put("publish_time", info.data.publishTime)
+                // 专辑页的歌手入口、“更多专辑”用
+                if (info.data.singerId > 0) put("artist_id", info.data.singerId.toString())
+            },
         )
         return playlist to songs
     }
@@ -3121,6 +3218,8 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
     private data class KrcLine(val startMs: Int, val endMs: Int, val words: List<KrcWord>)
 
     private companion object {
+        /** 歌手头像档位：softhead 的 240 / 480 / 800 / 1000 都有，800 已经够铺满歌手页头部。 */
+        const val KUGOU_ARTIST_AVATAR_SIZE = "800"
         const val MOBILE_USER_AGENT =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"
         const val SEARCH_USER_AGENT =
@@ -3412,6 +3511,7 @@ private data class KugouAlbumInfoData(
     @SerialName("publishtime") val publishTime: String = "",
     @SerialName("play_count") val playCount: Int = 0,
     @SerialName("songcount") val songCount: Int = 0,
+    @SerialName("singerid") val singerId: Long = 0,
 )
 
 @Serializable
@@ -3442,6 +3542,35 @@ private data class KugouSingerInfo(
     @SerialName("singername") val singerName: String = "",
     @SerialName("songcount") val songCount: Int = 0,
     @SerialName("albumcount") val albumCount: Int = 0,
+    @SerialName("imgurl") val imgUrl: String = "",
+    @SerialName("mvcount") val mvCount: Int = 0,
+    val alias: String = "",
+    val profile: String = "",
+    val intro: String = "",
+    @SerialName("mix_intro") val mixIntro: String = "",
+)
+
+@Serializable
+private data class KugouSingerAlbumsResponse(
+    val status: Int = 0,
+    val errcode: Int = 0,
+    val error: String = "",
+    val data: KugouSingerAlbumsData = KugouSingerAlbumsData(),
+)
+
+@Serializable
+private data class KugouSingerAlbumsData(
+    val total: Int = 0,
+    val info: List<KugouSingerAlbumItem> = emptyList(),
+)
+
+@Serializable
+private data class KugouSingerAlbumItem(
+    @SerialName("albumid") val albumId: Long = 0,
+    @SerialName("albumname") val albumName: String = "",
+    @SerialName("singername") val singerName: String = "",
+    @SerialName("songcount") val songCount: Int = 0,
+    @SerialName("publishtime") val publishTime: String = "",
     @SerialName("imgurl") val imgUrl: String = "",
 )
 

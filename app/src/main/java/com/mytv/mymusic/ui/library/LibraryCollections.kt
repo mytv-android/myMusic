@@ -251,6 +251,8 @@ fun FavoritesScreen(
             onRemoveFromPlaylist = null,
             onDismiss = { actionSong = null },
             onRematch = if (song.source == LOCAL_SOURCE) ({ actionSong = null; unplayable.rematch = song }) else null,
+            onOpenArtist = { name -> actions.openArtistByName(name, song) },
+            onOpenAlbum = { actions.openAlbumOf(song) },
         )
     }
 }
@@ -429,6 +431,8 @@ fun HistoryScreen(
             onRemoveFromPlaylist = null,
             onDismiss = { actionSong = null },
             onRematch = if (song.source == LOCAL_SOURCE) ({ actionSong = null; unplayable.rematch = song }) else null,
+            onOpenArtist = { name -> actions.openArtistByName(name, song) },
+            onOpenAlbum = { actions.openAlbumOf(song) },
         )
     }
 }

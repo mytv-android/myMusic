@@ -1,5 +1,10 @@
 package com.mytv.mymusic.data.native
 
+import com.mytv.mymusic.data.AlbumDetail
+import com.mytv.mymusic.data.AlbumSummary
+import com.mytv.mymusic.data.ArtistAlbumPage
+import com.mytv.mymusic.data.ArtistDetail
+import com.mytv.mymusic.data.ArtistProfile
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
@@ -10,6 +15,8 @@ import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.QRSession
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
+import com.mytv.mymusic.data.normalizePublishTime
+import com.mytv.mymusic.data.toAlbumSummary
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -785,6 +792,178 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         throw IllegalArgumentException("invalid qq album link")
     }
 
+    /**
+     * 歌手资料：GetSingerDetail（基本资料 + 百科）、歌曲总数、专辑总数、粉丝数放在同一个 musicu 请求里。
+     * MV 数没取：GetSingerMvList 的 total 是全部相关视频（周杰伦一万多条），不是 MV 数。
+     */
+    override suspend fun artistDetail(cookie: String, id: String): ArtistDetail {
+        val singerMid = id.trim()
+        if (singerMid.isEmpty()) throw IllegalArgumentException("singer id is empty")
+        val body = buildJsonObject {
+            putJsonObject("comm") {
+                put("ct", 24)
+                put("cv", 0)
+            }
+            putJsonObject("detail") {
+                put("module", "music.musichallSinger.SingerInfoInter")
+                put("method", "GetSingerDetail")
+                putJsonObject("param") {
+                    putJsonArray("singer_mids") { add(JsonPrimitive(singerMid)) }
+                    put("ex_singer", 1)
+                    put("wiki_singer", 1)
+                    put("group_singer", 0)
+                    put("pic", 1)
+                    put("photos", 0)
+                }
+            }
+            putJsonObject("songs") {
+                put("module", "musichall.song_list_server")
+                put("method", "GetSingerSongList")
+                putJsonObject("param") {
+                    put("singerMid", singerMid)
+                    put("order", 1)
+                    put("begin", 0)
+                    put("num", 1)
+                }
+            }
+            putJsonObject("albums") {
+                put("module", "music.musichallAlbum.AlbumListServer")
+                put("method", "GetAlbumList")
+                putJsonObject("param") {
+                    put("singerMid", singerMid)
+                    put("order", 0)
+                    put("begin", 0)
+                    put("num", 1)
+                    put("songNumTag", 0)
+                    put("singerID", 0)
+                }
+            }
+            putJsonObject("fans") {
+                put("module", "Concern.ConcernSystemServer")
+                put("method", "cgi_qry_concern_num")
+                putJsonObject("param") {
+                    putJsonArray("vec_userinfo") {
+                        add(
+                            buildJsonObject {
+                                put("usertype", 1)
+                                put("userid", singerMid)
+                            },
+                        )
+                    }
+                    put("opertype", 6)
+                    put("encrypt_singerid", 1)
+                }
+            }
+        }
+        val response = NativeHttp.postJson(
+            QQ_MUSICU_API,
+            body.toString(),
+            headers = mapOf(
+                "Referer" to "https://y.qq.com/",
+                "Content-Type" to "application/json",
+            ),
+            cookie = cookie,
+            randomIp = true,
+            userAgent = QQ_WINDOWS_USER_AGENT,
+        )
+        return ArtistDetail(parseSingerDetail(response.body, singerMid))
+    }
+
+    internal fun parseSingerDetail(body: String, singerMid: String): ArtistProfile {
+        val root = json.decodeFromString<QQSingerDetailBatch>(body)
+        if (root.detail.code != 0) throw IllegalStateException("qq singer detail api error code: ${root.detail.code}")
+        val singer = root.detail.data.singerList.firstOrNull() ?: throw IllegalStateException("qq singer not found")
+        val basic = singer.basicInfo
+        val mid = basic.singerMid.ifBlank { singerMid }
+        val wiki = parseQQSingerWiki(singer.wiki)
+        val facts = wiki.facts.ifEmpty {
+            listOfNotNull(singer.exInfo.birthday.trim().takeIf { it.isNotEmpty() }?.let { "生日" to it })
+        }
+        val fans = root.fans.data.mapSingerNum[mid]?.userFansnum
+            ?: root.fans.data.mapSingerNum.values.firstOrNull()?.userFansnum
+            ?: 0L
+        return ArtistProfile(
+            id = mid,
+            name = basic.name,
+            source = "qq",
+            // pmid 带图片版本号（换过头像会变），没有就用 mid
+            avatar = "$QQ_SINGER_AVATAR_PREFIX${basic.singerPmid.ifBlank { mid }}.jpg",
+            alias = singer.exInfo.foreignName.trim(),
+            description = wiki.description.ifBlank { artistPlainText(singer.exInfo.desc) },
+            songCount = root.songs.data.totalNum,
+            albumCount = root.albums.data.total,
+            fans = fans,
+            facts = facts,
+            link = "https://y.qq.com/n/ryqq/singer/$mid",
+        )
+    }
+
+    /** 歌手专辑：order=0 按发行时间从新到旧；songNumTag=1 才会带每张专辑的曲目数。 */
+    override suspend fun artistAlbums(cookie: String, id: String, page: Int, limit: Int): ArtistAlbumPage {
+        val singerMid = id.trim()
+        if (singerMid.isEmpty()) throw IllegalArgumentException("singer id is empty")
+        val size = limit.coerceIn(1, 100)
+        val begin = (page.coerceAtLeast(1) - 1) * size
+        val body = buildJsonObject {
+            putJsonObject("comm") {
+                put("ct", 24)
+                put("cv", 0)
+            }
+            putJsonObject("albums") {
+                put("module", "music.musichallAlbum.AlbumListServer")
+                put("method", "GetAlbumList")
+                putJsonObject("param") {
+                    put("singerMid", singerMid)
+                    put("order", 0)
+                    put("begin", begin)
+                    put("num", size)
+                    put("songNumTag", 1)
+                    put("singerID", 0)
+                }
+            }
+        }
+        val response = NativeHttp.postJson(
+            QQ_MUSICU_API,
+            body.toString(),
+            headers = mapOf(
+                "Referer" to "https://y.qq.com/",
+                "Content-Type" to "application/json",
+            ),
+            cookie = cookie,
+            randomIp = true,
+            userAgent = QQ_WINDOWS_USER_AGENT,
+        )
+        return parseSingerAlbums(response.body, singerMid, begin, size)
+    }
+
+    internal fun parseSingerAlbums(body: String, singerMid: String, begin: Int, limit: Int): ArtistAlbumPage {
+        val root = json.decodeFromString<QQSingerAlbumsResponse>(body)
+        if (root.albums.code != 0) throw IllegalStateException("qq singer albums api error code: ${root.albums.code}")
+        val list = root.albums.data.albumList
+        val albums = list.filter { it.albumMid.isNotBlank() }.map { item ->
+            AlbumSummary(
+                id = item.albumMid,
+                name = item.albumName,
+                source = "qq",
+                cover = coverUrl(item.albumMid),
+                artist = item.singerName,
+                artistId = singerMid,
+                publishTime = normalizePublishTime(item.publishDate),
+                type = item.albumType.trim(),
+                trackCount = item.totalNum,
+                link = "https://y.qq.com/n/ryqq/albumDetail/${item.albumMid}",
+            )
+        }
+        val total = root.albums.data.total
+        val hasMore = if (total > 0) begin + list.size < total else list.size >= limit
+        return ArtistAlbumPage(albums = albums, total = total, hasMore = hasMore)
+    }
+
+    override suspend fun albumDetail(cookie: String, id: String): AlbumDetail {
+        val (playlist, songs) = fetchAlbumDetail(cookie, id)
+        return AlbumDetail(playlist.toAlbumSummary(), songs)
+    }
+
     override suspend fun categories(cookie: String): List<PlaylistCategory> {
         val url = QQ_CATEGORY_API + "?" + qqQuery(
             "format" to "json",
@@ -1464,13 +1643,16 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             description = info.desc,
             source = "qq",
             link = "https://y.qq.com/n/ryqq/albumDetail/$albumMid",
-            extra = mapOf(
-                "type" to "album",
-                "album_id" to info.albumID.toString(),
-                "album_mid" to albumMid,
-                "company" to detail.album.data.company.name,
-                "publish_time" to info.publishDate,
-            ),
+            extra = buildMap {
+                put("type", "album")
+                put("album_id", info.albumID.toString())
+                put("album_mid", albumMid)
+                put("company", detail.album.data.company.name)
+                put("publish_time", info.publishDate)
+                // 专辑页的歌手入口、“更多专辑”用
+                detail.album.data.singer.singerList.firstOrNull { it.mid.isNotBlank() }?.let { put("artist_id", it.mid) }
+                if (info.albumType.isNotBlank()) put("album_type", info.albumType.trim())
+            },
         )
         return playlist to songs
     }
@@ -2856,6 +3038,8 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         const val QQ_DOWNLOAD_REFERER = "http://y.qq.com"
         const val QQ_LYRIC_REFERER = "https://y.qq.com/portal/player.html"
         const val QQ_COVER_PREFIX = "https://y.gtimg.cn/music/photo_new/T002R300x300M000"
+        /** 歌手头像：T001 只有 150 / 300 / 500 / 800 几档，1000 是 404。 */
+        const val QQ_SINGER_AVATAR_PREFIX = "https://y.gtimg.cn/music/photo_new/T001R800x800M000"
 
         const val QQ_MUSICU_API = "https://u.y.qq.com/cgi-bin/musicu.fcg"
         const val QQ_SEARCH_API = "http://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp"
@@ -3064,7 +3248,87 @@ private data class QQAlbumBasic(
     val albumName: String = "",
     val publishDate: String = "",
     val desc: String = "",
+    val albumType: String = "",
 )
+
+@Serializable
+private data class QQSingerDetailBatch(
+    val detail: QQSingerDetailNode = QQSingerDetailNode(),
+    val songs: QQSingerSongsNode = QQSingerSongsNode(),
+    val albums: QQSingerAlbumListNode = QQSingerAlbumListNode(),
+    val fans: QQConcernNumNode = QQConcernNumNode(),
+)
+
+@Serializable
+private data class QQSingerDetailNode(
+    val code: Int = 0,
+    val data: QQSingerDetailData = QQSingerDetailData(),
+)
+
+@Serializable
+private data class QQSingerDetailData(
+    @SerialName("singer_list") val singerList: List<QQSingerDetailItem> = emptyList(),
+)
+
+@Serializable
+private data class QQSingerDetailItem(
+    @SerialName("basic_info") val basicInfo: QQSingerBasicInfo = QQSingerBasicInfo(),
+    @SerialName("ex_info") val exInfo: QQSingerExInfo = QQSingerExInfo(),
+    val wiki: String = "",
+)
+
+@Serializable
+private data class QQSingerBasicInfo(
+    @SerialName("singer_mid") val singerMid: String = "",
+    val name: String = "",
+    @SerialName("singer_pmid") val singerPmid: String = "",
+)
+
+@Serializable
+private data class QQSingerExInfo(
+    val desc: String = "",
+    @SerialName("foreign_name") val foreignName: String = "",
+    val birthday: String = "",
+)
+
+@Serializable
+private data class QQSingerAlbumsResponse(val albums: QQSingerAlbumListNode = QQSingerAlbumListNode())
+
+@Serializable
+private data class QQSingerAlbumListNode(
+    val code: Int = 0,
+    val data: QQSingerAlbumListData = QQSingerAlbumListData(),
+)
+
+@Serializable
+private data class QQSingerAlbumListData(
+    val albumList: List<QQSingerAlbumItem> = emptyList(),
+    val total: Int = 0,
+)
+
+@Serializable
+private data class QQSingerAlbumItem(
+    val albumMid: String = "",
+    val albumName: String = "",
+    val publishDate: String = "",
+    val albumType: String = "",
+    val totalNum: Int = 0,
+    val singerName: String = "",
+)
+
+@Serializable
+private data class QQConcernNumNode(
+    val code: Int = 0,
+    val data: QQConcernNumData = QQConcernNumData(),
+)
+
+@Serializable
+private data class QQConcernNumData(
+    @SerialName("map_singer_num") val mapSingerNum: Map<String, QQConcernNum> = emptyMap(),
+)
+
+@Serializable
+private data class QQConcernNum(@SerialName("user_fansnum") val userFansnum: Long = 0)
 
 @Serializable
 private data class QQCompany(val name: String = "")

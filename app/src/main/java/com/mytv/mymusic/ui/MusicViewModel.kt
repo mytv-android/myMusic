@@ -64,6 +64,20 @@ import com.mytv.mymusic.data.TabletopTop
 import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.data.Playlist
+import com.mytv.mymusic.aggregate.TrackNormalizer
+import com.mytv.mymusic.data.AlbumSummary
+import com.mytv.mymusic.data.toAlbumSummary
+import com.mytv.mymusic.ui.artist.ArtistPages
+import com.mytv.mymusic.ui.artist.ArtistUiState
+import com.mytv.mymusic.ui.artist.MAX_COLLECTION_PAGES
+import com.mytv.mymusic.ui.artist.albumIdOf
+import com.mytv.mymusic.ui.artist.collectionKey
+import com.mytv.mymusic.ui.artist.hasHeaderInfo
+import com.mytv.mymusic.ui.artist.mergeAlbumHeader
+import com.mytv.mymusic.ui.artist.parseCollectionKey
+import com.mytv.mymusic.ui.artist.pickAlbum
+import com.mytv.mymusic.ui.artist.pickArtist
+import com.mytv.mymusic.ui.artist.splitArtistNames
 import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.PlaylistEntity
 import com.mytv.mymusic.data.PlaylistEntryEntity
@@ -405,7 +419,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val cookie: String,
         var appending: Boolean = false,
     )
-    private var collectionGeneration = 0
     private var failoverInProgress = false
 
     /** 本轮播放里已经试过并失败的平台（按曲目）：换源重试要累积排除，不然会在两个源之间来回切。 */
@@ -1207,43 +1220,205 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- collection detail ----------
 
+    /**
+     * 详情页按返回栈分开存（key 见 [collectionKey]）：歌手 → 专辑 → 另一个歌手 → 专辑这样一路点下去，
+     * 返回时每一层还是自己的内容。[_collection] 是当前在前台的那一页，播放全部 / 收藏 / 加入队列都对它操作；
+     * 页面回到前台时由路由调 [activateCollection] 切回来。
+     */
+    private val _collectionPages = MutableStateFlow<Map<String, CollectionUiState>>(emptyMap())
+    val collectionPages: StateFlow<Map<String, CollectionUiState>> = _collectionPages
+    private val collectionJobs = HashMap<String, Job>()
+
+    /** 新开一页详情：放进缓存、设为当前页、通知界面跳转。 */
+    private fun showCollection(state: CollectionUiState) {
+        _collectionPages.update { pages ->
+            val next = LinkedHashMap(pages)
+            next.remove(state.key)
+            next[state.key] = state
+            while (next.size > MAX_COLLECTION_PAGES) next.remove(next.keys.first())
+            next
+        }
+        _collection.value = state
+        _events.tryEmit(UiEvent.OpenCollection(state.title, state.key))
+    }
+
+    /** 改某一页；它正好在前台时同步到 [_collection]。页面已被挤出缓存就丢掉这次结果。 */
+    private fun updateCollection(key: String, transform: (CollectionUiState) -> CollectionUiState) {
+        var updated: CollectionUiState? = null
+        _collectionPages.update { pages ->
+            val current = pages[key] ?: return@update pages
+            val next = transform(current)
+            updated = next
+            pages + (key to next)
+        }
+        val next = updated ?: return
+        if (_collection.value.key == key) _collection.value = next
+    }
+
+    /**
+     * 详情页回到前台（进入、或从上一层返回）：把它设为当前页。进程被回收后从返回栈恢复时缓存是空的，
+     * 按 key 里的类型、平台和 id 重新加载（标题等加载回来再补）。
+     */
+    fun activateCollection(key: String) {
+        val cached = _collectionPages.value[key]
+        if (cached != null) {
+            if (_collection.value.key != key) _collection.value = cached
+            return
+        }
+        val parsed = parseCollectionKey(key)
+        if (parsed == null) {
+            // 按名字找的专辑（`Album|平台|name:专辑名`）：没有平台 id，按名字重新找一次
+            val parts = key.split('|', limit = 3)
+            if (parts.size != 3 || parts[0] != CollectionKind.Album.name || !parts[2].startsWith("name:")) return
+            val state = CollectionUiState(
+                key = key,
+                kind = CollectionKind.Album,
+                title = parts[2].removePrefix("name:"),
+                source = parts[1],
+                sourceName = providerName(parts[1]),
+                loading = true,
+            )
+            _collectionPages.update { it + (key to state) }
+            _collection.value = state
+            resolveAlbumByName(key)
+            return
+        }
+        val (kind, source, id) = parsed
+        val state = CollectionUiState(key = key, kind = kind, id = id, source = source, sourceName = providerName(source), loading = true)
+        _collectionPages.update { it + (key to state) }
+        _collection.value = state
+        loadCollection(key)
+    }
+
     fun openChart(chart: TopList) {
         val source = chart.source.ifBlank { _charts.value.providerId.ifBlank { settingsState.value.provider } }
         val subtitle = listOf(
             chart.updateFrequency.ifBlank { chart.description },
             "${chart.trackCount} 首".takeIf { chart.trackCount > 0 },
         ).filterNotNull().filter { it.isNotBlank() }.joinToString(" / ")
-        _collection.value = CollectionUiState(
-            kind = CollectionKind.Chart,
-            id = chart.id,
-            title = chart.name,
-            subtitle = subtitle,
-            cover = chart.cover,
-            source = source,
-            sourceName = providerName(source),
-            loading = true,
+        val key = collectionKey(CollectionKind.Chart, source, chart.id)
+        showCollection(
+            CollectionUiState(
+                key = key,
+                kind = CollectionKind.Chart,
+                id = chart.id,
+                title = chart.name,
+                subtitle = subtitle,
+                cover = chart.cover,
+                source = source,
+                sourceName = providerName(source),
+                loading = true,
+            ),
         )
-        _events.tryEmit(UiEvent.OpenCollection(chart.name))
-        val generation = ++collectionGeneration
-        viewModelScope.launch {
-            val result = runCatching { app.repository.topListSongs(source, cookieFor(source), chart.id) }
-            if (generation != collectionGeneration) return@launch
-            _collection.update {
-                it.copy(
-                    songs = result.getOrDefault(emptyList()),
-                    loading = false,
-                    error = result.exceptionOrNull()?.message.orEmpty(),
-                )
-            }
-        }
+        loadCollection(key)
     }
 
     fun openPlaylist(playlist: Playlist, album: Boolean) {
         openCollection(playlist, if (album) CollectionKind.Album else CollectionKind.Playlist)
     }
 
+    /** 歌手页的专辑卡片、专辑页底部的“更多专辑”。没有 id（从歌曲归并出来的）就按名字在平台上找。 */
+    fun openAlbum(album: AlbumSummary) {
+        if (album.id.isNotBlank()) {
+            openCollection(album.toPlaylist(), CollectionKind.Album)
+        } else {
+            openAlbumByName(album.name, album.artist, album.source, album.cover)
+        }
+    }
+
+    /** 搜索结果里的歌手：打开歌手页（资料 + 热门歌曲 + 专辑 + 简介）。 */
     fun openArtist(playlist: Playlist) {
-        openCollection(playlist, CollectionKind.Artist)
+        val key = artistPages.open(playlist, settingsState.value.provider)
+        _events.tryEmit(UiEvent.OpenArtist(key))
+    }
+
+    /**
+     * 歌曲上的歌手名 → 歌手页：在歌曲所在平台按名字找这个歌手，平台查不了歌手就用浏览来源 / 第一个能查的平台。
+     * 从播放页、海报墙进来时先把它们收起来，露出导航里的歌手页。
+     */
+    fun openArtistByName(name: String, song: Song? = null) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        val key = artistPages.openByName(trimmed, song?.source.orEmpty())
+        base.value = base.value.copy(playerOpen = false, posterOpen = false)
+        _events.tryEmit(UiEvent.OpenArtist(key))
+    }
+
+    /** 歌曲 → 它所在的专辑。歌曲带了专辑 id 且平台能读专辑就直接开；否则按专辑名 + 歌手在平台上找。 */
+    fun openAlbumOf(song: Song) {
+        if (song.album.isBlank()) return
+        base.value = base.value.copy(playerOpen = false, posterOpen = false)
+        val id = albumIdOf(song)
+        val provider = base.value.providers.find { it.id == song.source }
+        if (id.isNotBlank() && provider?.albumSongs == true) {
+            openCollection(
+                Playlist(id = id, name = song.album, cover = song.cover, creator = song.artist, source = song.source),
+                CollectionKind.Album,
+            )
+        } else {
+            openAlbumByName(song.album, song.artist, song.source, song.cover)
+        }
+    }
+
+    /** 按专辑名 + 歌手搜专辑：页面先开出来（名字、封面），找到后再读曲目。 */
+    private fun openAlbumByName(name: String, artist: String, preferSource: String, cover: String) {
+        val candidates = albumSearchProviders()
+        val source = candidates.firstOrNull { it.id == preferSource }?.id ?: candidates.firstOrNull()?.id
+        if (source == null) {
+            message("没有可以查专辑的平台", error = true)
+            return
+        }
+        val key = collectionKey(CollectionKind.Album, source, "name:$name")
+        showCollection(
+            CollectionUiState(
+                key = key,
+                kind = CollectionKind.Album,
+                id = "",
+                title = name,
+                subtitle = artist,
+                cover = cover,
+                source = source,
+                sourceName = providerName(source),
+                loading = true,
+            ),
+        )
+        resolveAlbumByName(key)
+    }
+
+    /** 按页面里记的专辑名（title）、歌手（subtitle）在它的平台上搜这张专辑，找到后补上 id 再读曲目。 */
+    private fun resolveAlbumByName(key: String) {
+        val page = _collectionPages.value[key] ?: return
+        val name = page.title
+        val artist = page.subtitle
+        val source = page.source
+        val cover = page.cover
+        updateCollection(key) { it.copy(loading = true, error = "") }
+        collectionJobs[key]?.cancel()
+        collectionJobs[key] = viewModelScope.launch {
+            val keyword = listOf(name, splitArtistNames(artist).firstOrNull().orEmpty()).filter { it.isNotBlank() }.joinToString(" ")
+            val found = runCatching { app.repository.searchAlbums(source, cookieFor(source), keyword) }
+                .getOrElse {
+                    if (it is CancellationException) throw it
+                    emptyList()
+                }
+                .let { pickAlbum(name, artist, it) }
+            if (found == null) {
+                updateCollection(key) {
+                    it.copy(loading = false, error = "没有在${providerName(source)}找到专辑“$name”")
+                }
+                return@launch
+            }
+            updateCollection(key) {
+                it.copy(
+                    id = found.id,
+                    title = found.name.ifBlank { name },
+                    cover = found.cover.ifBlank { cover },
+                    subtitle = found.creator.ifBlank { artist },
+                    album = found.toAlbumSummary().takeIf { album -> album.hasHeaderInfo() },
+                )
+            }
+            loadCollection(key)
+        }
     }
 
     private fun openCollection(playlist: Playlist, kind: CollectionKind) {
@@ -1258,28 +1433,62 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             playlist.creator.ifBlank { fallback },
             "${playlist.trackCount} 首".takeIf { playlist.trackCount > 0 } ?: "",
         ).filter { it.isNotBlank() }.joinToString(" / ")
-        _collection.value = CollectionUiState(
-            kind = kind,
-            id = playlist.id,
-            title = playlist.name,
-            subtitle = subtitle,
-            cover = playlist.cover,
-            source = source,
-            sourceName = providerName(source),
-            loading = true,
+        val key = collectionKey(kind, source, playlist.id)
+        // 搜索结果 / 歌手专辑列表里已经带了发行时间、厂牌等，专辑详情回来之前头部先用它们
+        val seedAlbum = if (kind == CollectionKind.Album) playlist.toAlbumSummary().takeIf { it.hasHeaderInfo() } else null
+        showCollection(
+            CollectionUiState(
+                key = key,
+                kind = kind,
+                id = playlist.id,
+                title = playlist.name,
+                subtitle = subtitle,
+                cover = playlist.cover,
+                source = source,
+                sourceName = providerName(source),
+                loading = true,
+                album = seedAlbum,
+            ),
         )
-        _events.tryEmit(UiEvent.OpenCollection(playlist.name))
-        val generation = ++collectionGeneration
-        viewModelScope.launch {
+        loadCollection(key)
+    }
+
+    /** 按页面里记的类型读曲目；专辑另外读头部资料和同一歌手的其他专辑。 */
+    private fun loadCollection(key: String) {
+        val current = _collectionPages.value[key] ?: return
+        if (current.id.isBlank()) return
+        collectionJobs[key]?.cancel()
+        updateCollection(key) { it.copy(loading = true, error = "") }
+        val source = current.source
+        val cookie = cookieFor(source)
+        collectionJobs[key] = viewModelScope.launch {
+            if (current.kind == CollectionKind.Album) {
+                val result = runCatching { app.repository.albumDetail(source, cookie, current.id) }
+                result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+                val detail = result.getOrNull()
+                updateCollection(key) { state ->
+                    val album = detail?.album?.let { mergeAlbumHeader(state.album, it) } ?: state.album
+                    state.copy(
+                        songs = detail?.songs.orEmpty(),
+                        loading = false,
+                        error = result.exceptionOrNull()?.message.orEmpty(),
+                        title = state.title.ifBlank { album?.name.orEmpty() },
+                        cover = state.cover.ifBlank { album?.cover.orEmpty() },
+                        album = album,
+                    )
+                }
+                if (detail != null) loadMoreAlbums(key)
+                return@launch
+            }
             val result = runCatching {
-                when (kind) {
-                    CollectionKind.Album -> app.repository.albumSongs(source, cookieFor(source), playlist.id)
-                    CollectionKind.Artist -> app.repository.artistSongs(source, cookieFor(source), playlist.id)
-                    else -> app.repository.playlistSongs(source, cookieFor(source), playlist.id)
+                when (current.kind) {
+                    CollectionKind.Chart -> app.repository.topListSongs(source, cookie, current.id)
+                    CollectionKind.Artist -> app.repository.artistSongs(source, cookie, current.id)
+                    else -> app.repository.playlistSongs(source, cookie, current.id)
                 }
             }
-            if (generation != collectionGeneration) return@launch
-            _collection.update {
+            result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+            updateCollection(key) {
                 it.copy(
                     songs = result.getOrDefault(emptyList()),
                     loading = false,
@@ -1287,34 +1496,114 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         }
+    }
+
+    /** 专辑页底部“更多专辑”：主歌手的其他专辑。没有歌手 id 时按歌手名在同一平台上找一次。 */
+    private suspend fun loadMoreAlbums(key: String) {
+        val state = _collectionPages.value[key] ?: return
+        val source = state.source
+        val cookie = cookieFor(source)
+        val artistName = splitArtistNames(
+            state.album?.artist.orEmpty().ifBlank { state.songs.firstOrNull()?.artist.orEmpty() },
+        ).firstOrNull().orEmpty()
+        val provider = base.value.providers.find { it.id == source }
+        val artistId = state.album?.artistId?.takeIf { it.isNotBlank() }
+            ?: if (artistName.isNotBlank() && provider?.searchArtist == true) {
+                runCatching { pickArtist(artistName, app.repository.searchArtists(source, cookie, artistName)) }
+                    .getOrElse {
+                        if (it is CancellationException) throw it
+                        null
+                    }
+                    ?.id
+            } else {
+                null
+            }
+        if (artistId.isNullOrBlank()) return
+        val page = runCatching { app.repository.artistAlbums(source, cookie, artistId, 1, 20) }.getOrElse {
+            if (it is CancellationException) throw it
+            return
+        }
+        val titleKey = TrackNormalizer.keyOf(state.title)
+        val others = page.albums.filter { it.id != state.id && TrackNormalizer.keyOf(it.name) != titleKey }
+        updateCollection(key) {
+            it.copy(
+                moreAlbums = others,
+                album = (it.album ?: AlbumSummary(id = it.id, name = it.title, source = source, artist = artistName))
+                    .copy(artistId = artistId),
+            )
+        }
+    }
+
+    /** 能按名字搜专辑并读专辑曲目的平台，浏览来源在前。 */
+    private fun albumSearchProviders(): List<ProviderInfo> {
+        val browse = settingsState.value.provider
+        return enabledProviders().filter { it.searchAlbum && it.albumSongs }.sortedByDescending { it.id == browse }
+    }
+
+    /** 能按名字搜歌手的平台，浏览来源在前；歌手页从歌曲进来时按这个顺序挑平台。 */
+    private fun artistSearchProviders(): List<ProviderInfo> {
+        val browse = settingsState.value.provider
+        return enabledProviders().filter { it.searchArtist }.sortedByDescending { it.id == browse }
     }
 
     fun retryCollection() {
         val current = _collection.value
-        if (current.title.isBlank()) return
-        val generation = ++collectionGeneration
-        _collection.update { it.copy(loading = true, error = "") }
-        viewModelScope.launch {
-            val result = runCatching {
-                when (current.kind) {
-                    CollectionKind.Chart -> app.repository.topListSongs(current.source, cookieFor(current.source), current.id)
-                    CollectionKind.Album -> app.repository.albumSongs(current.source, cookieFor(current.source), current.id)
-                    CollectionKind.Artist -> app.repository.artistSongs(current.source, cookieFor(current.source), current.id)
-                    CollectionKind.Playlist -> app.repository.playlistSongs(current.source, cookieFor(current.source), current.id)
-                }
-            }
-            if (generation != collectionGeneration) return@launch
-            _collection.update {
-                it.copy(
-                    songs = result.getOrDefault(emptyList()),
-                    loading = false,
-                    error = result.exceptionOrNull()?.message.orEmpty(),
-                )
-            }
+        if (current.key.isBlank()) return
+        if (current.id.isBlank() && current.kind == CollectionKind.Album) {
+            resolveAlbumByName(current.key)
+            return
         }
+        loadCollection(current.key)
     }
 
-    /** [openPlayer] 为 false 时不弹出播放页（详情页海报视图：开始播放的那首在墙上长成大卡）。 */
+    // ---------- artist page ----------
+
+    private val artistPages by lazy {
+        ArtistPages(
+            scope = viewModelScope,
+            repository = app.repository,
+            cookieFor = ::cookieFor,
+            providerName = ::providerName,
+            artistProviders = ::artistSearchProviders,
+        )
+    }
+    val artistPagesState: StateFlow<Map<String, ArtistUiState>> get() = artistPages.pages
+
+    fun ensureArtist(key: String) = artistPages.ensure(key)
+    fun retryArtist(key: String) = artistPages.retry(key)
+    fun loadMoreArtistAlbums(key: String) = artistPages.loadMoreAlbums(key)
+
+    /** 歌手页的“播放热门 / 随机播放”。 */
+    fun playArtist(key: String, shuffle: Boolean = false) {
+        val songs = artistPages.pages.value[key]?.visibleSongs.orEmpty()
+        if (songs.isEmpty()) {
+            message("歌手的歌还没有加载完成")
+            return
+        }
+        val queue = if (shuffle) songs.shuffled() else songs
+        play(queue.first(), queue)
+    }
+
+    /** 歌手页的歌接到播放队列末尾。 */
+    fun queueArtist(key: String) {
+        val songs = artistPages.pages.value[key]?.visibleSongs.orEmpty()
+        if (songs.isEmpty()) {
+            message("歌手的歌还没有加载完成")
+            return
+        }
+        enqueueSongs(songs)
+    }
+
+    /** 把歌手的热门歌曲存成一张本地歌单（以歌手名命名）。 */
+    fun saveArtistSongs(key: String) {
+        val state = artistPages.pages.value[key] ?: return
+        val songs = state.visibleSongs
+        if (songs.isEmpty()) {
+            message("歌手的歌还没有加载完成")
+            return
+        }
+        addSongsToLibrary(state.displayName, songs)
+    }
     fun playCollection(openPlayer: Boolean = true) {
         val songs = _collection.value.songs
         if (songs.isNotEmpty()) play(songs.first(), songs, openPlayer)
@@ -1450,6 +1739,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             message("当前歌单还没有加载完成")
             return
         }
+        enqueueSongs(songs)
+    }
+
+    /** 一批歌接到播放队列末尾；队列为空时直接播放。已在队列里的不重复添加。 */
+    private fun enqueueSongs(songs: List<Song>) {
         val player = controller
         if (player == null || base.value.queue.isEmpty()) {
             play(songs.first(), songs)
@@ -1908,17 +2202,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     if (result != null) {
                         val kind = if (playlist != null) CollectionKind.Playlist else CollectionKind.Album
                         val source = result.item.source.ifBlank { providerId }
-                        _collection.value = CollectionUiState(
-                            kind = kind,
-                            id = result.item.id,
-                            title = result.item.name,
-                            subtitle = listOf(result.item.creator, "${result.songs.size} 首").filter { it.isNotBlank() }.joinToString(" / "),
-                            cover = result.item.cover,
-                            source = source,
-                            sourceName = providerName(source),
-                            songs = result.songs,
+                        val key = collectionKey(kind, source, result.item.id)
+                        showCollection(
+                            CollectionUiState(
+                                key = key,
+                                kind = kind,
+                                id = result.item.id,
+                                title = result.item.name,
+                                subtitle = listOf(result.item.creator, "${result.songs.size} 首").filter { it.isNotBlank() }.joinToString(" / "),
+                                cover = result.item.cover,
+                                source = source,
+                                sourceName = providerName(source),
+                                songs = result.songs,
+                                album = if (kind == CollectionKind.Album) result.item.toAlbumSummary().takeIf { it.hasHeaderInfo() } else null,
+                            ),
                         )
-                        _events.tryEmit(UiEvent.OpenCollection(result.item.name))
+                        if (kind == CollectionKind.Album) launch { loadMoreAlbums(key) }
                         // 复制歌单链接导入 = 直接绑定为跟随平台更新的本地歌单
                         if (kind == CollectionKind.Playlist) {
                             bindPlatformPlaylist(

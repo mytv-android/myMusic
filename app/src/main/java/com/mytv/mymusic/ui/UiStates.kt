@@ -4,6 +4,7 @@ import com.mytv.mymusic.aggregate.CanonicalCollection
 import com.mytv.mymusic.aggregate.CanonicalTrack
 import com.mytv.mymusic.aggregate.ProviderSearchState
 import com.mytv.mymusic.aggregate.SearchStatus
+import com.mytv.mymusic.data.AlbumSummary
 import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
@@ -127,6 +128,8 @@ fun accountProfileOf(providerId: String, platformName: String, info: com.mytv.my
     )
 
 data class CollectionUiState(
+    /** 详情页 key（`类型|平台|id`），路由参数和 MusicViewModel 的分页缓存都按它找这一页。 */
+    val key: String = "",
     val kind: CollectionKind = CollectionKind.Playlist,
     val id: String = "",
     val title: String = "",
@@ -137,6 +140,10 @@ data class CollectionUiState(
     val songs: List<Song> = emptyList(),
     val loading: Boolean = false,
     val error: String = "",
+    /** 专辑页头部：发行时间、厂牌、类型、简介、主歌手；平台没给时为 null。 */
+    val album: AlbumSummary? = null,
+    /** 专辑页底部“更多专辑”：同一歌手的其他专辑（不含这张）。 */
+    val moreAlbums: List<AlbumSummary> = emptyList(),
 )
 
 data class LocalPlaylistSummary(
@@ -169,7 +176,10 @@ data class LibrarySearchUiState(
 )
 
 sealed interface UiEvent {
-    data class OpenCollection(val title: String) : UiEvent
+    data class OpenCollection(val title: String, val key: String) : UiEvent
+
+    /** 打开歌手页；[key] 见 ArtistPages。 */
+    data class OpenArtist(val key: String) : UiEvent
     data class Message(val text: String) : UiEvent
 
     /**

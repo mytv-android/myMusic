@@ -118,6 +118,12 @@ fun SongRow(
     onLongClick: (() -> Unit)? = onMore,
     container: Color = MaterialTheme.colorScheme.surfaceContainerLow,
     dimmed: Boolean = false,
+    /** 专辑曲目：每首都是同一张封面，不画；序号就是曲目号。 */
+    showCover: Boolean = true,
+    /** 前三名加粗变主色（榜单 / 热门）；专辑曲目号不需要。 */
+    rankEmphasis: Boolean = true,
+    /** 序号的读屏文案；默认“第 N 名”，专辑曲目传“第 N 首”。 */
+    rankLabel: (Int) -> String = { "第 $it 名" },
 ) {
     val shape = segmentShape(index, count)
     val fade = if (dimmed) Modifier.alpha(0.5f) else Modifier
@@ -137,17 +143,18 @@ fun SongRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (rank != null) {
+            val emphasized = rankEmphasis && rank <= 3
             Text(
                 rank.toString(),
-                Modifier.width(32.dp).semantics { contentDescription = "第 $rank 名" },
+                Modifier.width(32.dp).semantics { contentDescription = rankLabel(rank) },
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = if (rank <= 3) FontWeight.Black else FontWeight.Medium,
-                color = if (rank <= 3) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (emphasized) FontWeight.Black else FontWeight.Medium,
+                color = if (emphasized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
         }
-        Box(fade) { Cover(cover, title, 48.dp, corner = 12.dp) }
-        Column(Modifier.weight(1f).padding(start = 14.dp, end = 8.dp)) {
+        if (showCover) Box(fade) { Cover(cover, title, 48.dp, corner = 12.dp) }
+        Column(Modifier.weight(1f).padding(start = if (showCover) 14.dp else 6.dp, end = 8.dp)) {
             Text(
                 title,
                 modifier = fade,

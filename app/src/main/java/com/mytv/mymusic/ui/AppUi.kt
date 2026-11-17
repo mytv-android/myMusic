@@ -34,6 +34,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
@@ -129,6 +131,17 @@ class MusicActions(private val model: MusicViewModel) {
     fun openPlaylist(playlist: com.mytv.mymusic.data.Playlist, album: Boolean = false) = model.openPlaylist(playlist, album)
 
     fun openArtist(playlist: com.mytv.mymusic.data.Playlist) = model.openArtist(playlist)
+    /** 歌手页的专辑卡片、专辑页的“更多专辑”。 */
+    fun openAlbum(album: com.mytv.mymusic.data.AlbumSummary) = model.openAlbum(album)
+    /** 歌曲上的歌手名 → 歌手页；[song] 决定先在哪个平台上找。 */
+    fun openArtistByName(name: String, song: Song? = null) = model.openArtistByName(name, song)
+    /** 歌曲 → 它所在的专辑页。 */
+    fun openAlbumOf(song: Song) = model.openAlbumOf(song)
+    fun retryArtist(key: String) = model.retryArtist(key)
+    fun loadMoreArtistAlbums(key: String) = model.loadMoreArtistAlbums(key)
+    fun playArtist(key: String, shuffle: Boolean = false) = model.playArtist(key, shuffle)
+    fun queueArtist(key: String) = model.queueArtist(key)
+    fun saveArtistSongs(key: String) = model.saveArtistSongs(key)
     fun playCollection(openPlayer: Boolean = true) = model.playCollection(openPlayer)
     fun saveCollection() = model.saveCollectionToLibrary()
     fun retryCollection() = model.retryCollection()
@@ -604,6 +617,14 @@ fun TrackActionsSheet(
      * （歌曲信息只在本地音乐页里），选好的匹配记进线索表并同步回有文件的设备。非本地歌为 null。
      */
     onRematch: (() -> Unit)? = null,
+    /** “查看歌手：某某”，每位歌手一行（最多 3 位）；参数是点的那位歌手名。 */
+    onOpenArtist: ((String) -> Unit)? = null,
+    /** “查看专辑：某某”。歌曲没有专辑名时不显示。 */
+    onOpenAlbum: (() -> Unit)? = null,
+    /** 已经在这位歌手的页面里：不再给他自己那一行。 */
+    hideArtist: String = "",
+    /** 已经在这张专辑的页面里：不给“查看专辑”。 */
+    hideAlbum: String = "",
 ) {
     var showPlaylists by remember { mutableStateOf(false) }
     com.mytv.mymusic.ui.components.AdaptiveSheet(
@@ -621,7 +642,23 @@ fun TrackActionsSheet(
                     QuickAction(Icons.Filled.LibraryAdd, "加到歌单", false, Modifier.weight(1f), enabled = playlists.isNotEmpty()) { showPlaylists = true }
                 }
                 Spacer(Modifier.height(12.dp))
-                val rows = listOfNotNull(
+                // 直播（电台）没有歌手 / 专辑可看
+                val browsable = !song.isLive
+                val hiddenArtist = com.mytv.mymusic.aggregate.TrackNormalizer.keyOf(hideArtist)
+                val artistRows = if (onOpenArtist == null || !browsable) {
+                    emptyList()
+                } else {
+                    com.mytv.mymusic.ui.artist.splitArtistNames(song.artist)
+                        .filter { hiddenArtist.isEmpty() || com.mytv.mymusic.aggregate.TrackNormalizer.keyOf(it) != hiddenArtist }
+                        .take(3)
+                        .map { name -> SheetRow(Icons.Filled.Person, "查看歌手：$name", false) { onOpenArtist(name) } }
+                }
+                val albumRow = onOpenAlbum?.takeIf {
+                    browsable && song.album.isNotBlank() &&
+                        com.mytv.mymusic.aggregate.TrackNormalizer.keyOf(song.album) != com.mytv.mymusic.aggregate.TrackNormalizer.keyOf(hideAlbum)
+                }?.let { SheetRow(Icons.Filled.Album, "查看专辑：${song.album}", false, it) }
+                val rows = artistRows + listOfNotNull(
+                    albumRow,
                     onRematch?.let { SheetRow(Icons.Filled.FindReplace, "换一个匹配", false, it) },
                     onOpenSource?.let { SheetRow(Icons.Filled.SwapHoriz, "选择音源 / 查看其他版本", false, it) },
                     onMerge?.let { SheetRow(Icons.AutoMirrored.Filled.CallMerge, "合并到…", false, it) },

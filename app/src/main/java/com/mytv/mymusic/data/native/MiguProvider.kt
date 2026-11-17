@@ -1,5 +1,6 @@
 package com.mytv.mymusic.data.native
 
+import com.mytv.mymusic.data.AlbumDetail
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
@@ -304,6 +305,12 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
 
     override suspend fun albumSongs(cookie: String, id: String): List<Song> =
         fetchAlbumSongs(cookie, id).first
+
+    /** 专辑页要头部资料，走 parseAlbum 用的那条详情链路（多一次资源信息请求）。 */
+    override suspend fun albumDetail(cookie: String, id: String): AlbumDetail {
+        val result = fetchAlbumDetail(cookie, id)
+        return AlbumDetail(result.item.toLooseAlbumSummary(), result.songs)
+    }
 
     override suspend fun parseAlbum(cookie: String, link: String): CollectionResult {
         val id = ALBUM_PATTERNS.firstNotNullOfOrNull { pattern ->

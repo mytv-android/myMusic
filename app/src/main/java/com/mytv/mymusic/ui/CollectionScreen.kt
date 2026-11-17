@@ -114,6 +114,18 @@ import com.mytv.mymusic.ui.poster.CollectionPosterOps
 import com.mytv.mymusic.ui.poster.CollectionPosterView
 import com.mytv.mymusic.ui.poster.PosterExtraAction
 import com.mytv.mymusic.ui.poster.collectionKindLabel
+import com.mytv.mymusic.ui.artist.AlbumCard
+import com.mytv.mymusic.ui.artist.ArtistPill
+import com.mytv.mymusic.ui.artist.ExpandableText
+import com.mytv.mymusic.ui.artist.VinylCover
+import com.mytv.mymusic.ui.artist.albumArtists
+import com.mytv.mymusic.ui.artist.albumMetaLine
+import com.mytv.mymusic.ui.artist.totalDurationLabel
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextAlign
+import com.mytv.mymusic.data.Playlist
 
 /** 详情页的几种主操作，三种布局共用。 */
 private class CollectionOps(
@@ -204,6 +216,9 @@ fun CollectionScreen(
         onExit = { selection.exit() },
     )
     val playingKey = state.current?.key
+    // 专辑页的黑胶：正在放这张专辑里的歌时慢慢转
+    val albumSpinning = collection.kind == CollectionKind.Album && state.playing &&
+        playingKey != null && songs.any { it.key == playingKey }
     // 切到海报视图前退出多选：多选只在列表视图里
     val showPoster: () -> Unit = remember(actions, selection) {
         {
@@ -227,9 +242,9 @@ fun CollectionScreen(
                 onSettingsOpenChange = { posterSettingsOpen = it },
             )
         LocalAppWindow.current.twoPane ->
-            TwoPaneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster)
+            TwoPaneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster, albumSpinning)
         else ->
-            PhoneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster)
+            PhoneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster, albumSpinning)
     }
     target?.let {
         SongActionsSheet(
@@ -240,6 +255,7 @@ fun CollectionScreen(
             onDismiss = { target = null },
             // 电视上海报视图的墙自己收方向键，顶栏那一排在有选中格时走不到；单曲操作面板里也给一个入口
             onWallSettings = if (poster && LocalAppWindow.current.isTv) ({ posterSettingsOpen = true }) else null,
+            currentAlbum = if (collection.kind == CollectionKind.Album) collection.title else "",
         )
     }
     if (pickerOpen) {
@@ -384,8 +400,10 @@ private fun PhoneCollection(
     selection: SelectionState,
     selectionOps: CollectionSelectionOps,
     onPosterView: () -> Unit,
+    albumSpinning: Boolean,
 ) {
     val gutter = LocalAppWindow.current.gutter
+    val isAlbum = collection.kind == CollectionKind.Album
     val overlay = LocalOverlayPadding.current.calculateBottomPadding()
     val surface = MaterialTheme.colorScheme.surface
     val listState = rememberLazyListState()
@@ -398,7 +416,8 @@ private fun PhoneCollection(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(380.dp)
+                // 专辑头部是竖排的（唱片封面在上），渐变拉长一些
+                .height(if (isAlbum) 620.dp else 380.dp)
                 .graphicsLayer {
                     translationY = if (listState.firstVisibleItemIndex == 0) -listState.firstVisibleItemScrollOffset.toFloat() else -size.height
                 }
@@ -439,13 +458,24 @@ private fun PhoneCollection(
                 contentPadding = PaddingValues(bottom = overlay + 24.dp),
             ) {
                 item(key = "head", contentType = "head") {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = gutter).padding(top = 4.dp, bottom = 18.dp),
-                        verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        CollectionCover(collection, large = false)
-                        Column(Modifier.weight(1f)) { CollectionTitle(collection, large = false) }
+                    if (isAlbum) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = gutter).padding(top = 4.dp, bottom = 20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            VinylCover(collection.cover, collection.title, 208.dp, albumSpinning, tint)
+                            Spacer(Modifier.height(20.dp))
+                            AlbumTitleBlock(collection, actions, large = false, centered = true)
+                        }
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = gutter).padding(top = 4.dp, bottom = 18.dp),
+                            verticalAlignment = Alignment.Bottom,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            CollectionCover(collection, large = false)
+                            Column(Modifier.weight(1f)) { CollectionTitle(collection, large = false) }
+                        }
                     }
                 }
                 item(key = "actions", contentType = "actions") {
@@ -455,7 +485,8 @@ private fun PhoneCollection(
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = gutter).padding(bottom = 16.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            // 专辑头部居中排，操作也居中
+                            horizontalArrangement = if (isAlbum) Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally) else Arrangement.spacedBy(8.dp),
                         ) {
                             PlayAllSplitButton(
                                 onPlayAll = ops.playAll,
@@ -470,7 +501,9 @@ private fun PhoneCollection(
                         }
                     }
                 }
+                albumIntro(collection, horizontal = gutter)
                 collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = gutter, selection = selection)
+                albumFooter(collection, actions, horizontal = gutter)
             }
         }
     }
@@ -490,8 +523,10 @@ private fun TwoPaneCollection(
     selection: SelectionState,
     selectionOps: CollectionSelectionOps,
     onPosterView: () -> Unit,
+    albumSpinning: Boolean,
 ) {
     val window = LocalAppWindow.current
+    val isAlbum = collection.kind == CollectionKind.Album
     val tv = window.isTv
     val overlay = LocalOverlayPadding.current.calculateBottomPadding()
     val surface = MaterialTheme.colorScheme.surface
@@ -549,9 +584,15 @@ private fun TwoPaneCollection(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                         }
                     }
-                    CollectionCover(collection, large = true)
-                    Spacer(Modifier.height(16.dp))
-                    CollectionTitle(collection, large = true)
+                    if (isAlbum) {
+                        VinylCover(collection.cover, collection.title, if (tv) 200.dp else 224.dp, albumSpinning, tint)
+                        Spacer(Modifier.height(20.dp))
+                        AlbumTitleBlock(collection, actions, large = true, centered = false)
+                    } else {
+                        CollectionCover(collection, large = true)
+                        Spacer(Modifier.height(16.dp))
+                        CollectionTitle(collection, large = true)
+                    }
                     Spacer(Modifier.height(16.dp))
                     if (selection.active) {
                         SelectionBarFor(selectionOps, Modifier.selectionBackPreview(selection))
@@ -597,6 +638,11 @@ private fun TwoPaneCollection(
                             }
                         }
                     }
+                    // 专辑介绍放在左栏操作下面，收起成几行，点开看全文
+                    collection.album?.description?.takeIf { isAlbum && it.isNotBlank() }?.let { text ->
+                        Spacer(Modifier.height(20.dp))
+                        ExpandableText(text, collapsedLines = if (tv) 3 else 5)
+                    }
                 }
             },
             end = {
@@ -605,6 +651,7 @@ private fun TwoPaneCollection(
                     contentPadding = PaddingValues(top = LocalFoldPane.current.top(if (tv) 0.dp else 56.dp), bottom = overlay + 48.dp),
                 ) {
                     collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = 0.dp, selection = selection)
+                    albumFooter(collection, actions, horizontal = 0.dp)
                 }
             },
         )
@@ -759,6 +806,7 @@ private fun LazyListScope.collectionSongs(
                 }
             }
             val ranked = collection.kind != CollectionKind.Playlist
+            val album = collection.kind == CollectionKind.Album
             itemsIndexed(
                 songs,
                 key = { index, _ -> songKeys[index] },
@@ -790,6 +838,9 @@ private fun LazyListScope.collectionSongs(
                         .padding(horizontal = horizontal)
                         .padding(bottom = if (index < songs.lastIndex) SegmentGap else 0.dp),
                     rank = if (ranked) index + 1 else null,
+                    showCover = !album,
+                    rankEmphasis = !album,
+                    rankLabel = if (album) ({ "第 $it 首" }) else ({ "第 $it 名" }),
                     playing = playingKey == song.key,
                     badges = songBadge(song, collection.sourceName),
                     trailing = when {
@@ -829,6 +880,161 @@ private fun songBadge(song: Song, sourceName: String): (@Composable androidx.com
     return {
         Box(Modifier.clearAndSetSemantics { contentDescription = "${sourceName.ifBlank { "当前平台" }}${availabilityLabel(status)}" }) {
             PlatformBadge(providerMark(sourceName.ifBlank { song.source }), status)
+        }
+    }
+}
+
+// ---------------- 专辑页 ----------------
+
+/**
+ * 专辑标题区：类型 · 平台、专辑名、歌手胶囊（点开歌手页）、发行日期 · 厂牌、曲目数 · 总时长。
+ * 手机居中排在唱片封面下面；平板和电视左对齐放在左栏。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AlbumTitleBlock(collection: CollectionUiState, actions: MusicActions, large: Boolean, centered: Boolean) {
+    val tv = LocalAppWindow.current.isTv
+    val album = collection.album
+    val horizontal = if (centered) Alignment.CenterHorizontally else Alignment.Start
+    val textAlign = if (centered) TextAlign.Center else TextAlign.Start
+    Column(horizontalAlignment = horizontal, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            listOf(album?.type?.takeIf { it.isNotBlank() } ?: "专辑", collection.sourceName).filter { it.isNotBlank() }.joinToString(" · "),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+        )
+        Text(
+            collection.title.ifBlank { "专辑" },
+            Modifier.padding(top = 4.dp).semantics { heading() },
+            style = when {
+                tv -> MaterialTheme.typography.headlineLarge
+                large -> MaterialTheme.typography.headlineMedium
+                else -> MaterialTheme.typography.headlineSmall
+            },
+            fontWeight = FontWeight.Black,
+            textAlign = textAlign,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        val artists = albumArtists(album, collection.songs, collection.subtitle.substringBefore(" / "))
+        if (artists.isNotEmpty()) {
+            FlowRow(
+                Modifier.padding(top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, horizontal),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                artists.forEachIndexed { index, name ->
+                    ArtistPill(name, onClick = { openAlbumArtist(collection, index, name, actions) })
+                }
+            }
+        }
+        val meta = albumMetaLine(album)
+        if (meta.isNotBlank()) {
+            Text(
+                meta,
+                Modifier.padding(top = 12.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = textAlign,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        val songs = collection.songs
+        Text(
+            when {
+                songs.isNotEmpty() -> listOf("${songs.size} 首", totalDurationLabel(songs)).filter { it.isNotBlank() }.joinToString(" · ")
+                collection.loading -> "正在读取曲目…"
+                else -> ""
+            },
+            Modifier.padding(top = if (meta.isNotBlank()) 2.dp else 12.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** 头部歌手胶囊：第一位歌手有平台 id 就直接开，其余按名字在这个平台上找。 */
+private fun openAlbumArtist(collection: CollectionUiState, index: Int, name: String, actions: MusicActions) {
+    val artistId = collection.album?.artistId.orEmpty()
+    if (index == 0 && artistId.isNotBlank()) {
+        actions.openArtist(Playlist(id = artistId, name = name, source = collection.source))
+    } else {
+        actions.openArtistByName(name, Song(source = collection.source))
+    }
+}
+
+/** 手机专辑页的专辑介绍：操作按钮下面一张卡片，收起成 3 行。 */
+private fun LazyListScope.albumIntro(collection: CollectionUiState, horizontal: androidx.compose.ui.unit.Dp) {
+    val text = collection.album?.description.orEmpty().trim()
+    if (collection.kind != CollectionKind.Album || text.isEmpty()) return
+    item(key = "albumIntro", contentType = "albumIntro") {
+        androidx.compose.material3.Surface(
+            Modifier.fillMaxWidth().padding(horizontal = horizontal).padding(bottom = 16.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.9f),
+        ) {
+            Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+                Text(
+                    "专辑介绍",
+                    Modifier.padding(bottom = 6.dp).semantics { heading() },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                ExpandableText(text)
+            }
+        }
+    }
+}
+
+/**
+ * 专辑页末尾：发行信息（日期、厂牌）和“更多 某某 的专辑”横排卡片，最后一张后面是“全部”，打开歌手页。
+ */
+private fun LazyListScope.albumFooter(collection: CollectionUiState, actions: MusicActions, horizontal: androidx.compose.ui.unit.Dp) {
+    if (collection.kind != CollectionKind.Album || collection.songs.isEmpty()) return
+    val album = collection.album
+    val release = listOfNotNull(
+        album?.publishTime?.takeIf { it.isNotBlank() }?.let { "$it 发行" },
+        album?.company?.takeIf { it.isNotBlank() }?.let { "℗ $it" },
+    )
+    if (release.isNotEmpty()) {
+        item(key = "albumRelease", contentType = "albumRelease") {
+            Text(
+                release.joinToString("\n"),
+                Modifier.padding(horizontal = horizontal).padding(start = 4.dp, top = 16.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    val more = collection.moreAlbums
+    if (more.isEmpty()) return
+    val artist = album?.artist?.let { com.mytv.mymusic.ui.artist.splitArtistNames(it).firstOrNull() }.orEmpty()
+    item(key = "moreAlbums", contentType = "moreAlbums") {
+        val tv = LocalAppWindow.current.isTv
+        Column(Modifier.padding(top = 12.dp)) {
+            com.mytv.mymusic.ui.components.SectionLabel(
+                if (artist.isNotBlank()) "更多 $artist 的专辑" else "同一歌手的其他专辑",
+                Modifier.padding(horizontal = horizontal),
+                trailing = album?.artistId?.takeIf { it.isNotBlank() && artist.isNotBlank() }?.let { artistId ->
+                    {
+                        TextButton(
+                            onClick = { actions.openArtist(Playlist(id = artistId, name = artist, source = collection.source)) },
+                            modifier = Modifier.tvFocusRing(CircleShape),
+                        ) { Text("歌手主页") }
+                    }
+                },
+            )
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = horizontal),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(more, key = { it.id.ifBlank { it.name } }, contentType = { "album" }) { item ->
+                    AlbumCard(item, onClick = { actions.openAlbum(item) }, modifier = Modifier.width(if (tv) 150.dp else 140.dp))
+                }
+            }
         }
     }
 }

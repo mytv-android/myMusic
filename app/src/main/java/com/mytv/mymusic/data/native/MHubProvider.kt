@@ -1,5 +1,6 @@
 package com.mytv.mymusic.data.native
 
+import com.mytv.mymusic.data.AlbumDetail
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
@@ -420,6 +421,11 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
 
     override suspend fun albumSongs(cookie: String, id: String): List<Song> =
         resolveCollection(decodeCollectionId(id), album = true).songs
+
+    override suspend fun albumDetail(cookie: String, id: String): AlbumDetail {
+        val result = resolveCollection(decodeCollectionId(id), album = true)
+        return AlbumDetail(result.item.toLooseAlbumSummary(), result.songs)
+    }
 
     private fun requireLogin(cookie: String) {
         if (cookie.isBlank()) {

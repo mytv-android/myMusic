@@ -677,6 +677,8 @@ fun LocalPlaylistScreen(
                 actionEntry = null
             }),
             onDismiss = { actionEntry = null },
+            onOpenArtist = { name -> actions.openArtistByName(name, song) },
+            onOpenAlbum = { actions.openAlbumOf(song) },
             // 本地歌：这台设备没有文件、放的是匹配到的平台版本时，只有这里能换匹配（换好的会同步回有文件的设备）
             onRematch = if (song.source == LOCAL_SOURCE) ({ actionEntry = null; unplayable.rematch = song }) else null,
             // 电视上海报视图的墙自己收方向键，顶栏那一排在有选中格时走不到；单曲操作面板里也给一个入口

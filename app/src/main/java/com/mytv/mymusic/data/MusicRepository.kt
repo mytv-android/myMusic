@@ -67,6 +67,15 @@ open class MusicRepository {
     suspend fun parseAlbum(provider: String, cookie: String, link: String): CollectionResult =
         requireProvider(provider).parseAlbum(cookie, link)
 
+    suspend fun artistDetail(provider: String, cookie: String, id: String): ArtistDetail =
+        requireProvider(provider).artistDetail(cookie, id)
+
+    suspend fun artistAlbums(provider: String, cookie: String, id: String, page: Int, limit: Int): ArtistAlbumPage =
+        requireProvider(provider).artistAlbums(cookie, id, page, limit)
+
+    suspend fun albumDetail(provider: String, cookie: String, id: String): AlbumDetail =
+        requireProvider(provider).albumDetail(cookie, id)
+
     suspend fun categories(provider: String, cookie: String): List<PlaylistCategory> =
         requireProvider(provider).categories(cookie)
 

@@ -457,6 +457,8 @@ fun SearchScreen(
                 actionTrack.value = null
                 actions.openMerge(track)
             },
+            onOpenArtist = { name -> actions.openArtistByName(name, song) },
+            onOpenAlbum = { actions.openAlbumOf(song) },
         )
     }
     if (ctx.pickerOpen) {

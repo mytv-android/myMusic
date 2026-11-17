@@ -1,5 +1,9 @@
 package com.mytv.mymusic.data.native
 
+import com.mytv.mymusic.data.AlbumDetail
+import com.mytv.mymusic.data.AlbumSummary
+import com.mytv.mymusic.data.ArtistAlbumPage
+import com.mytv.mymusic.data.ArtistDetail
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
@@ -97,6 +101,26 @@ interface NativeProvider {
 
     suspend fun parseAlbum(cookie: String, link: String): CollectionResult =
         throw UnsupportedOperationException("${info.name} 暂不支持专辑链接解析")
+
+    /**
+     * 歌手主页资料：头像、简介、歌曲 / 专辑 / 粉丝数。没有专门接口的平台不实现，
+     * 歌手页退回搜索结果里带的资料（名字、头像、歌曲数）。
+     */
+    suspend fun artistDetail(cookie: String, id: String): ArtistDetail =
+        throw UnsupportedOperationException("${info.name} 暂不支持歌手资料")
+
+    /**
+     * 歌手的专辑，按发行时间从新到旧；[page] 从 1 开始。不实现的平台由歌手页从歌手歌曲里按专辑归并。
+     */
+    suspend fun artistAlbums(cookie: String, id: String, page: Int, limit: Int): ArtistAlbumPage =
+        throw UnsupportedOperationException("${info.name} 暂不支持歌手专辑")
+
+    /**
+     * 专辑详情：头部资料（发行时间、厂牌、简介、主歌手 id）+ 曲目。
+     * 默认只有曲目，头部由调用方拿打开时带的名字、封面补；有专辑详情接口的平台覆写它。
+     */
+    suspend fun albumDetail(cookie: String, id: String): AlbumDetail =
+        AlbumDetail(AlbumSummary(id = id, name = "", source = info.id), albumSongs(cookie, id))
 
     suspend fun categories(cookie: String): List<PlaylistCategory> =
         throw UnsupportedOperationException("${info.name} 暂不支持歌单分类")

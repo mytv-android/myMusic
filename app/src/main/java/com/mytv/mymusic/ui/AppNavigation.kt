@@ -251,7 +251,9 @@ fun MyMusicApp(model: MusicViewModel) {
         launch { model.syncEvents.collect { event -> snackbar.showSnackbar(event.message) } }
         model.events.collect { event ->
             when (event) {
-                is UiEvent.OpenCollection -> nav.navigate("collection") { launchSingleTop = true }
+                // 详情页按 key 入栈：专辑页里点“更多专辑”、歌手页点专辑都是压一层，返回回到上一层
+                is UiEvent.OpenCollection -> nav.openDetail(COLLECTION_ROUTE, event.key)
+                is UiEvent.OpenArtist -> nav.openDetail(com.mytv.mymusic.ui.artist.ARTIST_ROUTE, event.key)
                 // showSnackbar 会挂起到提示消失，放在 collect 里会把后面的跳转事件卡住几秒
                 is UiEvent.Message -> launch { snackbar.showSnackbar(event.text) }
                 // 只在本机的本地歌加进了同步的歌单：给“上传”，点了打开上传面板；只提示，不自动传
@@ -372,6 +374,7 @@ fun MyMusicApp(model: MusicViewModel) {
                                 popExitTransition = { if (state.reduceMotion) ExitTransition.None else fadeOut(exitSpec) },
                             ) {
                                 discoverRoutes(app)
+                                com.mytv.mymusic.ui.artist.artistRoutes(this, app)
                                 searchRoutes(app)
                                 libraryRoutes(app)
                                 settingsRoutes(app)
@@ -545,6 +548,20 @@ fun TvExitBackHandler() {
  * 始终包这一层，切换时里面的内容不重建；配色只在这里读，过渡期间只重组这一小块。
  */
 /** 返回栈里这一页对应的入口：顶层页就是它自己；设置在手机上归到“我的”，在平板和电视上是导航栏底部的“设置”；别的页面不算。 */
+/** 详情页（榜单 / 歌单 / 专辑 / 歌手）的路由前缀，参数是 Uri 编码过的页面 key。 */
+internal const val COLLECTION_ROUTE = "collection"
+
+/**
+ * 压一层详情页。栈顶已经是同一页（连点两下）就不再压；不用 launchSingleTop——
+ * 它会把栈顶同类页面换掉，专辑页点“更多专辑”后就回不到原来那张了。
+ */
+internal fun NavHostController.openDetail(base: String, key: String) {
+    if (key.isBlank()) return
+    val top = currentBackStackEntry
+    if (top?.destination?.route == "$base/{key}" && top.arguments?.getString("key") == key) return
+    navigate("$base/${android.net.Uri.encode(key)}")
+}
+
 private fun tabOf(route: String?, phone: Boolean): String? = when {
     route == null -> null
     TopTab.entries.any { it.route == route } -> route

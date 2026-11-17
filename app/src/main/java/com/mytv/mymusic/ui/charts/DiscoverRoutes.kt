@@ -7,7 +7,11 @@ import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.AppNav
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.mytv.mymusic.ui.COLLECTION_ROUTE
 import com.mytv.mymusic.ui.CollectionScreen
+import com.mytv.mymusic.ui.CollectionUiState
 import com.mytv.mymusic.ui.TvExitBackHandler
 import com.mytv.mymusic.ui.playlists.PlaylistsScreen
 import com.mytv.mymusic.ui.song
@@ -53,9 +57,13 @@ fun NavGraphBuilder.discoverRoutes(app: AppNav) {
             categoryEnd = categoryEnd,
         )
     }
-    composable("collection") {
+    composable("$COLLECTION_ROUTE/{key}") { entry ->
+        val key = entry.arguments?.getString("key").orEmpty()
+        // 每页按 key 取自己的内容；回到前台（进入或从上一层返回）时设为当前页，播放全部、收藏等都对它操作
+        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { app.model.activateCollection(key) }
         val state by app.model.state.collectAsState()
-        val collection by app.model.collectionState.collectAsState()
+        val pages by app.model.collectionPages.collectAsState()
+        val collection = pages[key] ?: CollectionUiState(key = key, loading = true)
         val favorites by app.model.favorites.collectAsState()
         val localPlaylists by app.model.localPlaylists.collectAsState()
         CollectionScreen(

@@ -1,6 +1,7 @@
 package com.mytv.mymusic.data.native
 
 import com.mytv.mymusic.AppLog
+import com.mytv.mymusic.data.AlbumDetail
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.PlaylistCategory
@@ -406,6 +407,11 @@ class AppleProvider : BaseNativeProvider(APPLE_INFO) {
 
     override suspend fun albumSongs(cookie: String, id: String): List<Song> =
         parseAlbum(cookie, id).songs
+
+    override suspend fun albumDetail(cookie: String, id: String): AlbumDetail {
+        val result = parseAlbum(cookie, id)
+        return AlbumDetail(result.item.toLooseAlbumSummary(), result.songs)
+    }
 
     override suspend fun parseAlbum(cookie: String, link: String): CollectionResult {
         val albumId = extractAppleId(link, "album") ?: throw IllegalArgumentException("invalid apple music album link: $link")
