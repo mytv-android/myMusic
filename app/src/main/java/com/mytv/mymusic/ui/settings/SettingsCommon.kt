@@ -81,6 +81,7 @@ internal enum class SettingsSection(
     Report("settings/report", "播放上报", "把播放记录回传给平台，推荐跟着口味走", Icons.Filled.Analytics, IconTone.Primary),
     Equalizer("settings/equalizer", "均衡器", "本机播放音效，不影响下载文件", Icons.Filled.GraphicEq, IconTone.Primary),
     Sources("settings/sources", "音乐源", "启用哪些平台、按什么顺序", Icons.Filled.Tune, IconTone.Primary),
+    LxSources("settings/sources/custom", "自定义音源", "导入、启用和更新落雪脚本", Icons.Filled.Code, IconTone.Secondary),
     Search("settings/search", "搜索与浏览", "默认浏览来源", Icons.Filled.Search, IconTone.Primary),
     Accounts("settings/accounts", "平台账号", "扫码登录、Cookie 与退出", Icons.Filled.Person, IconTone.Secondary),
     Sync("settings/sync", "音乐库同步", "自建歌单的云端同步", Icons.Filled.Cloud, IconTone.Secondary),
@@ -91,7 +92,11 @@ internal enum class SettingsSection(
     Privacy("settings/privacy", "隐私说明", "哪些数据留在本机，哪些会离开", Icons.Filled.PrivacyTip, IconTone.Tertiary),
     ;
 
-    val parent: SettingsSection? get() = if (this == Licenses || this == Privacy) About else null
+    val parent: SettingsSection? get() = when (this) {
+        Licenses, Privacy -> About
+        LxSources -> Sources
+        else -> null
+    }
 
     companion object {
         /** 设置首页 / 双栏左栏的三组。 */

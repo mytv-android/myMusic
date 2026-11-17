@@ -757,7 +757,13 @@ internal fun orderedEnabledSources(providers: List<ProviderInfo>, enabledIds: Li
  * 换源面板、播放换源都按它排。关掉的平台不参与这些；换源时碰上仍会排在最后试着用。
  */
 @Composable
-internal fun SourcesSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: () -> Unit, embedded: Boolean = false) {
+internal fun SourcesSettingsScreen(
+    state: MusicUiState,
+    actions: MusicActions,
+    onBack: () -> Unit,
+    embedded: Boolean = false,
+    onOpen: (SettingsSection) -> Unit,
+) {
     val tv = LocalAppWindow.current.isTv
     val searchable = state.providers.filter { it.search }
     val enabledIds = state.aggregation.enabledOrDefault(searchable.map { it.id })
@@ -810,8 +816,10 @@ internal fun SourcesSettingsScreen(state: MusicUiState, actions: MusicActions, o
         item(key = "note", contentType = "note") {
             SettingsNote("顺序同时决定聚合搜索、榜单和歌单的来源条、换源面板和播放换源的先后。")
         }
-        item(key = "lxSources", contentType = "lxSources") {
-            Box(Modifier.padding(top = 16.dp)) { LxSourcesSettingsSection(state) }
+        item(key = "lxSources", contentType = "settingRow") {
+            Box(Modifier.padding(top = 16.dp)) {
+                LxSourcesSettingsEntry { onOpen(SettingsSection.LxSources) }
+            }
         }
         item(key = "reset", contentType = "settingRow") {
             ListRow(

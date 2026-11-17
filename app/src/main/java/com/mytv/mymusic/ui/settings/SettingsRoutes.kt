@@ -101,7 +101,11 @@ private fun SectionContent(
         }
         SettingsSection.Sources -> {
             val state by app.model.state.collectAsState()
-            SourcesSettingsScreen(state, actions, onBack, embedded)
+            SourcesSettingsScreen(state, actions, onBack, embedded, onOpen)
+        }
+        SettingsSection.LxSources -> {
+            val state by app.model.state.collectAsState()
+            LxSourcesSettingsScreen(state, onBack, embedded)
         }
         SettingsSection.Search -> {
             val state by app.model.state.collectAsState()
