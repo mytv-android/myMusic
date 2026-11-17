@@ -117,6 +117,7 @@ import com.mytv.mymusic.aggregate.MatchStrictness
 import com.mytv.mymusic.aggregate.PlaybackMode
 import com.mytv.mymusic.data.CrossfadeAnimation
 import com.mytv.mymusic.data.CrossfadeMode
+import com.mytv.mymusic.data.native.AudioQuality
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.playreport.PlayReportHub
 import com.mytv.mymusic.ui.AccountProfile
@@ -529,6 +530,10 @@ private fun StyleChips(label: String, selected: SchemeStyle, onSelect: (SchemeSt
 
 // ======================= 播放与换源 =======================
 
+/** 音质偏好只放常用档；母带、全景声这些档取决于平台和账号，不在这里露出来。 */
+private val QUALITY_PREFERENCE_OPTIONS =
+    listOf(AudioQuality.Auto, AudioQuality.Standard, AudioQuality.High, AudioQuality.Lossless, AudioQuality.HiRes)
+
 /** 播放与换源：换源模式按钮组、平台顺序入口、匹配选项。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -625,6 +630,22 @@ internal fun PlaybackSettingsScreen(
                         showChevron = false,
                     )
                 }
+            }
+        }
+        item(key = "qualityHead", contentType = "sectionHeader") { SectionLabel("播放音质") }
+        item(key = "quality", contentType = "toggleGroup") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ConnectedToggleGroup(
+                    options = QUALITY_PREFERENCE_OPTIONS,
+                    selected = AudioQuality.normalize(state.audioQuality) ?: AudioQuality.Auto,
+                    onSelect = { actions.setAudioQuality(it) },
+                    label = { it.preferenceLabel },
+                    modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+                )
+                SettingsNote(
+                    "锁了档位就只取那一档；平台给不了（没上架、账号没有会员）时先换平台，仍不行才退回自动档。" +
+                        "各平台能选哪些档取决于当前账号，Spotify 与 Apple Music 只有试听片段。",
+                )
             }
         }
         item(key = "modeHead", contentType = "sectionHeader") { SectionLabel("换源模式") }
@@ -1901,8 +1922,10 @@ private const val FOLIA_MIT_NOTICE =
 fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
     val openUri = rememberOpenUri()
     val thirdParty = listOf(
-        "music-lib" to "平台能力来源。当前纳入 commit 7cc4467，保留 Go 源码用于移植参考与许可证说明。",
+        "music-lib" to "平台能力来源。当前纳入 commit 90b2942，保留 Go 源码用于移植参考与许可证说明。",
         "music-lib / Kotlin 移植" to "使用 OkHttp、原生加密工具与 Kotlin 实现，不引入 GoMobile、AAR 或额外后端。",
+        "music-lib / Spotify" to "Spotify 平台的匿名 Web Player 检索、公开嵌入与榜单镜像兜底、Web API 客户端凭据流程均移植自 music-lib 的 spotify 包（AGPL-3.0）。",
+        "music-lib / 音质阶梯" to "各平台的可选音质档位、码率标签与「不静默降档」判定移植自 music-lib 的 model/quality.go 与各平台 quality.go（AGPL-3.0）。",
         "SodaM / libresoda" to "汽水签名服务协议（POST /sign、GET /config、x-helios / x-medusa）、取流链路与加密流解密逻辑的来源（AGPL-3.0）。应用默认连接 SodaM 的公共签名服务，可在设置里换成自建实例。",
         "MHub / music.op.wiki" to "YouTube Music 的音频准备接口来源：MHub 公开实例（AGPL-3.0）。应用只调用它的 HTTP API，不打包其代码；音频由服务端逐首准备，客户端按它的限流要求串行请求。",
         "AndroidX、Media3、Coil、Room、WorkManager" to "均按其 Apache-2.0 或对应开源许可使用；完整列表随应用和仓库提供。",

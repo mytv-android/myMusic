@@ -102,6 +102,7 @@ import com.mytv.mymusic.data.local.forStorage
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.TrackOverrideEntity
 import com.mytv.mymusic.data.native.AppleLyricsConfig
+import com.mytv.mymusic.data.native.AudioQuality
 import com.mytv.mymusic.data.native.KugouProvider
 import com.mytv.mymusic.data.native.NativeProviders
 import com.mytv.mymusic.data.native.NetEaseProvider
@@ -259,6 +260,8 @@ data class MusicUiState(
     val cacheLimitMb: Int = 512,
     val reduceMotion: Boolean = false,
     val volumeNormalization: Boolean = false,
+    /** 播放音质偏好（AudioQuality.id）；平台不支持所选档位时按 auto 取。 */
+    val audioQuality: String = AudioQuality.Auto.id,
     val showBottomNav: Boolean = true,
     val cookies: Map<String, String> = emptyMap(),
     val sodaSignerUrl: String = "",
@@ -594,6 +597,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             cacheLimitMb = settings.cacheLimitMb.takeIf { it > 0 } ?: app.defaultCacheLimitMb(),
             reduceMotion = settings.reduceMotion,
             volumeNormalization = settings.volumeNormalization,
+            audioQuality = settings.audioQuality,
             showBottomNav = settings.showBottomNav,
             cookies = settings.cookies,
             sodaSignerUrl = settings.sodaSignerUrl,
@@ -619,6 +623,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         cookies = { settingsState.value.cookies },
         settings = { settingsState.value.aggregation },
         workDir = { app.cacheDir },
+        quality = { AudioQuality.normalize(settingsState.value.audioQuality) ?: AudioQuality.Auto },
     )
     private val matchJob = MatchJob(
         repository = app.repository,
@@ -5452,6 +5457,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setReduceMotion(value: Boolean) = viewModelScope.launch { app.settings.reduceMotion(value) }
     fun setVolumeNormalization(value: Boolean) =
         viewModelScope.launch { app.settings.volumeNormalization(value) }
+    fun setAudioQuality(value: AudioQuality) =
+        viewModelScope.launch { app.settings.audioQuality(value.id) }
     fun setLyricsBackground(value: LyricsBackgroundMode) = viewModelScope.launch { app.settings.lyricsBackground(value) }
     fun setNotificationLyrics(value: Boolean) = viewModelScope.launch { app.settings.notificationLyrics(value) }
     fun setLyriconProviderEnabled(value: Boolean) = viewModelScope.launch { app.settings.lyriconProviderEnabled(value) }

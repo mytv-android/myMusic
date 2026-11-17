@@ -100,6 +100,7 @@ import com.mytv.mymusic.aggregate.TrackSource
 import com.mytv.mymusic.aggregate.availabilityOf
 import com.mytv.mymusic.data.CrossfadeAnimation
 import com.mytv.mymusic.data.CrossfadeMode
+import com.mytv.mymusic.data.native.AudioQuality
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.data.SearchKind
@@ -277,6 +278,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun setCrossfadeMode(value: CrossfadeMode) = model.setCrossfadeMode(value)
     fun setReduceMotion(value: Boolean) = model.setReduceMotion(value)
     fun setVolumeNormalization(value: Boolean) = model.setVolumeNormalization(value)
+    fun setAudioQuality(value: AudioQuality) = model.setAudioQuality(value)
     fun toggleAggregateProvider(id: String) = model.toggleAggregateProvider(id)
     fun moveSource(id: String, delta: Int) = model.moveSource(id, delta)
     fun resetSources() = model.resetSources()

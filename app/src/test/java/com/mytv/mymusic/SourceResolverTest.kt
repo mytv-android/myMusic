@@ -10,6 +10,7 @@ import com.mytv.mymusic.aggregate.TrackSource
 import com.mytv.mymusic.aggregate.availabilityOf
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.native.AudioQuality
 import com.mytv.mymusic.data.native.PlayableStream
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -119,22 +120,102 @@ class SourceResolverTest {
     // ---------- resolve()：取流后才知道是试听（汽水会员曲）的换源行为 ----------
 
     /** 按平台返回固定流；没配置的平台返回空地址（等价于解析失败）。 */
-    private class FakeRepository(private val streams: Map<String, PlayableStream>) : MusicRepository() {
-        override suspend fun playableStream(song: Song, cookie: String, workDir: File): PlayableStream =
-            streams[song.key] ?: PlayableStream(url = "")
+    private class FakeRepository(
+        private val streams: Map<String, PlayableStream>,
+        /** 按音质偏好返回流；返回 null 表示这个平台不区分档位，走 [streams]。 */
+        private val onQuality: (Song, AudioQuality) -> PlayableStream? = { _, _ -> null },
+    ) : MusicRepository() {
+        override suspend fun playableStream(
+            song: Song,
+            cookie: String,
+            workDir: File,
+            quality: AudioQuality,
+        ): PlayableStream = onQuality(song, quality) ?: streams[song.key] ?: PlayableStream(url = "")
     }
+
+    private fun previewResolver(
+        streams: Map<String, PlayableStream>,
+        cookies: Map<String, String> = mapOf("soda" to "sid=1"),
+        onQuality: (Song, AudioQuality) -> PlayableStream? = { _, _ -> null },
+    ) = SourceResolver(
+        repository = FakeRepository(streams, onQuality),
+        cookies = { cookies },
+        settings = { AggregationSettings() },
+        workDir = { File(".") },
+    )
 
     /** 汽水会员曲：静态可用性查不出试听（签名器在），取流才带回顾片段标记。 */
     private fun sodaVipSource() = TrackSource("soda", "汽水音乐", song("s1", "soda", vip = true))
 
     private fun neteaseSource() = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/full.mp3"))
 
-    private fun previewResolver(streams: Map<String, PlayableStream>, cookies: Map<String, String> = mapOf("soda" to "sid=1")) = SourceResolver(
-        repository = FakeRepository(streams),
-        cookies = { cookies },
-        settings = { AggregationSettings() },
-        workDir = { File(".") },
-    )
+    // ---------- 音质偏好：锁了档位拿不到时不能整首播不出来 ----------
+
+    @Test
+    fun pinnedQualityFallsBackToAutoSoTheSongStillPlays() = runBlocking {
+        var autoRetried = false
+        val resolver = previewResolver(
+            emptyMap(),
+            onQuality = { _, quality ->
+                if (quality == AudioQuality.Auto) {
+                    autoRetried = true
+                    PlayableStream(url = "https://example.com/netease-320.mp3", bitrate = 320)
+                } else {
+                    // 平台给不了这一档：没上架无损、账号没有会员
+                    PlayableStream(url = "")
+                }
+            },
+        )
+        val resolution = resolver.resolve(
+            track(listOf(neteaseSource())),
+            policy = SourcePolicy(priority = listOf("netease")),
+        )
+        val ready = resolution as Resolution.Ready
+        assertEquals("https://example.com/netease-320.mp3", ready.url)
+        assertTrue("锁了音质后应退回自动档再取一次", autoRetried)
+    }
+
+    @Test
+    fun autoPreferenceDoesNotRetry() = runBlocking {
+        var calls = 0
+        val resolver = previewResolver(
+            emptyMap(),
+            onQuality = { _, _ -> calls++; PlayableStream(url = "https://example.com/a.mp3") },
+        )
+        resolver.resolve(track(listOf(neteaseSource())), policy = SourcePolicy(priority = listOf("netease")))
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun changingQualityPreferenceInvalidatesCachedUrl() = runBlocking {
+        var preference = AudioQuality.Auto
+        val requested = mutableListOf<AudioQuality>()
+        val resolver = SourceResolver(
+            repository = FakeRepository(
+                emptyMap(),
+                onQuality = { _, quality ->
+                    requested += quality
+                    PlayableStream(url = "https://example.com/${quality.id}.mp3")
+                },
+            ),
+            cookies = { emptyMap() },
+            settings = { AggregationSettings() },
+            workDir = { File(".") },
+            quality = { preference },
+        )
+        val target = track(listOf(neteaseSource()))
+        resolver.resolve(target, policy = SourcePolicy(priority = listOf("netease")))
+        resolver.resolve(target, policy = SourcePolicy(priority = listOf("netease")))
+        // 偏好没变：第二次命中地址缓存，不再取流
+        assertEquals(1, requested.size)
+
+        preference = AudioQuality.Lossless
+        val switched = resolver.resolve(target, policy = SourcePolicy(priority = listOf("netease")))
+        // 偏好变了必须重新取流，否则用户选了无损还在播缓存里的低档地址
+        assertEquals(2, requested.size)
+        assertEquals(AudioQuality.Lossless, requested.last())
+        assertEquals("https://example.com/lossless.mp3", (switched as Resolution.Ready).url)
+    }
 
     @Test
     fun previewStreamFallsThroughToNextPlatform() = runBlocking {

@@ -1,6 +1,7 @@
 package com.mytv.mymusic.data
 
 import com.mytv.mymusic.data.native.AccountInfo
+import com.mytv.mymusic.data.native.AudioQuality
 import com.mytv.mymusic.data.native.NativeProvider
 import com.mytv.mymusic.data.native.NativeProviders
 import com.mytv.mymusic.data.native.PlayableStream
@@ -28,8 +29,18 @@ open class MusicRepository {
     suspend fun parseSong(provider: String, cookie: String, link: String): Song =
         requireProvider(provider).parseSong(cookie, link)
 
-    open suspend fun playableStream(song: Song, cookie: String, workDir: File): PlayableStream =
-        requireProvider(song.source).playableStream(cookie, song, workDir)
+    open suspend fun playableStream(
+        song: Song,
+        cookie: String,
+        workDir: File,
+        quality: AudioQuality = AudioQuality.Auto,
+    ): PlayableStream =
+        requireProvider(song.source).playableStream(cookie, song, workDir, quality)
+
+    /** 当前账号在这个平台上实际能选的音质档，从高到低；空表表示只有“自动”。 */
+    suspend fun availableQualityOptions(provider: String, cookie: String) =
+        requireProvider(provider).availableQualityOptions(cookie)
+
 
     suspend fun lyrics(song: Song, cookie: String): String =
         requireProvider(song.source).lyrics(cookie, song)

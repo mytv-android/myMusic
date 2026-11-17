@@ -2,6 +2,7 @@ package com.mytv.mymusic.aggregate
 
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.native.AudioQuality
 import kotlinx.coroutines.CancellationException
 import java.io.File
 import java.util.LinkedHashMap
@@ -11,6 +12,8 @@ class SourceResolver(
     private val cookies: () -> Map<String, String>,
     private val settings: () -> AggregationSettings,
     private val workDir: () -> File,
+    /** 播放音质偏好；换源解析和播放取流都要按它取，选了无损就不能偷偷给 128k。 */
+    private val quality: () -> AudioQuality = { AudioQuality.Auto },
 ) {
     private data class CachedUrl(
         val url: String,
@@ -19,6 +22,8 @@ class SourceResolver(
         val ext: String = "",
         val bitrate: Int = 0,
         val extra: Map<String, String> = emptyMap(),
+        /** 取这条地址时的音质偏好；偏好一变整条缓存作废。 */
+        val quality: String = AudioQuality.Auto.id,
     )
 
     private val urlCache = object : LinkedHashMap<String, CachedUrl>(32, 0.75f, true) {}
@@ -112,7 +117,9 @@ class SourceResolver(
 
             val now = System.currentTimeMillis()
             val cached = synchronized(lock) { urlCache[source.song.key] }
-            if (cached != null && now - cached.at < URL_TTL_MS) {
+            // 换过音质偏好就不能复用旧地址：用户选了无损，缓存里那条 128k 必须作废
+            val qualityId = quality().id
+            if (cached != null && cached.quality == qualityId && now - cached.at < URL_TTL_MS) {
                 // 汽水这类取流后才知道是试听的源，缓存里带着试听标记：同样受「允许试听」约束
                 if (cached.preview && !policy.allowPreview && !explicit) {
                     attempts += Attempt(source, "仅提供试听")
@@ -130,12 +137,21 @@ class SourceResolver(
             }
 
             var failure: Throwable? = null
-            val stream = runCatching {
-                repository.playableStream(source.song, cookie, workDir())
+            var stream = runCatching {
+                repository.playableStream(source.song, cookie, workDir(), quality())
             }.onFailure {
                 if (it is CancellationException) throw it
                 failure = it
             }.getOrNull()
+            if (stream?.url.isNullOrBlank() && quality() != AudioQuality.Auto) {
+                // 用户锁了音质而这个平台给不了（没上架无损、账号没会员）：退回自动档再取一次，
+                // 宁可降档也要让这首歌响，不能因为一个音质偏好就整首播不出来。
+                stream = runCatching {
+                    repository.playableStream(source.song, cookie, workDir(), AudioQuality.Auto)
+                }.onFailure {
+                    if (it is CancellationException) throw it
+                }.getOrNull()
+            }
             val url = stream?.url.orEmpty()
             if (url.isBlank()) {
                 synchronized(lock) { negativeCache[source.song.key] = System.currentTimeMillis() }
@@ -160,6 +176,7 @@ class SourceResolver(
                     ext = resolvedSource.song.ext,
                     bitrate = resolvedSource.song.bitrate,
                     extra = stream?.extra.orEmpty(),
+                    quality = qualityId,
                 )
             }
             // 地址拿到了但只是片段，而设置里不允许试听：当没有可用地址，继续试下一个平台；
