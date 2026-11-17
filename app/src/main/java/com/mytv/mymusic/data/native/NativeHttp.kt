@@ -38,7 +38,8 @@ object NativeHttp {
         isLenient = true
     }
 
-    private val client = OkHttpClient.Builder()
+    /** 默认客户端；[MHubTls] 从这里派生出自带附加信任锚的那份。 */
+    internal val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -177,9 +178,20 @@ object NativeHttp {
         return execute(request, binary = true)
     }
 
+    /**
+     * 按请求地址挑客户端：MHub 的两个域名要用带附加信任锚的那份（它们的证书链挂在
+     * Let's Encrypt 的 YE 上，Android 6/7 的系统 CA 库里没有 ISRG 根），其余照旧。
+     * 见 [MHubTls]。
+     */
+    private fun clientFor(request: Request, followRedirects: Boolean): OkHttpClient = when {
+        request.url.host in MHubTls.hosts -> MHubTls.client
+        followRedirects -> client
+        else -> noRedirectClient
+    }
+
     private suspend fun execute(request: Request, binary: Boolean = false, followRedirects: Boolean = true): NativeResponse =
         suspendCancellableCoroutine { continuation ->
-            val call = (if (followRedirects) client else noRedirectClient).newCall(request)
+            val call = clientFor(request, followRedirects).newCall(request)
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, error: IOException) {

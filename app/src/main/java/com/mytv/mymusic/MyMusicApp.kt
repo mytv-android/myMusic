@@ -120,6 +120,9 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         AppleTokenCache.attach(this)
+        // music.op.wiki 和它的音频 CDN 挂在 Let's Encrypt 的 YE 链上，Android 6/7 的系统 CA 库里
+        // 没有 ISRG 根，播放器握手直接失败。这里装上附带的根，只影响系统锚找不到时的兜底。
+        com.mytv.mymusic.data.native.MHubTls.installDefaultSslSocketFactory()
         val backgroundWork = BackgroundWork.available(this)
         if (!backgroundWork) {
             android.util.Log.w("MyMusicApp", "设备保护存储或未解锁上下文：跳过桌面组件与 WorkManager 后台调度")
