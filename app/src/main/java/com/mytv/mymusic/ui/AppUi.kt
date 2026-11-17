@@ -305,6 +305,8 @@ class MusicActions(private val model: MusicViewModel) {
 
     /** 播放上报总开关：是否把播放记录回传给平台（见 PlayReporter）。 */
     fun setPlayReportEnabled(value: Boolean) = model.setPlayReportEnabled(value)
+    /** 更新线路（见 GithubMirror）。 */
+    fun setGithubMirror(value: com.mytv.mymusic.data.GithubMirror) = model.setGithubMirror(value)
     fun logout(providerId: String) = model.logout(providerId)
     fun startQrLogin(providerId: String, type: String) = model.startQrLogin(providerId, type)
     fun cancelLogin() = model.cancelLogin()

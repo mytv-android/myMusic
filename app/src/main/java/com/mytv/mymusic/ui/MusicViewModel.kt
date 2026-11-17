@@ -258,6 +258,8 @@ data class MusicUiState(
     /** 交叉淡化还是智能过渡，见 [com.mytv.mymusic.data.CrossfadeMode]。 */
     val crossfadeMode: com.mytv.mymusic.data.CrossfadeMode = com.mytv.mymusic.data.CrossfadeMode.Automix,
     val cacheLimitMb: Int = 512,
+    /** 更新检查与下载用哪条 GitHub 线路，见 [com.mytv.mymusic.data.GithubMirror]。 */
+    val githubMirror: com.mytv.mymusic.data.GithubMirror = com.mytv.mymusic.data.GithubMirror.Auto,
     val reduceMotion: Boolean = false,
     val volumeNormalization: Boolean = false,
     /** 播放音质偏好（AudioQuality.id）；平台不支持所选档位时按 auto 取。 */
@@ -595,6 +597,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 .firstOrNull { it.name == settings.crossfadeMode }
                 ?: com.mytv.mymusic.data.CrossfadeMode.Automix,
             cacheLimitMb = settings.cacheLimitMb.takeIf { it > 0 } ?: app.defaultCacheLimitMb(),
+            githubMirror = settings.githubMirror,
             reduceMotion = settings.reduceMotion,
             volumeNormalization = settings.volumeNormalization,
             audioQuality = settings.audioQuality,
@@ -5313,7 +5316,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             lyrics = if (ui.lyricsKey == song.key) ui.lyrics else "",
             lyricsReady = ui.lyricsKey == song.key,
             seed = ui.coverSeed,
-            sourceName = ui.currentSource?.providerName ?: providerName(song.source),
+            sourceName = ui.currentSource?.actualProviderName ?: providerName(song.source),
             quality = ui.currentSource?.qualityLabel?.takeUnless { it == "音质未知" }.orEmpty(),
             feedModeId = ui.listeningFeed?.modeId.orEmpty(),
             hasPrevious = ui.queue.size > 1,
@@ -5726,6 +5729,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         app.settings.playReportEnabled(value)
         PlayReportHub.setEnabled(value)
         message(if (value) "已开启播放上报，推荐会跟着听歌记录走" else "已关闭播放上报，不再回传播放记录")
+    }
+
+    /** 更新线路：写入设置后立即丢弃测速缓存，下一次检查按新线路排序。 */
+    fun setGithubMirror(value: com.mytv.mymusic.data.GithubMirror) = viewModelScope.launch {
+        app.settings.githubMirror(value)
+        message(if (value == com.mytv.mymusic.data.GithubMirror.Auto) "已恢复自动测速" else "更新将优先走 ${value.label}")
     }
 
     fun logout(providerId: String = settingsState.value.provider) = viewModelScope.launch {

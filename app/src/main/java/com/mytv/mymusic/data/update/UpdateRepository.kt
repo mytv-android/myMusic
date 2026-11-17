@@ -14,6 +14,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.mytv.mymusic.data.GithubMirror
 import com.mytv.mymusic.data.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -22,6 +23,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -103,8 +105,11 @@ class UpdateRepository(
     /** 检查更新与下载各自缓存一份线路测速结果，避免每次请求都重新探测。 */
     private var manifestProbeExpiry = 0L
     private var manifestProbeOrder: List<String>? = null
+    /** 测速结果对应的镜像设置；用户换了线路，旧顺序立刻作废。 */
+    private var manifestProbeMirror: GithubMirror? = null
     private var downloadProbeExpiry = 0L
     private var downloadProbeOrder: List<String>? = null
+    private var downloadProbeMirror: GithubMirror? = null
 
     @Volatile
     private var downloadCancelled = false
@@ -311,8 +316,8 @@ class UpdateRepository(
      * GitHub 直连在国内经常超时，内置多个加速镜像 + 源站直连兜底。
      * 并发测速后按耗时升序使用，测速结果缓存 5 分钟；不可达的线路留在末尾作为兜底。
      */
-    private suspend fun probeMirrors(target: String): List<String> = coroutineScope {
-        val results = MIRRORS.map { mirror ->
+    private suspend fun probeMirrors(target: String, mirrors: List<String>): List<String> = coroutineScope {
+        val results = mirrors.map { mirror ->
             async {
                 val startedAt = System.nanoTime()
                 val reachable = withTimeoutOrNull(PROBE_TIMEOUT_MS) {
@@ -335,19 +340,31 @@ class UpdateRepository(
 
     private suspend fun manifestMirrorOrder(): List<String> {
         val now = System.currentTimeMillis()
-        manifestProbeOrder?.takeIf { now < manifestProbeExpiry }?.let { return it }
-        return probeMirrors(MANIFEST_URL).also {
-            manifestProbeOrder = it
+        val selected = settings.state.first().githubMirror
+        manifestProbeOrder
+            ?.takeIf { now < manifestProbeExpiry && manifestProbeMirror == selected }
+            ?.let { return it }
+        return probeMirrors(MANIFEST_URL, candidateMirrors(selected)).let { order ->
+            val pinned = applyPinnedMirror(order, selected)
+            manifestProbeOrder = pinned
+            manifestProbeMirror = selected
             manifestProbeExpiry = now + PROBE_TTL_MS
+            pinned
         }
     }
 
     private suspend fun downloadMirrorOrder(target: String): List<String> {
         val now = System.currentTimeMillis()
-        downloadProbeOrder?.takeIf { now < downloadProbeExpiry }?.let { return it }
-        return probeMirrors(target).also {
-            downloadProbeOrder = it
+        val selected = settings.state.first().githubMirror
+        downloadProbeOrder
+            ?.takeIf { now < downloadProbeExpiry && downloadProbeMirror == selected }
+            ?.let { return it }
+        return probeMirrors(target, candidateMirrors(selected)).let { order ->
+            val pinned = applyPinnedMirror(order, selected)
+            downloadProbeOrder = pinned
+            downloadProbeMirror = selected
             downloadProbeExpiry = now + PROBE_TTL_MS
+            pinned
         }
     }
 
@@ -614,19 +631,20 @@ class UpdateRepository(
         private const val PROBE_TTL_MS = 5 * 60 * 1000L
         private const val PROBE_TIMEOUT_MS = 3_000L
 
-        /** GitHub 加速镜像；空字符串表示源站直连。与 myDV 的列表保持一致。 */
-        private val MIRRORS = listOf(
-            "https://gh-proxy.org/",
-            "https://gh-proxy.com/",
-            "https://ghproxy.net/",
-            "https://gh.cc/",
-            "https://mirror.ghproxy.com/",
-            "https://github.moeyy.xyz/",
-            "https://ghproxy.cn/",
-            "https://gh.api.99988866.xyz/",
-            "https://gh-proxy.ygxz.in/",
-            "",
-        )
+        /** 候选线路：选中具体线路时它排最前，其余线路与直连仍在后面兜底。清单见 [GithubMirror]。 */
+        private fun candidateMirrors(selected: GithubMirror): List<String> {
+            val proxies = GithubMirror.proxies.map { it.prefix }
+            return when (selected) {
+                GithubMirror.Auto -> proxies + ""
+                GithubMirror.Direct -> listOf("") + proxies
+                else -> listOf(selected.prefix) + proxies.filterNot { it == selected.prefix } + ""
+            }
+        }
+
+        /** 用户选中的具体线路永远排在测速结果前面。 */
+        private fun applyPinnedMirror(order: List<String>, selected: GithubMirror): List<String> =
+            if (selected.isProxy) listOf(selected.prefix) + order.filterNot { it == selected.prefix }
+            else order
     }
 }
 

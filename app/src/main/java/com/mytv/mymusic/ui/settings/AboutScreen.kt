@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Group
@@ -37,6 +38,7 @@ import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -66,6 +68,7 @@ import com.mytv.mymusic.ui.InfoNote
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.components.IconTone
+import com.mytv.mymusic.data.GithubMirror
 import com.mytv.mymusic.ui.components.ListRow
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
@@ -99,6 +102,7 @@ fun AboutScreen(
     val snackbar = LocalAppSnackbar.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
+    var showMirrorPicker by remember { mutableStateOf(false) }
     val info = update.info
     val showCard = info != null
     val isChecking = checking || update.phase == UpdatePhase.Checking
@@ -145,7 +149,7 @@ fun AboutScreen(
                 ListRow(
                     title = "检查更新",
                     index = 0,
-                    count = 7,
+                    count = 8,
                     onClick = ::check,
                     icon = Icons.Filled.Refresh,
                     summary = checkSummary,
@@ -157,25 +161,37 @@ fun AboutScreen(
                     },
                 )
                 ListRow(
-                    title = "隐私说明",
+                    title = "GitHub 镜像源",
                     index = 1,
-                    count = 7,
+                    count = 8,
+                    onClick = { showMirrorPicker = true },
+                    icon = Icons.Filled.CloudDownload,
+                    summary = when (state.githubMirror) {
+                        GithubMirror.Auto -> "自动测速，选最快的线路"
+                        GithubMirror.Direct -> "直连 github.com"
+                        else -> "优先 ${state.githubMirror.label}，失败按顺序回退"
+                    },
+                )
+                ListRow(
+                    title = "隐私说明",
+                    index = 2,
+                    count = 8,
                     onClick = onPrivacy,
                     icon = Icons.Filled.PrivacyTip,
                     summary = "哪些数据留在本机，哪些会离开",
                 )
                 ListRow(
                     title = "开源许可",
-                    index = 2,
-                    count = 7,
+                    index = 3,
+                    count = 8,
                     onClick = onLicenses,
                     icon = Icons.Filled.Code,
                     summary = "AGPL-3.0 · music-lib、Folia 模组、Rush 与第三方依赖",
                 )
                 ListRow(
                     title = "项目主页",
-                    index = 3,
-                    count = 7,
+                    index = 4,
+                    count = 8,
                     onClick = { openUri(PROJECT_URL) },
                     icon = Icons.AutoMirrored.Filled.OpenInNew,
                     summary = "github.com/mytv-android/myMusic",
@@ -183,8 +199,8 @@ fun AboutScreen(
                 )
                 ListRow(
                     title = "Telegram 群组",
-                    index = 4,
-                    count = 7,
+                    index = 5,
+                    count = 8,
                     onClick = { openUri(TELEGRAM_URL) },
                     icon = Icons.Filled.Group,
                     summary = "t.me/mytv_android_channel",
@@ -192,8 +208,8 @@ fun AboutScreen(
                 )
                 ListRow(
                     title = "复制诊断信息",
-                    index = 5,
-                    count = 7,
+                    index = 6,
+                    count = 8,
                     onClick = {
                         scope.launch {
                             clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("myMusic 诊断信息", actions.diagnostics())))
@@ -207,8 +223,8 @@ fun AboutScreen(
                 )
                 ListRow(
                     title = "导出日志文件",
-                    index = 6,
-                    count = 7,
+                    index = 7,
+                    count = 8,
                     onClick = {
                         scope.launch { snackbar.showSnackbar(actions.exportLog()) }
                     },
@@ -245,6 +261,56 @@ fun AboutScreen(
             )
         }
     }
+    if (showMirrorPicker) {
+        GithubMirrorDialog(
+            selected = state.githubMirror,
+            onPick = {
+                showMirrorPicker = false
+                scope.launch { actions.setGithubMirror(it) }
+            },
+            onDismiss = { showMirrorPicker = false },
+        )
+    }
+}
+
+/**
+ * 更新线路选择。每条线路后跟一句实测/限制说明，避免用户以为「不代理 API」的线路
+ * 也适合检查更新——那几条只能加速安装包下载。
+ */
+@Composable
+private fun GithubMirrorDialog(
+    selected: GithubMirror,
+    onPick: (GithubMirror) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("GitHub 镜像源") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                GithubMirror.entries.forEach { mirror ->
+                    val summary = when (mirror) {
+                        GithubMirror.Auto -> "并发测速所有线路，选最快可达者"
+                        GithubMirror.Direct -> "不走代理；api.github.com 被限流时检查更新会失败"
+                        GithubMirror.ProxyOrg, GithubMirror.ProxyCom -> "更新检查与下载都可用"
+                        else -> "只加速安装包下载，检查更新仍走其它线路"
+                    }
+                    ListRow(
+                        title = mirror.label,
+                        index = GithubMirror.entries.indexOf(mirror),
+                        count = GithubMirror.entries.size,
+                        onClick = { onPick(mirror) },
+                        summary = summary,
+                        selected = mirror == selected,
+                        showChevron = false,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+    )
 }
 
 /**

@@ -141,6 +141,41 @@ enum class CrossfadeMode(val label: String) {
     None("不过渡"),
 }
 
+/**
+ * GitHub 加速镜像；空串是源站直连。
+ *
+ * 2026-11-17 实测（Release 资产 / `api.github.com` / raw 三类端点）：
+ * - 直连：资产与 raw 可用；`api.github.com` 常因共享出口 IP 被限流 403。
+ * - gh-proxy.org / gh-proxy.com：三类全通，且代理 `api.github.com`。
+ * - ghfile.geekertao.top / ghfast.top / gh.3w.pm：只转发资产与 raw，**不代理 API**。
+ * - ghproxy.net：资产可用但 6~22s，仅作兜底。
+ *
+ * 已剔除（NXDOMAIN / TLS 不握手 / 落地页）：ghp.ci、hub.gitmirror.com、github.moeyy.xyz、
+ * gh.cc、ghproxy.cn、gh-proxy.net、mirror.ghproxy.com、gh-proxy.ygxz.in、gh.llkk.cc、
+ * gh.api.99988866.xyz、ghproxy.com。
+ */
+enum class GithubMirror(val label: String, val prefix: String) {
+    /** 并发测速所有线路，选最快可达者（原有行为） */
+    Auto("自动测速", ""),
+    Direct("GitHub 直连", ""),
+    ProxyOrg("gh-proxy.org", "https://gh-proxy.org/"),
+    ProxyCom("gh-proxy.com", "https://gh-proxy.com/"),
+    Geekertao("ghfile.geekertao.top", "https://ghfile.geekertao.top/"),
+    Ghfast("ghfast.top", "https://ghfast.top/"),
+    ThreeW("gh.3w.pm", "https://gh.3w.pm/"),
+    ProxyNet("ghproxy.net", "https://ghproxy.net/"),
+    ;
+
+    /** 具体代理线路（自动测速与直连另行展开）。 */
+    val isProxy: Boolean get() = this != Auto && this != Direct
+
+    companion object {
+        val proxies: List<GithubMirror> = entries.filter { it.isProxy }
+
+        fun fromName(name: String?): GithubMirror = entries.firstOrNull { it.name == name } ?: Auto
+    }
+}
+
 /** 播放页上怎么画出这次接歌：不画、围着封面的一整圈，或沿封面外轮廓走一圈。 */
 enum class CrossfadeAnimation(val label: String) {
     Off("关闭"),
@@ -244,6 +279,8 @@ class SettingsStore(private val context: Context) {
     private val lyricSplitBilingualKey = booleanPreferencesKey("lyric_split_bilingual")
     private val lyricTraditionalKey = booleanPreferencesKey("lyric_traditional")
     private val lyricAutoRomanizeKey = booleanPreferencesKey("lyric_auto_romanize")
+    /** 更新走哪条 GitHub 镜像线路；见 [GithubMirror]。 */
+    private val githubMirrorKey = stringPreferencesKey("github_mirror")
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -325,6 +362,7 @@ class SettingsStore(private val context: Context) {
             crossfadeAnimation = values[crossfadeAnimationKey] ?: CrossfadeAnimation.Ring.name,
             crossfadeMode = values[crossfadeModeKey] ?: CrossfadeMode.Automix.name,
             cacheLimitMb = values[cacheLimitKey] ?: 0,
+            githubMirror = GithubMirror.fromName(values[githubMirrorKey]),
         )
     }
 
@@ -386,6 +424,7 @@ class SettingsStore(private val context: Context) {
     suspend fun crossfadeMode(value: CrossfadeMode) =
         context.dataStore.edit { it[crossfadeModeKey] = value.name }
     suspend fun cacheLimitMb(value: Int) = context.dataStore.edit { it[cacheLimitKey] = value }
+    suspend fun githubMirror(value: GithubMirror) = context.dataStore.edit { it[githubMirrorKey] = value.name }
 
     /** 墙内设置：在同一次 edit 里读出当前值再写回，连着点两个开关也不会互相覆盖。 */
     suspend fun poster(transform: (PosterPrefs) -> PosterPrefs) = context.dataStore.edit {
@@ -681,6 +720,8 @@ data class AppSettings(
     val crossfadeMode: String = "Automix",
     /** 播放缓存上限（MB），0 表示按设备默认：电视 256，其他 512。 */
     val cacheLimitMb: Int = 0,
+    /** 更新检查与下载用哪条 GitHub 线路。 */
+    val githubMirror: GithubMirror = GithubMirror.Auto,
 )
 
 // 同一首歌可以同时在“喜欢”和“最近播放”里，所以主键是 (key, bucket)
