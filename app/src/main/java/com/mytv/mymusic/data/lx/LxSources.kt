@@ -66,18 +66,22 @@ object LxSources : LxPlayback {
         }
     }
 
-    override suspend fun resolve(song: Song, quality: String): PlayableStream? {
+    override suspend fun resolve(song: Song, quality: String): PlayableStream? =
+        resolve(listOf(song), quality)?.stream
+
+    override suspend fun resolve(songs: List<Song>, quality: String): LxPlaybackResult? {
         val sourceStore = store ?: return null
-        val source = LxPlatform.sourceKey(song.source) ?: return null
-        val failed = synchronized(failedLock) { failedScripts[song.key]?.toSet() }.orEmpty()
-        for (record in sourceStore.records.value) {
-            if (record.id in failed || !record.enabled || record.capabilities[source]?.actions?.contains("musicUrl") != true) continue
+        val failures = synchronized(failedLock) { failedScripts.mapValues { it.value.toSet() } }
+        val attempts = orderedLxAttempts(sourceStore.records.value, songs) { songKey, recordId ->
+            failures[songKey]?.contains(recordId) == true
+        }
+        for ((record, song) in attempts) {
             try {
-                return resolveFrom(record, song, quality).stream
+                return LxPlaybackResult(song, resolveFrom(record, song, quality).stream)
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Throwable) {
-                // 脚本异常继续尝试下一个；全失败后由 MusicRepository 回退到内置接口。
+                // 当前脚本无法处理这首歌时，先让它尝试其余匹配歌曲，再进入下一个脚本。
             }
         }
         return null

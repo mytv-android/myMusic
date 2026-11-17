@@ -161,7 +161,7 @@ internal fun LxSourcesSettingsScreen(
                 }
             }
             item(key = "sourcesNote", contentType = "note") {
-                SettingsNote("按列表顺序优先尝试脚本取流，失败自动回退内置接口。点按音源可测试、更新、排序或删除。")
+                SettingsNote("这里只调整统一「洛雪」内部的脚本顺序。全部脚本失败后，按播放与换源设置继续回退；点按音源可测试、更新、排序或删除。")
             }
         }
         operations.message.takeIf { it.isNotBlank() }?.let { message ->

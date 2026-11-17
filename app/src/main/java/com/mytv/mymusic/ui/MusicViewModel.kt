@@ -99,6 +99,7 @@ import com.mytv.mymusic.data.local.LOCAL_SOURCE
 import com.mytv.mymusic.data.local.LocalLibrary
 import com.mytv.mymusic.data.local.LocalPlayable
 import com.mytv.mymusic.data.local.forStorage
+import com.mytv.mymusic.data.lx.LxPlatform
 import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.TrackOverrideEntity
@@ -439,6 +440,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var mergeTargets: Map<String, String> = emptyMap()
     private var aggregateSongs: Map<String, List<Song>> = emptyMap()
     private val pinnedProviders = mutableMapOf<String, String>()
+    /** 本次队列实际解析出的来源；洛雪是组合源，不能只靠歌曲 key 反查原生平台。 */
+    private val resolvedSources = mutableMapOf<String, TrackSource>()
     private val aggregateDao = app.database.aggregate()
     private val libraryDao = app.database.library()
 
@@ -659,6 +662,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { app.settings.state.first() }
             AppleLyricsConfig.configure(settingsState.value.thirdPartyLyrics)
             _settingsReady.value = true
+        }
+        viewModelScope.launch {
+            app.settings.state.first()
+            LxSources.records.collect { records ->
+                if (records.none { it.enabled }) return@collect
+                val current = settingsState.value.aggregation
+                // providerPriority 里保留过 lx 表示用户已经做过选择，尤其不能在手动关闭后反复自动打开。
+                if (LxPlatform.PROVIDER_ID !in current.enabledProviders && LxPlatform.PROVIDER_ID !in current.providerPriority) {
+                    app.settings.saveAggregation(
+                        current.copy(
+                            enabledProviders = current.enabledProviders + LxPlatform.PROVIDER_ID,
+                            providerPriority = current.providerPriority + LxPlatform.PROVIDER_ID,
+                        ),
+                    )
+                }
+            }
         }
         startLyricon()
         viewModelScope.launch {
@@ -3418,6 +3437,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             else -> ""
         }
         dormant = null
+        resolvedSources.clear()
+        resolvedSources[playableTrack.id] = source
         AppLog.d(
             "Player",
             "起播《${resolvedSong.title}》${source.providerName}${if (local != null) "（本机文件）" else ""}" +
@@ -3512,6 +3533,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val queue = base.value.sourcePickerQueue.ifEmpty { listOf(track) }
         viewModelScope.launch {
             base.value = base.value.copy(sourcePickerBusy = providerId, sourcePickerError = "", sourcePickerInfo = "")
+            if (providerId == LxPlatform.PROVIDER_ID) {
+                if (remember) {
+                    app.settings.saveAggregation(
+                        settingsState.value.aggregation.copy(
+                            playbackMode = PlaybackMode.Pinned,
+                            pinnedProvider = providerId,
+                        ),
+                    )
+                }
+                pinnedProviders[track.id] = providerId
+                base.value = base.value.copy(sourcePickerTrack = null, sourcePickerQueue = emptyList(), sourcePickerBusy = "")
+                playTrack(track, queue, providerId)
+                return@launch
+            }
             val existing = track.sources.find { it.providerId == providerId }
             val source = if (existing != null) {
                 existing
@@ -3974,6 +4009,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearQueue() {
         dormant = null
+        resolvedSources.clear()
         controller?.clearMediaItems()
         controller?.stop()
         _position.value = 0
@@ -4314,6 +4350,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             "soda" -> "汽水音乐"
             "bilibili" -> "Bilibili"
             "local" -> "本地"
+            LxPlatform.PROVIDER_ID -> LxPlatform.PROVIDER_NAME
             else -> id
         }
 
@@ -4484,7 +4521,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val index = controller?.currentMediaItemIndex ?: return
             val song = base.value.queue.getOrNull(index) ?: return
             val track = base.value.canonicalQueue.getOrNull(index)
-            val source = track?.sources?.find { it.song.key == song.key }
+            val source = track?.let { resolvedSources[it.id] } ?: track?.sources?.find { it.song.key == song.key }
             base.value = base.value.copy(currentTrack = track, currentSource = source)
             staleErrorRetried = -1
             extendFeedIfNeeded(index)
@@ -4512,6 +4549,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     controller?.replaceMediaItem(index, mediaItem(resolved))
                     prepareIfStopped()
                     unplayableSkips = 0
+                    resolvedSources[track.id] = local.first
                     base.value = base.value.copy(
                         queue = base.value.queue.mapIndexed { i, queued -> if (i == index) resolved else queued },
                         current = resolved,
@@ -4537,6 +4575,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 controller?.replaceMediaItem(at, mediaItem(resolved))
                 prepareIfStopped()
                 unplayableSkips = 0
+                resolvedSources[result.track.id] = resolution.source
                 base.value = base.value.copy(
                     queue = base.value.queue.mapIndexed { i, queued -> if (i == at) resolved else queued },
                     canonicalQueue = base.value.canonicalQueue.mapIndexed { i, queued -> if (i == at) result.track else queued },
@@ -4693,6 +4732,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         player.replaceMediaItem(index, mediaItem(resolved))
                         player.seekTo(position)
                         player.play()
+                        resolvedSources[track.id] = local.first
                         base.value = base.value.copy(
                             queue = base.value.queue.mapIndexed { i, queued -> if (i == index) resolved else queued },
                             current = resolved,
@@ -4742,6 +4782,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     if (pinnedProviders[track.id] == failedSource?.providerId) {
                         pinnedProviders[track.id] = resolution.source.providerId
                     }
+                    resolvedSources[result.track.id] = resolution.source
                     base.value = base.value.copy(
                         queue = base.value.queue.mapIndexed { i, queued -> if (i == at) resolved else queued },
                         canonicalQueue = base.value.canonicalQueue.mapIndexed { i, queued -> if (i == at) result.track else queued },
@@ -5527,9 +5568,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (id in enabled) {
             enabled.remove(id)
             priority.remove(id)
+            // 洛雪保留一个末尾标记：关闭后只参与最后的失败回退，也不会被“首次导入”逻辑重新打开。
+            if (id == LxPlatform.PROVIDER_ID) priority += id
         } else {
             // 重新打开的排到最后：顺序是用户自己排的，不猜它想插在哪儿
             enabled += id
+            priority.remove(id)
             priority += id
         }
         searchEngine.clearCache()
@@ -5539,7 +5583,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** 音乐源排序：只在已启用的平台之间挪。这个顺序同时决定聚合搜索、来源条和换源的先后。 */
     fun moveSource(id: String, delta: Int) = viewModelScope.launch {
         val current = settingsState.value.aggregation
-        val available = base.value.providers.map { it.id }.toSet()
+        val available = base.value.providers.map { it.id }.toSet() + LxPlatform.PROVIDER_ID
         // 只排还在平台上的：已经下线的 id 不占位置，否则挪完看着没动
         val list = current.enabledProviders.filter { it in available }.toMutableList()
         val index = list.indexOf(id)

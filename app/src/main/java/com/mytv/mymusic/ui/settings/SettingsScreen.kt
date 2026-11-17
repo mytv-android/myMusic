@@ -138,8 +138,8 @@ internal fun themeLabel(theme: String): String = when (theme) {
 
 private fun playbackModeSummary(mode: PlaybackMode): String = when (mode) {
     PlaybackMode.Auto -> "自动换源"
-    PlaybackMode.Priority -> "按优先平台"
-    PlaybackMode.Pinned -> "固定平台"
+    PlaybackMode.Priority -> "按优先音源"
+    PlaybackMode.Pinned -> "固定音源"
 }
 
 /** 音乐源的当前值：启用几个、第一个是谁。顺序就是用户排的顺序。 */

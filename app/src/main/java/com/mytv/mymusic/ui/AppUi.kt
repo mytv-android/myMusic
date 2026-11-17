@@ -931,5 +931,6 @@ fun providerName(providers: List<com.mytv.mymusic.data.ProviderInfo>, id: String
         "fivesing" -> "5sing"
         "qianqian" -> "千千音乐"
         "local" -> "本地"
+        "lx" -> "洛雪"
         else -> id
     }

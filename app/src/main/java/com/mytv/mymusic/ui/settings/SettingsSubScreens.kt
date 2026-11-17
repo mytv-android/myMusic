@@ -70,6 +70,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -119,6 +120,8 @@ import com.mytv.mymusic.data.CrossfadeAnimation
 import com.mytv.mymusic.data.CrossfadeMode
 import com.mytv.mymusic.data.native.AudioQuality
 import com.mytv.mymusic.data.ProviderInfo
+import com.mytv.mymusic.data.lx.LxPlatform
+import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.data.playreport.PlayReportHub
 import com.mytv.mymusic.ui.AccountProfile
 import com.mytv.mymusic.ui.Cover
@@ -546,7 +549,10 @@ internal fun PlaybackSettingsScreen(
 ) {
     val aggregation = state.aggregation
     val searchable = state.providers.filter { it.search }
-    val priority = aggregation.priorityFor(searchable.map { it.id })
+    val lxRecords by LxSources.records.collectAsState()
+    val lxProvider = ProviderInfo(id = LxPlatform.PROVIDER_ID, name = LxPlatform.PROVIDER_NAME)
+    val pinnable = searchable + listOfNotNull(lxProvider.takeIf { lxRecords.isNotEmpty() })
+    val priority = aggregation.priorityFor(searchable.map { it.id } + LxPlatform.PROVIDER_ID)
     SettingsPage(SettingsSection.Playback, embedded, onBack) {
         item(key = "crossHead", contentType = "sectionHeader") { SectionLabel("切歌过渡") }
         item(key = "crossSwitch", contentType = "switch") {
@@ -657,8 +663,8 @@ internal fun PlaybackSettingsScreen(
                 label = {
                     when (it) {
                         PlaybackMode.Auto -> "自动"
-                        PlaybackMode.Priority -> "优先平台"
-                        PlaybackMode.Pinned -> "固定平台"
+                        PlaybackMode.Priority -> "优先音源"
+                        PlaybackMode.Pinned -> "固定音源"
                     }
                 },
                 modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
@@ -674,17 +680,17 @@ internal fun PlaybackSettingsScreen(
             )
         }
         if (aggregation.playbackMode == PlaybackMode.Pinned) {
-            item(key = "pinHead", contentType = "sectionHeader") { SectionLabel("固定平台") }
+            item(key = "pinHead", contentType = "sectionHeader") { SectionLabel("固定音源") }
             item(key = "pin", contentType = "chips") {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    searchable.forEach { provider ->
+                    pinnable.forEach { provider ->
                         MusicChip(provider.name, aggregation.pinnedProvider == provider.id) { actions.setPinnedProvider(provider.id) }
                     }
                 }
             }
         }
         item(key = "priorityHead", contentType = "sectionHeader") {
-            SectionLabel("平台顺序") {
+            SectionLabel("音源顺序") {
                 Text("越靠前越先尝试", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -766,9 +772,15 @@ internal fun SourcesSettingsScreen(
 ) {
     val tv = LocalAppWindow.current.isTv
     val searchable = state.providers.filter { it.search }
-    val enabledIds = state.aggregation.enabledOrDefault(searchable.map { it.id })
-    val enabled = orderedEnabledSources(searchable, enabledIds)
-    val disabled = searchable.filterNot { it.id in enabledIds }
+    val lxRecords by LxSources.records.collectAsState()
+    val orderable = searchable + ProviderInfo(
+        id = LxPlatform.PROVIDER_ID,
+        name = LxPlatform.PROVIDER_NAME,
+        note = if (lxRecords.isEmpty()) "尚未添加脚本" else "${lxRecords.count { it.enabled }} 个启用脚本 · 内部顺序在自定义音源中调整",
+    )
+    val enabledIds = state.aggregation.enabledOrDefault(orderable.map { it.id })
+    val enabled = orderedEnabledSources(orderable, enabledIds)
+    val disabled = orderable.filterNot { it.id in enabledIds }
     SettingsPage(SettingsSection.Sources, embedded, onBack) {
         item(key = "enabledHead", contentType = "sectionHeader") {
             SectionLabel("已启用") {

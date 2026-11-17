@@ -49,14 +49,26 @@ data class LxResolvedStream(
     val stream: PlayableStream,
 )
 
+data class LxPlaybackResult(
+    val song: Song,
+    val stream: PlayableStream,
+)
+
 /** 播放层只依赖这个小接口，单元测试不用加载 Android 或 QuickJS。 */
 interface LxPlayback {
     val generation: Long get() = 0
     fun supports(providerId: String): Boolean
     suspend fun resolve(song: Song, quality: String = "auto"): PlayableStream?
+    suspend fun resolve(songs: List<Song>, quality: String = "auto"): LxPlaybackResult? {
+        for (song in songs) resolve(song, quality)?.let { return LxPlaybackResult(song, it) }
+        return null
+    }
 }
 
 object LxPlatform {
+    const val PROVIDER_ID = "lx"
+    const val PROVIDER_NAME = "洛雪"
+
     private val providerToLx = mapOf(
         "netease" to "wy",
         "qq" to "tx",

@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +55,8 @@ import com.mytv.mymusic.aggregate.CanonicalTrack
 import com.mytv.mymusic.aggregate.PlaybackMode
 import com.mytv.mymusic.aggregate.TrackSource
 import com.mytv.mymusic.aggregate.availabilityOf
+import com.mytv.mymusic.data.lx.LxPlatform
+import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.ProviderIcon
@@ -72,11 +75,16 @@ import com.mytv.mymusic.ui.components.tvFocusRing
 fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
     val track = state.sourcePickerTrack ?: return
     val tv = LocalAppWindow.current.isTv
+    val lxRecords by LxSources.records.collectAsState()
+    val lxAvailable = track.sources.any { source ->
+        val key = LxPlatform.sourceKey(source.providerId)
+        lxRecords.any { it.enabled && it.capabilities[key]?.actions?.contains("musicUrl") == true }
+    }
     val providerIds = buildList {
         addAll(state.aggregation.enabledProviders)
         addAll(track.sources.map { it.providerId })
         addAll(track.alternatives.map { it.providerId })
-    }.distinct()
+    }.distinct().filter { it != LxPlatform.PROVIDER_ID || lxAvailable }
     val ordered = state.aggregation.priorityFor(providerIds)
     // 只有正在播放的就是这首歌时才有“当前音源”
     val currentId = state.currentSource?.providerId?.takeIf { state.currentTrack?.id == track.id }
@@ -92,7 +100,7 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
 
     // 电视默认焦点：下一个完整可播的音源，没有就落在第一个非当前音源
     val focusId = ordered.firstOrNull { id ->
-        id != currentId && availability(track.sources.find { it.providerId == id }) == Availability.Playable
+        id != currentId && (id == LxPlatform.PROVIDER_ID || availability(track.sources.find { it.providerId == id }) == Availability.Playable)
     } ?: ordered.firstOrNull { it != currentId } ?: ordered.firstOrNull()
     val focus = remember { FocusRequester() }
 
@@ -135,8 +143,11 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
                         providerId = providerId,
                         providerName = providerName(state.providers, providerId),
                         source = source,
-                        availability = availability(source),
+                        availability = if (providerId == LxPlatform.PROVIDER_ID) Availability.Playable else availability(source),
                         duration = track.durationLabel,
+                        detailOverride = if (providerId == LxPlatform.PROVIDER_ID) {
+                            "${lxRecords.count { it.enabled }} 个启用脚本 · 按自定义音源顺序解析"
+                        } else null,
                         current = providerId == currentId,
                         pinned = providerId == pinnedId,
                         busy = busy == providerId,
@@ -164,8 +175,8 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
             Spacer(Modifier.height(12.dp))
             // 现有逻辑记住的是全局“固定平台”模式，不是只对这首歌生效，文案按实际行为写
             SwitchRow(
-                title = "以后固定用所选平台",
-                summary = "播放模式改为固定平台，可在“播放与换源”中改回自动",
+                title = "以后固定用所选音源",
+                summary = "播放模式改为固定音源，可在“播放与换源”中改回自动",
                 checked = rememberChoice,
                 onCheckedChange = { rememberChoice = it },
                 index = 0,
@@ -215,7 +226,7 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
                 }
             }
             Text(
-                "换源是在目标平台重新检索同一录音，不会转移会员权益。找不到时可以看看“其他版本”，或在设置里调整匹配严格度。",
+                "换到原生平台时会重新检索同一录音；洛雪使用已导入的脚本集合。换源不会转移会员权益。",
                 Modifier.padding(start = 4.dp, top = 4.dp, bottom = 8.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -232,6 +243,7 @@ private fun SourceRow(
     source: TrackSource?,
     availability: Availability?,
     duration: String,
+    detailOverride: String? = null,
     current: Boolean,
     pinned: Boolean,
     busy: Boolean,
@@ -247,6 +259,7 @@ private fun SourceRow(
     val content = if (current) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
     val variant = if (current) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
     val detail = when {
+        detailOverride != null -> detailOverride
         source == null -> "未匹配 · 点按后在该平台检索同一版本"
         else -> listOf(
             when (availability) {
@@ -316,7 +329,7 @@ private fun SourceRow(
             availability == Availability.VipOnly -> SmallLabel("VIP", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
             availability == Availability.PreviewOnly -> SmallLabel("试听", MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant)
             else -> Text(
-                if (source == null) "检索" else "播放",
+                if (source == null && providerId != LxPlatform.PROVIDER_ID) "检索" else "播放",
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,

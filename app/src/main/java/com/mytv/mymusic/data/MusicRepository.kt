@@ -1,6 +1,7 @@
 package com.mytv.mymusic.data
 
 import com.mytv.mymusic.data.lx.LxPlayback
+import com.mytv.mymusic.data.lx.LxPlaybackResult
 import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.data.native.AccountInfo
 import com.mytv.mymusic.data.native.AudioQuality
@@ -38,10 +39,11 @@ open class MusicRepository(
         cookie: String,
         workDir: File,
         quality: AudioQuality = AudioQuality.Auto,
-    ): PlayableStream {
-        lxPlayback.resolve(song, quality.id)?.let { return it }
-        return requireProvider(song.source).playableStream(cookie, song, workDir, quality)
-    }
+    ): PlayableStream = requireProvider(song.source).playableStream(cookie, song, workDir, quality)
+
+    /** 统一的洛雪播放候选：脚本按自定义音源顺序跨平台尝试，原生接口不在这里兜底。 */
+    open suspend fun playableLxStream(songs: List<Song>, quality: AudioQuality): LxPlaybackResult? =
+        lxPlayback.resolve(songs, quality.id)
 
     /** 当前账号在这个平台上实际能选的音质档，从高到低；空表表示只有“自动”。 */
     suspend fun availableQualityOptions(provider: String, cookie: String) =
