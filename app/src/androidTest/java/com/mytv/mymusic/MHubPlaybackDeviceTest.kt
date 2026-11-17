@@ -15,6 +15,11 @@ import java.util.concurrent.TimeUnit
 /**
  * music.op.wiki 链路探测：先探各个域名的 TLS 可达性，再走搜索 → playbacks → 真播放。
  * 任何一步挂掉都在日志里留下具体原因，不用猜。
+ *
+ * 探针分两种，正好把"绕过证书校验"这件事的两面都照出来：
+ *  - [strictClient] 严格校验证书（系统默认）——在 Android 6/7 上两个 MHub 域名必然握手失败；
+ *  - [MHubTls.client] 不校验——搜索/取流走这条。
+ * 播放那一步由 ExoPlayer 经 MHubTls.RoutingFactory 自己走，测试里只用 DefaultDataSource 复现。
  */
 @RunWith(AndroidJUnit4::class)
 class MHubPlaybackDeviceTest {
@@ -23,27 +28,24 @@ class MHubPlaybackDeviceTest {
 
     private fun log(msg: String) = android.util.Log.i(tag, msg)
 
-    private val probeClient = OkHttpClient.Builder()
+    private val strictClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
-    /** 只诊断、不判失败：故意用不带附加信任锚的客户端，用来证明失败点在 TLS 而不在别处。 */
+    /** 只诊断、不判失败：故意用严格校验证书的客户端，证明这两个域名在旧系统上就是握不上手。 */
     private fun probe(url: String) {
         try {
-            probeClient.newCall(Request.Builder().url(url).head().build()).execute().use { r ->
-                log("PROBE $url -> HTTP ${r.code}")
+            strictClient.newCall(Request.Builder().url(url).head().build()).execute().use { r ->
+                log("PROBE(strict) $url -> HTTP ${r.code}")
             }
         } catch (e: Exception) {
-            log("PROBE $url -> FAIL ${e.javaClass.simpleName}: ${e.message}")
+            log("PROBE(strict) $url -> FAIL ${e.javaClass.simpleName}: ${e.message}")
         }
     }
 
     @Test
     fun searchPrepareAndPlay() {
-        // Application.onCreate 里已经装过；这里再调一次是幂等的，只为保证测试不依赖启动顺序
-        com.mytv.mymusic.data.native.MHubTls.installDefaultSslSocketFactory()
-
         // 1) 先探 TLS：对照组是走主流 CA 的域名
         listOf(
             "https://music.163.com/",
@@ -79,7 +81,7 @@ class MHubPlaybackDeviceTest {
 
     private fun readBytes(url: String) {
         try {
-            // 用 MHub 自己的客户端读：这条过了才说明 OkHttp 侧的附加信任锚生效
+            // 用 MHub 自己的客户端读：这条过了才说明"不验证证书"在接口/取流侧生效
             com.mytv.mymusic.data.native.MHubTls.client.newCall(
                 Request.Builder()
                     .url(url)
@@ -110,7 +112,11 @@ class MHubPlaybackDeviceTest {
             val player = androidx.media3.exoplayer.ExoPlayer.Builder(context)
                 .setMediaSourceFactory(
                     androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
-                        androidx.media3.datasource.DefaultDataSource.Factory(context),
+                        // 和 PlaybackService 里一样包一层：MHub 域名走 OkHttp（不验证证书），
+                        // 其余走系统默认。用裸 DefaultDataSource 的话这条用例在 Android 6/7 上必挂。
+                        com.mytv.mymusic.data.native.MHubTls.RoutingFactory(
+                            fallback = androidx.media3.datasource.DefaultDataSource.Factory(context),
+                        ),
                     ),
                 )
                 .build()

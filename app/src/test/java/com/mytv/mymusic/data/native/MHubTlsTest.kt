@@ -1,46 +1,44 @@
 package com.mytv.mymusic.data.native
 
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.concurrent.TimeUnit
-import javax.net.ssl.HttpsURLConnection
 
 /**
- * music.op.wiki 的 TLS 兜底：随包的那份 ISRG 根必须是完整、自签、仍在有效期内的，
- * 否则换根的时候把 base64 弄断一行，线上就是全线握手失败、而日志只会说"证书不受信任"。
+ * MHub 的"不验证证书"必须严格圈在两个域名里：路由漏一个域名，那个域名的请求就会撞回
+ * 系统默认客户端然后握手失败；多圈一个域名，就等于把不该关的 TLS 也关了。
  */
 class MHubTlsTest {
 
-    @Test
-    fun `bundled root is the ISRG Root X1 and self signed`() {
-        val cert = MHubTls.anchor
-        assertEquals("ISRG Root X1", cert.subjectX500Principal.name.substringAfter("CN=").substringBefore(","))
-        assertTrue("根证书必须是自签的", cert.subjectX500Principal == cert.issuerX500Principal)
-        // 自签校验：公钥能验自己的签名，说明整份 PEM 是完整的
-        cert.verify(cert.publicKey)
-    }
-
-    @Test
-    fun `bundled root has not expired`() {
-        val remaining = MHubTls.anchor.notAfter.time - System.currentTimeMillis()
-        assertTrue("根证书已过期或即将过期，剩 ${TimeUnit.DAYS.convert(remaining, TimeUnit.MILLISECONDS)} 天", remaining > 0)
-    }
+    private fun bypasses(scheme: String?, host: String?) =
+        MHubTls.bypassesCertificateValidation(scheme, host)
 
     @Test
     fun `mhub hosts cover both the api and the audio cdn`() {
         assertTrue(MHubTls.hosts.contains("music.op.wiki"))
         assertTrue(MHubTls.hosts.contains("music.zr.wiki"))
-        assertFalse(MHubTls.hosts.contains("music.163.com"))
     }
 
     @Test
-    fun `installing the default ssl socket factory is idempotent`() {
-        MHubTls.installDefaultSslSocketFactory()
-        val first = HttpsURLConnection.getDefaultSSLSocketFactory()
-        MHubTls.installDefaultSslSocketFactory()
-        assertSame(first, HttpsURLConnection.getDefaultSSLSocketFactory())
+    fun `only https mhub urls bypass certificate validation`() {
+        assertTrue(bypasses("https", "music.op.wiki"))
+        assertTrue(bypasses("https", "music.zr.wiki"))
+        // 主机名不区分大小写
+        assertTrue(bypasses("https", "MUSIC.OP.WIKI"))
+    }
+
+    @Test
+    fun `everything else keeps the default client`() {
+        assertFalse(bypasses("https", "music.163.com"))
+        assertFalse(bypasses("https", "y.qq.com"))
+        // 明文不碰：走明文说明本来就没在验证证书
+        assertFalse(bypasses("http", "music.op.wiki"))
+        // 长得像但不是这两个主机
+        assertFalse(bypasses("https", "evil-music.op.wiki.attacker.net"))
+        assertFalse(bypasses("https", null))
+        assertFalse(bypasses(null, "music.op.wiki"))
+        // 本地文件
+        assertFalse(bypasses("file", null))
+        assertFalse(bypasses("content", "media.external"))
     }
 }

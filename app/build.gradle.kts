@@ -123,6 +123,8 @@ dependencies {
     implementation(libs.haze.blur)
     implementation(libs.haze.blur.materials)
     implementation(libs.androidx.media3.common)
+    // music.op.wiki 的音频要绕过证书校验，OkHttp 数据源是按域名接进播放器的那一层
+    implementation(libs.androidx.media3.datasource.okhttp)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.androidx.media3.exoplayer.dash)
