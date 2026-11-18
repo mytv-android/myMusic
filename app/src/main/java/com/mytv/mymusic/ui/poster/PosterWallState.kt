@@ -279,10 +279,18 @@ internal class PosterWallState internal constructor(
     private val confirm = ConfirmPress()
     private var swallow: WallKey? = null
     private val wakeups = Channel<Unit>(Channel.CONFLATED)
+
+    /**
+     * 帧循环里上一帧的帧时间；[NO_FRAME] 是刚从空闲醒来，这一帧按 [clock] 从 [lastTick] 算。
+     * 帧时间的时间基由帧时钟定（测试的虚拟时钟从 0 起），不能和 [clock] 相减，只用来算帧间隔。
+     */
+    private var lastFrame = NO_FRAME
     private val frame: (Long) -> Unit = { now ->
-        val dt = (now - lastTick).coerceAtLeast(0L) / 1e9f
-        lastTick = max(lastTick, now)
-        tick(dt)
+        val t = clock()
+        val dt = if (lastFrame == NO_FRAME) t - lastTick else now - lastFrame
+        lastFrame = now
+        lastTick = t
+        tick(dt.coerceAtLeast(0L) / 1e9f)
     }
 
     val grownIndex: Int
@@ -840,6 +848,7 @@ internal class PosterWallState internal constructor(
      */
     internal suspend fun runFrames() {
         lastTick = clock()
+        lastFrame = NO_FRAME
         while (true) {
             if (needsFrames) {
                 withFrameNanos(frame)
@@ -859,6 +868,7 @@ internal class PosterWallState internal constructor(
                 val now = clock()
                 val dt = (now - lastTick).coerceAtLeast(0L) / 1e9f
                 lastTick = max(lastTick, now)
+                lastFrame = NO_FRAME
                 tick(dt)
             }
         }
@@ -922,5 +932,7 @@ internal class PosterWallState internal constructor(
 
         /** 原型减少动画时背景位置停在 50%：相位 (1.3 − 0.5) / 2.6，光带中心正好在格子中间。 */
         const val SHIMMER_STILL = 0.8f / 2.6f
+
+        private const val NO_FRAME = Long.MIN_VALUE
     }
 }
