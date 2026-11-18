@@ -191,6 +191,7 @@ import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.Skeleton
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.components.rememberRowSwipe
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvCardFocus
 import com.mytv.mymusic.ui.components.tvFocusRing
@@ -1217,6 +1218,9 @@ private fun SearchSongRow(
         }
     }
     val rowMore: (() -> Unit)? = if (picking || window.isTablet) null else ({ ctx.openActions(track) })
+    // 滑动的收藏、下载、加歌单都用最优音源那一首（和 ⋮ 面板一样）；任一平台的版本收藏过就算已收藏
+    val swipeSong = remember(track, cookies) { preferredSong(track, cookies) }
+    val sourceKeys = remember(track) { track.sources.map { it.song.key } }
     val rowLongPress: (() -> Unit)? = when {
         picking -> null
         window.isTablet -> ({ menuOpen = true })
@@ -1244,6 +1248,15 @@ private fun SearchSongRow(
         trailing = trailing,
         onMore = rowMore,
         onLongClick = rowLongPress,
+        swipe = rememberRowSwipe(
+            swipeSong,
+            emptyList(),
+            enabled = !picking,
+            favoriteKeys = sourceKeys,
+            onChooseSource = { ctx.openSource(track) },
+        ),
+        // 平板行尾有「更多」菜单按钮：悬停按钮插在它前面
+        hoverReplacesTrailing = !window.isTablet,
     )
 }
 

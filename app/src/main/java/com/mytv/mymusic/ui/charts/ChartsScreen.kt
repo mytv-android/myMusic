@@ -119,6 +119,7 @@ import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.Skeleton
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.components.rememberRowSwipe
 import com.mytv.mymusic.ui.components.tvCardFocus
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.relativeTime
@@ -350,6 +351,7 @@ private fun PhoneCharts(
                                                 },
                                                 onMore = rowMore,
                                                 onLongClick = rowLongPress,
+                                                swipe = rememberRowSwipe(song, charts.hotSongs, enabled = !picking),
                                             )
                                         }
                                     }
@@ -534,6 +536,7 @@ private fun FeaturedChart(
                 },
                 onMore = rowMore,
                 onLongClick = rowLongPress,
+                swipe = rememberRowSwipe(song, songs, enabled = !picking),
             )
         }
     }

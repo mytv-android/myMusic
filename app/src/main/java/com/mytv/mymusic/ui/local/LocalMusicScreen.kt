@@ -99,6 +99,7 @@ import com.mytv.mymusic.ui.components.SelectionPredictiveBack
 import com.mytv.mymusic.ui.components.SelectionState
 import com.mytv.mymusic.ui.components.PlatformBadge
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.components.rememberRowSwipe
 import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatBytes
@@ -346,6 +347,7 @@ fun LocalMusicScreen(
                         }
                     },
                     onMore = { infoFor = item.localId },
+                    queue = playable,
                 )
             }
         }
@@ -501,6 +503,7 @@ private fun LocalSongRow(
     selection: SelectionState,
     onPlay: () -> Unit,
     onMore: () -> Unit,
+    queue: List<Song>,
 ) {
     val window = LocalAppWindow.current
     val scheme = MaterialTheme.colorScheme
@@ -557,6 +560,8 @@ private fun LocalSongRow(
         },
         onMore = if (picking) null else onMore,
         onLongClick = if (picking) null else ({ selection.enter(song.key) }),
+        // 本地歌没有「下载」；也不做删文件，左滑只有取消收藏（收藏过的）
+        swipe = rememberRowSwipe(song, queue, enabled = !picking),
     )
 }
 

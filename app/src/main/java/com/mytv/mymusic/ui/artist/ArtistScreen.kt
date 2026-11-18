@@ -120,6 +120,7 @@ import com.mytv.mymusic.ui.components.RequestDarkBars
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.components.rememberRowSwipe
 import com.mytv.mymusic.ui.components.TintedGradient
 import com.mytv.mymusic.ui.components.distinctKeys
 import com.mytv.mymusic.ui.components.segmentShape
@@ -730,6 +731,8 @@ private fun LazyListScope.artistSongs(
                     }
                 },
                 onMore = { onMore(song) },
+                // 歌手就是这一页：「查看歌手」不给他自己（合唱的给另一位）
+                swipe = rememberRowSwipe(song, songs, hideArtist = artist.displayName),
             )
         }
     }
