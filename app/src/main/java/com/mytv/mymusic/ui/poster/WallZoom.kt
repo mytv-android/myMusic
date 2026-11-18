@@ -32,6 +32,10 @@ internal fun grownDisplaySize(m: WallMetrics, area: WallRect): Float {
 internal fun zoomCamera(cam: WallPoint, anchor: WallPoint, ratio: Float): WallPoint =
     WallPoint((cam.x + anchor.x) * ratio - anchor.x, (cam.y + anchor.y) * ratio - anchor.y)
 
+/** 捏合中的倍数：起始倍数 × 两指间距之比，允许略超出刻度两端（0.45–1.35），松手再吸附。 */
+internal fun pinchZoom(base: Float, spanRatio: Float): Float =
+    (base * spanRatio).coerceIn(PosterWallState.PINCH_MIN, PosterWallState.PINCH_MAX)
+
 /** 以中心为准改成 [size] × [size]。 */
 internal fun WallRect.resizedAround(size: Float): WallRect =
     if (w == size && h == size) this else WallRect(centerX - size / 2, centerY - size / 2, size, size)

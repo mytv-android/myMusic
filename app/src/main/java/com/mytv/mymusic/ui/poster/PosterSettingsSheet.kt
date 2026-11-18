@@ -82,8 +82,8 @@ internal fun PosterSettingsSheet(
             ZoomPresets(zoom, setZoom, Modifier.padding(horizontal = 20.dp).fillMaxWidth())
             Text(
                 when (scope) {
-                    ZoomScope.Phone -> "拉远能一屏看到整个歌单，适合截图给朋友看。"
-                    ZoomScope.Tablet -> "平板格子本来是 102dp，拉到 0.5× 正好接近手机默认的密度。"
+                    ZoomScope.Phone -> "拉远能一屏看到整个歌单，适合截图给朋友看；双指捏合也能调。"
+                    ZoomScope.Tablet -> "平板上也能双指捏合，松手吸附到最近的刻度。"
                     ZoomScope.Tv -> "电视上格子本来是 76dp，拉到 0.5× 时一屏的封面约是默认的 4 倍。"
                 },
                 Modifier.padding(start = 28.dp, end = 24.dp, top = 4.dp),

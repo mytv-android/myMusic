@@ -217,6 +217,8 @@ internal fun PosterWallScreen(
             currentIndex = currentIndex,
             feed = feed?.let { PosterFeed(it.appending) },
             prefs = state.poster,
+            // 双指捏合松手吸附的那一档写回这台设备那一份视角
+            onZoomChange = { z -> actions.setPosterPrefs { it.copy(zoom = it.zoom.with(metrics.kind.scope, z)) } },
             insetTop = insetTop,
             insetBottom = insetBottom,
             onLongPress = { index, fromMenu ->

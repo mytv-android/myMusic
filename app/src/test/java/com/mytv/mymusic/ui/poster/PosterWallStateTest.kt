@@ -660,4 +660,63 @@ class PosterWallStateTest {
         val focus = s.focus!!
         assertTrue(focus == scene.grown || !scene.coveredByGrown(focus, scene.rectAt(focus)))
     }
+
+    // ------------------------------------------------------------------ 双指捏合
+
+    @Test
+    fun aPinchThatStaysOnTheStepOnlySettlesTheLayer() {
+        val s = wall(phone(current = 4), phoneView)
+        var committed: Float? = null
+        s.onZoomCommit = { committed = it }
+        val generation = s.generation
+        s.beginPinch(WallPoint(180f, 400f))
+        assertEquals(1f, s.pinchTo(1.1f, WallPoint(180f, 400f)), 0f)
+        assertEquals(1.1f, s.layerScale, 1e-4f)
+        val requests = s.settleRequests
+        s.endPinch()
+        assertNull(committed)
+        assertNull(s.zoomOverride)
+        assertEquals(requests + 1, s.settleRequests)
+        assertEquals(generation, s.generation)
+    }
+
+    @Test
+    fun aPinchOutSnapsToTheNearestStepAroundTheFingers() {
+        val s = wall(phone(current = 4), phoneView)
+        s.settle()
+        var committed: Float? = null
+        s.onZoomCommit = { committed = it }
+        val anchor = WallPoint(120f, 300f)
+        val cam = s.camera.position
+        val before = s.metrics
+        s.beginPinch(anchor)
+        // 拉远时组合的范围放大
+        val plain = s.composedTiles.size
+        assertEquals(0.5f, s.pinchTo(0.55f, anchor), 0f)
+        assertTrue(s.composedTiles.size > plain)
+        s.endPinch()
+        assertEquals(0.5f, committed!!, 0f)
+        assertEquals(0.5f, s.zoomOverride!!, 0f)
+        // PosterWall 看到 override 后按新倍数配置：锚点下还是同一处墙面，图层接着从松手时的大小缩回来
+        s.configure(phone(current = 4).zoomed(0.5f))
+        val after = s.metrics
+        assertEquals(0.5f, after.zoom, 0f)
+        val now = s.camera.position
+        assertEquals((cam.x + anchor.x) / before.pitch, (now.x + anchor.x) / after.pitch, 1e-3f)
+        assertEquals((cam.y + anchor.y) / before.pitch, (now.y + anchor.y) / after.pitch, 1e-3f)
+        assertEquals(0.55f / 0.5f, s.layerScale, 1e-4f)
+        assertEquals(anchor, s.layerOrigin)
+        s.layerSettled()
+        assertEquals(1f, s.layerScale, 0f)
+    }
+
+    @Test
+    fun pinchingPastTheEndsIsAllowedButSnapsBack() {
+        val s = wall(phone(current = 4), phoneView)
+        s.beginPinch(WallPoint(180f, 400f))
+        assertEquals(1.25f, s.pinchTo(3f, WallPoint(180f, 400f)), 0f)
+        assertEquals(1.35f, s.layerScale, 1e-4f)
+        assertEquals(0.5f, s.pinchTo(0.1f, WallPoint(180f, 400f)), 0f)
+        assertEquals(0.45f, s.layerScale, 1e-4f)
+    }
 }

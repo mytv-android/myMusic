@@ -121,4 +121,12 @@ class WallZoomTest {
         assertEquals("1", zoomLabel(1f))
         assertEquals("1.25", zoomLabel(1.25f))
     }
+
+    @Test
+    fun pinchZoomIsClampedSlightlyPastTheSteps() {
+        assertEquals(0.9f, pinchZoom(1f, 0.9f), 1e-5f)
+        assertEquals(0.45f, pinchZoom(0.5f, 0.2f), 0f)
+        assertEquals(1.35f, pinchZoom(1.25f, 4f), 0f)
+        assertEquals(0.625f, pinchZoom(1.25f, 0.5f), 1e-5f)
+    }
 }

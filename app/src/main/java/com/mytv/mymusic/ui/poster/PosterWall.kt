@@ -69,8 +69,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.PosterPrefs
+import com.mytv.mymusic.data.PosterZoom
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.player.rememberScreenReaderOn
 import com.mytv.mymusic.ui.player.rememberSystemAnimationsOff
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlinx.coroutines.flow.collectLatest
@@ -121,6 +123,7 @@ internal fun PosterWall(
     resetKey: Any? = null,
     currentKey: String? = null,
     holdAwake: Boolean = false,
+    onZoomChange: (Float) -> Unit = {},
 ) {
     val window = LocalAppWindow.current
     // 有分页的折痕时格距按大卡那一段选，大卡只在那一段里居中；没有时和以前一样按整个窗口
@@ -130,8 +133,13 @@ internal fun PosterWall(
         Box(modifier.fillMaxSize().wallBackground(state.palette))
         return
     }
-    // 视角远近：设备档的格距乘这台设备那一份倍数（手机、平板、电视各存一份）
-    val metrics = spec.metrics.copy(zoom = prefs.zoom.of(spec.metrics.kind.scope))
+    // 视角远近：设备档的格距乘这台设备那一份倍数（手机、平板、电视各存一份）；
+    // 捏合松手后设置还没写回来时先用吸附的那一档，写回来一样了就清掉
+    val storedZoom = prefs.zoom.of(spec.metrics.kind.scope)
+    // 设置变了（写回来了，或者别处改成了别的值）就不再用临时倍数
+    val override = state.zoomOverride?.takeIf { storedZoom == state.zoomOverrideBase }
+    if (state.zoomOverride != null && override == null) SideEffect { state.zoomOverride = null }
+    val metrics = spec.metrics.copy(zoom = override ?: storedZoom)
     val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
     val count = songs.size
     val banded = feed != null
@@ -161,6 +169,7 @@ internal fun PosterWall(
     SideEffect {
         state.onLongPress = onLongPress
         state.onGrownConfirm = onGrownConfirm
+        state.onZoomCommit = onZoomChange
         env.metrics = metrics
         env.style = tileStyleFor(metrics.kind)
         env.compact = metrics.compact
@@ -186,6 +195,8 @@ internal fun PosterWall(
     val settleSpec = motion.fastSpatialSpec<Float>()
     LaunchedEffect(state) {
         snapshotFlow { state.settleRequests }.collectLatest {
+            // 捏合中图层跟着手指，不动画
+            if (state.pinching) return@collectLatest
             if (state.layerScale != 1f && !env.reduceMotion) {
                 animate(state.layerScale, 1f, animationSpec = settleSpec) { v, _ -> state.layerScale = v }
             }
@@ -203,13 +214,15 @@ internal fun PosterWall(
 
     val density = LocalDensity.current.density
     val haptic = LocalHapticFeedback.current
+    // 双指捏合调视角：电视没有触摸；读屏开着时双指是滚动，只用设置里的滑块
+    val pinch = !window.isTv && !rememberScreenReaderOn()
     Box(
         modifier
             .fillMaxSize()
             .clipToBounds()
             .onSizeChanged { state.setViewportSize(it.width / density, it.height / density) }
             .wallBackground(state.palette)
-            .wallGestures(state, haptic)
+            .wallGestures(state, haptic, pinch)
             .onPreviewKeyEvent { e -> state.previewKey(wallKeyOf(e.key), e.type == KeyEventType.KeyDown) }
             .onKeyEvent { e ->
                 val down = when (e.type) {
@@ -357,8 +370,9 @@ private class WallMeasurePolicy(private val state: PosterWallState) : MeasurePol
  * 触摸：拖动过阈值才算拖（拖动不算点击），松手按 VelocityTracker 的速度甩出；没动就是点，点到小格放大；
  * 按住到长按时间没动是长按。都在 Main 阶段处理：子节点（大卡里的进度条）先吃掉的拖动让给它们；
  * 墙一旦开始拖，消费掉移动，子节点的点击随之取消；长按之后在 Initial 阶段吞掉剩下的事件，大卡按钮不会再响应松开。
+ * [pinch] 时第二根手指落下（还没到长按、或者已经在拖）就转成双指捏合，见 [pinchGesture]。
  */
-private fun Modifier.wallGestures(state: PosterWallState, haptic: HapticFeedback): Modifier = pointerInput(state, haptic) {
+private fun Modifier.wallGestures(state: PosterWallState, haptic: HapticFeedback, pinch: Boolean): Modifier = pointerInput(state, haptic, pinch) {
     val slop = viewConfiguration.touchSlop
     val longPressMs = viewConfiguration.longPressTimeoutMillis
     val maxFling = viewConfiguration.maximumFlingVelocity
@@ -380,9 +394,9 @@ private fun Modifier.wallGestures(state: PosterWallState, haptic: HapticFeedback
         var timedOut = false
         while (outcome == PressOutcome.Pending) {
             val result = if (timedOut) {
-                awaitPress(id, origin, slop, tracker)
+                awaitPress(id, origin, slop, tracker, pinch)
             } else {
-                withTimeoutOrNull(longPressMs) { awaitPress(id, origin, slop, tracker) }
+                withTimeoutOrNull(longPressMs) { awaitPress(id, origin, slop, tracker, pinch) }
             }
             if (result == null) {
                 timedOut = true
@@ -398,11 +412,18 @@ private fun Modifier.wallGestures(state: PosterWallState, haptic: HapticFeedback
         }
         when (outcome) {
             PressOutcome.Tap -> state.tapAt(origin.x / d, origin.y / d)
+            PressOutcome.Pinch -> pinchGesture(state, haptic)
             PressOutcome.Drag -> {
                 state.beginDrag()
                 var released = false
                 while (!released) {
                     val e = awaitPointerEvent(PointerEventPass.Main)
+                    if (pinch && e.changes.count { it.pressed } >= 2) {
+                        // 拖着的时候落下第二根手指：停下拖动，转成捏合
+                        state.endDrag(0f, 0f)
+                        pinchGesture(state, haptic)
+                        return@awaitEachGesture
+                    }
                     val c = e.changes.firstOrNull { it.id == id }
                     if (c == null) break
                     tracker.addPointerInputChange(c)
@@ -421,19 +442,21 @@ private fun Modifier.wallGestures(state: PosterWallState, haptic: HapticFeedback
     }
 }
 
-private enum class PressOutcome { Pending, Tap, Drag, Cancel }
+private enum class PressOutcome { Pending, Tap, Drag, Pinch, Cancel }
 
 private class PressResult(val outcome: PressOutcome, val position: Offset)
 
-/** 等这一指过阈值（拖动）、松开（点按）或被子节点拿走（取消）。 */
+/** 等这一指过阈值（拖动）、松开（点按）、被子节点拿走（取消），或者 [pinch] 时第二根手指落下（捏合）。 */
 private suspend fun AwaitPointerEventScope.awaitPress(
     id: PointerId,
     origin: Offset,
     slop: Float,
     tracker: VelocityTracker,
+    pinch: Boolean,
 ): PressResult {
     while (true) {
         val e = awaitPointerEvent(PointerEventPass.Main)
+        if (pinch && e.changes.count { it.pressed } >= 2) return PressResult(PressOutcome.Pinch, origin)
         val c = e.changes.firstOrNull { it.id == id } ?: return PressResult(PressOutcome.Cancel, origin)
         if (!c.pressed) {
             // 子节点（大卡按钮）消费了松开就不算点墙
@@ -447,6 +470,42 @@ private suspend fun AwaitPointerEventScope.awaitPress(
             return PressResult(PressOutcome.Drag, c.position)
         }
     }
+}
+
+/**
+ * 双指捏合：两指间距之比调视角（墙的图层跟着缩放，不重排），两指中点的移动平移墙；跨过一档刻度时震一下。
+ * 少于两指就结束、吸附到最近的刻度（见 [PosterWallState.endPinch]），剩下那根手指不再拖，等全部抬起。
+ * 在 Initial 阶段吃掉事件：捏合中大卡里的按钮、进度条都收不到。
+ */
+private suspend fun AwaitPointerEventScope.pinchGesture(state: PosterWallState, haptic: HapticFeedback) {
+    val d = density
+    val fingers = currentEvent.changes.filter { it.pressed }
+    if (fingers.size < 2) return
+    val a = fingers[0].id
+    val b = fingers[1].id
+    val startSpan = (fingers[0].position - fingers[1].position).getDistance().coerceAtLeast(1f)
+    val startMid = (fingers[0].position + fingers[1].position) / 2f
+    state.beginPinch(WallPoint(startMid.x / d, startMid.y / d))
+    state.beginDrag()
+    var tick = PosterZoom.snap(state.metrics.zoom)
+    currentEvent.changes.forEach { it.consume() }
+    while (true) {
+        val e = awaitPointerEvent(PointerEventPass.Initial)
+        val ca = e.changes.firstOrNull { it.id == a }
+        val cb = e.changes.firstOrNull { it.id == b }
+        if (ca == null || cb == null || !ca.pressed || !cb.pressed) break
+        val mid = (ca.position + cb.position) / 2f
+        state.dragBy((mid.x - startMid.x) / d, (mid.y - startMid.y) / d)
+        val next = state.pinchTo((ca.position - cb.position).getDistance() / startSpan, WallPoint(mid.x / d, mid.y / d))
+        if (next != tick) {
+            tick = next
+            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+        }
+        e.changes.forEach { it.consume() }
+    }
+    state.endDrag(0f, 0f)
+    state.endPinch()
+    consumeUntilUp(PointerEventPass.Initial)
 }
 
 private suspend fun AwaitPointerEventScope.consumeUntilUp(pass: PointerEventPass) {

@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.focus.FocusRequester
+import com.mytv.mymusic.data.PosterZoom
 import com.mytv.mymusic.ui.adaptive.FoldAnchor
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
@@ -245,6 +246,28 @@ internal class PosterWallState internal constructor(
     internal var scaleEpoch = 0
         private set
 
+    /**
+     * 捏合松手吸附后、设置写回之前用这个倍数（PosterWall 读它，等 prefs 回来一样了再清掉），
+     * 免得松手那一帧墙先跳回旧倍数。
+     */
+    internal var zoomOverride by mutableStateOf<Float?>(null)
+
+    /** 设 [zoomOverride] 那一刻设置里的倍数：设置不再是它（写回来了或被别处改了）时 PosterWall 就不再用临时倍数。 */
+    internal var zoomOverrideBase = 1f
+        private set
+
+    /** 捏合吸附出新倍数时调：PosterWall 用 SideEffect 设成写设置。 */
+    internal var onZoomCommit: (Float) -> Unit = {}
+
+    /** 正在捏合（两指按着）。 */
+    internal var pinching = false
+        private set
+    private var pinchBase = 1f
+    private var pinchLive = 1f
+
+    /** 下一次 [rescale] 的锚点（屏幕点）：捏合松手时是两指中点。 */
+    private var pendingAnchor: WallPoint? = null
+
     /** 长按（触摸、读屏、长按 OK）和菜单键，参数是第几首、是不是菜单键（菜单键打开的面板焦点直接落在整页操作上）。 */
     internal var onLongPress: (index: Int, fromMenu: Boolean) -> Unit = { _, _ -> }
     internal var onGrownConfirm: (index: Int, current: Boolean) -> Unit = { _, _ -> }
@@ -337,7 +360,7 @@ internal class PosterWallState internal constructor(
             reset()
         } else {
             // 只换了视角倍数：不重排、不重放入场，镜头按倍数换算
-            if (s.metrics.zoom != c.metrics.zoom) rescale(s.metrics, c.metrics)
+            if (s.metrics.zoom != c.metrics.zoom) rescale(s.metrics, c.metrics, pendingAnchor.also { pendingAnchor = null })
             when (fieldChange(s.field, c.field)) {
                 FieldChange.Reset -> reset()
                 FieldChange.Append -> {
@@ -484,11 +507,60 @@ internal class PosterWallState internal constructor(
     private fun startLayerSettle(scale: Float, origin: WallPoint) {
         layerOrigin = origin
         layerScale = scale
-        if (scale < 1f) {
-            cullOrigin = origin
-            cullBoost = max(cullBoost, 1f / scale)
-        }
+        // 捏合时为了拉远多组合的那一圈到这里按新格距重算：只留过渡要用的
+        if (scale < 1f) cullOrigin = origin
+        cullBoost = if (scale < 1f) 1f / scale else 1f
         settleRequests++
+    }
+
+    // ------------------------------------------------------------------ 双指捏合
+
+    /** 两指按下：记下起始倍数；捏合中只改图层缩放，不重排。 */
+    internal fun beginPinch(origin: WallPoint) {
+        pinching = true
+        pinchBase = metrics.zoom
+        pinchLive = pinchBase
+        layerOrigin = origin
+        layerScale = 1f
+        // 停掉还在走的过渡（PosterWall 收到请求时看到正在捏合，什么也不做）
+        settleRequests++
+        signal()
+    }
+
+    /**
+     * 两指间距是开始时的 [ratio] 倍、中点在屏幕点 [origin]：墙的图层以中点缩放到 捏合倍数 / 起始倍数。
+     * 拉远时屏幕上露出的范围比视口大，第一次缩小时把要组合的范围放大到最远（[PINCH_MIN]）那么大。
+     * 返回此刻吸附会落到的刻度（跨过刻度时界面震一下）。
+     */
+    internal fun pinchTo(ratio: Float, origin: WallPoint): Float {
+        if (!pinching) return PosterZoom.snap(metrics.zoom)
+        pinchLive = pinchZoom(pinchBase, ratio)
+        layerOrigin = origin
+        layerScale = pinchLive / pinchBase
+        if (layerScale < 1f && cullBoost < pinchBase / PINCH_MIN) {
+            cullOrigin = origin
+            cullBoost = pinchBase / PINCH_MIN
+        }
+        return PosterZoom.snap(pinchLive)
+    }
+
+    /**
+     * 松手：吸附到最近的刻度。没换档就把图层动画回 1；换了档就记下锚点、先用 [zoomOverride] 生效、交给 [onZoomCommit] 写设置，
+     * 下一次 [configure] 里 [rescale] 按两指中点换算镜头，图层从松手时的大小接着缩放到 1。
+     */
+    internal fun endPinch() {
+        if (!pinching) return
+        pinching = false
+        val snapped = PosterZoom.snap(pinchLive)
+        if (snapped == pinchBase) {
+            startLayerSettle(layerScale, layerOrigin)
+        } else {
+            pendingAnchor = layerOrigin
+            zoomOverrideBase = pinchBase
+            zoomOverride = snapped
+            onZoomCommit(snapped)
+        }
+        signal()
     }
 
     /** 过渡缩放走完了：图层回到 1，多组合的格子放掉。 */
@@ -840,6 +912,10 @@ internal class PosterWallState internal constructor(
     }
 
     companion object {
+        /** 捏合时允许略超出刻度两端，松手吸附回来（见 pinchZoom）。 */
+        const val PINCH_MIN = 0.45f
+        const val PINCH_MAX = 1.35f
+
         /** 微光扫一遍的秒数、开关时的淡入淡出秒数（原型 1.4s / 0.3s）。 */
         const val SHIMMER_PERIOD = 1.4f
         const val SHIMMER_FADE = 0.3f
