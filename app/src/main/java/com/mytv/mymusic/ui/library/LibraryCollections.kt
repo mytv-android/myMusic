@@ -311,16 +311,21 @@ fun HistoryScreen(
     val groups = prepared.groups
     val queue = prepared.queue
     TvDefaultFocus(firstRow, history.isEmpty())
-    // 电视：删掉一条后焦点落到下一行（first 是删掉的那条，second 是要落的那行）。
-    // 面板关上时焦点先回到被删的那行，等列表刷新、那行没了再交过去，不然焦点跟着那行一起丢
+    // 电视：删掉一条后焦点落到下一行，撤销后落回恢复的那条（first 是要等它从列表里消失的那条，为空就不用等；
+    // second 是要落的那行）。面板关上时焦点先回到被删的那行，等列表刷新、那行没了再交过去，不然焦点跟着那行一起丢；
+    // 按了“撤销”，提示条连同它的按钮一起消失，焦点会掉到导航栏上，等那条写回列表再拉回来
     var refocus by remember { mutableStateOf<Pair<String, String>?>(null) }
     val refocusRow = remember { FocusRequester() }
     if (window.isTv) {
         LaunchedEffect(refocus, prepared) {
-            val (removed, next) = refocus ?: return@LaunchedEffect
+            val (gone, target) = refocus ?: return@LaunchedEffect
             val keys = prepared.groups.flatMap { group -> group.items.map { it.first.key } }
-            if (removed in keys) return@LaunchedEffect
-            if (next in keys) {
+            if (gone.isNotEmpty()) {
+                if (gone in keys) return@LaunchedEffect
+            } else if (target !in keys) {
+                return@LaunchedEffect
+            }
+            if (target in keys) {
                 // 等一帧让那一行挂上请求器再要焦点
                 withFrameNanos { }
                 runCatching { refocusRow.requestFocus() }
@@ -331,7 +336,10 @@ fun HistoryScreen(
     val removeOne: (SavedSong, Song) -> Unit = { saved, song ->
         prepared.keyAfterRemoving(saved.key)?.let { next -> if (window.isTv) refocus = saved.key to next }
         actions.removePlayHistory(saved.key)
-        undo.show("已从最近播放删除「${song.title}」") { actions.restoreSaved(listOf(saved)) }
+        undo.show("已从最近播放删除「${song.title}」") {
+            actions.restoreSaved(listOf(saved))
+            if (window.isTv) refocus = "" to saved.key
+        }
     }
 
     fun LazyListScope.group(label: String, items: List<Pair<SavedSong, Song>>, focusFirst: Boolean) {
