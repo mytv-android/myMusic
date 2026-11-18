@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
@@ -67,6 +68,8 @@ import com.mytv.mymusic.ui.player.RhythmFeed
 import com.mytv.mymusic.ui.player.TvFrameGate
 import com.mytv.mymusic.ui.player.rememberSystemAnimationsOff
 import com.mytv.mymusic.ui.theme.LocalAppearance
+import com.mytv.mymusic.ui.player.share.LocalLyricPickProbe
+import com.mytv.mymusic.ui.player.share.pickShareAction
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -510,12 +513,21 @@ private class StageAudioFeed(private val analyzer: RhythmAnalyzer, private val a
     }
 }
 
-/** 读屏：舞台对外是一个文本节点，内容是当前整句加翻译，不逐字播报。 */
+/**
+ * 读屏：舞台对外是一个文本节点，内容是当前整句加翻译，不逐字播报。
+ * 全屏歌词页能分享时多一个自定义操作「选这一句分享」（当前句，句间按最近唱过的那句）。
+ */
 @Composable
 private fun StageSemantics(ctx: LyricStageContext) {
     val line = ctx.currentLine
     val description = line?.let { listOf(it.text, it.subtitle(ctx.subline)).filter { s -> s.isNotBlank() }.joinToString("，") }.orEmpty()
-    Spacer(Modifier.fillMaxSize().clearAndSetSemantics { if (description.isNotEmpty()) contentDescription = description })
+    val pick = LocalLyricPickProbe.current?.takeIf { it.enabled }
+    Spacer(
+        Modifier.fillMaxSize().clearAndSetSemantics {
+            if (description.isNotEmpty()) contentDescription = description
+            if (pick != null) customActions = listOf(pickShareAction(pick, line?.index))
+        },
+    )
 }
 
 /** 舞台标签（约 32dp 高）加和文字的间距。 */

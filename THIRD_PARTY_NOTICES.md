@@ -222,7 +222,7 @@ These features were written from the mods' public descriptions only; none of the
 - Copyright (C) 2026 Shubham Gorai
 - License: GNU General Public License v3.0 or (at your option) any later version
 - Location: `app/src/main/java/com/mytv/mymusic/ui/player/stage/modes/Rush*.kt`,
-  `app/src/main/java/com/mytv/mymusic/ui/player/share/{ShareCards,ShareCardShapes,ShareModel}.kt`
+  `app/src/main/java/com/mytv/mymusic/ui/player/share/{ShareCards,ShareCardShapes,ShareLyricsScreen,ShareModel}.kt`
 - Usage: the "Rush" lyric animation is a Kotlin rewrite of Rush's lyrics page:
   the synced lyric list (current line anchored at one third of the viewport,
   0.8 scale and distance blur for other lines, auto-scroll pause after dragging),

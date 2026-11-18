@@ -1,5 +1,7 @@
 package com.mytv.mymusic.ui.player
 
+import com.mytv.mymusic.ui.player.share.LocalLyricPickProbe
+import com.mytv.mymusic.ui.player.share.lyricPickGesture
 import android.text.format.DateFormat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
@@ -265,7 +267,8 @@ private fun TabletopStage(
                     tag = stage.tag,
                     coverEnd = stage.coverEnd,
                     modeFade = stage.modeFade,
-                    modifier = Modifier.fillMaxSize().layout { measurable, constraints ->
+                    // 上半屏放歌词时就是这台设备的全屏歌词：长按选句（歌词分享）
+                    modifier = Modifier.fillMaxSize().lyricPickGesture(LocalLyricPickProbe.current).layout { measurable, constraints ->
                         val side = maxOf(24.dp.toPx(), (constraints.maxWidth - TabletopLyricsMaxWidth.toPx()) / 2f + 24.dp.toPx())
                         val fade = TabletopStageFade.toPx()
                         insets.set(top = fade, bottom = 8.dp.toPx() + fade, start = side, end = side)

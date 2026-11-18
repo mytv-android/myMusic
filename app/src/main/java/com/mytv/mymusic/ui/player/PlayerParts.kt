@@ -78,6 +78,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import com.mytv.mymusic.ui.player.share.LocalLyricPickProbe
+import com.mytv.mymusic.ui.player.share.lyricPickTarget
+import com.mytv.mymusic.ui.player.share.pickShareAction
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextMotion
@@ -232,6 +237,7 @@ class SeekHint {
  * - 唤醒的那一下吃掉（[consumeKeyWhenIdle]），否则焦点会被方向键带走、进度条会把它当成快进；
  * - 全屏歌词页（控制条已淡出）方向键直接控制播放：上下键 [onSkip] ±1 切歌，左右键 [onSeekBy] 相对快退快进，
  *   整次按键都吃掉，不唤醒控制条（见 [tvTransportOf]）。
+ * [suspended] 为 true 时按下和按键都不唤醒（歌词分享的选句层、分享页盖在上面，下面的控件留在淡出状态）。
  */
 fun Modifier.wakeOnInput(
     idle: IdleState,
@@ -239,12 +245,13 @@ fun Modifier.wakeOnInput(
     onSkip: (Int) -> Unit = {},
     onSeekBy: (Long) -> Unit = {},
     onAnyKey: (() -> Unit)? = null,
+    suspended: () -> Boolean = { false },
 ): Modifier = this
     .pointerInput(idle) {
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
-                if (event.type == PointerEventType.Press) idle.poke()
+                if (event.type == PointerEventType.Press && !suspended()) idle.poke()
             }
         }
     }
@@ -268,6 +275,7 @@ fun Modifier.wakeOnInput(
                 return@onPreviewKeyEvent true
             }
         }
+        if (suspended()) return@onPreviewKeyEvent false
         val wasIdle = idle.idle
         idle.poke()
         consumeKeyWhenIdle && wasIdle
@@ -614,6 +622,8 @@ private fun LyricRow(
 ) {
     // 每行只订阅自己离当前行的远近：换行时只有前后几行重组，远处的行不动
     val distance by remember(index, active) { derivedStateOf { lyricDistance(index, active.value) } }
+    // 全屏歌词长按选句：登记这一行是第几句；读屏用户用自定义操作选它
+    val pick = LocalLyricPickProbe.current
     // 只在图层和绘制里读：中间的行一直是 null，滚动时不重画；只有渐隐区里的几行随位置重画遮罩
     val edge = remember(index, edgeOf) { derivedStateOf(structuralEqualityPolicy()) { edgeOf(index) } }
     val current = distance == 0
@@ -635,6 +645,8 @@ private fun LyricRow(
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .lyricPickTarget(pick, index)
+            .then(if (pick?.enabled == true) Modifier.semantics { customActions = listOf(pickShareAction(pick, index)) } else Modifier)
             // 电视上遥控器停在哪一句要看得清，渐隐区里也一样：描边画在行的裁切和渐隐图层外面。
             // 不放大：整行放大会让左对齐的字横着跳一下
             .tvFocusRing(LyricRowShape, scale = 1f)

@@ -137,12 +137,15 @@ fun MyMusicTheme(appearance: Appearance, coverSeed: Color?, content: @Composable
     }
 }
 
-/** 播放页固定深色，用同一个种子色生成彩度更高的 Vibrant 配色。 */
+/**
+ * 播放页固定深色，用同一个种子色生成彩度更高的 Vibrant 配色。
+ * [seed] 默认是当前种子色；歌词分享页传打开那一刻的种子色，切歌后配色不跟着变。
+ */
 @Composable
-fun PlayerTheme(content: @Composable () -> Unit) {
+fun PlayerTheme(seed: Color = LocalSeedColor.current, content: @Composable () -> Unit) {
     val appearance = LocalAppearance.current
     val scheme = rememberDynamicColorScheme(
-        seedColor = LocalSeedColor.current,
+        seedColor = seed,
         isDark = true,
         isAmoled = false,
         style = appearance.playerStyle.palette,

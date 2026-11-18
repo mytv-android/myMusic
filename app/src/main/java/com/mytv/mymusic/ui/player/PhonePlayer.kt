@@ -1,5 +1,7 @@
 package com.mytv.mymusic.ui.player
 
+import com.mytv.mymusic.ui.player.share.LocalLyricPickProbe
+import com.mytv.mymusic.ui.player.share.lyricPickGesture
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -632,7 +634,8 @@ private fun PhoneLyricsPage(
                     prefs = stage.prefs,
                     textSp = PHONE_STAGE_SP,
                     insets = insets,
-                    modifier = Modifier.fillMaxSize(),
+                    // 长按任意一句进选句层（歌词分享）；经典列表也是舞台画的，一处管全部模式
+                    modifier = Modifier.fillMaxSize().lyricPickGesture(LocalLyricPickProbe.current),
                     seek = actions::seek,
                     // 手机上舞台被面板挡住，不在舞台上预览草稿，只用保存时的淡入淡出
                     modeFade = stage.modeFade,

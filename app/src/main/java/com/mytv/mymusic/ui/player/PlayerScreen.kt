@@ -36,6 +36,21 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.unit.Dp
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import com.mytv.mymusic.ui.player.share.LocalLyricPickProbe
+import com.mytv.mymusic.ui.player.share.LyricPickProbe
+import com.mytv.mymusic.ui.player.share.ShareOverlay
+import com.mytv.mymusic.ui.player.share.ShareSession
+import com.mytv.mymusic.ui.player.share.initialPick
+import com.mytv.mymusic.ui.player.share.pickLines
+import com.mytv.mymusic.ui.player.share.shareLink
+import com.mytv.mymusic.ui.theme.LocalAppearance
+import com.mytv.mymusic.ui.theme.LocalSeedColor
 import com.mytv.mymusic.ui.AddToPlaylistSheet
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
@@ -160,6 +175,10 @@ fun PlayerScreen(
     var animationOpen by rememberSaveable { mutableStateOf(false) }
     // 「加到歌单」面板：打开那一刻的这首。面板开着时切了歌，勾的还是打开时那首，不会悄悄改到下一首上
     var playlistSong by remember { mutableStateOf<Song?>(null) }
+    // 歌词分享：全屏歌词长按任意一句进选句层，再进分享页；会话是长按那一刻的快照。电视不做分享
+    val shareAllowed = !window.isTv
+    var share by remember { mutableStateOf<ShareSession?>(null) }
+    val pickProbe = remember { LyricPickProbe() }
     // 电视上开着歌词动画面板：直接进环境模式（舞台铺满，草稿画在上面）；其他设备开着面板时不进空闲
     val idle = rememberIdleState(
         holdAwake = sheetOpen || (animationOpen && !window.isTv) || playlistSong != null || state.sourcePickerTrack != null || tabletop,
@@ -264,6 +283,30 @@ fun PlayerScreen(
         }
     }
 
+    val haptics = LocalHapticFeedback.current
+    val seedColor = LocalSeedColor.current
+    SideEffect {
+        // 只在全屏歌词页（桌面姿态是上半屏放歌词时）、有歌词且不在加载时能长按选句；平板非专注时右栏那列歌词不是入口
+        pickProbe.enabled = shareAllowed && share == null && !lyricsLoading && lyrics.raw.isNotBlank() &&
+            (if (tabletop) tabletopShown == TabletopTop.Lyrics else lyricsMode)
+        pickProbe.onRequest = { hit ->
+            val lines = pickLines(lyrics.displayLines())
+            if (lines.isNotEmpty()) {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                share = ShareSession(
+                    song = song,
+                    link = shareLink(song, state.currentTrack),
+                    lines = lines,
+                    synced = lyrics.synced,
+                    seed = seedColor,
+                    initial = initialPick(lines, hit, active.value),
+                )
+                // 专注栏、标题、底部按钮在压暗层下面淡出
+                idle.sleep()
+            }
+        }
+    }
+
     // 播放页退出（含退场动画）时清掉上报的底部控件高度，更新胶囊不再为已经不存在的控件让位
     val bottomChrome = LocalPlayerBottomChrome.current
     DisposableEffect(bottomChrome) {
@@ -318,6 +361,8 @@ fun PlayerScreen(
                 onSkip = onSkip,
                 onSeekBy = onSeekBy,
                 onAnyKey = { com.mytv.mymusic.playback.CrossfadeStatus.dismissActive() },
+                // 选句层、分享页开着时下面的控件留在淡出状态，点按不唤醒
+                suspended = { share != null },
             ),
     ) {
         val wideBackdrop = !tabletop && (window.isTv || wideLayout)
@@ -339,135 +384,153 @@ fun PlayerScreen(
                 else -> BackdropScrim.Phone
             },
         )
-        when {
-            window.isTv -> TvPlayer(
-                song = song,
-                playing = state.playing,
-                duration = state.duration,
-                position = position,
-                favorite = favorite,
-                sleep = sleep,
-                lyrics = lyrics,
-                lyricsLoading = lyricsLoading,
-                active = active,
-                stage = stage,
-                sourceProvider = sourceProvider,
-                sourceDetail = sourceDetail,
-                playbackMode = playbackMode,
-                notice = state.playbackNotice,
-                actions = actions,
-                idle = idle,
-                pulse = pulse,
-                coverShape = state.coverShape,
-                transitionAnimation = state.crossfadeAnimation,
-                ambientClock = state.tvAmbientClock,
-                seekHint = seekHint,
-                addedToPlaylist = addedToPlaylist,
-                playlistSheetOpen = playlistSong != null,
-                animationSheetOpen = animationOpen,
-                onAddToPlaylist = onAddToPlaylist,
-                onOpenQueue = onOpenQueue,
-                onOpenTimer = onOpenTimer,
-                onOpenSource = onOpenSource,
-            )
-            tabletop -> TabletopPlayer(
-                song = song,
-                playing = state.playing,
-                duration = state.duration,
-                position = position,
-                favorite = favorite,
-                sleep = sleep,
-                lyrics = lyrics,
-                lyricsLoading = lyricsLoading,
-                active = active,
-                stage = stage,
-                sourceProvider = sourceProvider,
-                sourceDetail = sourceDetail,
-                playbackMode = playbackMode,
-                notice = state.playbackNotice,
-                deepLink = state.deepLink,
-                actions = actions,
-                top = state.tabletopTop,
-                lyricsMode = lyricsMode,
-                onLyricsMode = { lyricsMode = it },
-                onClose = onClose,
-                onOpenQueue = onOpenQueue,
-                onOpenTimer = onOpenTimer,
-                onFavoriteBurst = onFavoriteBurst,
-                onOpenSource = onOpenSource,
-                onSkip = onSkip,
-                pulse = pulse,
-                coverShape = state.coverShape,
-                transitionAnimation = state.crossfadeAnimation,
-                addedToPlaylist = addedToPlaylist,
-                onAddToPlaylist = onAddToPlaylist,
-            )
-            wideLayout -> WidePlayer(
-                song = song,
-                playing = state.playing,
-                duration = state.duration,
-                position = position,
-                favorite = favorite,
-                sleep = sleep,
-                lyrics = lyrics,
-                lyricsLoading = lyricsLoading,
-                active = active,
-                stage = stage,
-                sourceProvider = sourceProvider,
-                sourceDetail = sourceDetail,
-                playbackMode = playbackMode,
-                notice = state.playbackNotice,
-                deepLink = state.deepLink,
-                actions = actions,
-                idle = idle,
-                lyricsMode = lyricsMode,
-                onLyricsMode = { lyricsMode = it },
-                onClose = onClose,
-                onFavoriteBurst = onFavoriteBurst,
-                onOpenSource = onOpenSource,
-                onOpenQueue = onOpenQueue,
-                onOpenTimer = onOpenTimer,
-                onSkip = onSkip,
-                pulse = pulse,
-                coverShape = state.coverShape,
-                transitionAnimation = state.crossfadeAnimation,
-                addedToPlaylist = addedToPlaylist,
-                onAddToPlaylist = onAddToPlaylist,
-            )
-            else -> PhonePlayer(
-                song = song,
-                playing = state.playing,
-                duration = state.duration,
-                position = position,
-                favorite = favorite,
-                sleep = sleep,
-                lyrics = lyrics,
-                lyricsLoading = lyricsLoading,
-                active = active,
-                stage = stage,
-                sourceProvider = sourceProvider,
-                sourceDetail = sourceDetail,
-                playbackMode = playbackMode,
-                notice = state.playbackNotice,
-                deepLink = state.deepLink,
-                actions = actions,
-                idle = idle,
-                lyricsMode = lyricsMode,
-                onLyricsMode = { lyricsMode = it },
-                onClose = onClose,
-                onOpenQueue = onOpenQueue,
-                onOpenTimer = onOpenTimer,
-                onFavoriteBurst = onFavoriteBurst,
-                onOpenSource = onOpenSource,
-                onSkip = onSkip,
-                pulse = pulse,
-                coverShape = state.coverShape,
-                transitionAnimation = state.crossfadeAnimation,
-                addedToPlaylist = addedToPlaylist,
-                onAddToPlaylist = onAddToPlaylist,
-            )
+        CompositionLocalProvider(LocalLyricPickProbe provides pickProbe.takeIf { shareAllowed }) {
+            when {
+                window.isTv -> TvPlayer(
+                    song = song,
+                    playing = state.playing,
+                    duration = state.duration,
+                    position = position,
+                    favorite = favorite,
+                    sleep = sleep,
+                    lyrics = lyrics,
+                    lyricsLoading = lyricsLoading,
+                    active = active,
+                    stage = stage,
+                    sourceProvider = sourceProvider,
+                    sourceDetail = sourceDetail,
+                    playbackMode = playbackMode,
+                    notice = state.playbackNotice,
+                    actions = actions,
+                    idle = idle,
+                    pulse = pulse,
+                    coverShape = state.coverShape,
+                    transitionAnimation = state.crossfadeAnimation,
+                    ambientClock = state.tvAmbientClock,
+                    seekHint = seekHint,
+                    addedToPlaylist = addedToPlaylist,
+                    playlistSheetOpen = playlistSong != null,
+                    animationSheetOpen = animationOpen,
+                    onAddToPlaylist = onAddToPlaylist,
+                    onOpenQueue = onOpenQueue,
+                    onOpenTimer = onOpenTimer,
+                    onOpenSource = onOpenSource,
+                )
+                tabletop -> TabletopPlayer(
+                    song = song,
+                    playing = state.playing,
+                    duration = state.duration,
+                    position = position,
+                    favorite = favorite,
+                    sleep = sleep,
+                    lyrics = lyrics,
+                    lyricsLoading = lyricsLoading,
+                    active = active,
+                    stage = stage,
+                    sourceProvider = sourceProvider,
+                    sourceDetail = sourceDetail,
+                    playbackMode = playbackMode,
+                    notice = state.playbackNotice,
+                    deepLink = state.deepLink,
+                    actions = actions,
+                    top = state.tabletopTop,
+                    lyricsMode = lyricsMode,
+                    onLyricsMode = { lyricsMode = it },
+                    onClose = onClose,
+                    onOpenQueue = onOpenQueue,
+                    onOpenTimer = onOpenTimer,
+                    onFavoriteBurst = onFavoriteBurst,
+                    onOpenSource = onOpenSource,
+                    onSkip = onSkip,
+                    pulse = pulse,
+                    coverShape = state.coverShape,
+                    transitionAnimation = state.crossfadeAnimation,
+                    addedToPlaylist = addedToPlaylist,
+                    onAddToPlaylist = onAddToPlaylist,
+                )
+                wideLayout -> WidePlayer(
+                    song = song,
+                    playing = state.playing,
+                    duration = state.duration,
+                    position = position,
+                    favorite = favorite,
+                    sleep = sleep,
+                    lyrics = lyrics,
+                    lyricsLoading = lyricsLoading,
+                    active = active,
+                    stage = stage,
+                    sourceProvider = sourceProvider,
+                    sourceDetail = sourceDetail,
+                    playbackMode = playbackMode,
+                    notice = state.playbackNotice,
+                    deepLink = state.deepLink,
+                    actions = actions,
+                    idle = idle,
+                    lyricsMode = lyricsMode,
+                    onLyricsMode = { lyricsMode = it },
+                    onClose = onClose,
+                    onFavoriteBurst = onFavoriteBurst,
+                    onOpenSource = onOpenSource,
+                    onOpenQueue = onOpenQueue,
+                    onOpenTimer = onOpenTimer,
+                    onSkip = onSkip,
+                    pulse = pulse,
+                    coverShape = state.coverShape,
+                    transitionAnimation = state.crossfadeAnimation,
+                    addedToPlaylist = addedToPlaylist,
+                    onAddToPlaylist = onAddToPlaylist,
+                )
+                else -> PhonePlayer(
+                    song = song,
+                    playing = state.playing,
+                    duration = state.duration,
+                    position = position,
+                    favorite = favorite,
+                    sleep = sleep,
+                    lyrics = lyrics,
+                    lyricsLoading = lyricsLoading,
+                    active = active,
+                    stage = stage,
+                    sourceProvider = sourceProvider,
+                    sourceDetail = sourceDetail,
+                    playbackMode = playbackMode,
+                    notice = state.playbackNotice,
+                    deepLink = state.deepLink,
+                    actions = actions,
+                    idle = idle,
+                    lyricsMode = lyricsMode,
+                    onLyricsMode = { lyricsMode = it },
+                    onClose = onClose,
+                    onOpenQueue = onOpenQueue,
+                    onOpenTimer = onOpenTimer,
+                    onFavoriteBurst = onFavoriteBurst,
+                    onOpenSource = onOpenSource,
+                    onSkip = onSkip,
+                    pulse = pulse,
+                    coverShape = state.coverShape,
+                    transitionAnimation = state.crossfadeAnimation,
+                    addedToPlaylist = addedToPlaylist,
+                    onAddToPlaylist = onAddToPlaylist,
+                )
+            }
         }
         HeartBurst(burst, heartBurstPlacement(window.fold, book, tabletop))
+        // 记住最后一个会话，淡出时还画它
+        val lastShare = remember { arrayOfNulls<ShareSession>(1) }
+        share?.let { lastShare[0] = it }
+        val shareFade = if (LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()) {
+            snap()
+        } else {
+            MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+        }
+        AnimatedVisibility(share != null, Modifier.fillMaxSize(), enter = fadeIn(shareFade), exit = fadeOut(shareFade)) {
+            lastShare[0]?.let { session ->
+                ShareOverlay(session, state, actions, active, currentKey = song.key) {
+                    share = null
+                    idle.poke()
+                }
+            }
+        }
         if (animationDraft != null) {
             AnimationSheet(
                 saved = state.lyricStage,

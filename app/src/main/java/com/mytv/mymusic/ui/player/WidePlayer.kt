@@ -1,5 +1,7 @@
 package com.mytv.mymusic.ui.player
 
+import com.mytv.mymusic.ui.player.share.LocalLyricPickProbe
+import com.mytv.mymusic.ui.player.share.lyricPickGesture
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloat
@@ -249,11 +251,13 @@ internal fun WidePlayer(
                 {
                     // 专注歌词换成了动画舞台时，歌词栏随过渡淡出，稳定后不再组合
                     if (!stage.custom || showDefault) {
+                        // 经典模式的专注歌词不经过舞台，是这一栏换成专注字号：长按选句也装在这里（非专注时探针没开，不触发）
                         LyricsList(
                             lyrics,
                             active,
                             actions::seek,
-                            if (stage.custom) Modifier.fillMaxSize().graphicsLayer { alpha = defaultAlpha() } else Modifier.fillMaxSize(),
+                            (if (stage.custom) Modifier.fillMaxSize().graphicsLayer { alpha = defaultAlpha() } else Modifier.fillMaxSize())
+                                .lyricPickGesture(LocalLyricPickProbe.current),
                             loading = lyricsLoading,
                             position = position,
                             playing = playing,
@@ -299,7 +303,7 @@ internal fun WidePlayer(
                             prefs = stage.prefs,
                             textSp = WIDE_STAGE_SP,
                             insets = stageInsets,
-                            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = focusAlpha() },
+                            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = focusAlpha() }.lyricPickGesture(LocalLyricPickProbe.current),
                             seek = actions::seek,
                             tag = stage.tag,
                             coverEnd = stage.coverEnd,

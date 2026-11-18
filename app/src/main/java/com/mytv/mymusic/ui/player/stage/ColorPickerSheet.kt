@@ -91,6 +91,7 @@ import kotlin.math.roundToInt
  * @param onAutoText 改底色时点“自动配文字色”：把字色换成它。
  * @param onDone 完成时的颜色（记进“最近用过”）。
  * @param stageBeside 舞台在面板旁边：遮罩调淡，配色看得准。
+ * @param chromeHint 改底色时底色偏亮要不要提示播放页顶上的浅色歌名、按钮会看不清（歌词分享卡片用不着）。
  */
 @Composable
 internal fun ColorPickerSheet(
@@ -104,6 +105,7 @@ internal fun ColorPickerSheet(
     coverSwatches: List<Color>,
     recent: List<Color>,
     stageBeside: Boolean,
+    chromeHint: Boolean = true,
     onChange: (Color) -> Unit,
     onAutoText: (Color) -> Unit,
     onDone: (Color) -> Unit,
@@ -258,7 +260,7 @@ internal fun ColorPickerSheet(
                     }
                 }
                 // 播放页顶上的歌名、按钮一直是浅色的，底色太亮会把它们吃掉（歌词本身有上面的对比度管）
-                if (!editingText && contrastRatio(bg, PLAYER_CHROME) < MIN_CHROME_CONTRAST) {
+                if (chromeHint && !editingText && contrastRatio(bg, PLAYER_CHROME) < MIN_CHROME_CONTRAST) {
                     Text(
                         "底色偏亮：歌词页顶上的歌名和按钮是浅色的，可能看不清",
                         Modifier.padding(top = 8.dp),

@@ -19,6 +19,7 @@
 // 改动：列表排在舞台安全区里（最宽 720dp）、上下两端渐隐；锚点用上下留白 + 量出来的误差对齐，不靠每项高度表；
 // 间奏三点按句间空档合成（myMusic 的解析器不保留空行）；换歌后新歌词到之前只显示三点；减少动画时整页静止。
 // 2026-11-18 myMusic 改动：景深模糊有强度（0–1.5 倍），每句的模糊和上限都乘它。
+// 2026-11-18 myMusic 改动：有歌词的行登记长按选句的命中区域，读屏多一个「选这一句分享」操作（歌词分享）。
 package com.mytv.mymusic.ui.player.stage.modes
 
 import androidx.compose.animation.core.AnimationSpec
@@ -66,6 +67,8 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextMotion
 import androidx.compose.ui.unit.Constraints
@@ -77,6 +80,9 @@ import com.mytv.mymusic.ui.player.lyricAnchorError
 import com.mytv.mymusic.ui.player.stage.LyricStageContext
 import com.mytv.mymusic.ui.player.stage.StageDisplay
 import com.mytv.mymusic.ui.player.stage.StageLine
+import com.mytv.mymusic.ui.player.share.LocalLyricPickProbe
+import com.mytv.mymusic.ui.player.share.lyricPickTarget
+import com.mytv.mymusic.ui.player.share.pickShareAction
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -175,6 +181,8 @@ internal class RushLook(
 internal fun RushLyricList(ctx: LyricStageContext, look: RushLook, content: State<Color>, modifier: Modifier = Modifier) {
     val display = ctx.display
     val reduceMotion = display.reduceMotion
+    // 全屏歌词长按选句（缩略图里没有探针，什么都不登记）
+    val pick = LocalLyricPickProbe.current.takeIf { display.touch }
     val rows = remember(ctx.lines) { rushRows(ctx.lines) }
     val wordTimed = remember(ctx.lines) { ctx.lines.any { it.words.isNotEmpty() } }
     val fontSp = display.textSp * RUSH_TEXT_RATIO * look.size
@@ -250,7 +258,21 @@ internal fun RushLyricList(ctx: LyricStageContext, look: RushLook, content: Stat
             val scale = animateFloatAsState(if (relation == 0) 1f else RUSH_OTHER_SCALE, spatial, label = "rushScale")
             val blurDp = animateFloatAsState(rushBlurDp(relation, if (blur) depth else 0f, manual.value), effects, label = "rushBlur")
             val underAlpha = animateFloatAsState(if (relation == 0) RUSH_CURRENT_UNDER_ALPHA else RUSH_OTHER_UNDER_ALPHA, effects, label = "rushUnder")
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = arrangement) {
+            val pickLine = row.line?.index
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (pickLine != null) {
+                            Modifier
+                                .lyricPickTarget(pick, pickLine)
+                                .then(if (pick?.enabled == true) Modifier.semantics { customActions = listOf(pickShareAction(pick, pickLine)) } else Modifier)
+                        } else {
+                            Modifier
+                        },
+                    ),
+                horizontalArrangement = arrangement,
+            ) {
                 Box(
                     Modifier
                         .graphicsLayer {
