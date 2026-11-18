@@ -18,7 +18,7 @@ internal enum class SharePage { Pick, Share }
  *
  * @param link 平台上这首歌的链接（[shareLink]），没有为空串。
  * @param lines 选句列表（[pickLines]，副行已按「歌词下面那一行」换好）。
- * @param seed 打开那一刻的种子色：分享页按它建 PlayerTheme，切歌后卡片的「播放页」配色不跟着漂。
+ * @param seed 打开那一刻的种子色：选句层和分享页按它建 PlayerTheme，切歌后配色（含卡片的「播放页」配色）不跟着漂。
  * @param initial 先选上的那句（[initialPick]）。
  */
 @Stable

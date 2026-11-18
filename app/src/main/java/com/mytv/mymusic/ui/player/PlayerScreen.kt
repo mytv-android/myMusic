@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.spring
@@ -384,7 +385,16 @@ fun PlayerScreen(
                 else -> BackdropScrim.Phone
             },
         )
-        CompositionLocalProvider(LocalLyricPickProbe provides pickProbe.takeIf { shareAllowed }) {
+        val shareFade = if (LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()) {
+            snap()
+        } else {
+            MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+        }
+        // 选句层只有 0.6 的压暗，舞台、标题、按钮再一起淡到 0.2（稿子 .js-stage.picking .stl），不和列表叠字；背景不动。
+        // 盖着的这层读屏也不该再读到
+        val stageAlpha = animateFloatAsState(if (share != null) 0.2f else 1f, shareFade, label = "shareStageAlpha")
+        val stageCover = if (share != null) Modifier.clearAndSetSemantics {} else Modifier
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = stageAlpha.value }.then(stageCover)) { CompositionLocalProvider(LocalLyricPickProbe provides pickProbe.takeIf { shareAllowed }) {
             when {
                 window.isTv -> TvPlayer(
                     song = song,
@@ -513,16 +523,11 @@ fun PlayerScreen(
                     onAddToPlaylist = onAddToPlaylist,
                 )
             }
-        }
+        } }
         HeartBurst(burst, heartBurstPlacement(window.fold, book, tabletop))
         // 记住最后一个会话，淡出时还画它
         val lastShare = remember { arrayOfNulls<ShareSession>(1) }
         share?.let { lastShare[0] = it }
-        val shareFade = if (LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()) {
-            snap()
-        } else {
-            MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
-        }
         AnimatedVisibility(share != null, Modifier.fillMaxSize(), enter = fadeIn(shareFade), exit = fadeOut(shareFade)) {
             lastShare[0]?.let { session ->
                 ShareOverlay(session, state, actions, active, currentKey = song.key) {

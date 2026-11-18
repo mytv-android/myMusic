@@ -270,7 +270,10 @@ private fun PickRow(line: PickLine, selected: Boolean, singing: Boolean, onToggl
                     append(line.text)
                     if (singing) {
                         append("  ")
-                        withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = scheme.primary)) { append("● 正在唱") }
+                        // 小标整体换行（稿子 inline-flex）：不换行空格 + 词连接符，不会只剩一个圆点挂在行尾
+                        withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = scheme.primary)) {
+                            append("●\u00A0正\u2060在\u2060唱")
+                        }
                     }
                 },
                 fontSize = 21.sp,

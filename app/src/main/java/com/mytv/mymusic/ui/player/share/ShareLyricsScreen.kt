@@ -171,7 +171,7 @@ import kotlin.random.Random
 
 /**
  * 一次分享的覆盖层：选句层 ↔ 分享页，淡入淡出切换。返回键先从分享页回到选句层（选择保留），再按才退出整个分享。
- * 分享页按会话打开那一刻的种子色建 PlayerTheme，切歌后配色不漂。
+ * 两页都按会话打开那一刻的种子色建 PlayerTheme，切歌后配色不漂。
  */
 @Composable
 internal fun ShareOverlay(
@@ -182,6 +182,7 @@ internal fun ShareOverlay(
     currentKey: String,
     onClose: () -> Unit,
 ) {
+    ShareFonts.attach(LocalContext.current)
     val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
     val effects = if (reduceMotion) snap() else MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     // 列表状态放在外面：从分享页回到选句层时还停在原来的位置；长按的那句落在上面三分之一
@@ -189,16 +190,17 @@ internal fun ShareOverlay(
     BackHandler {
         if (session.page == SharePage.Share) session.page = SharePage.Pick else onClose()
     }
-    AnimatedContent(
-        session.page,
-        Modifier.fillMaxSize(),
-        transitionSpec = { fadeIn(effects) togetherWith fadeOut(effects) },
-        label = "sharePage",
-    ) { page ->
-        when (page) {
-            SharePage.Pick -> LyricPickLayer(session, pickList, active, currentKey, onClose) { session.page = SharePage.Share }
-            SharePage.Share -> PlayerTheme(seed = session.seed) {
-                ShareLyricsScreen(session, state.share, state.lyricStage, actions) { session.page = SharePage.Pick }
+    // 选句层也按会话的种子色：选句时切了歌，列表还是这首歌的词，配色也不该跟着下一首变
+    PlayerTheme(seed = session.seed) {
+        AnimatedContent(
+            session.page,
+            Modifier.fillMaxSize(),
+            transitionSpec = { fadeIn(effects) togetherWith fadeOut(effects) },
+            label = "sharePage",
+        ) { page ->
+            when (page) {
+                SharePage.Pick -> LyricPickLayer(session, pickList, active, currentKey, onClose) { session.page = SharePage.Share }
+                SharePage.Share -> ShareLyricsScreen(session, state.share, state.lyricStage, actions) { session.page = SharePage.Pick }
             }
         }
     }
