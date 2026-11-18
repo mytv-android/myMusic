@@ -5776,6 +5776,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun rememberLyric(songKey: String, update: (LyricMemoryEntry) -> LyricMemoryEntry) {
         app.appScope.launch { app.settings.rememberLyric(songKey, update) }
     }
+
+    suspend fun lyricMemoryModeCount(): Int = app.settings.lyricMemoryModeCount()
+
+    /** 忘掉每首歌随机到的模式；挂在应用作用域上，面板关了也会写完。返回撤销要用的原值。 */
+    suspend fun forgetLyricModes(): Map<String, String> = app.appScope.async { app.settings.forgetLyricModes() }.await()
+
+    fun restoreLyricModes(modes: Map<String, String>) {
+        app.appScope.launch { app.settings.restoreLyricModes(modes) }
+    }
     fun setCollectionView(value: CollectionView) = viewModelScope.launch { app.settings.collectionView(value) }
     fun setMiniPlayerTarget(value: MiniPlayerTarget) = viewModelScope.launch { app.settings.miniPlayerTarget(value) }
     fun setShowBottomNav(value: Boolean) = viewModelScope.launch { app.settings.showBottomNav(value) }

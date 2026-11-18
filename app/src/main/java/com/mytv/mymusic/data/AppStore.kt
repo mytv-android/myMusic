@@ -120,6 +120,8 @@ data class LyricStagePrefs(
     val pins: Map<String, String> = emptyMap(),
     /** 首次进入全屏歌词页时 ✦ 外面的呼吸提示，打开过一次面板就不再显示。 */
     val hintSeen: Boolean = false,
+    /** 随机池（模式 id）：随机换法从这里面抽。空＝除经典外的全部模式（旧数据、没动过时都是空）。 */
+    val randomPool: Set<String> = emptySet(),
 )
 
 /** 每首歌记下的随机结果和速度（最近 [LYRIC_MEMORY_LIMIT] 首）。 */
@@ -127,6 +129,10 @@ data class LyricStagePrefs(
 data class LyricMemoryEntry(val mode: String = "", val bpm: Float = 0f)
 
 const val LYRIC_MEMORY_LIMIT = 2000
+
+/** JSON 字符串数组 → 集合；读不出来（没写过、格式不对）时为空。 */
+internal fun decodeStringSet(raw: String?): Set<String> =
+    if (raw.isNullOrBlank()) emptySet() else runCatching { Json.decodeFromString<List<String>>(raw).toSet() }.getOrDefault(emptySet())
 
 /** 播放页封面形状：随机（每次切歌换一种，不和上一首重复）或固定成某一种 MaterialShapes。 */
 enum class CoverShapeChoice { Random, Cookie12, Cookie9, Cookie7, Sunny, SoftBurst, Clover8 }
@@ -279,6 +285,7 @@ class SettingsStore(private val context: Context) {
     private val lyricSpectrumKey = booleanPreferencesKey("lyric_spectrum")
     private val lyricSublineKey = stringPreferencesKey("lyric_subline")
     private val lyricHintSeenKey = booleanPreferencesKey("lyric_visualizer_hint_seen")
+    private val lyricRandomPoolKey = stringPreferencesKey("lyric_random_pool")
     private val lyricSplitBilingualKey = booleanPreferencesKey("lyric_split_bilingual")
     private val lyricTraditionalKey = booleanPreferencesKey("lyric_traditional")
     private val lyricAutoRomanizeKey = booleanPreferencesKey("lyric_auto_romanize")
@@ -471,6 +478,7 @@ class SettingsStore(private val context: Context) {
         pins = runCatching { json.decodeFromString<Map<String, String>>(values[lyricVisualizerPinsKey] ?: "{}") }
             .getOrDefault(emptyMap()),
         hintSeen = values[lyricHintSeenKey] ?: false,
+        randomPool = decodeStringSet(values[lyricRandomPoolKey]),
     )
 
     /** 全屏歌词动画的设置：同一次 edit 里读出当前值再写回，连着改几项不会互相覆盖。 */
@@ -484,6 +492,7 @@ class SettingsStore(private val context: Context) {
         it[lyricPluginSettingsKey] = json.encodeToString(value.pluginSettings)
         it[lyricVisualizerPinsKey] = json.encodeToString(value.pins)
         it[lyricHintSeenKey] = value.hintSeen
+        it[lyricRandomPoolKey] = json.encodeToString(value.randomPool.toList())
     }
 
     suspend fun lyricText(transform: (LyricTextPrefs) -> LyricTextPrefs) = context.dataStore.edit {
@@ -513,6 +522,44 @@ class SettingsStore(private val context: Context) {
             memory[songKey] = entry
             while (memory.size > LYRIC_MEMORY_LIMIT) memory.remove(memory.keys.first())
             it[lyricVisualizerMemoryKey] = json.encodeToString<Map<String, LyricMemoryEntry>>(memory)
+        }
+    }
+
+    /** 记着随机结果（模式不为空）的歌有几首。 */
+    suspend fun lyricMemoryModeCount(): Int =
+        decodeLyricMemory(context.lyricMemoryStore.data.first()[lyricVisualizerMemoryKey]).values.count { it.mode.isNotEmpty() }
+
+    /**
+     * 忘掉所有随机结果：模式清空、测到的速度留着，只剩模式的整条删掉。返回“歌曲 key → 原来的模式”，撤销时交给 [restoreLyricModes]。
+     */
+    suspend fun forgetLyricModes(): Map<String, String> {
+        val forgotten = LinkedHashMap<String, String>()
+        context.lyricMemoryStore.edit {
+            val memory = decodeLyricMemory(it[lyricVisualizerMemoryKey])
+            val kept = LinkedHashMap<String, LyricMemoryEntry>()
+            for ((key, entry) in memory) {
+                if (entry.mode.isNotEmpty()) forgotten[key] = entry.mode
+                if (entry.bpm > 0f) kept[key] = entry.copy(mode = "")
+            }
+            it[lyricVisualizerMemoryKey] = json.encodeToString<Map<String, LyricMemoryEntry>>(kept)
+        }
+        return forgotten
+    }
+
+    /** 撤销 [forgetLyricModes]：只写回现在模式还空着的歌（这期间重新抽过的不动），不改顺序，超出上限时丢最久的。 */
+    suspend fun restoreLyricModes(modes: Map<String, String>) {
+        if (modes.isEmpty()) return
+        context.lyricMemoryStore.edit {
+            val memory = decodeLyricMemory(it[lyricVisualizerMemoryKey])
+            val restored = LinkedHashMap<String, LyricMemoryEntry>()
+            // 按原来的先后排回去：撤销的条目在前（更早），这期间新记的在后
+            for ((key, mode) in modes) {
+                val current = memory[key]
+                restored[key] = if (current == null) LyricMemoryEntry(mode = mode) else if (current.mode.isEmpty()) current.copy(mode = mode) else current
+            }
+            for ((key, entry) in memory) if (key !in restored) restored[key] = entry
+            while (restored.size > LYRIC_MEMORY_LIMIT) restored.remove(restored.keys.first())
+            it[lyricVisualizerMemoryKey] = json.encodeToString<Map<String, LyricMemoryEntry>>(restored)
         }
     }
 

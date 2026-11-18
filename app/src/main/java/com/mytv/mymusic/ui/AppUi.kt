@@ -281,6 +281,9 @@ class MusicActions(private val model: MusicViewModel) {
     suspend fun lyricMemory(songKey: String) = model.lyricMemory(songKey)
     fun rememberLyric(songKey: String, update: (com.mytv.mymusic.data.LyricMemoryEntry) -> com.mytv.mymusic.data.LyricMemoryEntry) =
         model.rememberLyric(songKey, update)
+    suspend fun lyricMemoryModeCount() = model.lyricMemoryModeCount()
+    suspend fun forgetLyricModes() = model.forgetLyricModes()
+    fun restoreLyricModes(modes: Map<String, String>) = model.restoreLyricModes(modes)
     fun setCollectionView(value: com.mytv.mymusic.data.CollectionView) = model.setCollectionView(value)
     fun setMiniPlayerTarget(value: MiniPlayerTarget) = model.setMiniPlayerTarget(value)
     fun startSleepTimer(minutes: Int) = model.startSleepTimer(minutes)

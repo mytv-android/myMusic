@@ -444,4 +444,3 @@ private fun autoNote(auto: LyricAutoSwitch): String = when (auto) {
     LyricAutoSwitch.Tempo -> "听出速度后，在两句之间的空当换成对应的动画，不会在一句唱到一半时换；测到的速度会记下来，下次一开始就换。在上面点了某个动画，这首歌就一直用它。"
 }
 
-private val TEMPO_NAMES = listOf("慢", "中", "快", "很快")
