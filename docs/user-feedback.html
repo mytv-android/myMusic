@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>用户建议改进稿 · myMusic</title>
-<meta name="description" content="按用户提的 16 条建议整理的改进稿（手机、平板、横屏、折叠屏、电视都画了）：歌词动画面板（按速度灰掉、随机池、保存并应用）、Rush 自定义配色/景深强度/风格预设、长按歌词分享卡片（Rush 九种卡片＋播放页样式）、播放页加歌单、列表左右滑操作、歌单导出与落雪导入、海报墙视角远近、电视海报视图去掉浮动工具栏、手机底栏浮动条重画、手机横屏全屏歌词修复。">
+<meta name="description" content="按用户提的 16 条建议整理的改进稿（手机、平板、横屏、折叠屏、电视都画了）：歌词动画面板（按速度灰掉、随机池、保存并应用）、Rush 自定义配色/景深强度/风格预设、长按歌词分享卡片（Rush 九种卡片＋播放页样式）、播放页加歌单、列表左右滑操作、歌单导出与洛雪导入、海报墙视角远近、电视海报视图去掉浮动工具栏、手机底栏浮动条重画、手机横屏全屏歌词修复。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=Roboto+Flex:opsz,slnt,wdth,wght@8..144,-10..0,25..151,100..1000&display=swap" rel="stylesheet">
@@ -831,7 +831,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
     <a href="#share"><b>03</b>长按歌词分享</a>
     <a href="#addto"><b>04</b>播放页加歌单</a>
     <a href="#swipe"><b>05</b>列表左右滑</a>
-    <a href="#files"><b>06</b>歌单导出、落雪导入</a>
+    <a href="#files"><b>06</b>歌单导出、洛雪导入</a>
     <a href="#wall"><b>07</b>海报墙视角、电视工具栏</a>
     <a href="#landscape"><b>08</b>横屏全屏歌词</a>
     <a href="#navbar"><b>09</b>手机底栏</a>
@@ -855,10 +855,10 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
       <tr><td>6</td><td>选了「按速度」，上面的单选不该还亮着</td><td>模式卡片在三种换法下都是单选、都亮着；自动换时点卡片的意思变成「这首歌一直用它」（<code>LyricDirector.pick</code>），界面上看不出来。</td><td>换法挪到卡片上面。固定＝单选；随机＝多选（随机池）；按速度＝卡片整块灰掉不可点，由四档决定。「这首歌用哪个」单独成一行。</td><td><a href="#sheet">01</a></td></tr>
       <tr><td>7</td><td>改了没立即生效，加「保存偏好」，退出时问是否保存并应用</td><td>设置是即时写入的，但自动换只在两句之间空当 ≥1.5 秒时才换（<code>canSwitchAt</code>），按速度还要等第 4 秒后节拍锁定（置信度 ≥0.5）；等不到就留到下一首。所以看上去像没生效。</td><td>面板改成草稿：改动先只在缩略图和设置区顶部的大预览里体现，底部浮出「N 处改动 · 放弃 / 保存并应用」。关面板时有未保存改动就弹对话框。「保存并应用」立刻重算这首歌并马上换，不等空当。</td><td><a href="#sheet">01</a></td></tr>
       <tr><td>8</td><td>播放页没有直接加歌单的入口</td><td>播放页 ⋮ 菜单只有 全屏歌词 / 海报墙 / 选择音源 / 歌手 / 专辑 / 下载 / 在平台打开（<code>MoreMenu</code>）。</td><td>歌名右边、收藏左边加一个「加到歌单」按钮（全屏歌词页顶栏、平板和桌面姿态的歌名行、专注歌词标题行同样；电视加在控制条）；⋮ 菜单也加一项。面板里标出已在哪些歌单，能直接新建。</td><td><a href="#addto">04</a></td></tr>
-      <tr><td>9</td><td>能导入落雪导出的歌单文件</td><td>「从文件导入」只认本应用的同步 JSON（<code>SyncCoordinator.import</code> → <code>SyncJson.decode</code>）。</td><td>同一个入口自动识别落雪 <code>.lxmc</code>（gzip JSON）和旧版 <code>.json</code>，先出预览：几个歌单、各平台多少首、哪些导不了，勾选后导入。没有文件选择器的电视改成手机扫码传文件。</td><td><a href="#files">06</a></td></tr>
+      <tr><td>9</td><td>能导入洛雪导出的歌单文件</td><td>「从文件导入」只认本应用的同步 JSON（<code>SyncCoordinator.import</code> → <code>SyncJson.decode</code>）。</td><td>同一个入口自动识别洛雪 <code>.lxmc</code>（gzip JSON）和旧版 <code>.json</code>，以及 myMusic 歌单文件，先出预览：几个歌单、各平台多少首、哪些导不了，勾选后导入。没有文件选择器的电视改成手机扫码传文件。</td><td><a href="#files">06</a></td></tr>
       <tr><td>10</td><td>长按歌词选几句，出分享按钮，能编辑分享格式（参考 Rush 和现在的全屏播放页）</td><td>应用里没有分享（只有导出日志用到 <code>ACTION_SEND</code>）。</td><td>全屏歌词页长按进入选句，顶栏变成「已选 N 句 · 分享」。分享页上面是卡片预览，下面选样式：<b>Rush 的九种卡全部照搬</b>（色块、叠卡、竖排、对句、封面、流光、引言、乱排、粗糙）再加一种播放页样式；配色、圆角、封面形状、全屏 9:16、译文；可存图、分享图、复制文字。平板、横屏是左右两栏，桌面姿态上下分，电视不做。</td><td><a href="#share">03</a></td></tr>
       <tr><td>11</td><td>Rush 景深模糊能调模糊度</td><td>只有开关，强度写死为 min(|Δ|·3, 10) dp（<code>RushLyricList</code>）。</td><td>开关换成滑块：关 · 弱 · 中 · 强，「中」等于现在的强度。</td><td><a href="#rush">02</a></td></tr>
-      <tr><td>12</td><td>像落雪那样把本地歌单导出成文件</td><td>只有 同步 › 备份 › 导出到文件：一次导出全部歌单、收藏<b>和平台 Cookie</b>，不适合发给别人。</td><td>歌单 ⋮ 加「导出歌单」，可选 myMusic / 落雪 <code>.lxmc</code> / 纯文本；不带 Cookie。同步页加「导出歌单…」可多选。</td><td><a href="#files">06</a></td></tr>
+      <tr><td>12</td><td>像洛雪那样把本地歌单导出成文件</td><td>只有 同步 › 备份 › 导出到文件：一次导出全部歌单、收藏<b>和平台 Cookie</b>，不适合发给别人。</td><td>歌单 ⋮ 加「导出歌单」，导出 myMusic 歌单文件（<code>.mymusic.json</code>），不带 Cookie；同步页加「导出歌单…」可多选。只给另一台 myMusic 导入，不导出洛雪、纯文本格式（开发者定）。</td><td><a href="#files">06</a></td></tr>
       <tr><td>13</td><td>海报墙设置加视角远近滑块</td><td>格距按设备写死（手机 56dp、平板 102dp、电视 76dp，<code>WallMetrics</code>）。</td><td>海报墙设置加「视角」滑块（远 0.5× ～ 近 1.25×，默认 1×），手机、平板上也能双指捏合；拉远到一定程度自动收起序号和字。</td><td><a href="#wall">07</a></td></tr>
       <tr><td>14</td><td>手机横屏时全屏歌词用不了</td><td><b>bug。</b>横屏走 <code>WidePlayer</code>。舞台高度不到 320dp 时 <code>LyricStage</code> 改用经典列表兜底，但 <code>WidePlayer</code> 没传兜底列表，结果一行都不画。常见手机横屏后高度约 312–336dp，正好卡在线下。</td><td>补上兜底列表（电视同样）；高度门槛改成按文字区算，手机横屏也能放动画。</td><td><a href="#landscape">08</a></td></tr>
       <tr><td>15</td><td>电视上海报界面不要浮动工具栏，遥控器选不到</td><td>详情页（歌单、专辑、榜单、自建歌单）的海报视图，电视把浮动工具栏放在顶排胶囊右边（<code>CollectionPosterView</code>）。墙接管方向键且是无限的，选中格子后上键一直在墙里走，工具栏选不到。队列海报墙顶排本来就没按钮。</td><td>电视上不画工具栏，顶排只留标题和时钟，焦点直接进墙。工具栏的几项挪进长按确认键的面板，排在单曲操作下面一组；菜单键直接跳到这一组。读取失败、空歌单的提示里加「切回列表视图」。</td><td><a href="#wall">07</a></td></tr>
@@ -1051,9 +1051,10 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
 </section>
 
 <section class="block" id="files">
-  <div class="block-head"><span class="kicker">06</span><h2>歌单导出成文件，能导入落雪的导出文件</h2></div>
+  <div class="block-head"><span class="kicker">06</span><h2>歌单导出成 myMusic 文件，能导入洛雪的导出文件</h2></div>
   <div class="quote">许愿可以兼容落雪的歌单导出文件的导入……可以学着落雪，把本地的歌单导出为特定格式的文件，然后可以导入。现在我们的歌单好像只有同步功能，没有导出功能。</div>
-  <p class="sub">其实已经有导出：同步 › 备份 › 导出到文件。但它一次导出全部歌单、收藏<strong>和平台 Cookie</strong>（<code>SyncCoordinator.export</code>），是给自己换机用的，不能发给别人。这里补的是<strong>按歌单导出、不带 Cookie</strong>，格式可选，其中一种就是落雪的 <code>.lxmc</code>；导入沿用「我的 › 新建 › 从文件导入」这个入口，自动认格式。</p>
+  <p class="sub">其实已经有导出：同步 › 备份 › 导出到文件。但它一次导出全部歌单、收藏<strong>和平台 Cookie</strong>（<code>SyncCoordinator.export</code>），是给自己换机用的，不能发给别人。这里补的是<strong>按歌单导出、不带 Cookie</strong>的 myMusic 歌单文件，发给另一台装了 myMusic 的设备导入；导入沿用「我的 › 新建 › 从文件导入」这个入口，自动认格式：myMusic 歌单文件、同步备份，以及洛雪的 <code>.lxmc</code> / <code>.json</code>。</p>
+  <div class="note"><b>导入兼容洛雪，导出只出 myMusic：</b>按开发者的决定，能导入洛雪导出的歌单文件；导出只出 myMusic 歌单文件，<b>不导出洛雪 <code>.lxmc</code></b>，也不导出纯文本。</div>
   <div class="demo">
     <figure>
       <div class="phone"><div class="scr lt" id="shK0"></div></div>
@@ -1061,39 +1062,44 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
     </figure>
     <figure>
       <div class="phone"><div class="scr lt" id="shK"></div></div>
-      <figcaption><b>⑫ 导出面板</b>选格式（可点），下面按平台列出数量，落雪不认的平台写明跳过几首。「分享」直接发文件，「保存到文件」走系统文件选择器。</figcaption>
+      <figcaption><b>⑫ 导出面板</b>只有 myMusic 一种格式，所以不出格式选择；下面按平台列出数量。「分享」直接发文件，「保存到文件」走系统文件选择器。</figcaption>
     </figure>
     <figure>
       <div class="phone"><div class="scr lt" id="shL"></div></div>
-      <figcaption><b>⑬ 从文件导入 · 认出是落雪</b>不直接合并，先出预览：文件里有几个歌单、每个多少首、各平台多少首、哪些导不了。「我的收藏」可以选合并进收藏还是另建歌单；同名歌单可选合并或另建。</figcaption>
+      <figcaption><b>⑬ 从文件导入 · 认出是洛雪</b>不直接合并，先出预览：文件里有几个歌单、每个多少首、各平台多少首、哪些导不了。「我的收藏」可以选合并进收藏还是另建歌单；同名歌单可选合并或另建。myMusic 歌单文件也是这个预览，只是没有「导不了的平台」。</figcaption>
     </figure>
   </div>
-  <h3>格式</h3>
+  <h3>导出：myMusic 歌单文件</h3>
   <div class="scroll"><table>
-    <thead><tr><th style="width:16%">格式</th><th style="width:34%">文件</th><th>说明</th></tr></thead>
+    <thead><tr><th style="width:16%">项</th><th style="width:34%">做法</th><th>说明</th></tr></thead>
     <tbody>
-      <tr><td>myMusic 歌单</td><td><code>&lt;歌单名&gt;.mymusic.json</code>，明文 JSON：<code>{type:"mymusic.playlists", version:1, playlists:[…]}</code></td><td>歌曲条目和同步文件里的一样（平台、id、extra、本地歌的线索），所有平台都能完整还原。默认选这个。</td></tr>
-      <tr><td>落雪</td><td><code>lx_list_part_&lt;歌单名&gt;.lxmc</code>：gzip 压缩的 JSON，<code>{type:"playListPart_v2", data:{id, name, list:[…]}}</code>；多选导出时是 <code>playList_v2</code></td><td>只能放落雪也有的五个平台（见下表）。Apple Music、Spotify、YouTube、B 站、汽水、JOOX 等跳过，面板上写明数量。本地歌写成 <code>source:"local"</code>，只有歌名歌手。</td></tr>
-      <tr><td>纯文本</td><td><code>&lt;歌单名&gt;.txt</code>，UTF-8 带 BOM，每行「歌名␣␣歌手␣␣专辑」</td><td>和落雪桌面版的文本导出一样，方便贴到聊天里。不能再导入回来。</td></tr>
+      <tr><td>文件</td><td><code>&lt;歌单名&gt;.mymusic.json</code>（多选导出时 <code>myMusic 歌单 N 个.mymusic.json</code>），明文 JSON：<code>{type:"mymusic.playlists", version:1, playlists:[…]}</code></td><td>歌曲条目和同步文件里的一样（平台、id、extra、本地歌的线索），所有平台都能完整还原。只有这一种格式，面板上不出格式选择。</td></tr>
+      <tr><td>不带的</td><td>平台账号、Cookie、收藏、设置、封面图片</td><td>可以放心发给别人。换机整体迁移还是用同步 › 备份。</td></tr>
+      <tr><td>绑定歌单</td><td>照常导出歌曲；绑定关系只记平台和歌单 id 作参考</td><td>导入后是普通自建歌单，不自动绑定。</td></tr>
     </tbody>
   </table></div>
-  <h3>落雪文件怎么读（取自 lx-music-desktop @ 323e4ba、lx-music-mobile @ 0669d1b 的源码）</h3>
+  <h3>导入：认哪些文件</h3>
+  <ul class="clean">
+    <li><b>认文件：</b>按内容认，不管扩展名：文件头 <code>1f 8b</code> 先 gzip 解压；JSON 里 <code>type</code> 是 <code>mymusic.playlists</code> 走歌单导入预览，是洛雪的类型（见下）走洛雪导入预览；现有同步备份照旧走原来的恢复流程；都不是就提示「认不出这个文件」。</li>
+    <li><b>本地歌：</b>按文件线索（路径、大小）和歌名＋歌手在这台设备的本地音乐里找，找不到的跳过，预览里标出。</li>
+  </ul>
+  <h3>洛雪文件怎么读（取自 lx-music-desktop @ 323e4ba、lx-music-mobile @ 0669d1b 的源码）</h3>
   <div class="scroll"><table>
-    <thead><tr><th style="width:12%">落雪 source</th><th style="width:30%">歌曲字段</th><th style="width:24%">对应本应用</th><th>备注</th></tr></thead>
+    <thead><tr><th style="width:12%">洛雪 source</th><th style="width:30%">歌曲字段</th><th style="width:24%">对应本应用</th><th>备注</th></tr></thead>
     <tbody>
       <tr><td><code>wy</code></td><td><code>meta.songId</code>（数字）</td><td>网易云 <code>id</code></td><td></td></tr>
       <tr><td><code>tx</code></td><td><code>meta.songId</code>＝songmid；<code>strMediaMid</code>、<code>albumMid</code>、<code>meta.id</code>（数字 id）</td><td>QQ 音乐 <code>id</code>＝mid，其余进 extra</td><td></td></tr>
-      <tr><td><code>kg</code></td><td><code>meta.songId</code>＝audio_id；<code>meta.hash</code>；<code>meta.albumAudioId</code></td><td>酷狗 <code>id</code>＝hash，<code>extra.audio_id</code> / <code>album_audio_id</code></td><td>落雪的歌曲 id 没有 <code>kg_</code> 前缀，是 <code>audio_id_hash</code></td></tr>
+      <tr><td><code>kg</code></td><td><code>meta.songId</code>＝audio_id；<code>meta.hash</code>；<code>meta.albumAudioId</code></td><td>酷狗 <code>id</code>＝hash，<code>extra.audio_id</code> / <code>album_audio_id</code></td><td>洛雪的歌曲 id 没有 <code>kg_</code> 前缀，是 <code>audio_id_hash</code></td></tr>
       <tr><td><code>kw</code></td><td><code>meta.songId</code>＝rid（去掉 <code>MUSIC_</code>）</td><td>酷我 <code>id</code></td><td></td></tr>
       <tr><td><code>mg</code></td><td><code>meta.songId</code>、<code>meta.copyrightId</code></td><td>咪咕：用 copyrightId 换 content_id</td><td>现有咪咕取流本来就会带 <code>extra.copyright_id</code></td></tr>
       <tr><td><code>local</code></td><td><code>meta.filePath</code>、<code>meta.ext</code></td><td>按歌名＋歌手在本地音乐库里找</td><td>找不到就跳过，预览里标出</td></tr>
     </tbody>
   </table></div>
   <ul class="clean">
-    <li><b>容器：</b>落雪写文件一律 gzip（文件头 <code>1f 8b</code>），读文件时按扩展名决定要不要解压。我们按<b>文件头</b>判断，不管扩展名；解出来是字符串时再解析一次（落雪 1.14.0 有把导出序列化两次的问题）。</li>
-    <li><b>类型：</b>认 <code>playListPart_v2</code>（单个歌单）、<code>playList_v2</code>（全部歌单）、<code>allData_v2</code>（完整备份，取 <code>playList</code>），以及旧版 <code>playListPart</code> / <code>playList</code> / <code>allData</code> / <code>defautlList</code>（落雪自己的拼写）。旧版歌曲字段是 <code>songmid</code>、<code>img</code>、<code>types</code>，照落雪的 <code>toNewMusicInfo</code> 转成新版再处理。</li>
+    <li><b>容器：</b>洛雪写文件一律 gzip（文件头 <code>1f 8b</code>），读文件时按扩展名决定要不要解压。我们按<b>文件头</b>判断，不管扩展名；解出来是字符串时再解析一次（洛雪 1.14.0 有把导出序列化两次的问题）。</li>
+    <li><b>类型：</b>认 <code>playListPart_v2</code>（单个歌单）、<code>playList_v2</code>（全部歌单）、<code>allData_v2</code>（完整备份，取 <code>playList</code>），以及旧版 <code>playListPart</code> / <code>playList</code> / <code>allData</code> / <code>defautlList</code>（洛雪自己的拼写）。旧版歌曲字段是 <code>songmid</code>、<code>img</code>、<code>types</code>，照洛雪的 <code>toNewMusicInfo</code> 转成新版再处理。</li>
     <li><b>固定歌单：</b><code>default</code>（试听列表）、<code>love</code>（我的收藏）、<code>temp</code>（临时，跳过）按 id 认，不按名字（桌面版写的名字是 i18n 键 <code>list__name_default</code>）。</li>
-    <li><b>去重：</b>同一歌单里同平台同 id 只留一首；和本机同名歌单「合并」时按现有歌单合并规则（同一首不重复加）。导入的歌单是普通自建歌单，不绑定平台歌单，即使落雪那边记了 <code>sourceListId</code>。</li>
+    <li><b>去重：</b>同一歌单里同平台同 id 只留一首；和本机同名歌单「合并」时按现有歌单合并规则（同一首不重复加）。导入的歌单是普通自建歌单，不绑定平台歌单，即使洛雪那边记了 <code>sourceListId</code>。</li>
   </ul>
   <h3>平板和电视</h3>
   <div class="devblock" id="dvFiles"></div>
@@ -1235,7 +1241,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
       <tr><td>歌词分享</td><td>新 <code>ui/player/share/</code>：<code>LyricPickLayer</code>、<code>ShareLyricsScreen</code>、<code>ShareCards</code>（Rush 九种 ＋ 播放页，720px 排版）、<code>ShareExport</code>（卡片 / 9:16 画布录制成 PNG）；分享页宽屏两栏、桌面姿态上下分</td><td><code>SharePrefs</code>（上次的样式、配色、圆角、封面形状、全屏、译文、文字格式）；<code>ShareCardShape</code> 对应 <code>MaterialShapes</code></td></tr>
       <tr><td>播放页加歌单</td><td><code>PhonePlayer.kt</code>、<code>WidePlayer.kt</code>（<code>WideMeta</code>、<code>FocusHeader</code>）、<code>TabletopPlayer.kt</code>、<code>TvPlayer.kt</code>（控制条圆按钮）、<code>PlayerScreen.kt</code>（<code>MoreMenu</code>、长按收藏）、<code>AppUi.kt</code>（<code>PlaylistPickerSheet</code> 加勾选态）</td><td><code>MusicActions.playlistsContaining(song)</code>、<code>removeSongFromPlaylist</code></td></tr>
       <tr><td>滑动操作</td><td><code>components/Lists.kt</code>（<code>SongRow</code> 加 <code>swipe</code> 参数）、新 <code>components/SwipeActions.kt</code>（滑动 ＋ 指针悬停按钮）、各列表页传上下文、电视 <code>TrackActionsSheet</code> 加「从最近播放删除」、新设置页 <code>SwipeSettingsScreen</code>、<code>LibraryCollections.kt</code>（最近播放删除）</td><td><code>SwipePrefs</code>；<code>MusicActions.removeHistory(key)</code></td></tr>
-      <tr><td>导出 / 落雪导入</td><td>新 <code>data/transfer/</code>：<code>PlaylistExport</code>（三种格式）、<code>LxImport</code>（gzip 嗅探、v1→v2、平台映射）；<code>LocalPlaylistScreen.kt</code>、<code>SyncScreens.kt</code>、<code>LibraryScreen.kt</code>（导入预览面板）；电视没有文件选择器时复用 <code>SyncSetupServer</code> 出二维码，网页里上传 / 下载文件</td><td>—（导入后是普通自建歌单，走现有同步）；网页会话沿用 10 分钟时效和「附近的设备」权限提示</td></tr>
+      <tr><td>歌单导出 / 洛雪导入</td><td>新 <code>data/transfer/</code>：<code>PlaylistFile</code>（myMusic 歌单文件编解码）、<code>LxImport</code>（gzip 嗅探、v1→v2、平台映射，只读不写）、<code>PlaylistImport</code>（预览、同名合并、本地歌查找）；<code>LocalPlaylistScreen.kt</code>、<code>SyncScreens.kt</code>、<code>LibraryScreen.kt</code>（导入预览面板）；电视没有文件选择器时复用 <code>SyncSetupServer</code> 出二维码，网页里上传 / 下载文件</td><td>—（导入后是普通自建歌单，走现有同步）；网页会话沿用 10 分钟时效和「附近的设备」权限提示</td></tr>
       <tr><td>海报墙视角</td><td><code>WallGeometry.kt</code>（<code>WallMetrics.scaled(zoom)</code>）、<code>PosterWall.kt</code>（捏合）、<code>PosterSettingsSheet.kt</code></td><td><code>PosterPrefs.zoom</code>（<code>poster_zoom_phone/tablet/tv</code>）</td></tr>
       <tr><td>手机底栏（A）</td><td><code>adaptive/PhoneBottomBar.kt</code>：只改没歌时的 <code>FloatingToolbar</code>（阴影 + 描边、72dp 一项、指示器 + 文字的项样式）；迷你播放器、贴底导航栏、<code>phoneOverlayHeight</code> 不动</td><td>—</td></tr>
       <tr><td>电视海报视图</td><td><code>CollectionPosterView.kt</code>（电视不画 <code>PosterToolbar</code>，默认焦点给墙，去掉顶排接管下键）、<code>PosterWallScreen.kt</code>（提示）、<code>PosterWall.kt</code> / <code>PosterWallState.kt</code>（去掉没人再用的 <code>chromeAbove</code>、<code>escapeUp</code>、<code>focusFromAbove</code>；菜单键带上「从菜单键来」）、<code>AppUi.kt</code>（<code>TrackActionsSheet</code> 的 <code>onWallLocate</code> / <code>onWallSettings</code> 换成一组整页操作）、<code>CollectionScreen.kt</code>、<code>LocalPlaylistScreen.kt</code>（读取失败、空歌单加第二个按钮）</td><td>—</td></tr>
@@ -1247,16 +1253,16 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
     <div class="phase"><header><span class="tag">P3</span><h3>Rush 三项</h3></header><ul><li>Color / Slider 设置控件 + 取色面板</li><li>自定义配色、景深强度（含旧值迁移）</li><li>随机搭配、预设增删改、预设进池和四档</li></ul></div>
     <div class="phase"><header><span class="tag">P4</span><h3>滑动操作</h3></header><ul><li>SwipeActions + 各列表上下文</li><li>设置页（示例行、排序、选动作）</li><li>读屏自定义操作、手势冲突规则</li></ul></div>
     <div class="phase"><header><span class="tag">P5</span><h3>歌词分享</h3></header><ul><li>选句层（所有模式通用）</li><li>分享页 + Rush 九种卡片 + 播放页卡 + 导出 PNG / 9:16</li><li>宽屏两栏、桌面姿态上下分</li><li>Rush 一节补到 THIRD_PARTY_NOTICES</li></ul></div>
-    <div class="phase"><header><span class="tag">P6</span><h3>文件与海报墙</h3></header><ul><li>歌单导出三种格式、同步页多选导出</li><li>落雪导入预览（含 v1 旧格式、咪咕、本地）</li><li>电视扫码传文件</li><li>海报墙视角滑块 + 捏合</li><li>单测：lxmc 往返、v1 转换、kg id 拆分</li></ul></div>
+    <div class="phase"><header><span class="tag">P6</span><h3>文件与海报墙</h3></header><ul><li>歌单导出 myMusic 文件、同步页多选导出</li><li>导入预览：myMusic 文件和洛雪（含 v1 旧格式、咪咕、本地）</li><li>电视扫码传文件</li><li>海报墙视角滑块 + 捏合</li><li>单测：myMusic 歌单文件往返、洛雪 v1 转换、kg id 拆分、同名合并</li></ul></div>
   </div>
-  <div class="note plain"><b>不在这次范围里：</b>电视上的歌词分享（没有长按选句的手势，系统里通常也没有分享目标）；导出歌单时带封面图片；落雪的设置备份（<code>setting_v2</code>）。验证按约定只跑编译和单测，不上模拟器，需要目视确认的地方会在提交说明里写出来。</div>
+  <div class="note plain"><b>不在这次范围里：</b>电视上的歌词分享（没有长按选句的手势，系统里通常也没有分享目标）；导出歌单时带封面图片；导出成洛雪或纯文本格式（导出只出 myMusic 文件）；洛雪的设置备份（<code>setting_v2</code>）。</div>
 </section>
 
 </main>
 
 <footer>
   <b>myMusic 改进稿 · 2026-11-18</b><br>
-  稿子里的歌名、歌词、歌单都是为这份稿子编的示例。参考：用户反馈截图与原话；shub39/Rush（GPL-3.0）分享页、九种分享卡（<code>SpotifyShareCard</code> … <code>BratShareCard</code>）与自定义歌词页；lx-music-desktop @ 323e4ba、lx-music-mobile @ 0669d1b 的列表导入导出源码。界面组件照仓库当前代码：<code>AnimationSheet</code>、<code>ModeCard</code>、<code>ConnectedToggleGroup</code>、<code>SegmentedGroup</code>、<code>SongRow</code>、<code>TrackActionsSheet</code>（含电视上的快捷操作排法）、<code>PlaylistPickerSheet</code>、<code>PosterSettingsSheet</code>、<code>CollectionPosterView</code> 的电视顶排、<code>FavoriteToggle</code>、<code>WidePlayer</code> 的专注栏和常规左栏、<code>TabletopPlayer</code>、<code>TvPlayer</code> 的控制条、<code>AdaptiveSheet</code> 的平板 / 电视 / 折叠屏形态。设备外框按 dp 原尺寸排版后整体缩放：平板 1280×800、手机横屏 800×360、折叠屏 841×701（书本）/ 701×841（桌面）、电视 960×540。
+  稿子里的歌名、歌词、歌单都是为这份稿子编的示例。参考：用户反馈截图与原话；shub39/Rush（GPL-3.0）分享页、九种分享卡（<code>SpotifyShareCard</code> … <code>BratShareCard</code>）与自定义歌词页；lx-music-desktop @ 323e4ba、lx-music-mobile @ 0669d1b 的列表导入源码。界面组件照仓库当前代码：<code>AnimationSheet</code>、<code>ModeCard</code>、<code>ConnectedToggleGroup</code>、<code>SegmentedGroup</code>、<code>SongRow</code>、<code>TrackActionsSheet</code>（含电视上的快捷操作排法）、<code>PlaylistPickerSheet</code>、<code>PosterSettingsSheet</code>、<code>CollectionPosterView</code> 的电视顶排、<code>FavoriteToggle</code>、<code>WidePlayer</code> 的专注栏和常规左栏、<code>TabletopPlayer</code>、<code>TvPlayer</code> 的控制条、<code>AdaptiveSheet</code> 的平板 / 电视 / 折叠屏形态。设备外框按 dp 原尺寸排版后整体缩放：平板 1280×800、手机横屏 800×360、折叠屏 841×701（书本）/ 701×841（桌面）、电视 960×540。
 </footer>
 <script>
 
@@ -2077,7 +2083,7 @@ shJ.addEventListener('click', e => {
 });
 renderJ();
 
-/* ================= 06 导出 / 落雪导入 ================= */
+/* ================= 06 歌单导出（只出 myMusic）/ 洛雪导入 ================= */
 const PROV = { wy: ['云', '#e72d2c', '网易云'], tx: ['Q', '#20b26b', 'QQ'], kg: ['K', '#2a8cf0', '酷狗'], kw: ['W', '#f0a800', '酷我'], mg: ['咪', '#e5007f', '咪咕'], am: ['A', '#fa2d48', 'Apple Music'], local: ['本', '#6b7280', '本地'] };
 const pchip = (p, n, skip) => `<span class="pchip ${skip ? 'skip' : ''}"><i style="background:${PROV[p][1]}">${PROV[p][0]}</i>${PROV[p][2]} ${n}</span>`;
 function pageBehind(title, sub, rows) {
@@ -2093,23 +2099,17 @@ $('#shK0').innerHTML = STATUS() + pageBehind('跑步', '58 首 · 自建歌单 �
 let FMT = 'mymusic';
 const EXP = [['wy', 30], ['tx', 12], ['kg', 6], ['kw', 4], ['am', 3], ['local', 3]];
 function renderK() {
-  const lx = FMT === 'lx';
-  const note = { mymusic: '本应用的歌单文件，所有平台都能完整还原。发给另一台装了 myMusic 的设备，用「从文件导入」打开。', lx: '落雪音乐能打开的 .lxmc。落雪只认网易云、QQ、酷狗、酷我、咪咕；其他平台跳过，本地歌只带歌名歌手。', txt: '每行「歌名  歌手  专辑」，适合贴到聊天里。只能看，不能再导入。' }[FMT];
-  const ok = lx ? 55 : 58;
   $('#shK').innerHTML = STATUS() + pageBehind('跑步', '58 首 · 自建歌单 · 2 天前更新', RUN) + `<div class="scrim"></div>
-    <div class="sheet" style="top:300px"><div class="grab"></div><div class="sh-head"><h5>导出「跑步」</h5><p>不包含平台账号和 Cookie</p></div>
+    <div class="sheet" style="top:330px"><div class="grab"></div><div class="sh-head"><h5>导出「跑步」</h5><p>myMusic 歌单文件 · 不包含平台账号和 Cookie</p></div>
     <div class="sh-body">
-      <div class="lbl" style="padding-top:8px">格式</div>
-      <div class="ctg js-fmt">${[['mymusic', 'myMusic'], ['lx', '落雪'], ['txt', '纯文本']].map(([k, l]) => `<button data-v="${k}" class="${FMT === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-      <div class="sh-note">${note}</div>
-      <div class="lbl">会导出 <small>${ok} / 58 首</small></div>
-      <div class="pchips">${EXP.map(([p, n]) => pchip(p, n, lx && p === 'am')).join('')}</div>
-      ${lx ? '<div class="sh-note">跳过 3 首 Apple Music；本地 3 首只有歌名歌手。</div>' : ''}
+      <div class="sh-note" style="padding-top:0">发给另一台装了 myMusic 的设备，用「我的 › 新建 › 从文件导入」打开，所有平台都能完整还原。</div>
+      <div class="lbl">会导出 <small>58 首</small></div>
+      <div class="pchips">${EXP.map(([p, n]) => pchip(p, n)).join('')}</div>
+      <div class="sh-note">本地 3 首带文件线索，对方设备上有同一首才能对上。</div>
       <div style="display:flex;gap:8px;margin-top:18px"><button class="btn-t" style="flex:1;justify-content:center;height:48px">${ico('share', 's18')}分享</button><button class="btn-f" style="flex:1;justify-content:center;height:48px">${ico('save', 's18')}保存到文件</button></div>
-      <div class="sh-note" style="text-align:center">文件名：${{ mymusic: '跑步.mymusic.json', lx: 'lx_list_part_跑步.lxmc', txt: '跑步.txt' }[FMT]}</div>
+      <div class="sh-note" style="text-align:center">文件名：跑步.mymusic.json</div>
     </div></div>`;
 }
-$('#shK').addEventListener('click', e => { const b = e.target.closest('.js-fmt button'); if (b) { FMT = b.dataset.v; renderK(); } });
 renderK();
 const LXL = [
   { name: '试听列表', id: 'default', n: 32, chips: [['wy', 20], ['tx', 8], ['kw', 4]], to: '新建歌单「试听列表」', on: true },
@@ -2119,9 +2119,9 @@ const LXL = [
 function renderL() {
   const tot = LXL.filter(l => l.on).reduce((s, l) => s + l.n - (l.skip ? 2 : 0), 0), k = LXL.filter(l => l.on).length;
   $('#shL').innerHTML = STATUS() + `<div class="lbody"><div class="lbar"><span class="sp"></span><span class="ib">${ico('search')}</span><span class="ib">${ico('settings')}</span></div><div class="lbig"><h5>我的</h5><p>歌单、收藏、下载和最近播放</p></div></div><div class="scrim"></div>
-    <div class="sheet" style="top:120px"><div class="grab"></div><div class="sh-head"><h5>从文件导入</h5><p>lx_list.lxmc · 落雪音乐 · 3 个歌单</p></div>
+    <div class="sheet" style="top:120px"><div class="grab"></div><div class="sh-head"><h5>从文件导入</h5><p>lx_list.lxmc · 洛雪音乐 · 3 个歌单</p></div>
     <div class="sh-body">
-      <div class="sh-note" style="padding-top:0">认出是落雪导出的歌单文件。勾选要导入的；导入后是普通自建歌单，会跟着同步。</div>
+      <div class="sh-note" style="padding-top:0">认出是洛雪导出的歌单文件。勾选要导入的；导入后是普通自建歌单，会跟着同步。</div>
       <div class="seg" style="margin-top:8px">${LXL.map((l, i) => `<div class="lrow click js-lx" data-i="${i}" style="align-items:flex-start"><span class="cbx ${l.on ? 'on' : ''}" style="margin-top:2px">${ico('check')}</span><div class="t">${l.name} <span style="font-size:13px;color:var(--md-on-surface-variant);font-weight:400">${l.n} 首</span><small>${l.to} ▾</small><div class="pchips">${l.chips.map(([p, n]) => pchip(p, n, p === l.skip)).join('')}</div></div></div>`).join('')}</div>
       <div class="lbl">同名歌单</div>
       <div class="ctg"><button class="on">合并</button><button>另建一个</button></div>
@@ -2493,18 +2493,14 @@ devBlock('#dvSwipe', [
   },
 ]);
 
-/* ---------- 06 导出 / 落雪导入 ---------- */
+/* ---------- 06 歌单导出（只出 myMusic）/ 洛雪导入 ---------- */
 function exportBodyHTML() {
-  const lx = FMT === 'lx', ok = lx ? 55 : 58;
-  const note = { mymusic: '本应用的歌单文件，所有平台都能完整还原。', lx: '落雪只认网易云、QQ、酷狗、酷我、咪咕；其他平台跳过，本地歌只带歌名歌手。', txt: '每行「歌名  歌手  专辑」，只能看，不能再导入。' }[FMT];
-  return `<div class="sh-head"><h5>导出「跑步」</h5><p>不包含平台账号和 Cookie</p></div><div class="sh-body">
-    <div class="lbl" style="padding-top:8px">格式</div>
-    <div class="ctg js-fmt">${[['mymusic', 'myMusic'], ['lx', '落雪'], ['txt', '纯文本']].map(([k, l]) => `<button data-v="${k}" class="${FMT === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-    <div class="sh-note">${note}</div>
-    <div class="lbl">会导出 <small>${ok} / 58 首</small></div>
-    <div class="pchips">${EXP.map(([p, n]) => pchip(p, n, lx && p === 'am')).join('')}</div>
+  return `<div class="sh-head"><h5>导出「跑步」</h5><p>myMusic 歌单文件 · 不包含平台账号和 Cookie</p></div><div class="sh-body">
+    <div class="sh-note" style="padding-top:0">发给另一台装了 myMusic 的设备，用「从文件导入」打开，所有平台都能完整还原。</div>
+    <div class="lbl">会导出 <small>58 首</small></div>
+    <div class="pchips">${EXP.map(([p, n]) => pchip(p, n)).join('')}</div>
     <div style="display:flex;gap:8px;margin-top:18px"><button class="btn-t" style="flex:1;justify-content:center;height:48px">${ico('share', 's18')}分享</button><button class="btn-f" style="flex:1;justify-content:center;height:48px">${ico('save', 's18')}保存到文件</button></div>
-    <div class="sh-note" style="text-align:center">文件名：${{ mymusic: '跑步.mymusic.json', lx: 'lx_list_part_跑步.lxmc', txt: '跑步.txt' }[FMT]}</div></div>`;
+    <div class="sh-note" style="text-align:center">文件名：跑步.mymusic.json</div></div>`;
 }
 const qrSVG = (() => {
   const r = mulberry(42); let s = '';
@@ -2517,11 +2513,11 @@ function tvFilesHTML() {
   const lib = `<div class="tvhist"><div class="tvleft"><h5>我的</h5><p>歌单、收藏、下载和最近播放</p></div><div class="tvtiles">${['新建', '我的收藏', '跑步', '通勤路上', '夜里听', '本地音乐'].map((n, i) => `<div class="tvtile ${i === 0 ? 'fr' : ''}" style="${i ? `background:${ART[i * 2 % ART.length]}` : ''}">${i ? `<b>${n}</b>` : `${ico('add')}<b>${n}</b>`}</div>`).join('')}</div></div><div class="scrim"></div>`;
   if (tvImp === 'qr') return lib + `<div class="sheet tvp"><div class="sh-head"><h5>从文件导入</h5><p>这台电视没有系统文件选择器</p></div><div class="sh-body">
       <div class="tvqr">${qrSVG}</div>
-      <div class="sh-note" style="text-align:center;padding-top:10px">用手机扫码，在打开的网页里选文件<br>myMusic 歌单（.json）或落雪（.lxmc）</div>
+      <div class="sh-note" style="text-align:center;padding-top:10px">用手机扫码，在打开的网页里选文件<br>myMusic 歌单（.mymusic.json）或洛雪（.lxmc）</div>
       <div class="seg" style="margin-top:12px"><div class="lrow"><span class="ic">${ico('phone')}</span><div class="t">手机和电视连同一个网络<small>网页只在这一页开着时可用，10 分钟后失效</small></div></div></div>
       <button class="btn-t fr" style="width:100%;justify-content:center;height:48px;margin-top:14px">关闭</button>
       <div class="sh-note">有系统文件选择器的电视（比如接了 U 盘的盒子）直接走选择器，不出二维码。</div></div></div>`;
-  return lib + `<div class="sheet tvp"><div class="sh-head"><h5>从文件导入</h5><p>手机传来 lx_list.lxmc · 落雪音乐</p></div><div class="sh-body">
+  return lib + `<div class="sheet tvp"><div class="sh-head"><h5>从文件导入</h5><p>手机传来 lx_list.lxmc · 洛雪音乐</p></div><div class="sh-body">
       <div class="seg">${LXL.map((l, i) => `<div class="lrow" style="align-items:flex-start"><span class="cbx ${l.on ? 'on' : ''}" style="margin-top:2px">${ico('check')}</span><div class="t">${l.name} <span style="opacity:.7;font-weight:400">${l.n} 首</span><small>${l.to}</small><div class="pchips">${l.chips.map(([p, n]) => pchip(p, n, p === l.skip)).join('')}</div></div></div>`).join('')}</div>
       <button class="btn-f fr" style="width:100%;justify-content:center;height:52px;margin-top:16px">导入 3 个歌单 · 298 首</button></div></div>`;
 }
@@ -2536,7 +2532,6 @@ devBlock('#dvFiles', [
           <div class="slist" style="flex:1;margin:0">${RUN}</div></div><div class="scrim"></div><div class="sheet side lt-side" style="top:36px">${exportBodyHTML()}</div>`;
       };
       draw();
-      scr.addEventListener('click', e => { const b = e.target.closest('.js-fmt button'); if (b) { FMT = b.dataset.v; draw(); renderK(); } });
     },
     cap: '平板上歌单详情是两栏（左边封面和操作，右边歌曲），「导出歌单…」在左栏 ⋮ 菜单里；导出面板是右侧 400dp 浮动面板，内容和手机一样。从文件导入的预览面板同样从右边出。',
   },
