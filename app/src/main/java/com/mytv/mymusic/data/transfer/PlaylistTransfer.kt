@@ -18,7 +18,7 @@ import java.util.UUID
  * 只依赖 DAO 接口、同步层的本地歌线索和几个注入的函数，不碰 Android。
  *
  * @param localSongs 这台设备本地音乐里的歌（文件在的），只在文件里有本地歌时取一次。
- * @param migu 按版权号换咪咕歌（`MiguProvider.songsByCopyright`），回调是已完成批数 / 总批数。
+ * @param migu 按 songId 换咪咕歌（`MiguProvider.songsBySongId`），回调是已完成批数 / 总批数。
  * @param knownProvider 本应用认得的平台；myMusic 文件里别的平台（比如以后删掉的）算「本应用没有这个平台」。
  */
 class PlaylistTransfer(
@@ -92,7 +92,7 @@ class PlaylistTransfer(
         }
         val miguIds = (content as? TransferContent.Lx)?.file?.lists.orEmpty()
             .filter { it.fixed != LxFixed.Temp }
-            .flatMap { list -> list.songs.mapNotNull { (it.mapToSong() as? LxMapped.Migu)?.copyrightId } }
+            .flatMap { list -> list.songs.mapNotNull { (it.mapToSong() as? LxMapped.Migu)?.songId } }
             .distinct()
         val resolved = if (miguIds.isEmpty()) emptyMap() else {
             val batches = (miguIds.size + 99) / 100
@@ -194,7 +194,7 @@ class PlaylistTransfer(
 
 /**
  * 文件内容 + 本机现状 → 预览（纯函数）。洛雪的临时列表不导入，只计数；每个歌单里按 [importKey] 去重。
- * [local] 为 null 时本地歌都算没找到；[resolvedMigu] 是按版权号换到的咪咕歌。
+ * [local] 为 null 时本地歌都算没找到；[resolvedMigu] 是按 songId 换到的咪咕歌。
  */
 internal fun buildImportPlan(
     content: TransferContent,
@@ -231,7 +231,7 @@ internal fun buildImportPlan(
                 val tracks = mapped.map { (song, result) ->
                     when (result) {
                         is LxMapped.Ready -> ImportedTrack(result.song, null, result.song.source)
-                        is LxMapped.Migu -> ImportedTrack(resolvedMigu[result.copyrightId] ?: result.fallback, null, "migu")
+                        is LxMapped.Migu -> ImportedTrack(resolvedMigu[result.songId] ?: result.fallback, null, "migu")
                         is LxMapped.Local -> {
                             val hit = local?.pick(result.title, result.artist, result.durationSec, result.fileName)
                             if (hit != null) ImportedTrack(hit, null, LOCAL_TRACK_PROVIDER)
@@ -248,7 +248,7 @@ internal fun buildImportPlan(
                     tracks = tracks,
                     badFormat = list.dropped,
                     migu = miguSongs.size,
-                    miguResolved = miguSongs.count { it.copyrightId in resolvedMigu },
+                    miguResolved = miguSongs.count { it.songId in resolvedMigu },
                 )
             }
         }

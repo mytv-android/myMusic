@@ -6267,7 +6267,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             },
             migu = { ids, onBatch ->
                 (com.mytv.mymusic.data.native.NativeProviders.get("migu") as? com.mytv.mymusic.data.native.MiguProvider)
-                    ?.songsByCopyright(ids, onBatch).orEmpty()
+                    ?.songsBySongId(ids, onBatch).orEmpty()
             },
             knownProvider = { it == LOCAL_SOURCE || com.mytv.mymusic.data.native.NativeProviders.get(it) != null },
         )

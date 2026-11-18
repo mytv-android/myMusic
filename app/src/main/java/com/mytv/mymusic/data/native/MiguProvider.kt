@@ -52,12 +52,12 @@ private val MIGU_INFO = ProviderInfo(
 )
 
 /** 版权号换歌每批的个数，和洛雪 createGetMusicInfosTask 一样。 */
-internal const val COPYRIGHT_BATCH = 100
-private const val COPYRIGHT_BATCH_TIMEOUT_MS = 10_000L
+internal const val RESOURCE_BATCH = 100
+private const val RESOURCE_BATCH_TIMEOUT_MS = 10_000L
 
-/** 去空、去重后按 [COPYRIGHT_BATCH] 个一批。 */
-internal fun copyrightBatches(ids: List<String>): List<List<String>> =
-    ids.map { it.trim() }.filter { it.isNotEmpty() }.distinct().chunked(COPYRIGHT_BATCH)
+/** 去空、去重后按 [RESOURCE_BATCH] 个一批。 */
+internal fun resourceBatches(ids: List<String>): List<List<String>> =
+    ids.map { it.trim() }.filter { it.isNotEmpty() }.distinct().chunked(RESOURCE_BATCH)
 
 class MiguProvider : BaseNativeProvider(MIGU_INFO) {
     private val json = NativeHttp.json
@@ -771,19 +771,21 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
     }
 
     /**
-     * 洛雪导出的咪咕歌只有版权号（copyrightId）：照洛雪 mg_musicInfo.js 批量换成能放的 Song。
-     * key 是版权号，换不到的不在结果里。匿名调用（资源信息接口不用登录）；每批 10 秒，失败只记日志、这一批走兜底，不重试。
+     * 洛雪导出的咪咕歌只有歌曲 id（songId）和版权号，没有本应用放歌要的 contentId：照洛雪 mg_musicInfo.js
+     * 批量查 resourceinfo.do（resourceId 填 songId，用「|」连，每批 100 个），换成能放的 Song。
+     * 这个接口认 songId，不认版权号（实测版权号查回来是空的）。
+     * key 是查询用的 songId，换不到的不在结果里。匿名调用；每批 10 秒，失败只记日志、这一批走兜底，不重试。
      * [onBatch] 每换完一批回调一次（已完成批数、总批数），预览面板显示进度。
      */
-    internal suspend fun songsByCopyright(
-        copyrightIds: List<String>,
+    internal suspend fun songsBySongId(
+        songIds: List<String>,
         onBatch: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): Map<String, Song> {
-        val batches = copyrightBatches(copyrightIds)
+        val batches = resourceBatches(songIds)
         val out = LinkedHashMap<String, Song>()
         batches.forEachIndexed { index, batch ->
             try {
-                val body = withTimeout(COPYRIGHT_BATCH_TIMEOUT_MS) {
+                val body = withTimeout(RESOURCE_BATCH_TIMEOUT_MS) {
                     NativeHttp.postForm(
                         RESOURCE_INFO_URL.replaceFirst("http://", "https://") + "?resourceType=2",
                         mapOf("resourceId" to batch.joinToString("|")),
@@ -793,25 +795,25 @@ class MiguProvider : BaseNativeProvider(MIGU_INFO) {
                 }
                 out.putAll(parseResourceInfo(body))
             } catch (error: TimeoutCancellationException) {
-                com.mytv.mymusic.AppLog.w("Migu", "copyright batch ${index + 1}/${batches.size} timed out")
+                com.mytv.mymusic.AppLog.w("Migu", "resource batch ${index + 1}/${batches.size} timed out")
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                com.mytv.mymusic.AppLog.w("Migu", "copyright batch ${index + 1}/${batches.size} failed: ${error.message}")
+                com.mytv.mymusic.AppLog.w("Migu", "resource batch ${index + 1}/${batches.size} failed: ${error.message}")
             }
             onBatch(index + 1, batches.size)
         }
         return out
     }
 
-    /** resourceinfo.do 的返回：每项按 copyrightId 归位；没有可用格式的不出现。 */
+    /** resourceinfo.do 的返回：每项按 songId 归位；没有可用格式的不出现。 */
     internal fun parseResourceInfo(body: String): Map<String, Song> {
         val response = runCatching { json.decodeFromString<MiguSongDetailResponse>(body) }.getOrNull() ?: return emptyMap()
         val out = LinkedHashMap<String, Song>()
         for (item in response.resource) {
-            if (item.copyrightId.isBlank() || item.copyrightId in out) continue
+            if (item.songId.isBlank() || item.songId in out) continue
             val song = runCatching { convertItem(item) }.getOrNull() ?: continue
-            out[item.copyrightId] = song
+            out[item.songId] = song
         }
         return out
     }

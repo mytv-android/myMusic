@@ -9,8 +9,11 @@ sealed interface LxMapped {
     /** 网易云、QQ、酷狗、酷我：直接能用。 */
     data class Ready(val song: Song) : LxMapped
 
-    /** 咪咕只有版权号：先按 copyrightId 换取，换不到用 [fallback]（id 用版权号兜底，可能放不了）。 */
-    data class Migu(val copyrightId: String, val fallback: Song) : LxMapped
+    /**
+     * 咪咕：洛雪只存了歌曲 id 和版权号，没有本应用要的 contentId。先按 [songId] 在线换取，
+     * 换不到用 [fallback]（id 用版权号兜底，可能放不了）。
+     */
+    data class Migu(val songId: String, val fallback: Song) : LxMapped
 
     /** 本地文件：按歌名 + 歌手去这台设备的本地音乐里找；路径不用，只留最后一段文件名作比对。 */
     data class Local(
@@ -99,10 +102,12 @@ fun LxSong.mapToSong(): LxMapped {
             LxMapped.Ready(base("kuwo", rid, mapOf("rid" to rid), "https://www.kuwo.cn/play_detail/$rid"))
         }
         "mg" -> {
-            val copyrightId = meta["copyrightId"].orEmpty()
-            if (copyrightId.isBlank()) return LxMapped.Skip(SkipReason.MissingId)
+            // 洛雪的 songmid 就是咪咕 songId；很老的文件里 songmid 存的是版权号，洛雪 getSongId 也照样拿去查
+            val copyrightId = meta["copyrightId"].orEmpty().ifBlank { songId }
+            val lookup = songId.ifBlank { copyrightId }
+            if (lookup.isBlank()) return LxMapped.Skip(SkipReason.MissingId)
             LxMapped.Migu(
-                copyrightId,
+                lookup,
                 base(
                     "migu",
                     "$copyrightId|2|PQ",

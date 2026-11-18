@@ -161,9 +161,9 @@ internal fun importSkippedText(plan: ImportPlan): String {
     if (plan.migu > 0) {
         val missed = plan.migu - plan.miguResolved
         parts += if (missed > 0) {
-            "咪咕 ${plan.migu} 首用 copyrightId 换取，$missed 首没换到，先按版权号保存，可能放不了"
+            "咪咕 ${plan.migu} 首在线换取，$missed 首没换到，先按版权号保存，可能放不了"
         } else {
-            "咪咕 ${plan.migu} 首已用 copyrightId 换取"
+            "咪咕 ${plan.migu} 首已在线换取"
         }
     }
     val unknown = sum(SkipReason.UnknownSource) + sum(SkipReason.MissingId)

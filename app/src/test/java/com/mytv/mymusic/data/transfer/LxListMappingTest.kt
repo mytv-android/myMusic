@@ -58,11 +58,11 @@ class LxListMappingTest {
     }
 
     @Test
-    fun miguNeedsCopyright() {
+    fun miguLooksUpBySongIdAndFallsBackToCopyright() {
         val mapped = song("mg", meta = mapOf("songId" to "1121438701", "copyrightId" to "60084600529")).mapToSong()
         assertTrue(mapped is LxMapped.Migu)
         mapped as LxMapped.Migu
-        assertEquals("60084600529", mapped.copyrightId)
+        assertEquals("1121438701", mapped.songId)
         assertEquals("migu", mapped.fallback.source)
         assertEquals("60084600529|2|PQ", mapped.fallback.id)
         assertEquals("60084600529", mapped.fallback.extra["content_id"])
@@ -70,7 +70,11 @@ class LxListMappingTest {
         assertEquals("1121438701", mapped.fallback.extra["song_id"])
         assertEquals("2", mapped.fallback.extra["resource_type"])
         assertEquals("PQ", mapped.fallback.extra["format_type"])
-        assertEquals(LxMapped.Skip(SkipReason.MissingId), song("mg", meta = mapOf("songId" to "1")).mapToSong())
+        // 很老的文件只有 songmid（存的可能是版权号）：照洛雪 getSongId 拿它去查
+        val old = song("mg", meta = mapOf("songId" to "60084600529")).mapToSong() as LxMapped.Migu
+        assertEquals("60084600529", old.songId)
+        assertEquals("60084600529|2|PQ", old.fallback.id)
+        assertEquals(LxMapped.Skip(SkipReason.MissingId), song("mg", meta = emptyMap()).mapToSong())
     }
 
     @Test

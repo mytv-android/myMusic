@@ -117,7 +117,7 @@ class ImportPlanTest {
 
     @Test
     fun countsAddUp() {
-        val resolved = mapOf("60084600529" to Song(id = "600907|2|HQ", name = "小幸运", source = "migu", extra = mapOf("content_id" to "600907")))
+        val resolved = mapOf("1121438701" to Song(id = "600907|2|HQ", name = "小幸运", source = "migu", extra = mapOf("content_id" to "600907")))
         val local = LocalMatchIndex(listOf(LocalCandidate(Song(id = "sha:1", name = "夜曲", artist = "周杰伦", duration = 226, source = "local"), "夜曲.mp3")))
         val plan = lxPlan("part_v2.json", local = local, migu = resolved)
         val list = plan.lists.single()
