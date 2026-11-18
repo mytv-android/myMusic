@@ -76,3 +76,14 @@ internal fun prepareHistory(
     }
     return HistoryPrepared(grouped.map { HistoryGroup(it.key, it.value) }, queue)
 }
+
+/**
+ * 删掉 [removed] 这一条之后焦点落在哪一行（电视）：按页面上的顺序（今天在前，两栏时左栏在前）取它后面那一条，
+ * 它是最后一条就取前面那一条；删完没有别的记录了是 null。
+ */
+internal fun HistoryPrepared.keyAfterRemoving(removed: String): String? {
+    val keys = groups.flatMap { group -> group.items.map { it.first.key } }
+    val at = keys.indexOf(removed)
+    if (at < 0) return null
+    return keys.getOrNull(at + 1) ?: keys.getOrNull(at - 1)
+}

@@ -42,12 +42,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -301,7 +303,7 @@ fun HistoryScreen(
     val undo = rememberUndo()
     val settled = rememberSettled()
     val firstRow = remember { FocusRequester() }
-    var actionSong by remember { mutableStateOf<Song?>(null) }
+    var actionItem by remember { mutableStateOf<Pair<SavedSong, Song>?>(null) }
     // 解码、日期分组和 today 计算都在既有后台流程里完成；列表重组不再重新分组
     val prepared by produceState(initialValue = HistoryPrepared.Empty, history) {
         value = withContext(Dispatchers.IO) { prepareHistory(history) }
@@ -309,6 +311,28 @@ fun HistoryScreen(
     val groups = prepared.groups
     val queue = prepared.queue
     TvDefaultFocus(firstRow, history.isEmpty())
+    // 电视：删掉一条后焦点落到下一行（first 是删掉的那条，second 是要落的那行）。
+    // 面板关上时焦点先回到被删的那行，等列表刷新、那行没了再交过去，不然焦点跟着那行一起丢
+    var refocus by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val refocusRow = remember { FocusRequester() }
+    if (window.isTv) {
+        LaunchedEffect(refocus, prepared) {
+            val (removed, next) = refocus ?: return@LaunchedEffect
+            val keys = prepared.groups.flatMap { group -> group.items.map { it.first.key } }
+            if (removed in keys) return@LaunchedEffect
+            if (next in keys) {
+                // 等一帧让那一行挂上请求器再要焦点
+                withFrameNanos { }
+                runCatching { refocusRow.requestFocus() }
+            }
+            refocus = null
+        }
+    }
+    val removeOne: (SavedSong, Song) -> Unit = { saved, song ->
+        prepared.keyAfterRemoving(saved.key)?.let { next -> if (window.isTv) refocus = saved.key to next }
+        actions.removePlayHistory(saved.key)
+        undo.show("已从最近播放删除「${song.title}」") { actions.restoreSaved(listOf(saved)) }
+    }
 
     fun LazyListScope.group(label: String, items: List<Pair<SavedSong, Song>>, focusFirst: Boolean) {
         item(key = "day:$label", contentType = "header") { DayLabel(label) }
@@ -326,7 +350,9 @@ fun HistoryScreen(
                 index = index,
                 count = items.size,
                 onClick = { if (!unplayable.intercept(song, local)) actions.play(song, queue) },
-                modifier = if (focusFirst && index == 0) Modifier.focusRequester(firstRow) else Modifier,
+                modifier = Modifier
+                    .then(if (focusFirst && index == 0) Modifier.focusRequester(firstRow) else Modifier)
+                    .then(if (refocus?.second == saved.key) Modifier.focusRequester(refocusRow) else Modifier),
                 playing = state.current?.key == song.key,
                 dimmed = local?.gone == true,
                 badges = local?.let { copy -> { LocalSongBadge(copy) } },
@@ -337,7 +363,7 @@ fun HistoryScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 },
-                onMore = { actionSong = song },
+                onMore = { actionItem = saved to song },
             )
         }
     }
@@ -414,9 +440,14 @@ fun HistoryScreen(
         }
     }
 
-    // 最近播放只在本机、没有逐条移除，面板里只给“找一首平台版本”
-    LocalUnplayableSheets(host = unplayable)
-    actionSong?.let { song ->
+    // 放不了的本地歌：面板里除了“找一首平台版本”，也能删掉这条记录
+    LocalUnplayableSheets(
+        host = unplayable,
+        removeLabel = "从最近播放删除",
+        removeSummary = "只删这台设备上的这条记录",
+        onRemove = { song -> history.firstOrNull { it.key == song.key }?.let { removeOne(it, song) } },
+    )
+    actionItem?.let { (saved, song) ->
         TrackActionsSheet(
             song = song,
             favorite = favorites.any { it.key == song.key },
@@ -425,14 +456,16 @@ fun HistoryScreen(
             onDownload = { actions.download(song) },
             onAddToPlaylist = { id -> actions.addSongToPlaylist(id, song) },
             onOpenSource = {
-                actionSong = null
+                actionItem = null
                 actions.openSourceForSong(song, queue)
             },
             onRemoveFromPlaylist = null,
-            onDismiss = { actionSong = null },
-            onRematch = if (song.source == LOCAL_SOURCE) ({ actionSong = null; unplayable.rematch = song }) else null,
+            onDismiss = { actionItem = null },
+            onRematch = if (song.source == LOCAL_SOURCE) ({ actionItem = null; unplayable.rematch = song }) else null,
             onOpenArtist = { name -> actions.openArtistByName(name, song) },
             onOpenAlbum = { actions.openAlbumOf(song) },
+            // 删后底部出撤销条（按原时间写回），不弹确认
+            onRemoveFromHistory = { removeOne(saved, song) },
         )
     }
 }

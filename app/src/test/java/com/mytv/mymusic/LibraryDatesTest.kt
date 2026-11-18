@@ -11,6 +11,7 @@ import com.mytv.mymusic.ui.library.DownloadSnapshot
 import com.mytv.mymusic.ui.library.prepareDownloads
 import com.mytv.mymusic.ui.library.LibraryDates
 import com.mytv.mymusic.ui.library.prepareDownloadSections
+import com.mytv.mymusic.ui.library.keyAfterRemoving
 import com.mytv.mymusic.ui.library.prepareHistory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -106,6 +107,27 @@ class LibraryDatesTest {
         assertEquals(listOf("test:a", "test:b", "test:c", "test:d"), prepared.queue.map { it.key })
         assertEquals(listOf("Song a", "Song b", "Song c", "Song d"), prepared.queue.map { it.title })
         assertEquals(listOf("test:b", "test:d"), prepared.groups[1].items.map { it.first.key })
+    }
+
+    @Test
+    fun focusAfterRemovingGoesToTheNextRowAcrossDays() {
+        val now = millis(2026, 10, 25, 12, 0)
+        val prepared = prepareHistory(
+            listOf(
+                saved("a", millis(2026, 10, 25, 9, 0)),
+                saved("b", millis(2026, 10, 24, 22, 0)),
+                saved("c", millis(2026, 10, 24, 8, 0)),
+            ),
+            now,
+            zone,
+        )
+        // 今天最后一条删掉：落到昨天第一条；中间的落到下一条；最后一条落回前一条
+        assertEquals("test:b", prepared.keyAfterRemoving("test:a"))
+        assertEquals("test:c", prepared.keyAfterRemoving("test:b"))
+        assertEquals("test:b", prepared.keyAfterRemoving("test:c"))
+        assertEquals(null, prepared.keyAfterRemoving("test:x"))
+        val single = prepareHistory(listOf(saved("a", millis(2026, 10, 25, 9, 0))), now, zone)
+        assertEquals(null, single.keyAfterRemoving("test:a"))
     }
 
     @Test

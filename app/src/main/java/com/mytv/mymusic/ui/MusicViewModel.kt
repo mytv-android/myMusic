@@ -2987,6 +2987,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         history.value.forEach { app.database.dao().remove("history", it.key) }
     }
 
+    /** 最近播放删掉一条。只在本机、不进同步，也就不留墓碑；撤销按原时间写回（[restoreSavedSongs]）。 */
+    fun removePlayHistory(key: String) = viewModelScope.launch {
+        app.database.dao().remove("history", key)
+    }
+
     /** 撤销取消收藏 / 清除记录：按原时间写回。 */
     fun restoreSavedSongs(songs: List<SavedSong>) = viewModelScope.launch {
         val dao = app.database.dao()

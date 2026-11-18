@@ -231,6 +231,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun restoreEntry(entry: com.mytv.mymusic.data.PlaylistEntryEntity) =
         model.insertPlaylistEntry(entry.playlistId, entry.position, entry.songKey, entry.payload)
     fun clearPlayHistory() = model.clearPlayHistory()
+    fun removePlayHistory(key: String) = model.removePlayHistory(key)
     fun restoreSaved(songs: List<com.mytv.mymusic.data.SavedSong>) = model.restoreSavedSongs(songs)
     fun importLink(link: String) = model.openLink(link)
 
@@ -629,6 +630,8 @@ fun TrackActionsSheet(
     hideArtist: String = "",
     /** 已经在这张专辑的页面里：不给“查看专辑”。 */
     hideAlbum: String = "",
+    /** 最近播放里的“从最近播放删除”（红色，排在最后，和“从歌单移除”同一种行）；别的列表为 null。 */
+    onRemoveFromHistory: (() -> Unit)? = null,
 ) {
     var showPlaylists by remember { mutableStateOf(false) }
     com.mytv.mymusic.ui.components.AdaptiveSheet(
@@ -667,6 +670,7 @@ fun TrackActionsSheet(
                     onOpenSource?.let { SheetRow(Icons.Filled.SwapHoriz, "选择音源 / 查看其他版本", false, it) },
                     onMerge?.let { SheetRow(Icons.AutoMirrored.Filled.CallMerge, "合并到…", false, it) },
                     onRemoveFromPlaylist?.let { SheetRow(Icons.Filled.Delete, "从歌单移除", true, it) },
+                    onRemoveFromHistory?.let { SheetRow(Icons.Filled.Delete, "从最近播放删除", true, it) },
                     onWallLocate?.let { SheetRow(Icons.Filled.MyLocation, "回到正在播放", false, it) },
                     onWallSettings?.let { SheetRow(Icons.Filled.Tune, "海报墙设置", false, it) },
                 )
