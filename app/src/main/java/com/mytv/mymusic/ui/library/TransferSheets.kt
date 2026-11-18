@@ -5,6 +5,8 @@ import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,11 +29,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -63,18 +70,33 @@ import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.transfer.ExportList
 import com.mytv.mymusic.data.transfer.ExportPreview
+import com.mytv.mymusic.data.transfer.ImportChoice
+import com.mytv.mymusic.data.transfer.ImportPlan
+import com.mytv.mymusic.data.transfer.ImportTarget
+import com.mytv.mymusic.data.transfer.ImportedList
+import com.mytv.mymusic.data.transfer.LxFixed
 import com.mytv.mymusic.data.transfer.PLAYLIST_FILE_MIME
+import com.mytv.mymusic.data.transfer.importSkippedText
+import com.mytv.mymusic.data.transfer.applySameNameToggle
+import com.mytv.mymusic.data.transfer.defaultChoices
+import com.mytv.mymusic.data.transfer.selectedCount
+import com.mytv.mymusic.data.transfer.targetLabel
+import com.mytv.mymusic.data.transfer.targetsFor
 import com.mytv.mymusic.ui.MusicActions
+import com.mytv.mymusic.ui.TransferUi
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.AppLoading
+import com.mytv.mymusic.ui.components.ConnectedToggleGroup
 import com.mytv.mymusic.ui.components.ListRow
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalSheetClose
 import com.mytv.mymusic.ui.components.ProviderIcon
 import com.mytv.mymusic.ui.components.SectionLabel
+import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.providerName
 
@@ -331,6 +353,260 @@ private fun ColumnScope.ExportConfirmStep(preview: ExportPreview?, actions: Musi
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
+    }
+}
+
+// ======================= 从文件导入：预览（设计稿 06 节 ⑬） =======================
+
+/**
+ * 导入预览：外壳按 [transfer] 挂，从哪一页导入都盖在上面（电视扫码收到的文件也直接弹）。
+ * 读文件、本地匹配、咪咕换取时是同一个面板显示进度；关掉就是放弃这次导入。
+ */
+@Composable
+internal fun ImportPreviewSheet(transfer: TransferUi, actions: MusicActions) {
+    val plan = when (transfer) {
+        is TransferUi.Preview -> transfer.plan
+        is TransferUi.Applying -> transfer.plan
+        else -> null
+    }
+    val reading = transfer as? TransferUi.Reading
+    val subtitle = when {
+        plan != null -> listOf(
+            (if (plan.fromPhone) "手机传来 " else "") + plan.fileName,
+            plan.sourceLabel,
+            "${plan.lists.size} 个歌单",
+        ).joinToString(" · ")
+        reading != null -> (if (reading.fromPhone) "手机传来 " else "") + reading.fileName
+        else -> ""
+    }
+    AdaptiveSheet(onDismiss = actions::dismissImport, title = "从文件导入", subtitle = subtitle) {
+        if (plan == null) {
+            val tv = LocalAppWindow.current.isTv
+            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                AppLoading(text = reading?.step ?: "正在读取…")
+                TextButton(
+                    onClick = actions::dismissImport,
+                    modifier = Modifier.sheetDefaultFocus(tv).tvFocusRing(RoundedCornerShape(20.dp)),
+                ) { Text("取消") }
+            }
+        } else {
+            ImportPreviewBody(plan, applying = transfer is TransferUi.Applying, actions = actions)
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ColumnScope.ImportPreviewBody(plan: ImportPlan, applying: Boolean, actions: MusicActions) {
+    val tv = LocalAppWindow.current.isTv
+    val hasSameName = plan.lists.any { plan.sameName[it.sourceId]?.bound == false && it.fixed != LxFixed.Love }
+    var merge by remember(plan) { mutableStateOf(true) }
+    var overridden by remember(plan) { mutableStateOf(emptySet<String>()) }
+    var choices by remember(plan) { mutableStateOf(defaultChoices(plan, mergeSameName = true)) }
+    val (listCount, songCount) = selectedCount(plan, choices)
+    // 第一行能勾的给默认焦点
+    val firstEnabled = plan.lists.indexOfFirst { it.importable > 0 }.coerceAtLeast(0)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .weight(1f, fill = false)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+    ) {
+        val note = buildString {
+            append(if (plan.lx) "认出是洛雪导出的歌单文件。" else "认出是 myMusic 歌单文件。")
+            append("勾选要导入的；导入后是普通自建歌单，会跟着同步。")
+            if (plan.legacy) append("旧版格式，已按洛雪的规则转换。")
+            if (plan.newerVersion) append("文件来自更新的版本，部分信息可能丢失。")
+        }
+        Text(
+            note,
+            Modifier.padding(horizontal = 8.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.size(12.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            plan.lists.forEachIndexed { index, list ->
+                val choice = choices[list.sourceId] ?: ImportChoice(false, ImportTarget.New)
+                ImportListRow(
+                    plan = plan,
+                    list = list,
+                    choice = choice,
+                    index = index,
+                    count = plan.lists.size,
+                    enabled = !applying,
+                    modifier = if (index == firstEnabled) Modifier.sheetDefaultFocus(tv) else Modifier,
+                    onToggle = { choices = choices + (list.sourceId to choice.copy(include = !choice.include)) },
+                    onTarget = { target ->
+                        choices = choices + (list.sourceId to choice.copy(target = target))
+                        overridden = overridden + list.sourceId
+                    },
+                )
+            }
+        }
+        if (hasSameName) {
+            SectionLabel("同名歌单")
+            ConnectedToggleGroup(
+                options = listOf(true, false),
+                selected = merge,
+                onSelect = { value ->
+                    merge = value
+                    choices = applySameNameToggle(plan, choices, overridden, value)
+                },
+                label = { if (it) "合并" else "另建一个" },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            )
+        }
+        val skippedText = importSkippedText(plan)
+        if (skippedText.isNotBlank()) {
+            SectionLabel("导不了的")
+            Text(
+                skippedText,
+                Modifier.padding(horizontal = 8.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (plan.migu > plan.miguResolved) {
+            TextButton(
+                onClick = actions::recheckImport,
+                enabled = !applying,
+                modifier = Modifier.padding(top = 4.dp).tvFocusRing(RoundedCornerShape(20.dp)),
+            ) { Text("重新换取咪咕歌曲") }
+        }
+        Spacer(Modifier.size(8.dp))
+    }
+    // 按钮固定在列表外面：方向键下到底一定能落上
+    Button(
+        onClick = { actions.applyImport(choices) },
+        enabled = !applying && listCount > 0,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+            .heightIn(min = 52.dp)
+            .tvFocusRing(RoundedCornerShape(26.dp)),
+    ) {
+        Text(
+            when {
+                applying -> "正在导入…"
+                listCount == 0 -> "没有勾选歌单"
+                else -> "导入 $listCount 个歌单 · $songCount 首"
+            },
+            style = MaterialTheme.typography.titleSmall,
+        )
+    }
+}
+
+/** 一个歌单：勾选框 + 名字 + 首数，下面是目标（点开选）和平台小块。整行点一下切换勾选。 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ImportListRow(
+    plan: ImportPlan,
+    list: ImportedList,
+    choice: ImportChoice,
+    index: Int,
+    count: Int,
+    enabled: Boolean,
+    modifier: Modifier,
+    onToggle: () -> Unit,
+    onTarget: (ImportTarget) -> Unit,
+) {
+    val usable = list.importable > 0
+    val shape = segmentShape(index, count)
+    val checked = choice.include && usable
+    Row(
+        modifier
+            .fillMaxWidth()
+            .tvFocusRing(shape, scale = 1.02f)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .then(if (usable && enabled) Modifier.clickable(onClick = onToggle) else Modifier)
+            .semantics {
+                role = Role.Checkbox
+                toggleableState = ToggleableState(checked)
+            }
+            .padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            Checkbox(checked = checked, onCheckedChange = null, enabled = usable && enabled)
+        }
+        Column(Modifier.weight(1f).padding(top = 12.dp)) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    list.name,
+                    Modifier.weight(1f, fill = false),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("${list.shown} 首", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (!usable) {
+                Text("没有能导入的歌", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                TargetPicker(plan, list, choice.target, enabled = enabled && checked, onTarget = onTarget)
+            }
+            val chips = list.platformCounts.entries.sortedByDescending { it.value }.map { Triple(it.key, it.value, false) } +
+                list.skippedPlatforms.entries.sortedByDescending { it.value }.map { Triple(it.key, it.value, true) }
+            if (chips.isNotEmpty()) {
+                FlowRow(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                        .clearAndSetSemantics {
+                            contentDescription = chips.joinToString("，") { (p, n, skipped) ->
+                                "${platformLabel(p)} $n 首" + if (skipped) "导不了" else ""
+                            }
+                        },
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    chips.forEach { (p, n, skipped) -> PlatformChip(p, n, skipped) }
+                }
+            }
+        }
+    }
+}
+
+/** 目标「合并到收藏 ▾」：只有一个可选时不出下拉。电视上它是行里单独一个可聚焦按钮。 */
+@Composable
+private fun TargetPicker(plan: ImportPlan, list: ImportedList, target: ImportTarget, enabled: Boolean, onTarget: (ImportTarget) -> Unit) {
+    val options = targetsFor(plan, list)
+    var open by remember { mutableStateOf(false) }
+    val label = targetLabel(plan, list, target)
+    if (options.size <= 1) {
+        Text(label, Modifier.padding(vertical = 4.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        return
+    }
+    Box {
+        Row(
+            Modifier
+                .padding(vertical = 2.dp)
+                .tvFocusRing(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = enabled, onClickLabel = "改导入方式") { open = true }
+                .padding(vertical = 4.dp, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Filled.ArrowDropDown, null, tint = MaterialTheme.colorScheme.primary)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, shape = RoundedCornerShape(20.dp)) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(targetLabel(plan, list, option)) },
+                    leadingIcon = if (option == target) ({ Icon(Icons.Filled.Check, null) }) else null,
+                    onClick = {
+                        open = false
+                        onTarget(option)
+                    },
+                )
+            }
+        }
     }
 }
 

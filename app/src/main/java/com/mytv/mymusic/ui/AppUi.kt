@@ -362,6 +362,15 @@ class MusicActions(private val model: MusicViewModel) {
     fun saveExport(preview: com.mytv.mymusic.data.transfer.ExportPreview, uri: Uri) = model.saveExport(preview, uri)
     val favorites: kotlinx.coroutines.flow.StateFlow<List<com.mytv.mymusic.data.SavedSong>> get() = model.favorites
 
+    /** 从文件导入：先嗅探，歌单文件 / 洛雪出预览，整库备份照旧合并。 */
+    fun openImport(uri: Uri) = model.openImport(uri)
+    fun openImport(bytes: ByteArray, displayName: String, fromPhone: Boolean = false) = model.openImport(bytes, displayName, fromPhone)
+    fun applyImport(choices: Map<String, com.mytv.mymusic.data.transfer.ImportChoice>) = model.applyImport(choices)
+    fun recheckImport() = model.recheckImport()
+    fun dismissImport() = model.dismissImport()
+    val transfer: kotlinx.coroutines.flow.StateFlow<TransferUi> get() = model.transfer
+    val importDone: kotlinx.coroutines.flow.StateFlow<Int> get() = model.importDone
+
     fun checkUpdates() = model.checkForUpdates()
     suspend fun checkUpdatesNow(): com.mytv.mymusic.data.update.UpdateUiState = model.checkForUpdatesNow()
     fun downloadUpdate() = model.downloadUpdate()

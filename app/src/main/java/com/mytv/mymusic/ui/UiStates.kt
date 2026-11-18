@@ -205,3 +205,15 @@ sealed interface UiEvent {
 }
 
 data class LinkPreview(val link: Boolean, val text: String)
+
+/** 从文件导入的进度（设计稿 06 节 ⑬）：读文件 → 预览 → 写库。外壳按它挂导入预览面板，从哪一页导入都盖在上面。 */
+sealed interface TransferUi {
+    data object Idle : TransferUi
+
+    /** 读文件、本地匹配、咪咕换取；[step] 是面板上的进度文字。 */
+    data class Reading(val fileName: String, val step: String, val fromPhone: Boolean = false) : TransferUi
+
+    data class Preview(val plan: com.mytv.mymusic.data.transfer.ImportPlan) : TransferUi
+
+    data class Applying(val plan: com.mytv.mymusic.data.transfer.ImportPlan) : TransferUi
+}

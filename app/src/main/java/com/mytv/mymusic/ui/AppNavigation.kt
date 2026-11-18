@@ -163,6 +163,7 @@ fun MyMusicApp(model: MusicViewModel) {
     val position = model.position.collectAsState()
     val update by model.updateDetails.collectAsState()
     val updateProgress = model.updateState.collectAsState()
+    val transfer by model.transfer.collectAsState()
 
     val actions = remember(model) { MusicActions(model) }
     val snackbar = remember { SnackbarHostState() }
@@ -526,6 +527,10 @@ fun MyMusicApp(model: MusicViewModel) {
         // 列表滑动的「加到歌单」：和播放页同一个勾选面板
         swipePlaylistSong?.let { song ->
             AddToPlaylistSheet(song = song, providers = state.providers, actions = actions, onDismiss = { swipePlaylistSong = null })
+        }
+        // 从文件导入的预览（设计稿 06 节 ⑬）：从哪一页导入都盖在上面，电视扫码收到的文件也直接弹
+        if (transfer !is TransferUi.Idle) {
+            com.mytv.mymusic.ui.library.ImportPreviewSheet(transfer, actions)
         }
         // 本地歌的上传面板（设计稿第 ⑥ 张）：本地音乐页、歌曲信息、加进歌单后的提示都从这里打开
         com.mytv.mymusic.ui.local.LocalUploadSheetHost(

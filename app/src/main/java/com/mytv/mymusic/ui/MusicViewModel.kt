@@ -6248,7 +6248,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun importLibrary(uri: Uri, strategy: SyncStrategy = SyncStrategy.Merge) {
-        viewModelScope.launch { app.sync.import(uri, strategy) }
+        // 先嗅探：整库备份照旧合并，歌单文件、洛雪文件出预览
+        if (strategy == SyncStrategy.Merge) openImport(uri) else viewModelScope.launch { app.sync.import(uri, strategy) }
     }
 
     // ---------- 歌单文件导出 / 导入（设计稿 06 节） ----------
@@ -6258,8 +6259,151 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             library = libraryDao,
             music = app.database.dao(),
             localRefs = { app.sync.localRefs },
+            localSongs = {
+                // 本地音乐库是懒加载的：只在文件里有本地歌时才碰它，最多等 5 秒读完
+                val index = withTimeoutOrNull(5_000) { app.localLibrary.index.first { it.loaded } }
+                index?.byId?.values.orEmpty().filter { it.onDevice }
+                    .map { com.mytv.mymusic.data.transfer.LocalCandidate(it.song, it.row.displayName) }
+            },
+            migu = { ids, onBatch ->
+                (com.mytv.mymusic.data.native.NativeProviders.get("migu") as? com.mytv.mymusic.data.native.MiguProvider)
+                    ?.songsByCopyright(ids, onBatch).orEmpty()
+            },
+            knownProvider = { it == LOCAL_SOURCE || com.mytv.mymusic.data.native.NativeProviders.get(it) != null },
         )
     }
+
+    private val _transfer = MutableStateFlow<TransferUi>(TransferUi.Idle)
+
+    /** 从文件导入的进度；外壳按它挂导入预览面板。 */
+    val transfer: StateFlow<TransferUi> = _transfer.asStateFlow()
+
+    /** 导入完成（成功写了至少一个歌单）就加一；电视扫码网页据此显示「已导入」。 */
+    private val _importDone = MutableStateFlow(0)
+    val importDone: StateFlow<Int> = _importDone.asStateFlow()
+
+    private var importJob: Job? = null
+
+    /** 正在预览的文件：「重新换取」按它重算。 */
+    private var importSource: ImportSource? = null
+
+    private class ImportSource(
+        val content: com.mytv.mymusic.data.transfer.TransferContent,
+        val fileName: String,
+        val fromPhone: Boolean,
+    )
+
+    /** 从文件导入（系统文件选择器选的）：最多读 32MB，再按内容分流。 */
+    fun openImport(uri: Uri) {
+        importJob?.cancel()
+        importJob = viewModelScope.launch {
+            val context = getApplication<Application>()
+            val name = withContext(Dispatchers.IO) { displayNameOf(uri) }
+            val bytes = try {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use {
+                        com.mytv.mymusic.data.transfer.TransferReader.readBounded(it, com.mytv.mymusic.data.transfer.TransferReader.MAX_FILE_BYTES)
+                    } ?: throw java.io.IOException("无法读取所选文件")
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                message(error.message ?: "无法读取所选文件", error = true)
+                return@launch
+            }
+            if (bytes == null) {
+                message("文件太大（超过 32MB）", error = true)
+                return@launch
+            }
+            handleImport(bytes, name, fromPhone = false)
+        }
+    }
+
+    /** 电视扫码时手机传来的文件也走这里。 */
+    fun openImport(bytes: ByteArray, displayName: String, fromPhone: Boolean = false) {
+        importJob?.cancel()
+        importJob = viewModelScope.launch { handleImport(bytes, displayName, fromPhone) }
+    }
+
+    private suspend fun handleImport(bytes: ByteArray, name: String, fromPhone: Boolean) {
+        val content = withContext(Dispatchers.Default) { com.mytv.mymusic.data.transfer.TransferReader.read(bytes) }
+        when (content) {
+            // 整库备份照旧直接合并，提示一字不改
+            is com.mytv.mymusic.data.transfer.TransferContent.Library -> {
+                _transfer.value = TransferUi.Idle
+                app.sync.importText(content.text, SyncStrategy.Merge)
+            }
+            is com.mytv.mymusic.data.transfer.TransferContent.Unsupported -> {
+                _transfer.value = TransferUi.Idle
+                message(content.message, error = true)
+            }
+            else -> {
+                importSource = ImportSource(content, name, fromPhone)
+                planImport()
+            }
+        }
+    }
+
+    private suspend fun planImport() {
+        val source = importSource ?: return
+        _transfer.value = TransferUi.Reading(source.fileName, "正在读取…", source.fromPhone)
+        val plan = try {
+            withContext(Dispatchers.IO) {
+                playlistTransfer.plan(source.content, source.fileName, source.fromPhone) { step ->
+                    _transfer.update { if (it is TransferUi.Reading) it.copy(step = step) else it }
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            _transfer.value = TransferUi.Idle
+            message("读取歌单失败：${error.message.orEmpty()}", error = true)
+            return
+        }
+        _transfer.value = TransferUi.Preview(plan)
+    }
+
+    /** 咪咕有没换到的：再换一次。 */
+    fun recheckImport() {
+        if (_transfer.value !is TransferUi.Preview) return
+        importJob?.cancel()
+        importJob = viewModelScope.launch { planImport() }
+    }
+
+    /** 关掉预览 = 放弃这次导入；正在写库时不打断。 */
+    fun dismissImport() {
+        if (_transfer.value is TransferUi.Applying) return
+        importJob?.cancel()
+        importJob = null
+        importSource = null
+        _transfer.value = TransferUi.Idle
+    }
+
+    fun applyImport(choices: Map<String, com.mytv.mymusic.data.transfer.ImportChoice>) {
+        val plan = (_transfer.value as? TransferUi.Preview)?.plan ?: return
+        _transfer.value = TransferUi.Applying(plan)
+        importJob = launchPlaylistEdit {
+            val result = try {
+                withContext(Dispatchers.IO) { playlistTransfer.apply(plan, choices) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                com.mytv.mymusic.data.transfer.ImportResult(0, 0, 0, 0, 1, firstError = error.message.orEmpty())
+            }
+            importSource = null
+            _transfer.value = TransferUi.Idle
+            if (result.lists > 0) {
+                app.sync.onLocalChange()
+                _importDone.update { it + 1 }
+            }
+            message(importResultText(result), error = result.lists == 0 && result.failed > 0)
+        }
+    }
+
+    private fun displayNameOf(uri: Uri): String = runCatching {
+        getApplication<Application>().contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: uri.lastPathSegment?.substringAfterLast('/').orEmpty().ifBlank { "所选文件" }
 
     /** 导出面板打开时算一次：歌单名、各平台首数、文件名。[ids] 里的 `@favorites` 是我的收藏。 */
     suspend fun exportPreview(ids: List<String>): com.mytv.mymusic.data.transfer.ExportPreview =
@@ -6274,6 +6418,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
         "myMusic ${info.versionName} ($code)"
     }.getOrDefault("myMusic")
+
+    /** 导入完的提示：「已导入 3 个歌单，共 298 首（12 首原来就在）」；有失败的写清几个失败。 */
+    private fun importResultText(result: com.mytv.mymusic.data.transfer.ImportResult): String = buildString {
+        if (result.lists == 0) {
+            append(if (result.failed > 0) "导入失败：${result.firstError}" else "没有导入任何歌单")
+            return@buildString
+        }
+        if (result.failed > 0) {
+            append("${result.lists} 个歌单导入了，${result.failed} 个失败：${result.firstError}")
+            return@buildString
+        }
+        append("已导入 ${result.lists} 个歌单，共 ${result.added} 首")
+        if (result.alreadyIn > 0) append("（${result.alreadyIn} 首原来就在）")
+    }
 
     /** 系统分享：写进 cache/exports/（同时只留这一份）再走 FileProvider + ACTION_SEND，照 [exportLog] 的写法。 */
     fun shareExport(preview: com.mytv.mymusic.data.transfer.ExportPreview) {

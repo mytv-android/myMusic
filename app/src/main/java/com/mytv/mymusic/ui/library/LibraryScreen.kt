@@ -123,7 +123,6 @@ import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.SavedSong
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.sync.SyncStatus
-import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.data.sync.SyncUiState
 import com.mytv.mymusic.ui.Cover
 import com.mytv.mymusic.ui.EmptyState
@@ -669,7 +668,7 @@ private fun TvLibrary(
                     )
                 }
                 Text(
-                    "“从文件导入”读取在手机上导出的 JSON，与本机歌单合并。",
+                    "“从文件导入”认得本应用歌单、整库备份和洛雪 .lxmc；没有文件选择器时用手机扫码传。",
                     Modifier.padding(start = 4.dp, top = 12.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1301,17 +1300,20 @@ private fun LinkImportDialog(isLink: (String) -> Boolean, onImport: (String) -> 
     )
 }
 
-/** 从文件导入：系统文件选择器（SAF），与本机歌单合并。 */
+/**
+ * 从文件导入：系统文件选择器（SAF）。按内容认：本应用歌单文件、洛雪 .lxmc / .json 先出预览，整库备份照旧合并。
+ * 类型放开成 any——.lxmc 没有登记的 MIME（gzip 报 application/gzip 或 octet-stream），限定类型就选不到。
+ */
 @Composable
 internal fun rememberImportLauncher(actions: MusicActions): () -> Unit {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { actions.importLibrary(it, SyncStrategy.Merge) }
+        uri?.let(actions::openImport)
     }
     val onMissing = rememberMissingPicker()
     return remember(launcher, onMissing) {
         {
             try {
-                launcher.launch(arrayOf("application/json", "text/plain"))
+                launcher.launch(arrayOf("*/*"))
             } catch (error: ActivityNotFoundException) {
                 onMissing()
             }

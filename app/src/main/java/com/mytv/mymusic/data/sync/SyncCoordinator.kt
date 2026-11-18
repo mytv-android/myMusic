@@ -1176,10 +1176,20 @@ class SyncCoordinator(
         false
     }
 
-    suspend fun import(uri: Uri, strategy: SyncStrategy = SyncStrategy.Merge): Boolean = try {
-        val raw = context.contentResolver.openInputStream(uri)?.use { input ->
-            input.readBytes().toString(Charsets.UTF_8)
-        } ?: error("无法读取所选文件")
+    suspend fun import(uri: Uri, strategy: SyncStrategy = SyncStrategy.Merge): Boolean {
+        val raw = try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                input.readBytes().toString(Charsets.UTF_8)
+            } ?: error("无法读取所选文件")
+        } catch (error: Exception) {
+            emit(error.message ?: "导入失败", error = true)
+            return false
+        }
+        return importText(raw, strategy)
+    }
+
+    /** 整库备份的正文（已经读出来、认出是同步文件的）按 [strategy] 合并进本机；从文件导入先嗅探再走这里。 */
+    suspend fun importText(raw: String, strategy: SyncStrategy = SyncStrategy.Merge): Boolean = try {
         val remote = SyncJson.decode(raw)
         if (strategy == SyncStrategy.Remote && !ensureBackup()) return false
         val local = localSnapshot()
