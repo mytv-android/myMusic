@@ -9,7 +9,11 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -27,8 +31,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material3.FloatingToolbarDefaults
-import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,10 +53,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,17 +79,17 @@ import kotlin.math.roundToInt
 private val NavBarHeight = 64.dp
 private val MiniHeight = 64.dp
 private val MiniGap = 8.dp
-/** FloatingToolbar 离屏幕底边和左右边的距离（ContainerExternalPadding）。 */
+/** 没歌在播时的浮动导航条离屏幕底边（手势条上沿）和左右边的距离。 */
 private val FloatingMargin = 16.dp
 
 /**
  * 浮层总高度（不含系统导航栏），列表底部要让出这么多。
- * 有歌在播时是迷你播放器 + 短导航栏；没歌在播时只有悬浮工具栏，它离底边还有 16dp。
+ * 有歌在播时是迷你播放器 + 短导航栏；没歌在播时只有浮动导航条，它离底边还有 16dp。
  */
 fun phoneOverlayHeight(hasMini: Boolean): Dp =
     if (hasMini) NavBarHeight + MiniHeight + MiniGap * 2 else NavBarHeight + FloatingMargin
 
-/** 手机底部：有歌在播时是悬浮迷你播放器 + 贴底短导航栏；没歌在播时换成悬浮工具栏。 */
+/** 手机底部：有歌在播时是悬浮迷你播放器 + 贴底短导航栏；没歌在播时换成浮动导航条（[FloatingNavBar]）。 */
 @Composable
 fun PhoneBottomBar(
     state: MusicUiState,
@@ -127,7 +127,7 @@ fun PhoneBottomBar(
                 }
             }
         } else {
-            // 外层占满整行只为居中，工具栏本身按内容收缩；系统导航栏的高度也要让出来
+            // 外层占满整行只为居中，导航条本身按内容收缩；系统导航栏的高度也要让出来
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -136,63 +136,58 @@ fun PhoneBottomBar(
                     .padding(bottom = FloatingMargin),
                 contentAlignment = Alignment.Center,
             ) {
-                FloatingToolbar(selected = selected, onSelect = onSelect, blur = blur, container = container)
+                FloatingNavBar(selected = selected, onSelect = onSelect, blur = blur, container = container)
             }
         }
     }
 }
 
-/** 槽位固定 56 × 48；工具栏自身只有 64dp 高的下界，子项不能撑满高度。 */
-private val SlotWidth = 56.dp
-private val SlotHeight = 48.dp
+/** 浮动导航条一项的宽：4 项加左右各 8dp ≈ 304dp。 */
+private val PillItemWidth = 72.dp
+private val PillPadding = 8.dp
 
-/** 没歌在播时的底栏：M3E 悬浮工具栏，选中项用 secondaryContainer 底，和贴底导航栏的指示器一致。 */
+/**
+ * 没歌在播时的底栏：浮动导航条（设计稿 09 节，选定 A）。项直接用贴底那条的 [ShortNavigationBarItem]：
+ * 24dp 图标放在 56×32 的指示器里、下面 12sp 字，选中是实心图标加 secondaryContainer 指示器，水波纹只铺在指示器上，
+ * 读屏是带选中态的 Tab。开始放歌换成贴底导航栏时只是容器变了，图标和字不跳。
+ * 容器 64dp 起、全圆角，每项 72dp、整条居中；surfaceContainer 88%（开模糊是磨砂，关模糊是实色），
+ * 阴影 Level 2，浅色主题再加一圈 1dp outlineVariant 40% 描边——压在白列表上也看得出是浮着的；深色只有阴影。
+ * 大字号时跟着长高，不裁字。
+ */
 @Composable
-private fun FloatingToolbar(
+private fun FloatingNavBar(
     selected: String,
     onSelect: (String) -> Unit,
     blur: Boolean,
     container: Color,
     modifier: Modifier = Modifier,
 ) {
-    // FloatingToolbarDefaults.ContainerShape 走主题的 extraLarge（28dp），大屏手机上是圆角矩形而不是胶囊；
-    // 这里的槽位自己就是 50% 圆角，容器同样按 50% 裁，两端才是半圆
     val shape = RoundedCornerShape(percent = 50)
-    HorizontalFloatingToolbar(
-        expanded = true,
-        modifier = modifier
-            // frosted 的模糊层和底色都按矩形画，不裁的话胶囊会变成一个方角灰块
+    // 跟着外壳配色走（详情页海报视图会换成深色），不看系统深浅色
+    val light = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+    val outline = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+    Row(
+        modifier
+            // M3 Level 2 = 3dp
+            .shadow(3.dp, shape)
             .clip(shape)
-            .then(if (blur) Modifier.frosted(container.copy(alpha = 0.72f), shape) else Modifier),
-        shape = shape,
-        colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
-            toolbarContainerColor = if (blur) Color.Transparent else container,
-        ),
+            // frosted 的模糊层按矩形画，前面的 clip 把它裁成胶囊
+            .then(if (blur) Modifier.frosted(container.copy(alpha = 0.88f), shape) else Modifier.background(container, shape))
+            .then(if (light) Modifier.border(1.dp, outline, shape) else Modifier)
+            .heightIn(min = NavBarHeight)
+            .padding(horizontal = PillPadding)
+            .selectableGroup(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         TopTab.entries.forEach { tab ->
             val on = selected == tab.route
-            // 定宽定高，不用 fillMaxHeight：工具栏的内容行拿到的是整屏高度上限，撑满会把容器拉到屏幕高
-            Column(
-                modifier = Modifier
-                    .size(SlotWidth, SlotHeight)
-                    .clip(RoundedCornerShape(percent = 50))
-                    .then(if (on) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
-                    .clickable(role = Role.Tab) { onSelect(tab.route) }
-                    .semantics {
-                        this.selected = on
-                        contentDescription = tab.label
-                    },
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Icon(if (on) tab.selectedIcon else tab.icon, null, Modifier.size(22.dp))
-                Text(
-                    tab.label,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold,
-                    maxLines = 1,
-                )
-            }
+            ShortNavigationBarItem(
+                selected = on,
+                onClick = { onSelect(tab.route) },
+                icon = { Icon(if (on) tab.selectedIcon else tab.icon, null) },
+                label = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                modifier = Modifier.width(PillItemWidth),
+            )
         }
     }
 }
