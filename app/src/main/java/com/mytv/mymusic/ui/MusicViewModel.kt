@@ -6278,11 +6278,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** 从文件导入的进度；外壳按它挂导入预览面板。 */
     val transfer: StateFlow<TransferUi> = _transfer.asStateFlow()
 
-    /** 导入完成（成功写了至少一个歌单）就加一；电视扫码网页据此显示「已导入」。 */
+    /** 导入完成（写了至少一个歌单，或整库备份合并成功）就加一；电视扫码网页据此显示「已导入」。 */
     private val _importDone = MutableStateFlow(0)
     val importDone: StateFlow<Int> = _importDone.asStateFlow()
 
     private var importJob: Job? = null
+
+    /** 手机传来的整库备份正在合并：合并到一半不能取消。 */
+    private var mergingLibrary = false
 
     /** 正在预览的文件：「重新换取」按它重算。 */
     private var importSource: ImportSource? = null
@@ -6319,9 +6322,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 电视扫码时手机传来的文件也走这里。 */
+    /** 电视扫码时手机传来的文件也走这里；立刻出「正在读取」，电视上扫码面板一收起导入面板就接上。 */
     fun openImport(bytes: ByteArray, displayName: String, fromPhone: Boolean = false) {
         importJob?.cancel()
+        _transfer.value = TransferUi.Reading(displayName, "正在读取…", fromPhone)
         importJob = viewModelScope.launch { handleImport(bytes, displayName, fromPhone) }
     }
 
@@ -6330,8 +6334,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         when (content) {
             // 整库备份照旧直接合并，提示一字不改
             is com.mytv.mymusic.data.transfer.TransferContent.Library -> {
-                _transfer.value = TransferUi.Idle
-                app.sync.importText(content.text, SyncStrategy.Merge)
+                _transfer.update { if (it is TransferUi.Reading) it.copy(step = "正在合并整库备份…") else it }
+                mergingLibrary = true
+                try {
+                    withContext(NonCancellable) {
+                        if (app.sync.importText(content.text, SyncStrategy.Merge)) _importDone.update { it + 1 }
+                    }
+                } finally {
+                    mergingLibrary = false
+                    _transfer.value = TransferUi.Idle
+                }
             }
             is com.mytv.mymusic.data.transfer.TransferContent.Unsupported -> {
                 _transfer.value = TransferUi.Idle
@@ -6372,7 +6384,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 关掉预览 = 放弃这次导入；正在写库时不打断。 */
     fun dismissImport() {
-        if (_transfer.value is TransferUi.Applying) return
+        if (_transfer.value is TransferUi.Applying || mergingLibrary) return
         importJob?.cancel()
         importJob = null
         importSource = null

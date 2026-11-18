@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0f1513">
+  <meta name="referrer" content="no-referrer">
+  <title>传歌单文件 · myMusic TV</title>
+  <link rel="stylesheet" href="transfer.css">
+  <link rel="stylesheet" href="theme.css">
+  <script src="transfer.js" defer></script>
+</head>
+<body>
+  <header class="app-bar">
+    <div class="brand" aria-label="myMusic">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M9 18V6.7c0-.8.6-1.5 1.4-1.6l8-1.4v10.1M9 10l9.4-1.7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="18" r="2.5" fill="currentColor"/><circle cx="15.9" cy="13.8" r="2.5" fill="currentColor"/></svg>
+      </span>
+      <span>myMusic</span>
+    </div>
+    <span class="local-badge"><span class="local-dot" aria-hidden="true"></span>与电视直连</span>
+  </header>
+
+  <main class="page">
+    <section class="intro" aria-labelledby="page-title">
+      <div class="shape-icon" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none"><path d="M10 5h9l6 6v14a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M19 5v6h6" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M16 23v-8m0 0-3 3m3-3 3 3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div>
+        <h1 id="page-title">把歌单文件传到电视</h1>
+        <p id="page-intro">文件只发给这台电视，电视上先出预览，确认后才导入。</p>
+      </div>
+    </section>
+
+    <section class="card" aria-label="传文件">
+      <div id="upload-panel" hidden>
+        <label class="file-picker" for="file">
+          <span class="file-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H10l2 2h5.5A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="file-text">
+            <b id="file-name">选择文件</b>
+            <small id="file-meta">myMusic 歌单（.mymusic.json）、整库备份或洛雪（.lxmc / .json）</small>
+          </span>
+          <input id="file" type="file" accept=".lxmc,.json,application/json,application/octet-stream">
+        </label>
+
+        <div id="progress" class="progress" role="progressbar" aria-label="上传进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+          <span id="progress-bar" class="progress-bar"></span>
+        </div>
+
+        <button id="send" class="primary-button" type="button" disabled>
+          <svg class="button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 16V5m0 0-4 4m4-4 4 4M5 19h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span id="send-label">发送到电视</span>
+        </button>
+      </div>
+
+      <div id="download-panel" hidden>
+        <p class="lead" id="download-name"></p>
+        <a id="download" class="primary-button" href="api/download" download>
+          <svg class="button-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v11m0 0-4-4m4 4 4-4M5 19h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span id="download-label">下载</span>
+        </a>
+        <p class="hint">在另一台装了 myMusic 的设备上用「我的 › 新建 › 从文件导入」打开。</p>
+      </div>
+
+      <section id="status-card" class="status-card" aria-live="polite" hidden>
+        <span class="status-dot" aria-hidden="true"></span>
+        <div>
+          <h2 id="status-title"></h2>
+          <p id="status-detail"></p>
+        </div>
+      </section>
+      <noscript><p class="status-card error">请启用浏览器 JavaScript。</p></noscript>
+    </section>
+  </main>
+
+  <footer>此页面由电视临时提供，不经过第三方服务器。电视上关掉这一页、或 10 分钟后自动失效。</footer>
+</body>
+</html>

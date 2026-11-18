@@ -2,6 +2,8 @@ package com.mytv.mymusic.ui.library
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -32,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
@@ -40,17 +44,22 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -60,6 +69,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -72,7 +82,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.mytv.mymusic.data.transfer.ExportFile
 import com.mytv.mymusic.data.transfer.ExportList
+import com.mytv.mymusic.data.transfer.FileTransferServer
 import com.mytv.mymusic.data.transfer.ExportPreview
 import com.mytv.mymusic.data.transfer.ImportChoice
 import com.mytv.mymusic.data.transfer.ImportPlan
@@ -80,6 +95,9 @@ import com.mytv.mymusic.data.transfer.ImportTarget
 import com.mytv.mymusic.data.transfer.ImportedList
 import com.mytv.mymusic.data.transfer.LxFixed
 import com.mytv.mymusic.data.transfer.PLAYLIST_FILE_MIME
+import com.mytv.mymusic.data.transfer.TransferMode
+import com.mytv.mymusic.data.transfer.TransferPhase
+import com.mytv.mymusic.data.transfer.UploadResult
 import com.mytv.mymusic.data.transfer.importSkippedText
 import com.mytv.mymusic.data.transfer.applySameNameToggle
 import com.mytv.mymusic.data.transfer.defaultChoices
@@ -99,6 +117,14 @@ import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.providerName
+import com.mytv.mymusic.ui.settings.QrCodeImage
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ======================= 导出歌单（设计稿 06 节 ⑪ ⑫） =======================
 
@@ -117,17 +143,28 @@ internal fun ExportSheet(ids: List<String>?, actions: MusicActions, onDismiss: (
         if (current != null) value = actions.exportPreview(current)
     }
     val loaded = preview?.takeIf { current != null }
+    // 「保存到文件」没有系统文件选择器（电视）：同一个面板换成扫码下载
+    var download by remember { mutableStateOf<ExportFile?>(null) }
+    val tv = LocalAppWindow.current.isTv
     AdaptiveSheet(
         onDismiss = onDismiss,
         title = when {
+            download != null -> "导出到手机"
             current == null -> "导出歌单"
             loaded == null -> "导出歌单"
             loaded.lists.size == 1 -> "导出「${loaded.title}」"
             else -> "导出 ${loaded.lists.size} 个歌单"
         },
-        subtitle = if (current == null) "挑几个歌单导出成一个文件，可以发给别人" else "myMusic 歌单文件 · 不包含平台账号和 Cookie",
+        subtitle = when {
+            download != null -> if (tv) "这台电视没有系统文件选择器" else "这台设备没有系统文件选择器"
+            current == null -> "挑几个歌单导出成一个文件，可以发给别人"
+            else -> "myMusic 歌单文件 · 不包含平台账号和 Cookie"
+        },
     ) {
-        if (current == null) {
+        val file = download
+        if (file != null) {
+            FileDownloadBody(file)
+        } else if (current == null) {
             ExportPickStep(
                 actions = actions,
                 selection = selection,
@@ -141,6 +178,7 @@ internal fun ExportSheet(ids: List<String>?, actions: MusicActions, onDismiss: (
                 preview = loaded,
                 actions = actions,
                 onBack = if (fromPicker) ({ picked = null }) else null,
+                onNoPicker = { download = it },
             )
         }
     }
@@ -229,7 +267,12 @@ private data class PickRow(val id: String, val name: String, val count: Int, val
 /** 第 2 步：照稿子 renderK——说明、会导出几首、各平台多少首、分享 / 保存到文件、文件名。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ColumnScope.ExportConfirmStep(preview: ExportPreview?, actions: MusicActions, onBack: (() -> Unit)?) {
+private fun ColumnScope.ExportConfirmStep(
+    preview: ExportPreview?,
+    actions: MusicActions,
+    onBack: (() -> Unit)?,
+    onNoPicker: (ExportFile) -> Unit,
+) {
     val context = LocalContext.current
     val tv = LocalAppWindow.current.isTv
     val close = LocalSheetClose.current
@@ -237,7 +280,8 @@ private fun ColumnScope.ExportConfirmStep(preview: ExportPreview?, actions: Musi
     val canShare = remember(context) {
         Intent(Intent.ACTION_SEND).setType(PLAYLIST_FILE_MIME).resolveActivity(context.packageManager) != null
     }
-    var noPicker by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var exportError by remember { mutableStateOf("") }
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(PLAYLIST_FILE_MIME)) { uri ->
         if (uri != null && preview != null) {
             actions.saveExport(preview, uri)
@@ -327,7 +371,15 @@ private fun ColumnScope.ExportConfirmStep(preview: ExportPreview?, actions: Musi
                     try {
                         saveLauncher.launch(preview.fileName)
                     } catch (_: ActivityNotFoundException) {
-                        noPicker = true
+                        scope.launch {
+                            try {
+                                onNoPicker(actions.exportFile(preview))
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                exportError = "导出失败：${error.message.orEmpty()}"
+                            }
+                        }
                     }
                 },
                 enabled = !empty,
@@ -338,9 +390,9 @@ private fun ColumnScope.ExportConfirmStep(preview: ExportPreview?, actions: Musi
                 Text("保存到文件")
             }
         }
-        if (noPicker) {
+        if (exportError.isNotBlank()) {
             Text(
-                "这台设备没有系统文件选择器，无法选择保存位置。",
+                exportError,
                 Modifier.padding(top = 8.dp),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
@@ -608,6 +660,211 @@ private fun TargetPicker(plan: ImportPlan, list: ImportedList, target: ImportTar
             }
         }
     }
+}
+
+// ======================= 电视扫码传文件（设计稿 06 节 电视帧、方案 10 节） =======================
+
+private sealed interface FileTransferSession {
+    data object Starting : FileTransferSession
+    data class Ready(val url: String, val server: FileTransferServer) : FileTransferSession
+    data class Error(val message: String) : FileTransferSession
+    data object Expired : FileTransferSession
+}
+
+/**
+ * 没有系统文件选择器时「从文件导入」：出二维码，手机扫码在网页里选文件传过来。
+ * 文件到了扫码面板收起、导入预览接着弹；服务留到导入完成或放弃，网页那边能看到结果，再过几秒关掉。
+ */
+@Composable
+internal fun TvFileUploadHost(actions: MusicActions, onDismiss: () -> Unit) {
+    var generation by remember { mutableIntStateOf(0) }
+    // 收到文件时 importDone 的值；导入完成会加一，没加就是取消了或读不出来
+    var receivedAt by remember { mutableStateOf<Int?>(null) }
+    val currentActions by rememberUpdatedState(actions)
+    val currentDismiss by rememberUpdatedState(onDismiss)
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val session = rememberFileTransferSession(generation, TransferMode.Upload) { bytes, name ->
+        if (currentActions.transfer.value !is TransferUi.Idle) {
+            UploadResult.Busy
+        } else {
+            mainHandler.post {
+                receivedAt = currentActions.importDone.value
+                currentActions.openImport(bytes, name, fromPhone = true)
+            }
+            UploadResult.Accepted
+        }
+    }
+    val server by rememberUpdatedState((session as? FileTransferSession.Ready)?.server)
+    LaunchedEffect(receivedAt) {
+        val start = receivedAt ?: return@LaunchedEffect
+        val transfer = currentActions.transfer
+        transfer.first { it !is TransferUi.Idle }
+        server?.setStatus(TransferPhase.Received, "电视已收到，请在电视上确认导入")
+        transfer.first { it is TransferUi.Idle }
+        val imported = currentActions.importDone.value > start
+        server?.setStatus(
+            if (imported) TransferPhase.Done else TransferPhase.Error,
+            if (imported) "已导入到电视" else "电视上没有导入：取消了，或者文件读不出来（电视上有提示）",
+        )
+        // 网页每 2 秒问一次，留够时间让它看到结果
+        delay(6_000)
+        currentDismiss()
+    }
+    if (receivedAt != null) return
+    val tv = LocalAppWindow.current.isTv
+    AdaptiveSheet(
+        onDismiss = onDismiss,
+        title = "从文件导入",
+        subtitle = if (tv) "这台电视没有系统文件选择器" else "这台设备没有系统文件选择器",
+    ) {
+        FileTransferBody(TransferMode.Upload, session, onRegenerate = { generation++ })
+    }
+}
+
+/** 导出面板里「保存到文件」没有选择器时换成这一页：手机扫码下载。下载完电视不自动关（不知道手机存好没有）。 */
+@Composable
+private fun ColumnScope.FileDownloadBody(file: ExportFile) {
+    var generation by remember { mutableIntStateOf(0) }
+    val mode = remember(file) { TransferMode.Download(file) }
+    val session = rememberFileTransferSession(generation, mode) { _, _ -> UploadResult.Rejected }
+    FileTransferBody(mode, session, onRegenerate = { generation++ })
+}
+
+/** 照稿子 tvFilesHTML：二维码 → 两行说明 → 同一网络提示 → 附近的设备权限（Android 17）→「关闭」。 */
+@Composable
+private fun ColumnScope.FileTransferBody(mode: TransferMode, session: FileTransferSession, onRegenerate: () -> Unit) {
+    val tv = LocalAppWindow.current.isTv
+    val close = LocalSheetClose.current
+    val upload = mode is TransferMode.Upload
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .weight(1f, fill = false)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(240.dp).clip(RoundedCornerShape(22.dp)).background(
+                if (session is FileTransferSession.Ready) Color.White else MaterialTheme.colorScheme.surfaceContainerHigh,
+            ),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (session) {
+                FileTransferSession.Starting -> LoadingIndicator(Modifier.size(56.dp))
+                is FileTransferSession.Ready -> QrCodeImage(
+                    text = session.url,
+                    modifier = Modifier.fillMaxSize().padding(12.dp),
+                    description = if (upload) "扫描后在手机上选歌单文件发给电视" else "扫描后在手机上下载歌单文件",
+                )
+                is FileTransferSession.Error, FileTransferSession.Expired -> Column(
+                    Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        if (session is FileTransferSession.Error) session.message else "已过期",
+                        style = if (session is FileTransferSession.Error) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleLarge,
+                        fontWeight = if (session is FileTransferSession.Error) null else FontWeight.Bold,
+                        color = if (session is FileTransferSession.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                    Button(
+                        onClick = onRegenerate,
+                        modifier = Modifier
+                            .padding(top = 14.dp)
+                            .sheetDefaultFocus(tv, session)
+                            .tvFocusRing(RoundedCornerShape(24.dp)),
+                    ) { Text("重新生成") }
+                }
+            }
+        }
+        Text(
+            if (upload) {
+                "用手机扫码，在打开的网页里选文件\nmyMusic 歌单（.mymusic.json）或洛雪（.lxmc）"
+            } else {
+                "用手机扫码，在打开的网页里下载\n${(mode as TransferMode.Download).file.fileName}"
+            },
+            Modifier.fillMaxWidth().padding(top = 14.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        ListRow(
+            title = "手机和电视连同一个网络",
+            index = 0,
+            count = 1,
+            onClick = null,
+            modifier = Modifier.padding(top = 12.dp),
+            icon = Icons.Filled.PhoneAndroid,
+            summary = "网页只在这一页开着时可用，10 分钟后失效",
+        )
+        LocalNetworkHint(Modifier.padding(top = 12.dp))
+        Button(
+            onClick = close,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 14.dp)
+                .heightIn(min = 48.dp)
+                .sheetDefaultFocus(tv && session !is FileTransferSession.Expired && session !is FileTransferSession.Error, session is FileTransferSession.Ready)
+                .tvFocusRing(RoundedCornerShape(24.dp)),
+        ) { Text("关闭") }
+    }
+}
+
+/**
+ * 扫码网页的服务：照 [rememberTvSetupSession] 抄的——只在 RESUMED 时开，离开组合、过期、进后台都停；
+ * [generation] 变了换新令牌。
+ */
+@Composable
+private fun rememberFileTransferSession(
+    generation: Int,
+    mode: TransferMode,
+    onUpload: (ByteArray, String) -> UploadResult,
+): FileTransferSession {
+    val context = LocalContext.current.applicationContext
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var resumed by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            resumed = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val theme = rememberUpdatedState(currentSyncSetupTheme())
+    val upload = rememberUpdatedState(onUpload)
+    return produceState<FileTransferSession>(FileTransferSession.Starting, generation, resumed, mode, context) {
+        value = FileTransferSession.Starting
+        if (!resumed) return@produceState
+        var server: FileTransferServer? = null
+        try {
+            val started = withContext(Dispatchers.IO) {
+                FileTransferServer(
+                    assets = { name ->
+                        runCatching { context.assets.open("file-transfer/$name").use { it.readBytes() } }.getOrNull()
+                    },
+                    theme = { theme.value },
+                    mode = mode,
+                    onUpload = { bytes, name -> upload.value(bytes, name) },
+                ).also { server = it }.startPanel()
+            }
+            value = FileTransferSession.Ready(started.url, server!!)
+            launch {
+                delay((started.expiresAt - System.currentTimeMillis()).coerceAtLeast(0))
+                server?.stop()
+                value = FileTransferSession.Expired
+            }
+            awaitCancellation()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            value = FileTransferSession.Error(error.message ?: "无法开启局域网传输，请检查网络后重试")
+        } finally {
+            server?.stop()
+        }
+    }.value
 }
 
 // ======================= 共用小件 =======================

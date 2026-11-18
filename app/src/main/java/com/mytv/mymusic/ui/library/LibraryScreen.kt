@@ -1303,19 +1303,21 @@ private fun LinkImportDialog(isLink: (String) -> Boolean, onImport: (String) -> 
 /**
  * 从文件导入：系统文件选择器（SAF）。按内容认：本应用歌单文件、洛雪 .lxmc / .json 先出预览，整库备份照旧合并。
  * 类型放开成 any——.lxmc 没有登记的 MIME（gzip 报 application/gzip 或 octet-stream），限定类型就选不到。
+ * 没有选择器（不少电视盒子）时出二维码，手机扫码把文件传过来（[TvFileUploadHost]）。
  */
 @Composable
 internal fun rememberImportLauncher(actions: MusicActions): () -> Unit {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(actions::openImport)
     }
-    val onMissing = rememberMissingPicker()
-    return remember(launcher, onMissing) {
+    var phoneUpload by remember { mutableStateOf(false) }
+    if (phoneUpload) TvFileUploadHost(actions, onDismiss = { phoneUpload = false })
+    return remember(launcher) {
         {
             try {
                 launcher.launch(arrayOf("*/*"))
             } catch (error: ActivityNotFoundException) {
-                onMissing()
+                phoneUpload = true
             }
         }
     }
