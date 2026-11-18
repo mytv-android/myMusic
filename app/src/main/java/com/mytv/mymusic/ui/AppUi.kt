@@ -274,6 +274,8 @@ class MusicActions(private val model: MusicViewModel) {
     fun setRhythmDebug(value: Boolean) = model.setRhythmDebug(value)
     fun setPosterPrefs(transform: (com.mytv.mymusic.data.PosterPrefs) -> com.mytv.mymusic.data.PosterPrefs) =
         model.setPosterPrefs(transform)
+    fun setSwipePrefs(transform: (com.mytv.mymusic.data.SwipePrefs) -> com.mytv.mymusic.data.SwipePrefs) =
+        model.setSwipePrefs(transform)
     fun setLyricStage(transform: (com.mytv.mymusic.data.LyricStagePrefs) -> com.mytv.mymusic.data.LyricStagePrefs) =
         model.setLyricStage(transform)
     fun setLyricText(transform: (com.mytv.mymusic.data.LyricTextPrefs) -> com.mytv.mymusic.data.LyricTextPrefs) =

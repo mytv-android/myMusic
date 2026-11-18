@@ -371,6 +371,7 @@ class SettingsStore(private val context: Context) {
             rhythmOffsetMs = (values[rhythmOffsetKey] ?: 0).coerceIn(-RHYTHM_OFFSET_MAX_MS, RHYTHM_OFFSET_MAX_MS),
             rhythmDebug = values[rhythmDebugKey] ?: false,
             poster = posterPrefs(values),
+            swipe = SwipePrefsCodec.read(values),
             collectionView = values[collectionViewKey].toCollectionView(),
             miniPlayerTarget = values[miniPlayerTargetKey].toMiniPlayerTarget(),
             playReportEnabled = values[playReportEnabledKey] ?: true,
@@ -491,6 +492,11 @@ class SettingsStore(private val context: Context) {
         it[posterTranslationKey] = value.translation
         it[posterFollowKey] = value.follow
         it[posterTvDriftKey] = value.tvDrift
+    }
+
+    /** 滑动操作（设置 › 滑动操作）：只在本机，不进同步。 */
+    suspend fun swipe(transform: (SwipePrefs) -> SwipePrefs) = context.dataStore.edit {
+        SwipePrefsCodec.write(it, transform(SwipePrefsCodec.read(it)))
     }
 
     private fun posterPrefs(values: Preferences) = PosterPrefs(
@@ -784,6 +790,8 @@ data class AppSettings(
     val rhythmDebug: Boolean = false,
     /** 海报墙的墙内设置，队列墙和详情页海报视图共用。 */
     val poster: PosterPrefs = PosterPrefs(),
+    /** 歌曲列表左右滑的按钮和拉到头（设置 › 滑动操作）。 */
+    val swipe: SwipePrefs = SwipePrefs(),
     /** 详情页上次用的视图（列表 / 海报），不单独做设置项。 */
     val collectionView: CollectionView = CollectionView.List,
     /** 点按迷你播放器打开播放页还是海报墙（设置 › 播放页）。 */
