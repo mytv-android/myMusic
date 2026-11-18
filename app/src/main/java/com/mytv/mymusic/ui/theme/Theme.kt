@@ -34,7 +34,8 @@ val LocalAppearance = staticCompositionLocalOf { Appearance() }
 val LocalSeedColor = staticCompositionLocalOf { BrandSeed }
 
 /**
- * Roboto Flex：只保留字重轴、只含拉丁字符的可变字体（约 94KB），中文由系统字体回退显示。
+ * Roboto Flex：保留字重、字宽、斜度三个轴，只含拉丁字符的可变字体（约 214KB），中文由系统字体回退显示。
+ * 界面只调字重，字宽、斜度留在默认值（100、0），和只有字重轴时渲染一样；歌词分享卡片才用到另两个轴。
  * Android 8.0 以下不支持可变字体的轴，只声明常规字重，让 Compose 合成粗体，否则所有字重都会显示成常规。
  */
 private val RobotoFlex: FontFamily = if (Build.VERSION.SDK_INT >= 26) {

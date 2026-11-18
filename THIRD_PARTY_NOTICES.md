@@ -333,7 +333,7 @@ OF THE POSSIBILITY OF SUCH DAMAGE.
 - Upstream: https://github.com/googlefonts/roboto-flex (via https://github.com/google/fonts/tree/main/ofl/robotoflex)
 - License: SIL Open Font License, Version 1.1
 - Location: `app/src/main/res/font/roboto_flex.ttf`
-- Modifications: subset to Latin, Latin-1, general punctuation and currency symbols; all variation axes except `wght` are pinned to their defaults (fontTools `subset` + `varLib.instancer`). The Android TV launcher banner (`res/drawable/tv_banner.xml`) embeds `myMusic` glyph outlines converted to vector paths from the same subset.
+- Modifications: subset to Latin, Latin-1, general punctuation and currency symbols; all variation axes except `wght`, `wdth` and `slnt` are pinned to their defaults (fontTools `subset` + `varLib.instancer`). The Android TV launcher banner (`res/drawable/tv_banner.xml`) embeds `myMusic` glyph outlines converted to vector paths from the same subset.
 
 ```
 Copyright 2017 The Roboto Flex Project Authors (https://github.com/TypeNetwork/Roboto-Flex)
