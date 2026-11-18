@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.RemoveCircleOutline
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.SyncProblem
@@ -204,6 +205,7 @@ fun LocalPlaylistScreen(
     var nameDraft by rememberSaveable(playlistId, playlist?.name) { mutableStateOf(playlist?.name.orEmpty()) }
     var renameOpen by remember { mutableStateOf(false) }
     var deleteOpen by remember { mutableStateOf(false) }
+    var exportOpen by remember { mutableStateOf(false) }
     var addOpen by remember { mutableStateOf(false) }
     var actionEntry by remember { mutableStateOf<Pair<Song, PlaylistEntryEntity>?>(null) }
     // 电视海报视图里长按 / 菜单键打开时接在单曲操作下面的整页操作；列表视图里为 null
@@ -285,6 +287,7 @@ fun LocalPlaylistScreen(
         onEdit = if (readOnly) null else ({ editing = true }),
         onRename = { renameOpen = true },
         onDelete = { deleteOpen = true },
+        onExport = { exportOpen = true },
         onSync = if (bound) ({ actions.syncBoundPlaylist(playlistId) }) else null,
         onUnbind = if (bound) ({ actions.unbindPlaylist(playlistId) }) else null,
     )
@@ -738,6 +741,9 @@ fun LocalPlaylistScreen(
             onDismiss = { renameOpen = false },
         )
     }
+    if (exportOpen && playlist != null) {
+        ExportSheet(listOf(playlistId), actions, onDismiss = { exportOpen = false })
+    }
     if (deleteOpen && playlist != null) {
         ConfirmDialog(
             title = "删除“${playlist.name}”？",
@@ -758,6 +764,8 @@ private data class PlaylistMenu(
     val onEdit: (() -> Unit)?,
     val onRename: () -> Unit,
     val onDelete: () -> Unit,
+    /** 导出成 myMusic 歌单文件（设计稿 06 节 ⑪）。 */
+    val onExport: () -> Unit,
     /** 绑定平台歌单的专属操作；未绑定为 null 不显示。 */
     val onSync: (() -> Unit)? = null,
     val onUnbind: (() -> Unit)? = null,
@@ -987,6 +995,11 @@ private fun PlaylistMoreMenu(menu: PlaylistMenu) {
                 text = { Text("重命名") },
                 leadingIcon = { Icon(Icons.Filled.Edit, null) },
                 onClick = { open = false; menu.onRename() },
+            )
+            DropdownMenuItem(
+                text = { Text("导出歌单…") },
+                leadingIcon = { Icon(Icons.Filled.SaveAlt, null) },
+                onClick = { open = false; menu.onExport() },
             )
             DropdownMenuItem(
                 text = { Text("删除歌单", color = MaterialTheme.colorScheme.error) },

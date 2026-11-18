@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SaveAlt
@@ -128,6 +129,7 @@ fun SyncCenterScreen(
 ) {
     val window = LocalAppWindow.current
     var disconnectOpen by remember { mutableStateOf(false) }
+    var exportPlaylistsOpen by rememberSaveable { mutableStateOf(false) }
     val exportFile = rememberExportLauncher(actions)
     val importFile = rememberImportLauncher(actions)
     val primaryFocus = remember { FocusRequester() }
@@ -233,26 +235,37 @@ fun SyncCenterScreen(
             }
         }
         item(key = "backupHead", contentType = "header") { SectionLabel("备份") }
+        item(key = "exportPlaylists", contentType = "row") {
+            ListRow(
+                title = "导出歌单…",
+                index = 0,
+                count = 3,
+                onClick = { exportPlaylistsOpen = true },
+                icon = Icons.Filled.IosShare,
+                iconTone = IconTone.Tertiary,
+                summary = "挑几个歌单导出成文件，可发给别人，不含 Cookie",
+            )
+        }
         item(key = "export", contentType = "row") {
             ListRow(
-                title = "导出到文件",
-                index = 0,
-                count = 2,
+                title = "导出整库备份",
+                index = 1,
+                count = 3,
                 onClick = exportFile,
                 icon = Icons.Filled.SaveAlt,
                 iconTone = IconTone.Tertiary,
-                summary = "保存歌单、收藏和平台 Cookie 为 JSON",
+                summary = "歌单、收藏和平台 Cookie 存成 JSON，含 Cookie，只给自己换机用",
             )
         }
         item(key = "import", contentType = "row") {
             ListRow(
                 title = "从文件导入",
-                index = 1,
-                count = 2,
+                index = 2,
+                count = 3,
                 onClick = importFile,
                 icon = Icons.Filled.FileOpen,
                 iconTone = IconTone.Tertiary,
-                summary = "与本机歌单、收藏和 Cookie 合并，不会覆盖",
+                summary = "认得本应用歌单、整库备份和洛雪 .lxmc",
             )
         }
         item(key = "providerHead", contentType = "header") { SectionLabel("同步位置") }
@@ -346,6 +359,9 @@ fun SyncCenterScreen(
             onConfirm = actions::disconnectSync,
             onDismiss = { disconnectOpen = false },
         )
+    }
+    if (exportPlaylistsOpen) {
+        ExportSheet(null, actions, onDismiss = { exportPlaylistsOpen = false })
     }
 }
 
@@ -719,6 +735,7 @@ fun SyncConnectScreen(
     val tokenFocus = remember { FocusRequester() }
     val exportFile = rememberExportLauncher(actions)
     val importFile = rememberImportLauncher(actions)
+    var exportPlaylistsOpen by rememberSaveable { mutableStateOf(false) }
     val syncing = sync.status == SyncStatus.Syncing
     val gist = provider == "gist"
     val webDav = provider == WebDavSyncProvider.ID
@@ -808,7 +825,8 @@ fun SyncConnectScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = exportFile, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("导出到文件") }
+                TextButton(onClick = { exportPlaylistsOpen = true }, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("导出歌单…") }
+                TextButton(onClick = exportFile, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("导出整库备份") }
                 TextButton(onClick = importFile, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("从文件导入") }
             }
         }
@@ -993,5 +1011,8 @@ fun SyncConnectScreen(
 
     sync.initialMerge?.let { preview ->
         InitialMergeDialog(preview, sync, actions, dismissible = false)
+    }
+    if (exportPlaylistsOpen) {
+        ExportSheet(null, actions, onDismiss = { exportPlaylistsOpen = false })
     }
 }

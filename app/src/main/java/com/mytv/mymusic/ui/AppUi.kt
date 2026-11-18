@@ -355,6 +355,13 @@ class MusicActions(private val model: MusicViewModel) {
     fun exportLibrary(uri: Uri) = model.exportLibrary(uri)
     fun importLibrary(uri: Uri, strategy: SyncStrategy = SyncStrategy.Merge) = model.importLibrary(uri, strategy)
 
+    /** 歌单文件导出（设计稿 06 节）。 */
+    suspend fun exportPreview(ids: List<String>) = model.exportPreview(ids)
+    suspend fun exportFile(preview: com.mytv.mymusic.data.transfer.ExportPreview) = model.exportFile(preview)
+    fun shareExport(preview: com.mytv.mymusic.data.transfer.ExportPreview) = model.shareExport(preview)
+    fun saveExport(preview: com.mytv.mymusic.data.transfer.ExportPreview, uri: Uri) = model.saveExport(preview, uri)
+    val favorites: kotlinx.coroutines.flow.StateFlow<List<com.mytv.mymusic.data.SavedSong>> get() = model.favorites
+
     fun checkUpdates() = model.checkForUpdates()
     suspend fun checkUpdatesNow(): com.mytv.mymusic.data.update.UpdateUiState = model.checkForUpdatesNow()
     fun downloadUpdate() = model.downloadUpdate()

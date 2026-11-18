@@ -6251,6 +6251,83 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.sync.import(uri, strategy) }
     }
 
+    // ---------- 歌单文件导出 / 导入（设计稿 06 节） ----------
+
+    private val playlistTransfer by lazy {
+        com.mytv.mymusic.data.transfer.PlaylistTransfer(
+            library = libraryDao,
+            music = app.database.dao(),
+            localRefs = { app.sync.localRefs },
+        )
+    }
+
+    /** 导出面板打开时算一次：歌单名、各平台首数、文件名。[ids] 里的 `@favorites` 是我的收藏。 */
+    suspend fun exportPreview(ids: List<String>): com.mytv.mymusic.data.transfer.ExportPreview =
+        withContext(Dispatchers.IO) { playlistTransfer.exportPreview(ids) }
+
+    suspend fun exportFile(preview: com.mytv.mymusic.data.transfer.ExportPreview): com.mytv.mymusic.data.transfer.ExportFile =
+        withContext(Dispatchers.IO) { playlistTransfer.exportFile(preview, appVersionLabel()) }
+
+    private fun appVersionLabel(): String = runCatching {
+        val context = getApplication<Application>()
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+        "myMusic ${info.versionName} ($code)"
+    }.getOrDefault("myMusic")
+
+    /** 系统分享：写进 cache/exports/（同时只留这一份）再走 FileProvider + ACTION_SEND，照 [exportLog] 的写法。 */
+    fun shareExport(preview: com.mytv.mymusic.data.transfer.ExportPreview) {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val shared = runCatching {
+                withContext(Dispatchers.IO) {
+                    val file = exportFile(preview)
+                    val dir = java.io.File(context.cacheDir, "exports")
+                    dir.deleteRecursively()
+                    dir.mkdirs()
+                    val target = java.io.File(dir, file.fileName)
+                    target.writeBytes(file.bytes)
+                    file to androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", target)
+                }
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                message("导出失败：${error.message.orEmpty()}", error = true)
+                return@launch
+            }
+            val (file, uri) = shared
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = file.mime
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, file.fileName)
+                clipData = android.content.ClipData.newRawUri(file.fileName, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            runCatching {
+                context.startActivity(Intent.createChooser(intent, "分享歌单").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure { message("这台设备上没有能接收文件的应用", error = true) }
+        }
+    }
+
+    /** 「保存到文件」：系统文件选择器建好的文档里写字节。 */
+    fun saveExport(preview: com.mytv.mymusic.data.transfer.ExportPreview, uri: Uri) {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val file = exportFile(preview)
+                    context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(file.bytes) }
+                        ?: error("无法写入所选文件")
+                    file
+                }
+            }.onSuccess { file ->
+                message("已导出「${preview.title}」· ${file.counts.kept} 首")
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                message("导出失败：${error.message.orEmpty()}", error = true)
+            }
+        }
+    }
+
     fun syncProviderLabel(id: String): String = when (id) {
         "gist" -> "GitHub Gist"
         "gitee" -> "Gitee 代码片段"
