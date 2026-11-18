@@ -1367,6 +1367,8 @@ private fun ChoiceRow(
             onSelect = onChange,
             label = { key -> setting.options.firstOrNull { it.first == key }?.second ?: key },
             modifier = Modifier.fillMaxWidth(),
+            // 四个以上的选项（Rush 配色加了“自定义”）在电视侧栏里会挤成“播…”，收窄内边距
+            compact = setting.options.size >= 4,
         )
         below?.invoke()
     }

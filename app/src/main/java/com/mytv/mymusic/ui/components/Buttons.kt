@@ -7,6 +7,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -31,6 +32,7 @@ import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -123,6 +125,7 @@ fun PlayPauseButton(
 /**
  * 连接式按钮组：用于互斥选项（主题、对比度、搜索类型、定时时长）。
  * 选中项变成满圆角，其余保持内侧小圆角。[selectedFocus] 挂在选中的那个按钮上（电视默认焦点落在当前选项上）。
+ * [compact] 收窄按钮左右内边距：选项多、面板窄（电视侧栏里四个三字选项）时字不被省略。
  */
 @Composable
 fun <T> ConnectedToggleGroup(
@@ -133,6 +136,7 @@ fun <T> ConnectedToggleGroup(
     modifier: Modifier = Modifier,
     icon: ((T) -> ImageVector?)? = null,
     selectedFocus: FocusRequester? = null,
+    compact: Boolean = false,
 ) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
         options.forEachIndexed { index, option ->
@@ -151,6 +155,7 @@ fun <T> ConnectedToggleGroup(
                     options.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
                     else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
                 },
+                contentPadding = if (compact) CompactTogglePadding else ToggleButtonDefaults.ContentPadding,
             ) {
                 icon?.invoke(option)?.let {
                     Icon(it, null, Modifier.size(18.dp))
@@ -161,6 +166,8 @@ fun <T> ConnectedToggleGroup(
         }
     }
 }
+
+private val CompactTogglePadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
 
 /**
  * 歌单 / 榜单的主操作：Split button。左侧“播放全部”，右侧展开随机播放、加入队列、存到本地歌单。

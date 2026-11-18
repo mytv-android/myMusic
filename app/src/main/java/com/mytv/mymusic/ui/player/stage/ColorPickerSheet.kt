@@ -144,6 +144,8 @@ internal fun ColorPickerSheet(
         val scheme = MaterialTheme.colorScheme
         val bg = if (editingText) background else current
         val fg = if (editingText) current else text
+        // “自动配文字色”点完按钮就没了，电视上焦点交给“完成”，不让它掉回最上面的色块
+        val doneFocus = remember { FocusRequester() }
         Column(
             Modifier
                 .fillMaxWidth()
@@ -249,10 +251,20 @@ internal fun ColorPickerSheet(
                             onClick = {
                                 val auto = autoTextColor(bg)
                                 if (editingText) pick(auto) else onAutoText(auto)
+                                runCatching { doneFocus.requestFocus() }
                             },
                             modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
                         ) { Text("自动配文字色") }
                     }
+                }
+                // 播放页顶上的歌名、按钮一直是浅色的，底色太亮会把它们吃掉（歌词本身有上面的对比度管）
+                if (!editingText && contrastRatio(bg, PLAYER_CHROME) < MIN_CHROME_CONTRAST) {
+                    Text(
+                        "底色偏亮：歌词页顶上的歌名和按钮是浅色的，可能看不清",
+                        Modifier.padding(top = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant,
+                    )
                 }
             }
 
@@ -268,7 +280,7 @@ internal fun ColorPickerSheet(
                     },
                     modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
                 ) { Text("取消") }
-                Button(onClick = close, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("完成") }
+                Button(onClick = close, modifier = Modifier.focusRequester(doneFocus).tvFocusRing(RoundedCornerShape(20.dp))) { Text("完成") }
             }
         }
     }
@@ -435,6 +447,12 @@ internal fun pushRecentColor(recent: List<String>, color: Color): List<String> {
 
 /** 文字对比度够清楚的线（WCAG AA）。 */
 internal const val MIN_TEXT_CONTRAST = 4.5f
+
+/** 播放页（一直是深色主题）顶上歌名、按钮的浅色，和它比对比度不到 [MIN_CHROME_CONTRAST] 就提示底色偏亮。 */
+internal val PLAYER_CHROME = Color(0xFFE2E2E9)
+
+/** 图标、按钮这类界面元素要的对比度（WCAG 非文字 3:1）。 */
+internal const val MIN_CHROME_CONTRAST = 3f
 
 private const val COVER_SWATCHES = 6
 private const val MAX_CHROMA = 150.0
