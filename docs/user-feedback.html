@@ -1,0 +1,1617 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>用户建议改进稿 · myMusic</title>
+<meta name="description" content="按用户提的 13 条建议整理的改进稿：歌词动画面板（按速度灰掉、随机池、保存并应用）、Rush 自定义配色/景深强度/风格预设、长按歌词分享卡片、播放页加歌单、列表左右滑操作、歌单导出与落雪导入、海报墙视角远近、手机横屏全屏歌词修复。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=Roboto+Flex:opsz,wdth,wght@8..144,100..125,300..900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #f4f1f2; --paper: #ffffff; --ink: #1d1b20; --muted: #6b6772; --line: #e4e0e3;
+  --red: #c8102e; --soft-red: #fbe9ec; --dark: #151318;
+  --body: "Roboto Flex", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  --spring: cubic-bezier(.3,1.35,.4,1);
+  /* 浅色 M3E：BrandSeed #006B5F 经 materialkolor 的浅色方案（与 expressive-redesign 一致） */
+  --md-primary:#206a5f;--md-on-primary:#e2fff8;--md-primary-container:#a9f0e2;--md-on-primary-container:#095c52;
+  --md-secondary:#4b645f;--md-secondary-container:#cde8e1;--md-on-secondary-container:#3e5751;
+  --md-tertiary:#336577;--md-tertiary-container:#afe2f6;--md-on-tertiary-container:#1d5364;
+  --md-error:#ba1a1a;--md-error-container:#ffdad6;--md-on-error-container:#93000a;
+  --md-surface:#f6faf8;--md-surface-container-lowest:#ffffff;--md-surface-container-low:#eef5f2;--md-surface-container:#e7f0ec;
+  --md-surface-container-high:#e1eae7;--md-surface-container-highest:#dae5e1;
+  --md-on-surface:#2a3532;--md-on-surface-variant:#56615e;--md-outline:#727d7a;--md-outline-variant:#a9b4b1;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, h5, p { margin: 0; }
+svg { display: block; }
+button { font-family: inherit; }
+.page-head, main, footer { width: min(1220px, calc(100% - 40px)); margin-inline: auto; }
+.page-head { padding: 62px 0 30px; }
+.doc-label { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .16em; }
+h1 { max-width: 980px; margin-top: 14px; font-size: clamp(38px, 5.6vw, 70px); line-height: 1.08; letter-spacing: -.045em; font-weight: 900; text-wrap: balance; }
+h1 em { font-style: normal; color: var(--red); }
+.lede { max-width: 900px; margin-top: 24px; color: var(--muted); font-size: 17px; line-height: 1.85; }
+.lede strong { color: var(--ink); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.chip2 { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 13px; }
+.chip2 b { color: var(--ink); font-weight: 700; }
+.chip2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 22px; }
+nav.toc a { font-size: 13px; color: var(--ink); text-decoration: none; padding: 5px 11px; border-radius: 10px; background: var(--paper); border: 1px solid var(--line); }
+nav.toc a b { color: var(--red); font-family: var(--mono); font-size: 11.5px; margin-right: 5px; }
+section.block { padding: 46px 0; border-top: 1px solid var(--line); }
+.block-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.kicker { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .14em; }
+h2 { font-size: clamp(24px, 3vw, 31px); line-height: 1.25; letter-spacing: -.025em; font-weight: 800; }
+.sub { margin: 10px 0 22px; color: var(--muted); font-size: 14.5px; line-height: 1.8; max-width: 940px; }
+.sub strong { color: var(--ink); font-weight: 700; }
+h3 { margin: 30px 0 12px; font-size: 18px; font-weight: 750; letter-spacing: -.01em; }
+.quote { margin: 0 0 18px; padding: 12px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--muted); font-size: 13.5px; line-height: 1.75; max-width: 940px; }
+.quote::before { content: "用户原话"; display: block; font-size: 11.5px; font-weight: 800; letter-spacing: .12em; color: var(--red); margin-bottom: 2px; }
+table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; font-size: 13.5px; }
+th, td { padding: 11px 14px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+thead th { border-top: 0; background: #faf7f8; color: var(--muted); font-size: 12.5px; font-weight: 700; }
+td code, p code, li code, .sub code, figcaption code, .note code { font-family: var(--mono); font-size: 12px; background: #f1edf1; border-radius: 6px; padding: 1px 6px; }
+td a { color: var(--ink); }
+.scroll { overflow-x: auto; border-radius: 16px; }
+pre { margin: 12px 0 0; padding: 16px 18px; background: var(--dark); color: #d9d5df; border-radius: 16px; overflow: auto; font: 12.5px/1.75 var(--mono); }
+pre .c { color: #8c8797; } pre .s { color: #ffb6c1; } pre .k { color: #a9d8d6; } pre .n { color: #f2c98a; }
+.note { margin-top: 14px; padding: 14px 16px; border-left: 3px solid var(--red); background: #fbf6f7; border-radius: 0 14px 14px 0; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
+.note b { color: var(--ink); }
+.note.plain { border-left-color: #cfcad4; background: #f7f5f7; }
+ul.clean { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; line-height: 1.85; }
+ul.clean b { color: var(--ink); }
+.tag { display: inline-block; font: 700 11px var(--mono); padding: 2px 7px; border-radius: 999px; background: var(--soft-red); color: var(--red); white-space: nowrap; }
+.tag.g { background: #e3f3ea; color: #1b6b3a; } .tag.y { background: #fbf0d9; color: #8a5a00; } .tag.b { background: #e4ecfb; color: #2a4fa0; }
+.phases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
+.phase { padding: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.phase header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.phase h3 { margin: 0; font-size: 15px; }
+.phase ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+footer { padding: 34px 0 70px; border-top: 1px solid var(--line); color: #8f8b95; font-size: 12.5px; line-height: 1.8; }
+footer b { color: var(--muted); font-weight: 700; }
+
+/* ── 演示控制条 ── */
+.demo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 4px 0 18px; padding: 12px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; font-size: 13px; color: var(--muted); }
+.demo-bar .grp { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.demo-bar button { height: 32px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font: 600 12.5px/1 var(--body); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.demo-bar button.on { background: var(--ink); color: #fff; border-color: var(--ink); border-radius: 16px; }
+.demo-bar .sep { width: 1px; height: 22px; background: var(--line); }
+.demo { display: flex; gap: 26px; align-items: flex-start; flex-wrap: wrap; }
+.demo > figure { margin: 0; display: grid; gap: 10px; }
+figcaption { color: var(--muted); font-size: 12.5px; line-height: 1.65; max-width: 380px; }
+figcaption b { color: var(--ink); }
+figcaption > b:first-child { display: block; font-size: 13.5px; margin-bottom: 2px; }
+
+/* ── 手机外框（两套：深色播放页 .pl，浅色应用页 .lt） ── */
+.phone { position: relative; width: 380px; height: 800px; padding: 10px; border-radius: 52px; background: #080b0b; box-shadow: 0 30px 70px -36px rgb(0 0 0 / .6); flex: none; }
+.scr { position: relative; width: 360px; height: 780px; border-radius: 43px; overflow: hidden; font-family: var(--body); user-select: none; }
+.scr.pl { background: var(--pl-surface); color: var(--pl-on-surface); }
+.scr.lt { background: var(--md-surface); color: var(--md-on-surface); }
+.status { position: absolute; left: 0; right: 0; top: 0; height: 30px; display: flex; justify-content: space-between; align-items: center; padding: 0 26px; font: 600 12px/1 var(--body); z-index: 40; pointer-events: none; }
+.pl .status { color: rgb(255 255 255 / .9); } .lt .status { color: var(--md-on-surface); }
+.navpill { position: absolute; left: 50%; bottom: 8px; width: 108px; height: 4px; margin-left: -54px; border-radius: 2px; background: rgb(255 255 255 / .45); z-index: 41; }
+.lt .navpill { background: rgb(0 0 0 / .3); }
+.ico { width: 24px; height: 24px; fill: currentColor; flex: none; }
+.ico.s18 { width: 18px; height: 18px; } .ico.s20 { width: 20px; height: 20px; } .ico.s16 { width: 16px; height: 16px; }
+.ib { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: inherit; flex: none; border: 0; background: transparent; cursor: pointer; padding: 0; }
+.newmark { position: relative; outline: 2px dashed var(--red); outline-offset: 2px; border-radius: 14px; }
+.newmark::after { content: attr(data-new); position: absolute; right: 8px; top: -10px; background: var(--red); color: #fff; font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 6px; white-space: nowrap; z-index: 5; }
+.newmark:not([data-new])::after { content: "新增"; }
+
+/* ── 深色：AdaptiveSheet 与设置行（同 AnimationSheet 真实组件：SectionLabel / ConnectedToggleGroup / SegmentedGroup / SwitchRow / NumberRow） ── */
+.backdrop { position: absolute; inset: 0; z-index: 1; }
+.scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .32); z-index: 19; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; top: 64px; z-index: 20; background: var(--pl-surface-container-low); color: var(--pl-on-surface); border-radius: 28px 28px 0 0; display: flex; flex-direction: column; overflow: hidden; }
+.lt .sheet { background: var(--md-surface-container-low); color: var(--md-on-surface); }
+.grab { width: 32px; height: 4px; border-radius: 2px; background: var(--pl-on-surface-variant); opacity: .6; margin: 12px auto 4px; flex: none; }
+.lt .grab { background: var(--md-on-surface-variant); }
+.sh-head { padding: 6px 24px 6px; flex: none; }
+.sh-head h5 { font-size: 22px; font-weight: 600; line-height: 28px; }
+.sh-head p { margin-top: 2px; font-size: 14px; color: var(--pl-on-surface-variant); }
+.lt .sh-head p { color: var(--md-on-surface-variant); }
+.sh-body { overflow-y: auto; padding: 4px 16px 28px; flex: 1; scrollbar-width: thin; position: relative; }
+.lbl { font-size: 16px; font-weight: 700; line-height: 24px; padding: 20px 4px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lbl .side { display: flex; align-items: center; gap: 2px; }
+.lbl small { font-size: 13px; font-weight: 500; color: var(--pl-on-surface-variant); }
+.txtbtn { border: 0; background: none; color: var(--pl-primary); font: 600 14px/1 var(--body); height: 40px; padding: 0 12px; border-radius: 20px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.lt .txtbtn { color: var(--md-primary); }
+.txtbtn:disabled { opacity: .45; cursor: default; }
+.ctg { display: flex; gap: 2px; }
+.ctg button { flex: 1; min-width: 0; height: 48px; border: 0; background: var(--pl-surface-container); color: var(--pl-on-surface-variant); font: 600 14px/1 var(--body); border-radius: 8px; cursor: pointer; transition: border-radius .35s var(--spring), background .2s; padding: 0 4px; white-space: nowrap; }
+.ctg button:first-child { border-radius: 24px 8px 8px 24px; } .ctg button:last-child { border-radius: 8px 24px 24px 8px; }
+.ctg button.on { background: var(--pl-primary); color: var(--pl-on-primary); border-radius: 24px; }
+.lt .ctg button { background: var(--md-surface-container); color: var(--md-on-surface-variant); }
+.lt .ctg button.on { background: var(--md-primary); color: var(--md-on-primary); }
+.seg { display: flex; flex-direction: column; gap: 2px; }
+.row { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 8px 10px 16px; background: var(--pl-surface-container); border-radius: 4px; }
+.lt .row { background: var(--md-surface-container-low); }
+.row.col { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 16px 12px; }
+.seg > :first-child { border-top-left-radius: 16px; border-top-right-radius: 16px; }
+.seg > :last-child { border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; }
+.row .t { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; line-height: 22px; }
+.row .t small { display: block; font-size: 13.5px; font-weight: 400; line-height: 19px; color: var(--pl-on-surface-variant); }
+.lt .row .t small { color: var(--md-on-surface-variant); }
+.row .t.inl { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.row .t.inl small { display: inline; }
+.row .val { font-size: 14px; color: var(--pl-on-surface-variant); white-space: nowrap; display: flex; align-items: center; gap: 2px; }
+.lt .row .val { color: var(--md-on-surface-variant); }
+.sw { width: 52px; height: 32px; border-radius: 16px; flex: none; position: relative; background: var(--pl-surface-container-highest); box-shadow: inset 0 0 0 2px var(--pl-outline); cursor: pointer; transition: background .2s; margin-right: 8px; }
+.sw::after { content: ""; position: absolute; left: 8px; top: 8px; width: 16px; height: 16px; border-radius: 50%; background: var(--pl-outline); transition: all .25s var(--spring); }
+.sw.on { background: var(--pl-primary); box-shadow: none; }
+.sw.on::after { left: 24px; top: 4px; width: 24px; height: 24px; background: var(--pl-on-primary); }
+.lt .sw { background: var(--md-surface-container-highest); box-shadow: inset 0 0 0 2px var(--md-outline); }
+.lt .sw::after { background: var(--md-outline); }
+.lt .sw.on { background: var(--md-primary); box-shadow: none; } .lt .sw.on::after { background: var(--md-on-primary); }
+.stp { display: flex; align-items: center; gap: 6px; }
+.stp button { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); font: 700 20px/1 var(--body); cursor: pointer; }
+.stp b { min-width: 56px; text-align: center; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sh-note { font-size: 14px; line-height: 1.55; color: var(--pl-on-surface-variant); padding: 8px 4px 4px; }
+.lt .sh-note { color: var(--md-on-surface-variant); }
+/* M3E Slider：轨道 16dp、手柄是 4dp 竖条、两侧留缝 */
+.sld { position: relative; height: 44px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
+.sld .tr-a, .sld .tr-b { position: absolute; top: 14px; height: 16px; }
+.sld .tr-a { left: 0; border-radius: 8px 2px 2px 8px; background: var(--pl-primary); }
+.sld .tr-b { right: 0; border-radius: 2px 8px 8px 2px; background: var(--pl-secondary-container); }
+.sld .hd { position: absolute; top: 2px; width: 4px; height: 40px; margin-left: -2px; border-radius: 2px; background: var(--pl-primary); }
+.sld .tk { position: absolute; top: 20px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--pl-on-secondary-container); opacity: .7; }
+.lt .sld .tr-a, .lt .sld .hd { background: var(--md-primary); } .lt .sld .tr-b { background: var(--md-secondary-container); }
+.sld-ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--pl-on-surface-variant); margin-top: -2px; }
+.lt .sld-ends { color: var(--md-on-surface-variant); }
+.savebar { position: absolute; left: 12px; right: 12px; bottom: 22px; z-index: 30; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 18px; border-radius: 28px; background: var(--pl-surface-container-highest); box-shadow: 0 10px 30px -8px rgb(0 0 0 / .55); transform: translateY(180px); transition: transform .45s var(--spring); }
+.savebar.on { transform: none; }
+.savebar span { flex: 1; font-size: 14px; color: var(--pl-on-surface-variant); }
+.savebar span b { color: var(--pl-on-surface); }
+.btn-f { height: 40px; padding: 0 18px; border: 0; border-radius: 20px; background: var(--pl-primary); color: var(--pl-on-primary); font: 700 14px/1 var(--body); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn-t { height: 40px; padding: 0 14px; border: 0; border-radius: 20px; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); font: 600 14px/1 var(--body); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.lt .btn-f { background: var(--md-primary); color: var(--md-on-primary); }
+.lt .btn-t { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+/* 对话框（M3 AlertDialog，28dp 圆角） */
+.dlg-scrim { position: absolute; inset: 0; z-index: 50; background: rgb(0 0 0 / .45); display: grid; place-items: center; padding: 24px; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.dlg-scrim.on { opacity: 1; pointer-events: auto; }
+.dlg { width: 100%; border-radius: 28px; padding: 24px 24px 18px; background: var(--pl-surface-container-high); color: var(--pl-on-surface); transform: scale(.92); transition: transform .35s var(--spring); }
+.dlg-scrim.on .dlg { transform: none; }
+.dlg h5 { font-size: 22px; line-height: 28px; font-weight: 500; }
+.dlg p { margin-top: 12px; font-size: 14px; line-height: 1.55; color: var(--pl-on-surface-variant); }
+.dlg ul { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.dlg li { font-size: 13.5px; padding: 8px 12px; border-radius: 12px; background: var(--pl-surface-container-highest); }
+.dlg li i { font-style: normal; color: var(--pl-primary); font-weight: 700; }
+.dlg .acts { display: flex; justify-content: flex-end; gap: 4px; margin-top: 18px; }
+.lt .dlg { background: var(--md-surface-container-high); color: var(--md-on-surface); }
+.lt .dlg p { color: var(--md-on-surface-variant); }
+.snack { position: absolute; left: 12px; right: 12px; bottom: 96px; z-index: 30; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 4px 6px 4px 16px; border-radius: 12px; background: #2f3331; color: #eef1ef; font-size: 14px; box-shadow: 0 8px 20px -10px rgb(0 0 0 / .5); }
+.snack span { flex: 1; }
+.snack button { border: 0; background: none; color: #8fd5c6; font: 700 14px/1 var(--body); height: 40px; padding: 0 12px; cursor: pointer; }
+
+/* ── 模式卡片（ModeGrid / ModeCard：两列、1.5 比例缩略图、选中描 2.5dp 主色边 + 22dp 圆角 + 右上勾） ── */
+.mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; transition: opacity .25s; }
+.mcard { border: 0; padding: 4px; background: none; color: var(--pl-on-surface-variant); text-align: left; cursor: pointer; border-radius: 14px; display: grid; gap: 6px; font: inherit; position: relative; }
+.mcard .th { position: relative; aspect-ratio: 1.5; border-radius: 14px; overflow: hidden; transition: border-radius .35s var(--spring), padding .2s, opacity .2s, filter .2s; }
+.mcard .th > .art { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; }
+.mcard.on .th { padding: 4px; border-radius: 22px; box-shadow: inset 0 0 0 2.5px var(--pl-primary); }
+.mcard.on .th > .art { inset: 4px; border-radius: 18px; }
+.mcard .ck { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--pl-primary); color: var(--pl-on-primary); display: none; place-items: center; z-index: 2; }
+.mcard .ck svg { width: 14px; height: 14px; fill: currentColor; }
+.mcard.on .ck { display: grid; }
+.mcard .nm { padding-left: 4px; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; }
+.mcard.on .nm { color: var(--pl-on-surface); font-weight: 700; }
+.mcard .pre { font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 6px; background: var(--pl-tertiary); color: #102030; flex: none; }
+.mcard .now { position: absolute; left: 8px; bottom: 8px; z-index: 2; display: none; align-items: center; gap: 4px; padding: 2px 7px 2px 5px; border-radius: 8px; background: rgb(0 0 0 / .55); color: #fff; font-size: 10.5px; font-weight: 700; }
+.mcard .now i { display: inline-flex; gap: 1.5px; align-items: flex-end; height: 9px; }
+.mcard .now i b { width: 2px; background: currentColor; border-radius: 1px; }
+.mcard.showing .now { display: inline-flex; }
+/* 随机池：多选。未选中的卡片右上是空心圈，缩略图压暗 */
+.mgrid.multi .mcard .ck { display: grid; background: rgb(0 0 0 / .35); box-shadow: inset 0 0 0 2px rgb(255 255 255 / .85); }
+.mgrid.multi .mcard .ck svg { display: none; }
+.mgrid.multi .mcard.on .ck { background: var(--pl-primary); box-shadow: none; }
+.mgrid.multi .mcard.on .ck svg { display: block; }
+.mgrid.multi .mcard:not(.on) .th { opacity: .62; }
+/* 按速度：整块灰掉、不可点 */
+.mgrid.off { pointer-events: none; }
+.mgrid.off .mcard .th { filter: grayscale(1); opacity: .38; }
+.mgrid.off .mcard .nm { opacity: .45; }
+.mgrid.off .mcard.on .th { padding: 0; border-radius: 14px; box-shadow: none; }
+.mgrid.off .mcard.on .th > .art { inset: 0; border-radius: 14px; }
+.mgrid.off .mcard .ck { display: none !important; }
+
+/* 缩略图：各模式静帧的示意（真实界面是 StagePreview 的减少动画快照） */
+.art { display: flex; flex-direction: column; justify-content: center; padding: 10px 12px; font-weight: 700; color: #fff; line-height: 1.25; }
+.art .l1 { font-size: 13px; } .art .l0 { font-size: 10px; opacity: .45; font-weight: 500; } .art .l2 { font-size: 9.5px; opacity: .7; font-weight: 500; margin-top: 2px; }
+.a-classic { background: #1b1a22; align-items: center; text-align: center; }
+.a-classic .l1 { color: #fff; }
+.a-rush { background: #3462c8; }
+.a-rush .l1 { font-size: 15px; font-weight: 900; letter-spacing: -.02em; }
+.a-rush.salt { background: #2c5f5a; color: #ffe9b8; } .a-rush.night { background: radial-gradient(120% 90% at 20% 120%, #3c3a8a 0, #141436 60%); color: #cfd3ff; }
+.a-rainbow { background: #15141c; align-items: center; text-align: center; }
+.a-rainbow .l1 { background: linear-gradient(90deg, #ff7a7a, #ffd36b, #7dffa8, #6bc8ff, #c78bff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.a-52 { background: repeating-radial-gradient(circle at 50% 50%, rgb(255 255 255 / .09) 0 1px, transparent 1px 9px), #18161d; align-items: center; text-align: center; }
+.a-miside { background: #201622; }
+.a-miside .l1 { transform: rotate(-6deg); font-size: 15px; color: #ffd1ec; }
+.a-wave { background: repeating-linear-gradient(170deg, rgb(255 255 255 / .06) 0 4px, transparent 4px 11px), linear-gradient(180deg, #1d2440, #141422); align-items: center; text-align: center; }
+.a-vinyl { background: radial-gradient(circle at 18% 50%, #111 0 18%, #2b2b2b 18.5% 19.5%, #111 20% 30%, transparent 30.5%), #191820; padding-left: 46%; }
+.a-cine { background: #0f0f12; }
+.a-cine .l1 { font-size: 17px; font-weight: 900; letter-spacing: -.04em; line-height: 1.05; }
+.a-star { background: radial-gradient(1px 1px at 20% 30%, #fff, transparent), radial-gradient(1px 1px at 70% 20%, #fff, transparent), radial-gradient(1.5px 1.5px at 40% 80%, #fff, transparent), radial-gradient(1px 1px at 85% 70%, #fff, transparent), radial-gradient(1px 1px at 55% 50%, #cfe, transparent), linear-gradient(180deg, #101734, #1c1036); align-items: center; text-align: center; }
+.a-jump { background: linear-gradient(160deg, #1f2733, #12161e); align-items: center; text-align: center; }
+.a-jump .blk { width: 18px; height: 10px; background: #5b7cf0; transform: skewY(-25deg); display: inline-block; margin: 0 6px; box-shadow: 0 4px 0 #2a3c8a; }
+
+/* ── 浅色应用页（照 PageScaffold / LargeFlexibleTopAppBar / SongRow / MiniPlayer / ShortNavigationBar） ── */
+.lbar { position: absolute; left: 0; right: 0; top: 30px; height: 64px; display: flex; align-items: center; padding: 0 4px; z-index: 6; color: var(--md-on-surface); }
+.lbar .sp { flex: 1; }
+.lbar .ttl { flex: 1; font-size: 20px; font-weight: 600; padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lbig { padding: 100px 20px 6px; }
+.lbig h5 { font-size: 34px; line-height: 1.15; font-weight: 800; letter-spacing: -.5px; }
+.lbig p { margin-top: 4px; font-size: 14px; color: var(--md-on-surface-variant); }
+.lbody { position: absolute; inset: 0; overflow: hidden; }
+.dayl { padding: 16px 20px 8px; font-size: 14px; font-weight: 700; color: var(--md-on-surface-variant); }
+.slist { display: flex; flex-direction: column; gap: 2px; margin: 0 16px; }
+.srow { position: relative; height: 64px; border-radius: 4px; overflow: hidden; touch-action: pan-y; }
+.slist > .srow:first-child { border-radius: 16px 16px 4px 4px; } .slist > .srow:last-child { border-radius: 4px 4px 16px 16px; }
+.srow .fg { position: absolute; inset: 0; display: flex; align-items: center; gap: 0; padding: 8px 0 8px 12px; background: var(--md-surface-container-low); z-index: 2; transition: transform .45s var(--spring); cursor: grab; }
+.srow.drag .fg { transition: none; cursor: grabbing; }
+.srow.playing .fg { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.cv { width: 48px; height: 48px; border-radius: 12px; flex: none; background-size: cover; }
+.srow .tx { flex: 1; min-width: 0; padding: 0 8px 0 14px; }
+.srow .tx b { display: block; font-size: 16px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srow.playing .tx b { font-weight: 700; }
+.srow .tx small { display: block; font-size: 14px; color: var(--md-on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srow .tm { font-size: 14px; font-weight: 500; color: var(--md-on-surface-variant); }
+.srow .more { color: var(--md-on-surface-variant); }
+/* 滑开后露出的按钮：两侧各一组，按钮是 56dp 宽的竖排图标 + 字 */
+.srow .under { position: absolute; inset: 0; display: flex; justify-content: space-between; z-index: 1; }
+.srow .under .side { display: flex; height: 100%; }
+.srow .act { width: 64px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 11.5px; font-weight: 700; border: 0; cursor: pointer; }
+.srow .act svg { width: 22px; height: 22px; fill: currentColor; }
+.act.k-dl { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.act.k-pl { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+.act.k-fav { background: #ffd8e4; color: #7a1d3e; }
+.act.k-unfav { background: var(--md-surface-container-highest); color: var(--md-on-surface); }
+.act.k-del { background: var(--md-error-container); color: var(--md-on-error-container); }
+.act.k-next { background: var(--md-primary-container); color: var(--md-on-primary-container); }
+.srow .flood { position: absolute; inset: 0; z-index: 1; display: none; align-items: center; padding: 0 22px; gap: 10px; font-weight: 800; font-size: 14px; }
+.srow .flood svg { width: 26px; height: 26px; fill: currentColor; transition: transform .3s var(--spring); }
+.srow.full-r .flood.r, .srow.full-l .flood.l { display: flex; }
+.srow .flood.l { justify-content: flex-end; }
+.srow.full-r .flood.r svg, .srow.full-l .flood.l svg { transform: scale(1.25); }
+.lmini { position: absolute; left: 10px; right: 10px; bottom: 92px; height: 64px; border-radius: 22px; display: flex; align-items: center; gap: 12px; padding: 0 6px 0 8px; z-index: 13; background: var(--md-secondary-container); color: var(--md-on-secondary-container); box-shadow: 0 10px 26px -12px rgb(0 0 0 / .4); }
+.lmini .cv { width: 46px; height: 46px; border-radius: 14px; }
+.lmini .tx { flex: 1; min-width: 0; } .lmini .tx b { display: block; font-size: 15px; } .lmini .tx small { font-size: 12.5px; opacity: .75; }
+.lmini .pp { width: 44px; height: 44px; border-radius: 50%; background: var(--md-primary-container); color: var(--md-on-primary-container); display: grid; place-items: center; }
+.lnav { position: absolute; left: 0; right: 0; bottom: 0; height: 84px; padding-bottom: 18px; display: grid; grid-template-columns: repeat(4, 1fr); z-index: 12; background: var(--md-surface-container); }
+.lnav span { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--md-on-surface-variant); }
+.lnav span i { width: 56px; height: 32px; display: grid; place-items: center; border-radius: 16px; }
+.lnav span.on { color: var(--md-on-surface); font-weight: 700; } .lnav span.on i { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.menu { position: absolute; z-index: 25; min-width: 200px; padding: 6px 0; border-radius: 20px; background: var(--md-surface-container); box-shadow: 0 10px 28px -8px rgb(0 0 0 / .35); }
+.menu div { display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 16px; font-size: 14.5px; }
+.menu div svg { width: 22px; height: 22px; fill: var(--md-on-surface-variant); }
+.menu div.danger { color: var(--md-error); } .menu div.danger svg { fill: var(--md-error); }
+.lrow { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 10px 16px; background: var(--md-surface-container-low); border-radius: 4px; }
+.lrow .ic { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.lrow .ic.tr { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+.lrow .ic.er { background: var(--md-error-container); color: var(--md-on-error-container); }
+.lrow .ic svg { width: 22px; height: 22px; fill: currentColor; }
+.lrow .t { flex: 1; min-width: 0; font-size: 15.5px; font-weight: 500; line-height: 21px; }
+.lrow .t small { display: block; font-size: 13px; font-weight: 400; line-height: 18px; color: var(--md-on-surface-variant); }
+.lrow .v { font-size: 14px; color: var(--md-on-surface-variant); white-space: nowrap; }
+.lrow.sel { background: var(--md-secondary-container); }
+.cbx { width: 22px; height: 22px; border-radius: 6px; flex: none; box-shadow: inset 0 0 0 2px var(--md-outline); display: grid; place-items: center; }
+.cbx.on { background: var(--md-primary); box-shadow: none; color: var(--md-on-primary); }
+.cbx svg { width: 18px; height: 18px; fill: currentColor; display: none; } .cbx.on svg { display: block; }
+.pchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.pchip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px 0 5px; border-radius: 8px; font-size: 12px; font-weight: 600; background: var(--md-surface-container-highest); color: var(--md-on-surface-variant); }
+.pchip i { width: 16px; height: 16px; border-radius: 5px; display: grid; place-items: center; font: 800 9px/1 var(--body); color: #fff; font-style: normal; }
+.pchip.skip { text-decoration: line-through; opacity: .7; }
+
+@media (max-width: 900px) { .phases { grid-template-columns: 1fr; } }
+@media (max-width: 420px) { .phone { transform: scale(.86); transform-origin: top left; margin-bottom: -112px; margin-right: -53px; } }
+
+/* ── 深色版的列表行、勾选框（播放页里的 PlaylistPickerSheet） ── */
+.pl .lrow { background: var(--pl-surface-container); }
+.pl .lrow .ic { background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); }
+.pl .lrow .t small, .pl .lrow .v { color: var(--pl-on-surface-variant); }
+.pl .cbx { box-shadow: inset 0 0 0 2px var(--pl-outline); }
+.pl .cbx.on { background: var(--pl-primary); color: var(--pl-on-primary); box-shadow: none; }
+.pl .pchip { background: var(--pl-surface-container-highest); color: var(--pl-on-surface-variant); }
+.lrow.click, .row.click { cursor: pointer; }
+.chipdd { display: inline-flex; align-items: center; gap: 2px; height: 32px; padding: 0 6px 0 12px; border-radius: 8px; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); font: 600 13.5px/1 var(--body); border: 0; cursor: pointer; white-space: nowrap; }
+.chipdd svg { width: 18px; height: 18px; fill: currentColor; }
+.mini-th { width: 56px; height: 38px; border-radius: 10px; flex: none; padding: 4px 6px !important; }
+.mini-th .l1 { font-size: 7.5px !important; } .mini-th .l0, .mini-th .l2 { display: none; }
+.ddm { position: absolute; z-index: 45; width: 210px; max-height: 330px; overflow-y: auto; padding: 6px 0; border-radius: 20px; background: var(--pl-surface-container-high); color: var(--pl-on-surface); box-shadow: 0 12px 30px -8px rgb(0 0 0 / .6); display: none; }
+.ddm.on { display: block; }
+.ddm div { display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 16px; font-size: 14px; cursor: pointer; }
+.ddm div:hover { background: rgb(255 255 255 / .06); }
+.ddm div svg { width: 20px; height: 20px; fill: currentColor; }
+.pl .snack { background: #e6e1e5; color: #1d1b20; }
+.pl .snack button { color: var(--pl-on-primary-container); }
+.snack { opacity: 0; transform: translateY(10px); transition: opacity .2s, transform .3s var(--spring); pointer-events: none; }
+.snack.on { opacity: 1; transform: none; pointer-events: auto; }
+.sheet.closed { transform: translateY(105%); transition: transform .4s cubic-bezier(.3,0,.8,.15); }
+.sheet { transition: transform .45s var(--spring); }
+.scrim { transition: opacity .3s; } .scrim.off { opacity: 0; pointer-events: none; }
+.stage-peek { position: absolute; inset: 0; z-index: 1; padding: 46px 22px 0; }
+.stage-peek .cap { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 10px; background: rgb(0 0 0 / .35); color: #fff; font-size: 11.5px; font-weight: 700; }
+/* 大预览（设置区顶部，StagePreview 放大版） */
+.bigprev { position: relative; aspect-ratio: 1.6; border-radius: 20px; overflow: hidden; margin-bottom: 10px; }
+.bigprev .bgl { position: absolute; inset: 0; }
+.bigprev .lines { position: absolute; left: 16px; right: 16px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+.bigprev .ln { font-weight: 800; line-height: 1.12; transform-origin: left center; transition: filter .2s, transform .2s, font-size .2s; }
+.bigprev .ln.sub { font-weight: 500; opacity: .75; font-size: 11px; margin-top: -3px; }
+.bigprev .tag2 { position: absolute; left: 10px; bottom: 10px; padding: 3px 8px; border-radius: 8px; font-size: 10.5px; font-weight: 700; background: rgb(0 0 0 / .3); color: #fff; }
+.swrow { display: flex; gap: 8px; }
+.swbtn { flex: 1; height: 48px; border-radius: 24px; border: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font: 700 14px/1 var(--body); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .15); }
+.swbtn svg { width: 20px; height: 20px; fill: currentColor; }
+.swbtn.sel { outline: 3px solid var(--pl-primary); outline-offset: 2px; }
+/* 取色面板 */
+.cp-prev { height: 92px; border-radius: 18px; display: flex; flex-direction: column; justify-content: center; padding: 0 18px; font-weight: 800; font-size: 20px; line-height: 1.15; }
+.cp-prev small { font-size: 12px; font-weight: 500; opacity: .75; margin-top: 4px; }
+.swatches { display: flex; gap: 10px; flex-wrap: wrap; }
+.swatches button { width: 40px; height: 40px; border-radius: 50%; border: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgb(255 255 255 / .2); }
+.swatches button.on { outline: 3px solid var(--pl-primary); outline-offset: 2px; }
+.hsl-row { display: grid; grid-template-columns: 48px 1fr 40px; align-items: center; gap: 8px; font-size: 13px; color: var(--pl-on-surface-variant); }
+.hsl-row b { font-weight: 600; text-align: right; color: var(--pl-on-surface); font-variant-numeric: tabular-nums; }
+.grad-track { position: relative; height: 28px; border-radius: 14px; cursor: pointer; touch-action: none; }
+.grad-track i { position: absolute; top: -3px; width: 8px; height: 34px; margin-left: -4px; border-radius: 4px; background: #fff; box-shadow: 0 0 0 2px rgb(0 0 0 / .45); }
+.hexf { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 14px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--pl-outline); font: 600 15px/1 var(--mono); }
+.hexf span { font-family: var(--body); font-size: 12px; color: var(--pl-on-surface-variant); }
+.ctr { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 700; }
+.ctr.ok { background: #1d4d33; color: #b6f2c9; } .ctr.bad { background: #5c1d1d; color: #ffd0cc; }
+/* 分享 */
+.topbar { position: absolute; left: 0; right: 0; top: 30px; height: 64px; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 4px; z-index: 6; }
+.topbar .ttl { flex: 1; font-size: 20px; font-weight: 600; padding-left: 2px; }
+.pk-list { z-index: 3; position: absolute; left: 0; right: 0; top: 96px; bottom: 70px; overflow: hidden; padding: 6px 14px; display: flex; flex-direction: column; gap: 4px; -webkit-mask-image: linear-gradient(to bottom, #000 85%, transparent); mask-image: linear-gradient(to bottom, #000 85%, transparent); }
+.pk { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 18px; cursor: pointer; transition: background .2s, border-radius .35s var(--spring); }
+.pk .ck2 { width: 22px; height: 22px; border-radius: 50%; flex: none; margin-top: 4px; box-shadow: inset 0 0 0 2px var(--pl-outline); display: grid; place-items: center; }
+.pk .ck2 svg { width: 16px; height: 16px; fill: var(--pl-on-primary); display: none; }
+.pk .tx2 b { display: block; font-size: 21px; line-height: 1.25; font-weight: 800; color: var(--pl-on-surface); opacity: .5; }
+.pk .tx2 small { display: block; font-size: 13.5px; color: var(--pl-on-surface-variant); opacity: .6; margin-top: 2px; }
+.pk.on { background: var(--pl-secondary-container); border-radius: 12px; }
+.pk.on .ck2 { background: var(--pl-primary); box-shadow: none; } .pk.on .ck2 svg { display: block; }
+.pk.on .tx2 b, .pk.on .tx2 small { opacity: 1; color: var(--pl-on-secondary-container); }
+.pk .singing { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: var(--pl-primary); margin-left: 6px; vertical-align: middle; }
+.hintchip { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 6; padding: 8px 14px; border-radius: 12px; background: var(--pl-surface-container-high); color: var(--pl-on-surface-variant); font-size: 13px; white-space: nowrap; }
+.share-prev { position: absolute; left: 0; right: 0; top: 94px; height: 330px; display: grid; place-items: center; }
+.share-lower { position: absolute; left: 0; right: 0; top: 430px; bottom: 84px; overflow-y: auto; padding: 0 16px 12px; scrollbar-width: thin; }
+.stylestrip { display: flex; gap: 10px; padding: 4px 0 2px; }
+.stylestrip button { flex: 1; border: 0; background: none; cursor: pointer; display: grid; gap: 4px; justify-items: center; padding: 0; color: var(--pl-on-surface-variant); font: 600 12px/1.2 var(--body); }
+.stylestrip button .sw2 { width: 100%; height: 56px; border-radius: 12px; overflow: hidden; position: relative; transition: border-radius .35s var(--spring); }
+.stylestrip button.on { color: var(--pl-on-surface); }
+.stylestrip button.on .sw2 { border-radius: 18px; box-shadow: 0 0 0 2.5px var(--pl-primary); }
+.actbar { position: absolute; left: 0; right: 0; bottom: 0; height: 84px; padding: 10px 16px 26px; display: flex; gap: 8px; background: var(--pl-surface-container-low); z-index: 8; }
+.actbar button { flex: 1; justify-content: center; }
+.lcard { position: relative; overflow: hidden; display: flex; flex-direction: column; font-family: var(--body); box-shadow: 0 18px 40px -20px rgb(0 0 0 / .7); flex: none; }
+.lcard .lg { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; }
+.lcard .lg i { display: grid; place-items: center; border-radius: 30%; }
+.lcard .lyr { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.lcard .w { display: inline-block; margin-right: .26em; }
+.gal-fig { margin: 0; display: grid; gap: 8px; width: 236px; align-content: start; }
+/* 播放页（PhonePlayer 竖屏） */
+.pp-cover { position: absolute; left: 32px; top: 104px; width: 296px; height: 296px; background-size: cover; }
+.pp-meta { position: absolute; left: 24px; right: 14px; top: 432px; display: flex; align-items: center; gap: 4px; }
+.pp-meta .tt { flex: 1; min-width: 0; }
+.pp-meta .tt b { display: block; font-size: 30px; line-height: 1.18; font-weight: 900; letter-spacing: -.02em; }
+.pp-meta .tt span { font-size: 16px; color: var(--pl-primary); font-weight: 500; }
+.favbtn { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; color: var(--pl-on-surface); flex: none; }
+.favbtn.on { border-radius: 14px; background: var(--pl-primary-container); color: var(--pl-on-primary-container); }
+.pp-lyr { position: absolute; left: 24px; right: 24px; top: 524px; font-size: 17px; font-weight: 700; line-height: 1.45; }
+.pp-lyr span { display: block; opacity: .4; font-weight: 600; }
+.pp-wave { position: absolute; left: 24px; right: 24px; top: 600px; height: 28px; }
+.pp-time { position: absolute; left: 24px; right: 24px; top: 632px; display: flex; justify-content: space-between; font-size: 12px; color: var(--pl-on-surface-variant); }
+.pp-ctl { position: absolute; left: 20px; right: 16px; top: 668px; display: flex; justify-content: space-between; align-items: center; }
+.ptg { display: flex; align-items: center; gap: 8px; height: 56px; }
+.ptg .side { width: 50px; height: 56px; display: grid; place-items: center; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); }
+.ptg .side.l { border-radius: 28px 14px 14px 28px; } .ptg .side.r { border-radius: 14px 28px 28px 14px; }
+.cookie { position: relative; width: 56px; height: 56px; flex: none; }
+.cookie > svg { position: absolute; inset: 0; width: 56px; height: 56px; fill: var(--pl-primary); }
+.cookie i { position: absolute; inset: 0; display: grid; place-items: center; color: var(--pl-on-primary); }
+.toolbar { height: 60px; display: flex; align-items: center; padding: 0 6px; border-radius: 30px; background: var(--pl-surface-container-high); }
+.tb { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--pl-on-surface); }
+.tb.sel { border-radius: 16px; background: var(--pl-primary-container); color: var(--pl-on-primary-container); }
+/* 海报墙 */
+.wall { position: absolute; left: 0; right: 0; top: 0; height: 470px; overflow: hidden; }
+.wall .tile { position: absolute; overflow: hidden; background-size: cover; transition: left .35s var(--spring), top .35s var(--spring), width .35s var(--spring), height .35s var(--spring), border-radius .3s; }
+.wall .tile b { position: absolute; left: 5px; top: 3px; font-size: 10px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgb(0 0 0 / .6); }
+.wall .tint { position: absolute; inset: 0; pointer-events: none; }
+.wall .grown { position: absolute; z-index: 3; overflow: hidden; box-shadow: 0 16px 40px -16px rgb(0 0 0 / .8); transition: all .35s var(--spring); display: flex; flex-direction: column; justify-content: flex-end; padding: 14px; color: #fff; }
+.wall .grown h6 { margin: 0; font-size: 18px; font-weight: 800; }
+.wall .grown p { font-size: 12px; opacity: .8; }
+.wall .grown .gl { font-size: 13.5px; font-weight: 700; margin-top: 8px; }
+.wall .pill { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); z-index: 4; padding: 8px 16px; border-radius: 20px; background: rgb(20 20 28 / .75); color: #fff; font-size: 13px; font-weight: 700; white-space: nowrap; }
+/* 横屏 */
+.land { position: relative; width: 560px; max-width: 100%; aspect-ratio: 800/360; padding: 8px; border-radius: 34px; background: #080b0b; box-shadow: 0 24px 50px -30px rgb(0 0 0 / .6); }
+.land .ls { position: relative; width: 100%; height: 100%; border-radius: 27px; overflow: hidden; }
+.land .rail { position: absolute; left: 3%; top: 7%; bottom: 7%; width: 9.5%; border-radius: 40px; background: var(--pl-surface-container); display: flex; flex-direction: column; align-items: center; justify-content: space-around; padding: 6px 0; color: var(--pl-on-surface); }
+.land .rail .c0 { width: 60%; aspect-ratio: 1; border-radius: 50%; background-size: cover; }
+.land .rail svg { width: 18px; height: 18px; fill: currentColor; }
+.land .rail .pp2 { width: 64%; aspect-ratio: 1; border-radius: 40%; background: var(--pl-primary); color: var(--pl-on-primary); display: grid; place-items: center; }
+.land .rail .sel { width: 52%; aspect-ratio: 1; border-radius: 30%; background: var(--pl-primary); color: var(--pl-on-primary); display: grid; place-items: center; }
+.land .hd { position: absolute; left: 18%; top: 8%; font-size: 15px; font-weight: 700; color: var(--pl-primary); }
+.land .lz { position: absolute; left: 18%; right: 6%; top: 22%; bottom: 8%; display: flex; flex-direction: column; justify-content: flex-start; gap: 4px; overflow: hidden; }
+.land .lz .ln { font-weight: 800; transform-origin: left center; }
+.land .empty { position: absolute; left: 18%; right: 6%; top: 22%; bottom: 8%; border: 2px dashed rgb(255 120 120 / .55); border-radius: 14px; display: grid; place-items: center; color: rgb(255 170 170 / .9); font-size: 13px; font-weight: 700; }
+.stage-peek.art { justify-content: flex-start; align-items: flex-start; padding: 40px 18px 0; }
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true">
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></symbol>
+<symbol id="i-next" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></symbol>
+<symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></symbol>
+<symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></symbol>
+<symbol id="i-heart-o" viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/></symbol>
+<symbol id="i-queue" viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18A3 3 0 1 0 19 17V8h3V6h-5z"/></symbol>
+<symbol id="i-library" viewBox="0 0 24 24"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 5h-3v5.5a2.5 2.5 0 1 1-1-2V5h4v2zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6z"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></symbol>
+<symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h12v2H4zm0 5h9v2H4zm14.5-3a2.5 2.5 0 1 0 2.5 2.5V10h2V8h-3v5.05A2.5 2.5 0 0 0 18.5 13z"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+<symbol id="i-add" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></symbol>
+<symbol id="i-history" viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></symbol>
+<symbol id="i-drag" viewBox="0 0 24 24"><path d="M20 9H4v2h16V9zM4 15h16v-2H4v2z"/></symbol>
+<symbol id="i-delete" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></symbol>
+<symbol id="i-playnext" viewBox="0 0 24 24"><path d="M3 10h11v2H3zm0-4h11v2H3zm0 8h7v2H3zm13-1v8l6-4z"/></symbol>
+<symbol id="i-pladd" viewBox="0 0 24 24"><path d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></symbol>
+<symbol id="i-chart" viewBox="0 0 24 24"><path d="M7.5 21H2V9h5.5v12zm7.25-18h-5.5v18h5.5V3zM22 11h-5.5v10H22V11z"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4a5 5 0 0 0 0-10z"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></symbol>
+<symbol id="i-remove" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/></symbol>
+<symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></symbol>
+<symbol id="i-share" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></symbol>
+<symbol id="i-dice" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM7.5 18c-.83 0-1.5-.67-1.5-1.5S6.67 15 7.5 15s1.5.67 1.5 1.5S8.33 18 7.5 18zm0-9C6.67 9 6 8.33 6 7.5S6.67 6 7.5 6 9 6.67 9 7.5 8.33 9 7.5 9zm4.5 4.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4.5 4.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm0-9c-.83 0-1.5-.67-1.5-1.5S15.67 6 16.5 6s1.5.67 1.5 1.5S17.33 9 16.5 9z"/></symbol>
+<symbol id="i-arrup" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></symbol>
+<symbol id="i-arrdown" viewBox="0 0 24 24"><path d="M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z"/></symbol>
+<symbol id="i-save" viewBox="0 0 24 24"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/></symbol>
+<symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><path d="M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z"/></symbol>
+<symbol id="i-dd" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></symbol>
+<symbol id="i-quote" viewBox="0 0 24 24"><path d="M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z"/></symbol>
+<symbol id="i-tune" viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></symbol>
+<symbol id="i-swipe" viewBox="0 0 24 24"><path d="M18.89 6.83C17.03 4.97 14.6 4 12 4S6.97 4.97 5.11 6.83L4 5.72V9h3.28L5.89 7.61C7.4 6.11 9.62 5.25 12 5.25s4.6.86 6.11 2.36L16.72 9H20V5.72l-1.11 1.11zM13 9.5h-2v6.67l-1.79-1.79-1.42 1.41L12 20l4.21-4.21-1.42-1.41L13 16.17z"/></symbol>
+<symbol id="i-zoomout" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM7 9h5v1H7z"/></symbol>
+<symbol id="i-text" viewBox="0 0 24 24"><path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z"/></symbol>
+<symbol id="i-image" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></symbol>
+<symbol id="i-rotate" viewBox="0 0 24 24"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 18.29 0 12 0l-.66.03 3.81 3.81 1.33-1.32zm-6.25-.77a1.49 1.49 0 0 0-2.12 0L1.75 8.11a1.49 1.49 0 0 0 0 2.12l12.02 12.02c.59.59 1.54.59 2.12 0l6.36-6.36c.59-.59.59-1.54 0-2.12L10.23 1.75zm4.6 19.44L2.81 9.17l6.36-6.36 12.02 12.02-6.36 6.36zm-7.31.29C4.25 19.94 1.91 16.76 1.55 13H.05C.56 19.16 5.71 24 12 24l.66-.03-3.81-3.81-1.33 1.32z"/></symbol>
+</svg>
+
+<header class="page-head">
+  <div class="doc-label">改 进 稿 · 2 0 2 6 - 1 1 - 1 8</div>
+  <h1>用户提的 14 条建议，<em>逐条</em>落到界面上</h1>
+  <p class="lede">
+    这份稿子按用户的反馈截图和原话整理，每条先对照<strong>现在代码里是怎么做的</strong>，再给出改法和交互稿。界面一律照现有组件画：歌词动画面板是 <code>AnimationSheet</code>（<code>AdaptiveSheet</code> + <code>ConnectedToggleGroup</code> + 两列 <code>ModeCard</code>），列表是 <code>SongRow</code> 分段列表，设置行是 <code>SegmentedGroup</code> 里的 <code>ListRow</code> / <code>SwitchRow</code>。
+    深色稿是播放页的 <strong>PlayerTheme</strong>（跟封面色相走），浅色稿是 <strong>BrandSeed #006B5F</strong> 的 M3 浅色方案。带 <span class="tag">红色虚线</span> 的是新增或改动的部分。
+  </p>
+  <div class="chips">
+    <span class="chip2"><span class="dot"></span>来源：用户反馈 <b>7 张截图 + 原话</b></span>
+    <span class="chip2">建议 <b>14</b> 条 · 归成 <b>8</b> 块</span>
+    <span class="chip2">真 bug <b>1</b> 个：手机横屏全屏歌词空白</span>
+    <span class="chip2">新依赖 <b>0</b> 个</span>
+  </div>
+  <nav class="toc">
+    <a href="#overview"><b>00</b>总览</a>
+    <a href="#sheet"><b>01</b>动画面板：换法、随机池、保存并应用</a>
+    <a href="#rush"><b>02</b>Rush：自定义配色、景深强度、风格预设</a>
+    <a href="#share"><b>03</b>长按歌词分享</a>
+    <a href="#addto"><b>04</b>播放页加歌单</a>
+    <a href="#swipe"><b>05</b>列表左右滑</a>
+    <a href="#files"><b>06</b>歌单导出、落雪导入</a>
+    <a href="#wall"><b>07</b>海报墙视角远近</a>
+    <a href="#landscape"><b>08</b>横屏全屏歌词</a>
+    <a href="#impl"><b>09</b>实现与分期</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="block" id="overview">
+  <div class="block-head"><span class="kicker">00</span><h2>总览：现在是怎样，改成怎样</h2></div>
+  <p class="sub">「现在」一栏都是读代码得到的，括号里是出处。只有第 14 条是真 bug，其余是功能缺口或交互不清楚。</p>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:4%">#</th><th style="width:19%">建议</th><th style="width:36%">现在</th><th>改成</th><th style="width:6%">节</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Rush 加自定义配色</td><td>配色只有 鲜艳 / 柔和 / 播放页。移植时把 Rush 的取色器换成了「播放页」，因为设置表只有数字、选项、开关三种控件（<code>RushVisualizer.kt</code> 文件头）。</td><td>配色加第 4 项「自定义」，下面出两个色块（背景、文字），点开是自己画的取色面板：封面取色、色相/彩度/明度三条滑块、十六进制、对比度检查。设置表加一种 <code>Color</code> 控件。</td><td><a href="#rush">02</a></td></tr>
+      <tr><td>2</td><td>Rush 的组合存成新风格预设</td><td>每个模式只有一份设置（<code>pluginSettings[modeId]</code>），改了就覆盖。</td><td>设置标题旁加「存为预设」和「随机搭配」。预设是一张独立的模式卡片，排在原模式后面，能选为固定、放进随机池、配给按速度的某一档。</td><td><a href="#rush">02</a></td></tr>
+      <tr><td>3</td><td>随机时能选从哪几个里随机；有记忆优先用记忆</td><td>随机候选写死为「除经典外全部」（<code>LyricDirector.randomCandidates</code>）；记忆已有（最近 2000 首，<code>lyric_memory</code>）。</td><td>选「随机」时模式卡片变成多选，选中的组成随机池。顺序：这首歌固定的 → 记住的 → 从池里抽（不和上一首重复）。</td><td><a href="#sheet">01</a></td></tr>
+      <tr><td>4</td><td>最近播放没有单曲删除</td><td>面板里刻意不给移除（<code>HistoryScreen</code>：「最近播放只在本机、没有逐条移除」）。</td><td>⋮ 面板加「从最近播放删除」，左滑也能删，都带撤销。</td><td><a href="#swipe">05</a></td></tr>
+      <tr><td>5</td><td>列表左右滑快捷操作，设置里能调排布</td><td>全应用没有滑动操作（没有用 <code>anchoredDraggable</code> / <code>SwipeToDismissBox</code>）。</td><td>右滑露出「下载、加到歌单」，右滑到底收藏；左滑露出「取消收藏、删除」，左滑到底默认不做事。四个位置都能在 设置 › 滑动操作 里换、排顺序。</td><td><a href="#swipe">05</a></td></tr>
+      <tr><td>6</td><td>选了「按速度」，上面的单选不该还亮着</td><td>模式卡片在三种换法下都是单选、都亮着；自动换时点卡片的意思变成「这首歌一直用它」（<code>LyricDirector.pick</code>），界面上看不出来。</td><td>换法挪到卡片上面。固定＝单选；随机＝多选（随机池）；按速度＝卡片整块灰掉不可点，由四档决定。「这首歌用哪个」单独成一行。</td><td><a href="#sheet">01</a></td></tr>
+      <tr><td>7</td><td>改了没立即生效，加「保存偏好」，退出时问是否保存并应用</td><td>设置是即时写入的，但自动换只在两句之间空当 ≥1.5 秒时才换（<code>canSwitchAt</code>），按速度还要等第 4 秒后节拍锁定（置信度 ≥0.5）；等不到就留到下一首。所以看上去像没生效。</td><td>面板改成草稿：改动先只在缩略图和设置区顶部的大预览里体现，底部浮出「N 处改动 · 放弃 / 保存并应用」。关面板时有未保存改动就弹对话框。「保存并应用」立刻重算这首歌并马上换，不等空当。</td><td><a href="#sheet">01</a></td></tr>
+      <tr><td>8</td><td>播放页没有直接加歌单的入口</td><td>播放页 ⋮ 菜单只有 全屏歌词 / 海报墙 / 选择音源 / 歌手 / 专辑 / 下载 / 在平台打开（<code>MoreMenu</code>）。</td><td>歌名右边、收藏左边加一个「加到歌单」按钮（全屏歌词页顶栏同样）；⋮ 菜单也加一项。面板里标出已在哪些歌单，能直接新建。</td><td><a href="#addto">04</a></td></tr>
+      <tr><td>9</td><td>能导入落雪导出的歌单文件</td><td>「从文件导入」只认本应用的同步 JSON（<code>SyncCoordinator.import</code> → <code>SyncJson.decode</code>）。</td><td>同一个入口自动识别落雪 <code>.lxmc</code>（gzip JSON）和旧版 <code>.json</code>，先出预览：几个歌单、各平台多少首、哪些导不了，勾选后导入。</td><td><a href="#files">06</a></td></tr>
+      <tr><td>10</td><td>长按歌词选几句，出分享按钮，能编辑分享格式（参考 Rush 和现在的全屏播放页）</td><td>应用里没有分享（只有导出日志用到 <code>ACTION_SEND</code>）。</td><td>全屏歌词页长按进入选句，顶栏变成「已选 N 句 · 分享」。分享页上面是卡片预览，下面选样式（色块 / 混排 / 封面 / 播放页）、配色、比例、要不要译文；可存图、分享图、复制文字。</td><td><a href="#share">03</a></td></tr>
+      <tr><td>11</td><td>Rush 景深模糊能调模糊度</td><td>只有开关，强度写死为 min(|Δ|·3, 10) dp（<code>RushLyricList</code>）。</td><td>开关换成滑块：关 · 弱 · 中 · 强，「中」等于现在的强度。</td><td><a href="#rush">02</a></td></tr>
+      <tr><td>12</td><td>像落雪那样把本地歌单导出成文件</td><td>只有 同步 › 备份 › 导出到文件：一次导出全部歌单、收藏<b>和平台 Cookie</b>，不适合发给别人。</td><td>歌单 ⋮ 加「导出歌单」，可选 myMusic / 落雪 <code>.lxmc</code> / 纯文本；不带 Cookie。同步页加「导出歌单…」可多选。</td><td><a href="#files">06</a></td></tr>
+      <tr><td>13</td><td>海报墙设置加视角远近滑块</td><td>格距按设备写死（手机 56dp、平板 102dp、电视 76dp，<code>WallMetrics</code>）。</td><td>海报墙设置加「视角」滑块（远 0.5× ～ 近 1.25×，默认 1×），手机、平板上也能双指捏合；拉远到一定程度自动收起序号和字。</td><td><a href="#wall">07</a></td></tr>
+      <tr><td>14</td><td>手机横屏时全屏歌词用不了</td><td><b>bug。</b>横屏走 <code>WidePlayer</code>。舞台高度不到 320dp 时 <code>LyricStage</code> 改用经典列表兜底，但 <code>WidePlayer</code> 没传兜底列表，结果一行都不画。常见手机横屏后高度约 312–336dp，正好卡在线下。</td><td>补上兜底列表（电视同样）；高度门槛改成按文字区算，手机横屏也能放动画。</td><td><a href="#landscape">08</a></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="block" id="sheet">
+  <div class="block-head"><span class="kicker">01</span><h2>动画面板：三种换法各管各的，改完「保存并应用」</h2></div>
+  <div class="quote">按理来说，如果选择了根据速度来检测的话，前面就不应该还是选择着某种特定的风格了，应该是前面都是灰色的……随机风格，除了现在的这个记忆，加一个可以选择在哪几个里面选随机；有以前播放的记录就优先用以前播放的那个，没播放过就从用户选择的样式组里面挑一个……好像没有立即生效，可以加一个保存偏好的按钮，退出返回到歌词页面时弹窗说检测到改动，是否保存并应用。</div>
+  <p class="sub">现在的面板是「卡片（单选）→ 每首歌换动画 → 这首歌固定用它 → 频谱 → 设置」。问题在于<strong>卡片在三种换法下都是单选</strong>：固定时它是全局选择，随机和按速度时点它的意思悄悄变成了「这首歌一直用它」，界面上看不出来。改法是把换法挪到最上面，让卡片的含义跟着换法变；「这首歌用哪个」单独成一行；面板里的改动先当草稿，保存时一次生效。</p>
+
+  <h3>为什么改了看上去没生效</h3>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:26%">操作</th><th style="width:40%">现在的行为（<code>LyricDirector.kt</code>）</th><th>用户看到的</th></tr></thead>
+    <tbody>
+      <tr><td>换法从固定改成随机</td><td>这首歌在记忆里有结果就用记忆里的，没有才抽；抽到后要等<b>两句之间空当 ≥1.5 秒、离下一句 ≥0.8 秒</b>才换（<code>canSwitchAt</code>）</td><td>点了「随机」，画面不动；歌词密的歌整首都等不到空当，留到下一首</td></tr>
+      <tr><td>换法改成按速度</td><td>播到第 4 秒后才开始测，节拍网格置信度到 0.5 才算测到；测到后同样等空当</td><td>节拍弱的歌（慢歌、纯人声）可能一直测不出，一直不换</td></tr>
+      <tr><td>改按速度某一档的动画</td><td>只影响「测到的速度落在这一档」的歌，同样等空当</td><td>这首歌不在这一档时什么也不变</td></tr>
+      <tr><td>随机 / 按速度时点了一张卡片</td><td>这首歌在本次运行里手动优先（不落盘），随机时顺便写进记忆</td><td>以为改了全局选择，其实只改了这一首</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub" style="margin-top:14px">所以「保存并应用」要做的不只是写设置：它会<strong>立刻按新设置重算这首歌，马上换，不等空当</strong>（用 0.4 秒淡入淡出，避免硬切）。按速度且这首歌还没测出速度时，「这首歌」那一行显示「正在听速度…」，测到后立刻换。自动换歌时的「等空当」规则不变，只有手动保存这一下跳过它。</p>
+
+  <h3>交互稿</h3>
+  <div class="demo-bar">
+    <div class="grp"><span>演示</span><button id="aClose">模拟下滑关闭面板</button><button id="aReopen">重新打开面板</button><button id="aReset">重置</button></div>
+    <span class="sep"></span>
+    <span>左边面板里的换法、卡片、按速度四档、「这首歌」那行都能点；改过之后底部会浮出保存条。</span>
+  </div>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr pl" id="shA"></div></div>
+      <figcaption><b>① 动画面板（可操作）</b>换法在最上面。<b>固定</b>：卡片单选；<b>随机</b>：卡片多选，选中的组成随机池，右上角是勾 / 空心圈；<b>按速度</b>：卡片整块灰掉、点不了，四档挪到卡片上面。最上面「这首歌」一行说明这首正在用哪个、为什么，「改…」才是给这一首单独指定。</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr pl" id="shB"></div></div>
+      <figcaption><b>② 有改动时关面板</b>下滑、点外面、按返回，只要草稿和已保存的不一样就弹这个对话框，列出改了什么。点对话框外面回到面板接着改。电视上返回键同样弹，焦点默认在「保存并应用」。</figcaption>
+    </figure>
+  </div>
+
+  <h3>三种换法下，卡片和「这首歌」各是什么意思</h3>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:11%">换法</th><th style="width:26%">卡片</th><th style="width:28%">「这首歌」一行</th><th>设置区编辑哪个模式</th></tr></thead>
+    <tbody>
+      <tr><td>固定</td><td>单选，选中＝所有歌都用它（现状）</td><td>「跟着上面的选择」；「单独指定…」给这首换一个并固定</td><td>选中的那个</td></tr>
+      <tr><td>随机</td><td><b>多选</b>，选中的进随机池；标题「从这些里随机 · 6/12」，旁边「全选 / 清空」。至少留 1 个，只剩 1 个时提示「等于固定」</td><td>「上次听时抽到的（已记住）」或「这次从池里抽到的」；「改…」</td><td>默认是正在显示的那个；标题旁的下拉可以换成池里任意一个</td></tr>
+      <tr><td>按速度</td><td><b>整块灰掉、不可点</b>，不画选中描边和勾；四档在卡片上面，每档点开选一个（预设也在里面）</td><td>「测得 92 拍/分 → 慢」或「正在听速度…」；「改…」</td><td>同上</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note"><b>随机时用哪个，按这个顺序：</b>① 这首歌被固定过（<code>pins</code>）→ 用固定的；② 记忆里有这首（<code>lyric_memory</code>，最近 2000 首）→ 用记住的，<b>即使它已经不在池里</b>（这是用户要的「有记忆优先」）；记住的是一个已删除的预设时跳过；③ 都没有 → 从池里抽，不和上一首重复，抽到的写进记忆。设置区底部加一行「忘掉记住的结果 · 已记住 386 首」，想让池子重新生效时点它。</div>
+</section>
+
+<section class="block" id="rush">
+  <div class="block-head"><span class="kicker">02</span><h2>Rush：自定义配色、景深强度、存成风格预设</h2></div>
+  <div class="quote">能不能加一个自定义配色……rush 它不是可以生成很多种风格吗？可以把它保存为预设的新风格预设……rush 歌词的那个景深模糊，能不能设置一个模糊度的调节。</div>
+  <p class="sub">三件事都落在动画面板的设置区。设置区顶部加一张<strong>大预览</strong>（同 Rush 原版「自定义歌词」页顶上的预览），草稿改动先在这里看效果。设置表的控件从三种（数字、选项、开关）扩到五种：加 <code>Color</code>（色块按钮）和 <code>Slider</code>（滑块），其他模式以后也能用。</p>
+  <div class="demo-bar">
+    <div class="grp"><span>封面</span><span id="rCovers"></span></div>
+    <span class="sep"></span>
+    <span>配色、对齐、字号、景深滑块、背景都能点；配色选「自定义」后点色块，右边的取色面板会跟着改。</span>
+  </div>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr pl" id="shC"></div></div>
+      <figcaption><b>③ 设置区 · 编辑预设「海盐」</b>标题旁的下拉切换编辑哪个模式或预设。配色第 4 项「自定义」，下面两个色块（背景、文字），样子照 Rush 的卡片颜色行。景深模糊换成滑块。最底下是预设操作：存成新预设、覆盖当前预设、删除。</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr pl" id="shD"></div></div>
+      <figcaption><b>④ 取色面板</b>不引入 Rush 用的 skydoves 取色库，用现有 <code>AdaptiveSheet</code> 画：顶部预览；「从封面取」6 个色（舞台已经算好的封面量化色）；最近用过；色相 / 彩度 / 明度三条滑块（HCT，materialkolor 已在依赖里）；十六进制输入；文字对比度不到 4.5:1 时给「自动配文字色」。</figcaption>
+    </figure>
+  </div>
+
+  <h3>三项改动的细节</h3>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:14%">项</th><th style="width:43%">交互</th><th>实现</th></tr></thead>
+    <tbody>
+      <tr><td>自定义配色</td><td>配色：鲜艳 · 柔和 · 播放页 · <b>自定义</b>。选自定义后出两个色块按钮：背景、文字。初值取当前封面的鲜艳色和它的文字色，所以切过去时画面不跳。</td><td><code>LyricSetting.Color(key, label, default)</code>，值存 <code>#RRGGBB</code> 进 <code>pluginSettings</code>；<code>Color</code> 项可声明 <code>visibleWhen = colors == custom</code>。<code>rushPalette</code> 加 custom 分支：底色、字色用设置值，波浪色＝两者掺 25%，流光两端照原式从底色拉开。自定义颜色<b>不跟封面变</b>，切歌不过渡。</td></tr>
+      <tr><td>景深强度</td><td>「景深模糊」开关换成滑块：关 · 弱 · 中 · 强，四个刻度可以吸附，中间也能停。「中」等于现在的强度。</td><td><code>LyricSetting.Slider(key, 0f..1.5f, default = 1f, ticks = 0/0.5/1/1.5)</code>；模糊＝min(|Δ|·3·k, 10·k) dp，k 是滑块值，「强」是 1.5 倍（最多 15dp）。旧的开关值迁移：开 → 1，关 → 0；电视、低内存、Android 12 以下默认 0。<code>RushBlur</code> 缓存上限 80px，15dp 在 3x 屏上是 45px，不用改缓存。</td></tr>
+      <tr><td>风格预设</td><td>设置标题旁「随机搭配」骰子：背景、律动样式、配色、对齐随机组合一套（字号、景深保留），满意就「存成新预设」，起名默认「Rush 1」。预设是一张独立卡片，排在 Rush 后面，带「预设」角标；长按卡片：重命名 / 用当前设置覆盖 / 删除。</td><td><code>LyricStagePrefs.presets: List&lt;StagePreset(id, base, name, settings)&gt;</code>，卡片 id 是 <code>rush#k3f9</code>。<code>LyricVisualizers.byId</code> 认 <code>base#id</code>：返回 base 模式，舞台的 <code>ctx.settings</code> 换成预设的设置。预设能选为固定、进随机池、配给按速度某一档、给某首歌固定。删预设时引用它的地方退回 base 模式。不只 Rush，有设置项的模式都能存预设。只存在本机。</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="block" id="share">
+  <div class="block-head"><span class="kicker">03</span><h2>长按歌词选句，做成分享卡片</h2></div>
+  <div class="quote">分享功能可以参考 rush：长按歌词可以选中，可以选中几条歌词，然后会出现一个分享的按钮，然后可以编辑分享的格式。这一部分参考 Rush 的 style 和现有全屏播放页的 style。</div>
+  <p class="sub">入口只放在<strong>全屏歌词页</strong>。各种动画模式的排版差别很大（星潮、跳一跳根本不是列表），所以长按任何模式都进同一个「选句」层：舞台压暗，上面铺一张按时间排的歌词列表，长按的那句先选上。分享页照 Rush 的分享页结构（预览在上、样式和选项在下、底部操作），视觉用播放页的深色 PlayerTheme。卡片样式取 Rush 的思路自己画，四种：<strong>色块</strong>（Rush 的 Spotify 卡）、<strong>混排</strong>（Rush 的 Rushed 卡，就是截图那张）、<strong>封面</strong>、<strong>播放页</strong>（照现在的全屏歌词）。</p>
+  <div class="demo-bar">
+    <div class="grp"><span>演示</span><button id="eReset">重新选句</button></div>
+    <span class="sep"></span>
+    <span>左边点句子增减选择；右边点样式、配色、比例、译文，预览跟着变；🎲 随机换一套。</span>
+  </div>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr pl" id="shE"></div></div>
+      <figcaption><b>⑤ 选句</b>长按一句进来，顶栏换成「× 已选 N 句 … 分享」。点句子增减，最多 8 句；选的不连续时卡片上按时间顺序排、中间加省略行。返回键或 × 退出，不影响播放。</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr pl" id="shF"></div></div>
+      <figcaption><b>⑥ 分享页</b>上面是按比例缩放的卡片预览，下面横排四种样式，再往下是配色、比例、译文、文字格式。底部三个操作：复制文字、保存图片（相册 Pictures/myMusic）、分享图片（系统分享面板）。</figcaption>
+    </figure>
+  </div>
+  <h3>四种卡片</h3>
+  <div id="cardGallery" style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start"></div>
+  <div class="scroll" style="margin-top:18px"><table>
+    <thead><tr><th style="width:16%">选项</th><th style="width:38%">取值</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>样式</td><td>色块 · 混排 · 封面 · 播放页</td><td>混排每次随机挑几个词放大、加粗、大写（Rush 的 Rushed 卡做法），🎲 换一种排法；中文按词组处理，不拆字。</td></tr>
+      <tr><td>配色</td><td>鲜艳 · 柔和 · 播放页 · 自定义</td><td>和 Rush 歌词动画同一套取色（<code>StageColors.coverVibrant/coverMuted</code>）；自定义用 02 节的取色面板。「封面」样式只用来定字色。</td></tr>
+      <tr><td>比例</td><td>4:5 · 1:1 · 9:16</td><td>9:16 适合发动态；字号按卡片高度和句数自动缩，最多 8 句。</td></tr>
+      <tr><td>译文</td><td>开 / 关</td><td>歌词有翻译或罗马音时才出现，跟 <code>LyricPipeline</code> 拆出来的副行一致。</td></tr>
+      <tr><td>文字格式</td><td>只有歌词 · 歌词＋歌名歌手 · 再加平台链接</td><td>「复制文字」和系统分享里附带的文字都用它。平台链接取 <code>deepLink</code>，本地歌没有链接。</td></tr>
+      <tr><td>卡片角标</td><td>myMusic 图标 ＋ 名字</td><td>放左上（混排）或底部（其他），设置里不给关，和 Rush 一样。</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note"><b>实现：</b>卡片是普通 Composable，用 <code>rememberGraphicsLayer()</code> 录制后 <code>toImageBitmap()</code> 出 PNG，按 1080px 宽导出；存到 cache 后走已有的 <code>FileProvider</code> 发 <code>ACTION_SEND image/png</code>，保存走 MediaStore（Android 10 起不要存储权限，9 以下要 <code>WRITE_EXTERNAL_STORAGE</code>）。选句层是舞台上面的一个覆盖层，对所有模式通用。电视上不做（没有长按和分享目标）。混排卡的排法参考 Rush 的 <code>RushedShareCard</code>（GPL-3.0），照上次的做法写进 THIRD_PARTY_NOTICES 的 Rush 一节。</div>
+</section>
+
+<section class="block" id="addto">
+  <div class="block-head"><span class="kicker">04</span><h2>播放页直接加到歌单</h2></div>
+  <div class="quote">在播放页没有一个直接的入口可以把这个歌加到歌单。</div>
+  <p class="sub">歌名那一行现在右边只有收藏。在收藏<strong>左边</strong>加一个同尺寸（48dp）的「加到歌单」按钮，空闲时和收藏一起淡出；全屏歌词页顶栏是 ✦、加到歌单、收藏三个；平板和折叠屏的歌名行同样加；电视放进更多菜单。⋮ 菜单也加「加到歌单…」。长按收藏键也能打开同一个面板。</p>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr pl" id="shG"></div></div>
+      <figcaption><b>⑦ 播放页</b>歌名行：歌名 / 歌手 ＋「加到歌单」＋ 收藏。图标用 <code>PlaylistAdd</code>，加到过任意歌单后换成 <code>PlaylistAddCheck</code>，底色同收藏按钮选中态（primaryContainer、14dp 圆角）。</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr pl" id="shH"></div></div>
+      <figcaption><b>⑧ 加到歌单面板</b>沿用 <code>PlaylistPickerSheet</code>（顶上「新建歌单」），每行右边是勾选框，已经在的歌单是勾上的，点一下就加或移出，带撤销。绑定了平台歌单的行标出「写回网易云」。面板不自动关，可以一次加到几个歌单。</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="block" id="swipe">
+  <div class="block-head"><span class="kicker">05</span><h2>列表左右滑，最近播放能删单条</h2></div>
+  <div class="quote">最近播放里面没有单歌曲删除按钮。可以设置左滑右滑的便捷操作：默认向右滑是下载、添加歌曲到歌单，右滑拉到头触发收藏；向左滑是取消收藏按钮和删除按钮可以选择，左滑拉到头默认没有操作但是可以设置。然后在设置里可以调整这些按钮功能的排布。</div>
+  <p class="sub">滑动操作加在所有 <code>SongRow</code> 列表上（最近播放、歌单、收藏、下载、榜单、搜索、专辑、歌手页、队列）。<strong>向右滑</strong>露出左侧两个按钮，<strong>向左滑</strong>露出右侧两个按钮；拉过行宽 60% 松手是「拉到头」，底色铺满、图标放大、有一次震动。每个位置要做什么都按用户说的默认值，设置里能改、能排顺序。电视不做。</p>
+  <div class="demo-bar">
+    <div class="grp"><span>演示</span><button id="iReset">全部收回</button></div>
+    <span class="sep"></span>
+    <span>左边每一行都能用鼠标横向拖：拖开一点露出按钮，拖过 60% 松手触发「拉到头」。</span>
+  </div>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr lt" id="shI"></div></div>
+      <figcaption><b>⑨ 最近播放</b>第 2 行是左滑露出「取消收藏 / 删除」，第 4 行是右滑露出「下载 / 加到歌单」。删除后底部出撤销条。⋮ 面板里同样加「从最近播放删除」，不会滑的人也能删。</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr lt" id="shJ"></div></div>
+      <figcaption><b>⑩ 设置 › 滑动操作</b>顶部是能拖的示例行。两边各两个「露出的按钮」（↑↓ 换顺序，用上下箭头而不是拖动，和现有歌单排序一致），加一个「拉到头」。点任意一格从列表里换动作，也可以只留一个按钮。</figcaption>
+    </figure>
+  </div>
+  <h3>动作和它在各列表里的意思</h3>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:15%">动作</th><th style="width:20%">默认位置</th><th>在不同列表里</th></tr></thead>
+    <tbody>
+      <tr><td>下载</td><td>右滑第 1 个</td><td>已下载的歌显示「已下载」并禁用；本地歌不显示。</td></tr>
+      <tr><td>加到歌单</td><td>右滑第 2 个</td><td>打开 04 节的面板。</td></tr>
+      <tr><td>收藏</td><td>右滑拉到头</td><td>已收藏时只提示「已在收藏里」，不会变成取消（取消在左滑，避免手滑）。</td></tr>
+      <tr><td>取消收藏</td><td>左滑第 1 个</td><td>没收藏的歌这个按钮不出现，另一个按钮占满。</td></tr>
+      <tr><td>删除</td><td>左滑第 2 个</td><td>最近播放＝删这条记录；自建歌单＝从歌单移出（绑定歌单照现在的写回规则同步到平台）；收藏＝取消收藏；下载＝删除文件（要确认）；队列＝移出队列；榜单、搜索、专辑、歌手页没有可删的，按钮不出现。除删下载文件外都用撤销条，不弹确认。</td></tr>
+      <tr><td>可选</td><td>—</td><td>下一首播放 · 加到播放队列 · 查看歌手 · 查看专辑 · 选择音源 · 不做事（只有「拉到头」能选不做事）。</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note"><b>手势冲突：</b>只有横向位移先到 16dp、且角度小于 30° 才归行处理，否则交给列表纵向滚动；离屏幕左右边缘 24dp 内按下不接（让系统返回手势）；多选模式、编辑排序模式、读屏开着时关掉滑动（读屏改用「自定义操作」，把同样的动作挂到行上）。实现用 Foundation 的 <code>AnchoredDraggableState</code>，锚点 −128 / 0 / +128dp，再加两个「到头」阈值。新增数据：<code>SwipePrefs(startActions, startFull, endActions, endFull, enabled)</code> 存 AppStore，<code>swipe_*</code> 键，不进同步。</div>
+</section>
+
+<section class="block" id="files">
+  <div class="block-head"><span class="kicker">06</span><h2>歌单导出成文件，能导入落雪的导出文件</h2></div>
+  <div class="quote">许愿可以兼容落雪的歌单导出文件的导入……可以学着落雪，把本地的歌单导出为特定格式的文件，然后可以导入。现在我们的歌单好像只有同步功能，没有导出功能。</div>
+  <p class="sub">其实已经有导出：同步 › 备份 › 导出到文件。但它一次导出全部歌单、收藏<strong>和平台 Cookie</strong>（<code>SyncCoordinator.export</code>），是给自己换机用的，不能发给别人。这里补的是<strong>按歌单导出、不带 Cookie</strong>，格式可选，其中一种就是落雪的 <code>.lxmc</code>；导入沿用「我的 › 新建 › 从文件导入」这个入口，自动认格式。</p>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr lt" id="shK0"></div></div>
+      <figcaption><b>⑪ 歌单 ⋮ 菜单</b>自建歌单详情页右上 ⋮（<code>PlaylistMoreMenu</code>），在「重命名」下面加「导出歌单…」。绑定歌单、本地歌单同样有。</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr lt" id="shK"></div></div>
+      <figcaption><b>⑫ 导出面板</b>选格式（可点），下面按平台列出数量，落雪不认的平台写明跳过几首。「分享」直接发文件，「保存到文件」走系统文件选择器。</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr lt" id="shL"></div></div>
+      <figcaption><b>⑬ 从文件导入 · 认出是落雪</b>不直接合并，先出预览：文件里有几个歌单、每个多少首、各平台多少首、哪些导不了。「我的收藏」可以选合并进收藏还是另建歌单；同名歌单可选合并或另建。</figcaption>
+    </figure>
+  </div>
+  <h3>格式</h3>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:16%">格式</th><th style="width:34%">文件</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>myMusic 歌单</td><td><code>&lt;歌单名&gt;.mymusic.json</code>，明文 JSON：<code>{type:"mymusic.playlists", version:1, playlists:[…]}</code></td><td>歌曲条目和同步文件里的一样（平台、id、extra、本地歌的线索），所有平台都能完整还原。默认选这个。</td></tr>
+      <tr><td>落雪</td><td><code>lx_list_part_&lt;歌单名&gt;.lxmc</code>：gzip 压缩的 JSON，<code>{type:"playListPart_v2", data:{id, name, list:[…]}}</code>；多选导出时是 <code>playList_v2</code></td><td>只能放落雪也有的五个平台（见下表）。Apple Music、Spotify、YouTube、B 站、汽水、JOOX 等跳过，面板上写明数量。本地歌写成 <code>source:"local"</code>，只有歌名歌手。</td></tr>
+      <tr><td>纯文本</td><td><code>&lt;歌单名&gt;.txt</code>，UTF-8 带 BOM，每行「歌名␣␣歌手␣␣专辑」</td><td>和落雪桌面版的文本导出一样，方便贴到聊天里。不能再导入回来。</td></tr>
+    </tbody>
+  </table></div>
+  <h3>落雪文件怎么读（取自 lx-music-desktop @ 323e4ba、lx-music-mobile @ 0669d1b 的源码）</h3>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:12%">落雪 source</th><th style="width:30%">歌曲字段</th><th style="width:24%">对应本应用</th><th>备注</th></tr></thead>
+    <tbody>
+      <tr><td><code>wy</code></td><td><code>meta.songId</code>（数字）</td><td>网易云 <code>id</code></td><td></td></tr>
+      <tr><td><code>tx</code></td><td><code>meta.songId</code>＝songmid；<code>strMediaMid</code>、<code>albumMid</code>、<code>meta.id</code>（数字 id）</td><td>QQ 音乐 <code>id</code>＝mid，其余进 extra</td><td></td></tr>
+      <tr><td><code>kg</code></td><td><code>meta.songId</code>＝audio_id；<code>meta.hash</code>；<code>meta.albumAudioId</code></td><td>酷狗 <code>id</code>＝hash，<code>extra.audio_id</code> / <code>album_audio_id</code></td><td>落雪的歌曲 id 没有 <code>kg_</code> 前缀，是 <code>audio_id_hash</code></td></tr>
+      <tr><td><code>kw</code></td><td><code>meta.songId</code>＝rid（去掉 <code>MUSIC_</code>）</td><td>酷我 <code>id</code></td><td></td></tr>
+      <tr><td><code>mg</code></td><td><code>meta.songId</code>、<code>meta.copyrightId</code></td><td>咪咕：用 copyrightId 换 content_id</td><td>现有咪咕取流本来就会带 <code>extra.copyright_id</code></td></tr>
+      <tr><td><code>local</code></td><td><code>meta.filePath</code>、<code>meta.ext</code></td><td>按歌名＋歌手在本地音乐库里找</td><td>找不到就跳过，预览里标出</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="clean">
+    <li><b>容器：</b>落雪写文件一律 gzip（文件头 <code>1f 8b</code>），读文件时按扩展名决定要不要解压。我们按<b>文件头</b>判断，不管扩展名；解出来是字符串时再解析一次（落雪 1.14.0 有把导出序列化两次的问题）。</li>
+    <li><b>类型：</b>认 <code>playListPart_v2</code>（单个歌单）、<code>playList_v2</code>（全部歌单）、<code>allData_v2</code>（完整备份，取 <code>playList</code>），以及旧版 <code>playListPart</code> / <code>playList</code> / <code>allData</code> / <code>defautlList</code>（落雪自己的拼写）。旧版歌曲字段是 <code>songmid</code>、<code>img</code>、<code>types</code>，照落雪的 <code>toNewMusicInfo</code> 转成新版再处理。</li>
+    <li><b>固定歌单：</b><code>default</code>（试听列表）、<code>love</code>（我的收藏）、<code>temp</code>（临时，跳过）按 id 认，不按名字（桌面版写的名字是 i18n 键 <code>list__name_default</code>）。</li>
+    <li><b>去重：</b>同一歌单里同平台同 id 只留一首；和本机同名歌单「合并」时按现有歌单合并规则（同一首不重复加）。导入的歌单是普通自建歌单，不绑定平台歌单，即使落雪那边记了 <code>sourceListId</code>。</li>
+  </ul>
+</section>
+
+<section class="block" id="wall">
+  <div class="block-head"><span class="kicker">07</span><h2>海报墙：视角远近滑块</h2></div>
+  <div class="quote">海报墙的设置里面可以增加一个视角远近的滑块调节，就是可以拉近拉远视角。如果拉远视角的话，感觉非常适合给同好展示，然后正常视角就是正常用。</div>
+  <p class="sub">海报墙的格距现在按设备写死：手机 56dp、平板 102dp、电视 76dp（<code>WallMetrics</code>）。加一个缩放倍数乘在格距上就是「视角远近」。海报墙设置在「海报染色」下面加一节「视角」，放 M3E 滑块；手机和平板上还能直接<strong>双指捏合</strong>，松手吸附到最近的刻度并记住。</p>
+  <div class="demo-bar">
+    <div class="grp"><span>视角</span><button data-z="0.5">远 0.5×</button><button data-z="0.75">0.75×</button><button data-z="1" class="on">1×</button><button data-z="1.25">近 1.25×</button></div>
+    <span class="sep"></span><span>也可以直接拖手机里的滑块。</span>
+  </div>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr pl" id="shM"></div></div>
+      <figcaption><b>⑭ 队列海报墙 ＋ 设置</b>拉远后一屏能看到整个歌单；格子小于 40dp 时收起序号和格子上的字，只剩封面，正在播放的那张放大卡保持能读的大小。</figcaption>
+    </figure>
+    <div style="max-width:520px">
+      <div class="scroll"><table>
+        <thead><tr><th style="width:30%">项</th><th>做法</th></tr></thead>
+        <tbody>
+          <tr><td>范围</td><td>0.5×（远）～ 1.25×（近），刻度 0.5 / 0.75 / 1 / 1.25，默认 1×。电视同样可调，滑块用左右键。</td></tr>
+          <tr><td>格距</td><td><code>pitch × zoom</code>；间隙、圆角跟着乘；手机 0.5× 是 28dp 一格。</td></tr>
+          <tr><td>放大卡</td><td>大小是 6 格，限制在 240dp（电视 300dp）到屏宽减 24dp 之间，拉远时歌词和按钮还能用，拉近时不出屏；周围的格子照常按缩放排。</td></tr>
+          <tr><td>字</td><td>格子 &lt; 40dp 时不画序号和格子上的歌名；关灯、染色照常。</td></tr>
+          <tr><td>镜头</td><td>改缩放时以屏幕中心为锚点，正在播放的那张留在原位；捏合以两指中点为锚点。</td></tr>
+          <tr><td>存储</td><td><code>PosterPrefs.zoom</code>，AppStore 键 <code>poster_zoom</code>，按手机 / 平板 / 电视各存一份（屏幕差太多），不进同步。队列海报墙和歌单详情的海报视图共用。</td></tr>
+          <tr><td>性能</td><td>墙本来就按可见区虚拟化，0.5× 时同屏格子数约是 4 倍；封面按 <code>coverAt(px)</code> 取小图，电视 30fps 门限不变。</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="landscape">
+  <div class="block-head"><span class="kicker">08</span><h2>手机横屏全屏歌词是空白：bug，和机型关系不大</h2></div>
+  <div class="quote">虽然不怎么用吧，但是可能可以做一下这个适配：手机横屏的全屏模式歌词好像用不了，不知道是不是手机型号的问题。</div>
+  <p class="sub">截图里横屏全屏歌词只有左侧控制栏和「Bang! · AJR」标题，歌词区一行都没有。读代码能完整复现原因，<strong>不是机型问题</strong>，只是在高度刚好不到 320dp 的手机上才会出现，所以看起来像机型相关。</p>
+  <div class="demo" style="gap:22px">
+    <figure>
+      <div id="lsBefore"></div>
+      <figcaption><b>现在</b>舞台判定「太矮」，退回经典列表，但横屏布局没给经典列表，于是什么都不画。</figcaption>
+    </figure>
+    <figure>
+      <div id="lsAfter"></div>
+      <figcaption><b>修好后</b>按文字区高度判断，横屏也放当前动画（图中是 Rush）；真的太矮时退回经典列表，至少有字。</figcaption>
+    </figure>
+  </div>
+  <h3>原因</h3>
+  <ol class="clean">
+    <li><code>PlayerScreen.kt:137</code>：宽 ≥600dp 且宽 &gt; 高就走 <code>WidePlayer</code>。手机横过来是 800dp 左右宽，所以横屏手机用的是平板的宽布局。</li>
+    <li><code>LyricStage.kt:95</code>：<code>tooShort = maxHeight &lt; 320.dp</code>，量的是整个舞台（整窗）高度；<code>LyricStage.kt:98–101</code>：太矮就 <code>classic?.invoke(…)</code> 后返回。</li>
+    <li><code>WidePlayer.kt:284</code>：这里调用 <code>LyricStage</code> 时<b>没传 <code>classic</code></b>（竖屏 <code>PhonePlayer.kt:610</code> 和桌面姿态 <code>TabletopPlayer.kt:250</code> 都传了）。而 <code>WidePlayer.kt:245</code> 在选了非经典模式时会把原来的歌词列表撤掉。两边都不画。</li>
+    <li>算一下：2400×1080 的手机按 480dpi 是 800×360dp，扣状态栏 24dp 剩 336dp，再扣横屏手势条约 16–24dp，就是 312–320dp，正好在 320 线下。显示大小调大一档的手机也会落到线下；420dpi 的同分辨率手机有 ~370dp，不出问题。仓库里的 <code>WideStageLayoutTest</code> 就用的 800×336。</li>
+    <li>选「经典」时不走这条路，所以经典模式横屏是好的；其他 9 种全空。平板上同一个缺口也会让「纯文本歌词」「没有歌词」时变空白。电视 <code>TvPlayer.kt:245</code> 同样没传。</li>
+  </ol>
+  <h3>修法</h3>
+  <ul class="clean">
+    <li><b>补兜底：</b><code>WidePlayer</code>、<code>TvPlayer</code> 调 <code>LyricStage</code> 时传 <code>classic = { LyricsList(…, sizing = LyricsSizing.TabletFocus) }</code>，<code>stageSafePadding</code> 已经会把它摆进歌词栏。</li>
+    <li><b>门槛按文字区算：</b><code>tooShort</code> 改成 <code>maxHeight − insets.top − insets.bottom &lt; 160.dp</code>（文字区，不是整窗）。横屏手机文字区约 222dp，能放动画。个别需要高度的模式（跳一跳、巨幕）在 <code>LyricVisualizer</code> 上声明 <code>minTextHeight</code>，不够就照样退回经典。</li>
+    <li><b>测试：</b><code>WideStageLayoutTest</code> 加 800×312 用例；<code>LyricStage</code> 加「太矮时一定有兜底」的单测。</li>
+  </ul>
+</section>
+
+<section class="block" id="impl">
+  <div class="block-head"><span class="kicker">09</span><h2>实现与分期</h2></div>
+  <p class="sub">确认后按下面的顺序一次做完，每一期单独提交、跑单测。</p>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:15%">块</th><th style="width:45%">主要改动的文件</th><th>新增数据 / 接口</th></tr></thead>
+    <tbody>
+      <tr><td>横屏修复</td><td><code>WidePlayer.kt</code>、<code>TvPlayer.kt</code>、<code>LyricStage.kt</code>、<code>LyricVisualizer.kt</code></td><td><code>LyricVisualizer.minTextHeight</code>（默认 160dp）</td></tr>
+      <tr><td>动画面板</td><td><code>AnimationSheet.kt</code>（拆出 <code>SongModeRow</code>、<code>ModeGrid</code> 三态、<code>SaveBar</code>、<code>DiscardDialog</code>）、<code>LyricDirector.kt</code>（随机池、<code>applyNow()</code>）、<code>StagePreview.kt</code>（大预览）</td><td><code>LyricStagePrefs.randomPool: Set&lt;String&gt;</code>（空＝除经典外全部，兼容旧数据）；草稿是面板内的 <code>LyricStagePrefs</code> 副本</td></tr>
+      <tr><td>Rush 三项</td><td><code>RushVisualizer.kt</code>、<code>RushPalette.kt</code>、<code>RushLyricList.kt</code>；设置表新增 <code>ColorRow</code>、<code>SliderRow</code>、<code>ColorPickerSheet</code></td><td><code>LyricSetting.Color</code>、<code>LyricSetting.Slider</code>、<code>visibleWhen</code>；<code>LyricStagePrefs.presets</code>；<code>LyricVisualizers.byId("base#id")</code></td></tr>
+      <tr><td>歌词分享</td><td>新 <code>ui/player/share/</code>：<code>LyricPickLayer</code>、<code>ShareLyricsScreen</code>、<code>ShareCards</code>（四种）、<code>ShareExport</code></td><td><code>SharePrefs</code>（上次的样式、配色、比例、译文、文字格式）</td></tr>
+      <tr><td>播放页加歌单</td><td><code>PhonePlayer.kt</code>、<code>WidePlayer.kt</code>、<code>TabletopPlayer.kt</code>、<code>PlayerScreen.kt</code>（<code>MoreMenu</code>、长按收藏）、<code>AppUi.kt</code>（<code>PlaylistPickerSheet</code> 加勾选态）</td><td><code>MusicActions.playlistsContaining(song)</code>、<code>removeSongFromPlaylist</code></td></tr>
+      <tr><td>滑动操作</td><td><code>components/Lists.kt</code>（<code>SongRow</code> 加 <code>swipe</code> 参数）、新 <code>components/SwipeActions.kt</code>、各列表页传上下文、新设置页 <code>SwipeSettingsScreen</code>、<code>LibraryCollections.kt</code>（最近播放删除）</td><td><code>SwipePrefs</code>；<code>MusicActions.removeHistory(key)</code></td></tr>
+      <tr><td>导出 / 落雪导入</td><td>新 <code>data/transfer/</code>：<code>PlaylistExport</code>（三种格式）、<code>LxImport</code>（gzip 嗅探、v1→v2、平台映射）；<code>LocalPlaylistScreen.kt</code>、<code>SyncScreens.kt</code>、<code>LibraryScreen.kt</code>（导入预览面板）</td><td>—（导入后是普通自建歌单，走现有同步）</td></tr>
+      <tr><td>海报墙视角</td><td><code>WallGeometry.kt</code>（<code>WallMetrics.scaled(zoom)</code>）、<code>PosterWall.kt</code>（捏合）、<code>PosterSettingsSheet.kt</code></td><td><code>PosterPrefs.zoom</code>（<code>poster_zoom_phone/tablet/tv</code>）</td></tr>
+    </tbody>
+  </table></div>
+  <div class="phases" style="margin-top:16px">
+    <div class="phase"><header><span class="tag">P1</span><h3>修 bug 和小缺口</h3></header><ul><li>横屏全屏歌词兜底 + 门槛</li><li>最近播放单条删除（⋮ 面板）</li><li>播放页「加到歌单」按钮和面板</li><li>单测：横屏 800×312、兜底必有</li></ul></div>
+    <div class="phase"><header><span class="tag">P2</span><h3>动画面板</h3></header><ul><li>换法置顶、卡片三态、「这首歌」一行</li><li>随机池 + 记忆优先</li><li>草稿、保存条、关闭确认、立即应用</li><li>单测：抽取顺序、池为空兼容、applyNow 跳过空当</li></ul></div>
+    <div class="phase"><header><span class="tag">P3</span><h3>Rush 三项</h3></header><ul><li>Color / Slider 设置控件 + 取色面板</li><li>自定义配色、景深强度（含旧值迁移）</li><li>随机搭配、预设增删改、预设进池和四档</li></ul></div>
+    <div class="phase"><header><span class="tag">P4</span><h3>滑动操作</h3></header><ul><li>SwipeActions + 各列表上下文</li><li>设置页（示例行、排序、选动作）</li><li>读屏自定义操作、手势冲突规则</li></ul></div>
+    <div class="phase"><header><span class="tag">P5</span><h3>歌词分享</h3></header><ul><li>选句层（所有模式通用）</li><li>分享页 + 四种卡片 + 导出 PNG</li><li>Rush 一节补到 THIRD_PARTY_NOTICES</li></ul></div>
+    <div class="phase"><header><span class="tag">P6</span><h3>文件与海报墙</h3></header><ul><li>歌单导出三种格式、同步页多选导出</li><li>落雪导入预览（含 v1 旧格式、咪咕、本地）</li><li>海报墙视角滑块 + 捏合</li><li>单测：lxmc 往返、v1 转换、kg id 拆分</li></ul></div>
+  </div>
+  <div class="note plain"><b>不在这次范围里：</b>平板和电视的分享页（电视不做分享）；导出时带封面图片；落雪的设置备份（<code>setting_v2</code>）。验证按约定只跑编译和单测，不上模拟器，需要目视确认的地方会在提交说明里写出来。</div>
+</section>
+
+</main>
+
+<footer>
+  <b>myMusic 改进稿 · 2026-11-18</b><br>
+  稿子里的歌名、歌词、歌单都是为这份稿子编的示例。参考：用户反馈截图与原话；shub39/Rush（GPL-3.0）分享页与自定义歌词页；lx-music-desktop @ 323e4ba、lx-music-mobile @ 0669d1b 的列表导入导出源码。界面组件照仓库当前代码：<code>AnimationSheet</code>、<code>ModeCard</code>、<code>ConnectedToggleGroup</code>、<code>SegmentedGroup</code>、<code>SongRow</code>、<code>TrackActionsSheet</code>、<code>PlaylistPickerSheet</code>、<code>PosterSettingsSheet</code>、<code>FavoriteToggle</code>、<code>WidePlayer</code> 的专注栏。
+</footer>
+<script>
+
+/* ================= 公共 ================= */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const ico = (id, cls = '') => `<svg class="ico ${cls}"><use href="#i-${id}"/></svg>`;
+const hsl = (h, s, l) => { s /= 100; l /= 100; const f = n => { const k = (n + h / 30) % 12; return l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }; return [f(0) * 255, f(8) * 255, f(4) * 255]; };
+const rgb = (a, al = 1) => `rgba(${a[0] | 0},${a[1] | 0},${a[2] | 0},${al})`;
+const hex2 = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+const toHex = a => '#' + a.map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+const mixc = (a, b, k) => { const x = hex2(a), y = hex2(b); return toHex(x.map((v, i) => v + (y[i] - v) * k)); };
+function rgb2hsl([r, g, b]) {
+  r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b); let h = 0, s = 0; const l = (mx + mn) / 2;
+  if (mx !== mn) { const d = mx - mn; s = l > .5 ? d / (2 - mx - mn) : d / (mx + mn);
+    h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60; }
+  return [h, s * 100, l * 100];
+}
+const lum = h => { const c = hex2(h).map(v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
+const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+
+/* 播放页令牌：PlayerTheme 以封面色为种子的深色方案，稿子里按色相近似（同 rush-lyrics 稿） */
+function plTokens(h) {
+  const t = (s, l) => rgb(hsl(h, s, l));
+  return {
+    '--pl-primary': t(90, 84), '--pl-on-primary': t(100, 18), '--pl-primary-container': t(70, 66), '--pl-on-primary-container': t(90, 13),
+    '--pl-secondary-container': t(45, 24), '--pl-on-secondary-container': t(70, 90), '--pl-tertiary': rgb(hsl((h + 70) % 360, 90, 76)),
+    '--pl-surface': t(55, 5), '--pl-surface-container-low': t(42, 8), '--pl-surface-container': t(36, 11), '--pl-surface-container-high': t(32, 14), '--pl-surface-container-highest': t(28, 18),
+    '--pl-on-surface': t(40, 91), '--pl-on-surface-variant': t(16, 72), '--pl-outline': t(14, 52), '--pl-outline-variant': t(18, 28),
+  };
+}
+const applyPl = (el, h) => { const t = plTokens(h); for (const k in t) el.style.setProperty(k, t[k]); };
+const plSurface = h => toHex(hsl(h, 55, 5)), plOn = h => toHex(hsl(h, 40, 91)), plPrimary = h => toHex(hsl(h, 90, 84));
+const STATUS = (t = '22:48') => `<div class="status"><span>${t}</span><span>5G ▮▮▮ 76%</span></div><div class="navpill"></div>`;
+const cookiePath = (() => { let d = ''; for (let i = 0; i <= 120; i++) { const a = i / 120 * Math.PI * 2, r = 28 * (0.93 + 0.07 * Math.cos(12 * a)); d += (i ? 'L' : 'M') + (28 + r * Math.cos(a)).toFixed(2) + ' ' + (28 + r * Math.sin(a)).toFixed(2); } return d + 'Z'; })();
+const cookiePoly = (lobes = 12, amp = .06) => { const p = []; for (let i = 0; i < 96; i++) { const a = i / 96 * Math.PI * 2, r = 50 * (1 - amp + amp * Math.cos(lobes * a)); p.push(`${(50 + r * Math.cos(a)).toFixed(2)}% ${(50 + r * Math.sin(a)).toFixed(2)}%`); } return `polygon(${p.join(',')})`; };
+const COOKIE_BTN = (icon = 'pause') => `<span class="cookie"><svg viewBox="0 0 56 56"><path d="${cookiePath}"/></svg><i>${ico(icon, 's20')}</i></span>`;
+const ART = [
+  'linear-gradient(135deg,#ffb36b,#e0485a 55%,#521437)', 'linear-gradient(140deg,#9af0d6,#1f9c8e 55%,#0b3742)',
+  'linear-gradient(135deg,#c3d6ff,#5b7cf0 55%,#2a2678)', 'linear-gradient(160deg,#ffe29a,#f29b4c 50%,#7a2e1a)',
+  'linear-gradient(135deg,#f6c1ff,#a45cf0 55%,#2c1660)', 'linear-gradient(150deg,#d7f5a8,#5fae5a 55%,#163c2a)',
+  'linear-gradient(135deg,#ffd0d0,#ff6f8b 50%,#4b1030)', 'linear-gradient(145deg,#cfe9ff,#3f8fd8 50%,#0d2747)',
+  'linear-gradient(135deg,#f3f0e6,#b9a98a 55%,#3e3426)', 'linear-gradient(135deg,#a8fff3,#22c1c3 50%,#123a55)',
+];
+const COVERS = [
+  { id: 'ember', name: '晚霞', hue: 18, vibrant: '#9a3412', muted: '#3b2a26', grad: ART[0], picks: ['#9a3412', '#e0485a', '#ffb36b', '#521437', '#3b2a26', '#f6d7c3'] },
+  { id: 'tide', name: '青潮', hue: 172, vibrant: '#0e5a52', muted: '#253230', grad: ART[1], picks: ['#0e5a52', '#1f9c8e', '#9af0d6', '#0b3742', '#253230', '#dff7ef'] },
+  { id: 'iris', name: '鸢尾', hue: 224, vibrant: '#3462c8', muted: '#2c3448', grad: ART[2], picks: ['#3462c8', '#5b7cf0', '#c3d6ff', '#2a2678', '#2c3448', '#e6ecff'] },
+];
+function snackIn(root) {
+  let el = $('.snack', root); if (!el) { el = document.createElement('div'); el.className = 'snack'; root.appendChild(el); }
+  let timer;
+  return (text, undo) => {
+    el.innerHTML = `<span>${text}</span>${undo ? '<button>撤销</button>' : ''}`;
+    if (undo) $('button', el).onclick = () => { undo(); el.classList.remove('on'); };
+    el.classList.add('on'); clearTimeout(timer); timer = setTimeout(() => el.classList.remove('on'), 2600);
+  };
+}
+/* M3E 滑块：拖动或点按，ticks 可吸附 */
+function makeSlider(el, o) {
+  el.classList.add('sld');
+  el.innerHTML = `<div class="tr-a"></div><div class="tr-b"></div>${(o.ticks || []).map(() => '<span class="tk"></span>').join('')}<div class="hd"></div>`;
+  const pct = v => (v - o.min) / (o.max - o.min) * 100;
+  const set = v => {
+    const p = pct(v);
+    $('.tr-a', el).style.width = `calc(${p}% - 6px)`; $('.tr-b', el).style.width = `calc(${100 - p}% - 6px)`;
+    $('.tr-a', el).style.display = p < 2 ? 'none' : ''; $('.hd', el).style.left = p + '%';
+    $$('.tk', el).forEach((t, i) => { const tp = pct(o.ticks[i]); t.style.left = tp + '%'; t.style.display = Math.abs(tp - p) < 4 ? 'none' : ''; t.style.background = tp < p ? 'currentColor' : ''; });
+  };
+  const fromX = x => { const r = el.getBoundingClientRect(); return o.min + Math.max(0, Math.min(1, (x - r.left) / r.width)) * (o.max - o.min); };
+  const snap = v => { if (!o.ticks) return v; let best = v, bd = 1e9; for (const t of o.ticks) { const d = Math.abs(t - v); if (d < bd) { bd = d; best = t; } } return bd <= (o.snapWithin ?? (o.max - o.min) * .06) ? best : v; };
+  let drag = false;
+  el.onpointerdown = e => { drag = true; el.setPointerCapture(e.pointerId); const v = snap(fromX(e.clientX)); set(v); o.onChange(v); };
+  el.onpointermove = e => { if (!drag) return; const v = snap(fromX(e.clientX)); set(v); o.onChange(v); };
+  el.onpointerup = e => { drag = false; if (o.snapOnRelease) { const v = o.snapOnRelease(fromX(e.clientX)); set(v); o.onChange(v, true); } };
+  set(o.value);
+  return { set };
+}
+
+/* ================= 01 动画面板 ================= */
+const MODES = [
+  { id: 'classic', name: '经典', cls: 'a-classic', h: '<div class="l0">走过的那条街</div><div class="l1">风吹过的地方都有光</div><div class="l0">Where the wind goes</div>' },
+  { id: 'rush', name: 'Rush', cls: 'a-rush', h: '<div class="l1">风吹过的地方<br>都有光</div><div class="l2">Where the wind goes</div>' },
+  { id: 'rush#salt', name: 'Rush · 海盐', preset: 1, cls: 'a-rush salt', h: '<div class="l1">风吹过的地方<br>都有光</div><div class="l2">Where the wind goes</div>' },
+  { id: 'rush#night', name: 'Rush · 夜航', preset: 1, cls: 'a-rush night', h: '<div class="l1" style="text-align:center">风吹过的地方<br>都有光</div>' },
+  { id: 'rainbow', name: '虹光', cls: 'a-rainbow', h: '<div class="l1">风吹过的地方都有光</div><div class="l2">Where the wind goes</div>' },
+  { id: '52hz', name: '52Hz', cls: 'a-52', h: '<div class="l1">风吹过的地方都有光</div><div class="l2">Where the wind goes</div>' },
+  { id: 'miside', name: 'MiSide 掉落', cls: 'a-miside', h: '<div class="l1">风吹过的地方</div><div class="l2">都有光</div>' },
+  { id: 'wave', name: '动感波光', cls: 'a-wave', h: '<div class="l1">风吹过的地方都有光</div>' },
+  { id: 'vinyl', name: '黑胶唱片', cls: 'a-vinyl', h: '<div class="l1">风吹过的<br>地方都有光</div>' },
+  { id: 'cine', name: '巨幕', cls: 'a-cine', h: '<div class="l1">风吹过的 地方都有光</div>' },
+  { id: 'star', name: '星潮·银河', cls: 'a-star', h: '<div class="l1">风吹过的地方都有光</div><div class="l2">Where the wind goes</div>' },
+  { id: 'jump', name: '跳一跳', cls: 'a-jump', h: '<div><span class="blk"></span><span class="blk"></span><span class="blk"></span></div><div class="l2" style="margin-top:8px">风吹过的地方</div>' },
+];
+const MODE = id => MODES.find(m => m.id === id) || MODES[0];
+const mname = id => MODE(id).name;
+const TEMPO = [['慢', '每分钟 90 拍以下'], ['中', '每分钟 90–120 拍'], ['快', '每分钟 120–150 拍'], ['很快', '每分钟 150 拍及以上']];
+const AUTO = [['fixed', '固定'], ['random', '随机'], ['tempo', '按速度']];
+const AUTO_L = Object.fromEntries(AUTO);
+const NOTE = {
+  fixed: '所有歌都用下面选中的动画。',
+  random: '听过的歌用上次的；没听过的从下面选中的里随机抽一个，不和上一首重复（记最近 2000 首）。',
+  tempo: '听出速度后按下面四档挑；测到的速度会记下来，下次一开始就是它。卡片这时只做预览，不能选。',
+};
+const thumb = (m, extra = '') => `<div class="art ${m.cls} ${extra}">${m.h}</div>`;
+const cloneS = s => ({ auto: s.auto, vis: s.vis, pool: new Set(s.pool), tempo: [...s.tempo] });
+const setEq = (a, b) => a.size === b.size && [...a].every(x => b.has(x));
+function diffS(a, b) {
+  const out = [];
+  if (a.auto !== b.auto) out.push(`换法：<i>${AUTO_L[a.auto]}</i> → <i>${AUTO_L[b.auto]}</i>`);
+  if (a.vis !== b.vis) out.push(`所有歌都用：<i>${mname(a.vis)}</i> → <i>${mname(b.vis)}</i>`);
+  if (!setEq(a.pool, b.pool)) out.push(`随机池：<i>${a.pool.size} 个</i> → <i>${b.pool.size} 个</i>`);
+  a.tempo.forEach((t, i) => { if (t !== b.tempo[i]) out.push(`「${TEMPO[i][0]}」：<i>${mname(t)}</i> → <i>${mname(b.tempo[i])}</i>`); });
+  return out;
+}
+const DEFAULT_POOL = MODES.map(m => m.id).filter(id => id !== 'classic' && id !== 'jump' && id !== 'cine');
+
+function sheetDemo(root, opts) {
+  applyPl(root, opts.hue);
+  const S = {};
+  const init = () => {
+    S.saved = cloneS(opts.saved); S.draft = cloneS(opts.saved); if (opts.patch) opts.patch(S.draft);
+    S.pinned = null; S.shown = opts.shown; S.memory = 'vinyl';
+  };
+  init();
+  root.innerHTML = STATUS() + `<div class="stage-peek art"></div><div class="scrim"></div>
+    <div class="sheet"><div class="grab"></div><div class="sh-head"><h5>歌词动画</h5><p>只在全屏歌词页生效</p></div><div class="sh-body"></div></div>
+    <div class="savebar newmark" data-new="新：保存条"><span></span><button class="txtbtn js-discard">放弃</button><button class="btn-f js-save">保存并应用</button></div>
+    <div class="ddm"></div><div class="snack"></div>
+    <div class="dlg-scrim"><div class="dlg"><h5>保存并应用这些改动？</h5><p>不保存的话，面板里的改动会丢掉，歌词页保持原样。</p><ul></ul><div class="acts"><button class="txtbtn js-dl-discard">放弃改动</button><button class="btn-f js-dl-save">保存并应用</button></div></div></div>`;
+  const body = $('.sh-body', root), sheet = $('.sheet', root), scrim = $('.scrim', root), bar = $('.savebar', root), ddm = $('.ddm', root), dlg = $('.dlg-scrim', root), peek = $('.stage-peek', root);
+  const snack = snackIn(root);
+  const decide = () => S.pinned || (S.saved.auto === 'fixed' ? S.saved.vis : S.saved.auto === 'random' ? (S.memory || [...S.saved.pool][0]) : S.saved.tempo[0]);
+  function render() {
+    const d = S.draft, keep = body.scrollTop;
+    let reason, btn;
+    if (S.pinned) { reason = '已固定，以后放这首都用它'; btn = '取消固定'; }
+    else if (S.saved.auto === 'fixed') { reason = '跟着下面的选择'; btn = '单独指定…'; }
+    else if (S.saved.auto === 'random') { reason = '上次听时抽到的，已记住'; btn = '改…'; }
+    else { reason = '测得 92 拍/分 → 落在「慢」'; btn = '改…'; }
+    let h = `<div class="row newmark" data-new="新：这首歌" style="margin-top:8px;gap:12px">${thumb(MODE(S.shown), 'mini-th')}<div class="t" style="font-size:15px">这首歌：${mname(S.shown)}<small>${reason}</small></div><button class="btn-t js-song" style="padding:0 12px">${S.pinned ? '' : ico('pin', 's18')}${btn}</button></div>`;
+    h += `<div class="lbl">每首歌换动画</div><div class="ctg js-auto newmark" data-new="挪到卡片上面">${AUTO.map(([k, l]) => `<button data-k="${k}" class="${d.auto === k ? 'on' : ''}">${l}</button>`).join('')}</div><div class="sh-note">${NOTE[d.auto]}</div>`;
+    if (d.auto === 'tempo') h += `<div class="seg" style="margin-top:8px">${TEMPO.map(([t, s], i) => `<div class="row click js-tempo" data-i="${i}" style="padding-right:12px"><div class="t">${t}<small>${s}</small></div><div class="val">${mname(d.tempo[i])}${ico('dd', 's20')}</div></div>`).join('')}</div>`;
+    const title = d.auto === 'fixed' ? '所有歌都用' : d.auto === 'random' ? `从这些里随机 <small>${d.pool.size}/${MODES.length}</small>` : '动画 <small>由上面四档决定</small>';
+    const side = d.auto === 'random' ? `<button class="txtbtn js-all">全选</button><button class="txtbtn js-none">清空</button>` : '';
+    h += `<div class="lbl"><span>${title}</span><span class="side">${side}</span></div>`;
+    h += `<div class="mgrid ${d.auto === 'random' ? 'multi' : ''} ${d.auto === 'tempo' ? 'off' : ''}">` + MODES.map(m => {
+      const on = d.auto === 'fixed' ? m.id === d.vis : d.auto === 'random' ? d.pool.has(m.id) : false;
+      return `<button class="mcard ${on ? 'on' : ''} ${m.id === S.shown ? 'showing' : ''}" data-id="${m.id}"><div class="th">${thumb(m)}<span class="ck">${ico('check')}</span><span class="now"><i><b style="height:5px"></b><b style="height:9px"></b><b style="height:6px"></b></i>正在用</span></div><div class="nm">${m.name}${m.preset ? '<span class="pre">预设</span>' : ''}</div></button>`;
+    }).join('') + '</div>';
+    if (d.auto === 'random' && d.pool.size === 1) h += `<div class="sh-note">只选了 1 个，等于固定用它。</div>`;
+    if (d.auto === 'random' && d.pool.size === 0) h += `<div class="sh-note" style="color:#ffb4ab">至少选 1 个才能保存。</div>`;
+    h += `<div class="lbl">叠加</div><div class="seg"><div class="row"><div class="t">频谱<small>全屏歌词页左下角显示 48 段频谱、响度和峰值频率；经典模式不显示</small></div><span class="sw"></span></div></div>`;
+    h += `<div class="lbl"><span>设置</span><span class="side"><button class="chipdd">${mname(S.shown)}${ico('dd')}</button></span></div><div class="sh-note">设置区见下一节：大预览、各项设置、预设操作。</div>`;
+    if (d.auto === 'random') h += `<div class="seg" style="margin-top:8px"><div class="row click js-forget"><div class="t">忘掉记住的结果<small>已记住 386 首；清掉后这些歌也从上面选中的里重新抽</small></div></div></div>`;
+    h += '<div style="height:84px"></div>';
+    body.innerHTML = h; body.scrollTop = keep;
+    peek.className = `stage-peek art ${MODE(S.shown).cls}`; peek.innerHTML = `<span class="cap">歌词页正在显示：${mname(S.shown)}</span>`;
+    const diffs = diffS(S.saved, S.draft);
+    bar.classList.toggle('on', diffs.length > 0 && !sheet.classList.contains('closed'));
+    $('span', bar).innerHTML = `<b>${diffs.length} 处改动</b> 还没保存`;
+    $('.js-save', bar).disabled = S.draft.auto === 'random' && S.draft.pool.size === 0;
+    $('.js-save', bar).style.opacity = $('.js-save', bar).disabled ? .4 : 1;
+  }
+  function menu(anchor, current, pick) {
+    const r = anchor.getBoundingClientRect(), rr = root.getBoundingClientRect(), k = rr.width / 360;
+    ddm.innerHTML = MODES.map(m => `<div data-id="${m.id}"><span>${m.name}</span>${m.id === current ? ico('check') : ''}</div>`).join('');
+    ddm.style.top = Math.min((r.bottom - rr.top) / k, 780 - 350) + 'px'; ddm.style.right = '24px';
+    ddm.classList.add('on');
+    ddm.onclick = e => { const it = e.target.closest('[data-id]'); if (!it) return; ddm.classList.remove('on'); pick(it.dataset.id); };
+  }
+  function save() { S.saved = cloneS(S.draft); S.shown = decide(); render(); snack(`已应用，这首歌现在用「${mname(S.shown)}」`); }
+  function closeSheet() { sheet.classList.add('closed'); scrim.classList.add('off'); bar.classList.remove('on'); }
+  root.addEventListener('click', e => {
+    if (ddm.classList.contains('on') && !e.target.closest('.ddm')) { ddm.classList.remove('on'); if (!e.target.closest('.js-tempo,.js-song')) return; }
+    const d = S.draft, t = e.target;
+    let el;
+    if ((el = t.closest('.js-auto button'))) { d.auto = el.dataset.k; render(); }
+    else if ((el = t.closest('.mcard'))) {
+      const id = el.dataset.id;
+      if (d.auto === 'fixed') d.vis = id;
+      else if (d.auto === 'random') { d.pool.has(id) ? d.pool.delete(id) : d.pool.add(id); }
+      render();
+    }
+    else if (t.closest('.js-all')) { d.pool = new Set(MODES.map(m => m.id)); render(); }
+    else if (t.closest('.js-none')) { d.pool = new Set(); render(); }
+    else if ((el = t.closest('.js-tempo'))) { const i = +el.dataset.i; menu(el, d.tempo[i], id => { d.tempo[i] = id; render(); }); }
+    else if ((el = t.closest('.js-song'))) {
+      if (S.pinned) { S.pinned = null; S.shown = decide(); render(); snack('已取消固定，这首歌跟着换法走'); }
+      else menu(el, S.shown, id => { S.pinned = id; S.shown = id; render(); snack(`这首歌固定用「${mname(id)}」，立刻生效`); });
+    }
+    else if (t.closest('.js-forget')) snack('已忘掉 386 首的记忆', () => {});
+    else if (t.closest('.js-save')) save();
+    else if (t.closest('.js-discard')) { S.draft = cloneS(S.saved); render(); }
+    else if (t.closest('.js-dl-discard')) { S.draft = cloneS(S.saved); dlg.classList.remove('on'); closeSheet(); render(); bar.classList.remove('on'); }
+    else if (t.closest('.js-dl-save')) { dlg.classList.remove('on'); save(); closeSheet(); }
+    else if (t === dlg) dlg.classList.remove('on');
+  });
+  const api = {
+    close() {
+      const diffs = diffS(S.saved, S.draft);
+      if (diffs.length) { $('ul', dlg).innerHTML = diffs.map(x => `<li>${x}</li>`).join(''); dlg.classList.add('on'); }
+      else closeSheet();
+    },
+    reopen() { sheet.classList.remove('closed'); scrim.classList.remove('off'); render(); },
+    reset() { init(); dlg.classList.remove('on'); api.reopen(); },
+  };
+  render();
+  if (opts.dialog) api.close();
+  return api;
+}
+const sheetA = sheetDemo($('#shA'), { hue: 18, shown: 'vinyl', saved: { auto: 'tempo', vis: 'rush', pool: DEFAULT_POOL, tempo: ['vinyl', 'rush', 'wave', 'jump'] } });
+sheetDemo($('#shB'), {
+  hue: 18, shown: 'rush', dialog: true,
+  saved: { auto: 'fixed', vis: 'rush', pool: DEFAULT_POOL, tempo: ['vinyl', 'rush', 'wave', 'jump'] },
+  patch: d => { d.auto = 'tempo'; d.tempo[2] = 'rush#night'; },
+});
+$('#aClose').onclick = () => sheetA.close();
+$('#aReopen').onclick = () => sheetA.reopen();
+$('#aReset').onclick = () => sheetA.reset();
+
+/* ================= 02 Rush 设置 + 取色 ================= */
+const R0 = { bg: 'solid', rhythm: 'wave', pal: 'custom', align: 'start', size: 1, blur: 1, expr: false, bgc: '#2c5f5a', fgc: '#ffe9b8' };
+let R = { ...R0 }, Rsaved = { ...R0 }, rCover = COVERS[0], pickTarget = 'bgc';
+const RL = {
+  bg: [['solid', '纯色'], ['cover', '封面'], ['hypnotic', '流光'], ['rhythm', '律动']],
+  rhythm: [['wave', '波浪'], ['gradient', '渐变'], ['curve', '条纹']],
+  pal: [['vibrant', '鲜艳'], ['muted', '柔和'], ['player', '播放页'], ['custom', '自定义']],
+  align: [['start', '左'], ['center', '中'], ['end', '右']],
+};
+const BLUR_L = v => v <= 0.01 ? '关' : v < .75 ? '弱' : v < 1.25 ? '中' : '强';
+function rushColors() {
+  switch (R.pal) {
+    case 'vibrant': return [rCover.vibrant, '#ffffff'];
+    case 'muted': return [rCover.muted, '#ffffff'];
+    case 'player': return [plSurface(rCover.hue), plOn(rCover.hue)];
+    default: return [R.bgc, R.fgc];
+  }
+}
+function rushBgLayers(bg, fg) {
+  switch (R.bg) {
+    case 'cover': return `<div class="bgl" style="background:${rCover.grad};filter:blur(14px);transform:scale(1.3)"></div><div class="bgl" style="background:${bg};opacity:.5"></div>`;
+    case 'hypnotic': return `<div class="bgl" style="background:radial-gradient(60% 90% at 15% 20%, ${mixc(bg, '#ffffff', .25)}, transparent 70%), radial-gradient(70% 90% at 90% 90%, ${mixc(bg, '#000000', .45)}, transparent 70%), ${bg}"></div>`;
+    case 'rhythm': {
+      const w = mixc(bg, fg, .22);
+      if (R.rhythm === 'gradient') return `<div class="bgl" style="background:linear-gradient(to top, ${w}, ${bg} 75%)"></div>`;
+      if (R.rhythm === 'curve') return `<div class="bgl" style="background:repeating-linear-gradient(165deg, ${mixc(bg, fg, .1)} 0 6px, transparent 6px 15px), ${bg}"></div>`;
+      return `<div class="bgl" style="background:radial-gradient(130% 55% at 30% 118%, ${w} 0 48%, transparent 49%), radial-gradient(120% 50% at 85% 125%, ${mixc(bg, fg, .12)} 0 50%, transparent 51%), ${bg}"></div>`;
+    }
+    default: return `<div class="bgl" style="background:${bg}"></div>`;
+  }
+}
+const RLINES = [['I keep the porch light on', -1], ['for a signal in the rain', 0], ['every echo sounds like you', 1], ['calling out my name', 2]];
+function rushPreview(scale = 1) {
+  const [bg, fg] = rushColors();
+  const ta = R.align === 'center' ? 'center' : R.align === 'end' ? 'right' : 'left';
+  const origin = R.align === 'center' ? 'center' : R.align === 'end' ? 'right' : 'left';
+  const lines = RLINES.map(([t, d]) => {
+    const fs = (d === 0 ? 21 : 17) * R.size * scale;
+    const blur = d === 0 ? 0 : Math.min(Math.abs(d) * 1.1 * R.blur, 3.6 * R.blur) * scale;
+    const col = d === 0 ? `background:linear-gradient(90deg, ${fg} 0 58%, ${fg}77 58%);-webkit-background-clip:text;background-clip:text;color:transparent` : `color:${fg}`;
+    const w = d === 0 && R.expr ? 'font-variation-settings:"wght" 900;font-weight:900;' : '';
+    return `<div class="ln" style="font-size:${fs}px;${col};${w}filter:blur(${blur}px);transform:scale(${d === 0 ? 1 : .82});transform-origin:${origin} center;text-align:${ta};opacity:${d === 0 ? 1 : .85}">${t}</div>` +
+      (d === 0 ? `<div class="ln sub" style="color:${fg};text-align:${ta};font-size:${11 * scale}px">等雨里传来一个信号</div>` : '');
+  }).join('');
+  return rushBgLayers(bg, fg) + `<div class="lines">${lines}</div><span class="tag2">预览 · 草稿</span>`;
+}
+const rDirty = () => Object.keys(R).filter(k => R[k] !== Rsaved[k]).length;
+const shC = $('#shC'), shD = $('#shD');
+let blurSlider;
+function renderC() {
+  applyPl(shC, rCover.hue);
+  const body = $('.sh-body', shC), keep = body ? body.scrollTop : 0;
+  const ctg = (k, extra = '') => `<div class="ctg" data-k="${k}">${RL[k].map(([v, l]) => `<button data-v="${v}" class="${R[k] === v ? 'on' : ''}">${l}</button>`).join('')}</div>${extra}`;
+  const sw = R.pal === 'custom' ? `<div class="swrow" style="margin-top:4px"><button class="swbtn ${pickTarget === 'bgc' ? 'sel' : ''}" data-t="bgc" style="background:${R.bgc};color:${contrast(R.bgc, '#000') > 6 ? '#111' : '#fff'}">${ico('edit')}背景</button><button class="swbtn ${pickTarget === 'fgc' ? 'sel' : ''}" data-t="fgc" style="background:${R.fgc};color:${contrast(R.fgc, '#000') > 6 ? '#111' : '#fff'}">${ico('edit')}文字</button></div>` : '';
+  const k = R.blur;
+  const html = `
+    <div class="lbl"><span>设置</span><span class="side"><button class="chipdd">Rush · 海盐${ico('dd')}</button></span></div>
+    <div style="display:flex;gap:2px;margin:-6px 0 8px -8px"><button class="txtbtn js-rand newmark" data-new="新">${ico('dice', 's18')}随机搭配</button><button class="txtbtn js-def">恢复默认</button></div>
+    <div class="bigprev newmark" data-new="新：大预览">${rushPreview()}</div>
+    <div class="seg">
+      <div class="row col"><div class="t">背景</div>${ctg('bg')}</div>
+      <div class="row col"><div class="t inl">律动样式<small>背景选“律动”时生效</small></div>${ctg('rhythm')}</div>
+      <div class="row col newmark" data-new="加「自定义」"><div class="t">配色</div>${ctg('pal', sw)}</div>
+      <div class="row col"><div class="t">对齐</div>${ctg('align')}</div>
+      <div class="row"><div class="t">字号</div><div class="stp"><button data-s="-1">−</button><b>×${R.size.toFixed(1)}</b><button data-s="1">+</button></div></div>
+      <div class="row col newmark" data-new="开关 → 滑块"><div class="t inl">景深模糊<small>${BLUR_L(k)}${k > .01 ? ` · 每离一句多 ${(3 * k).toFixed(1)}dp，最多 ${(10 * k).toFixed(0)}dp` : ''}</small></div><div class="js-blur"></div><div class="sld-ends"><span>关</span><span>弱</span><span>中</span><span>强</span></div></div>
+      <div class="row"><div class="t">逐字粗细<small>唱得越长的字越粗；需要字体有字重轴</small></div><span class="sw js-expr ${R.expr ? 'on' : ''}"></span></div>
+    </div>
+    <div class="lbl newmark" data-new="新：预设">预设「海盐」</div>
+    <div class="seg">
+      <div class="row click js-saveas"><div class="t">存成新预设<small>用现在这套设置新建一张卡片</small></div><span class="ib">${ico('add')}</span></div>
+      <div class="row click js-over"><div class="t">用现在的设置覆盖「海盐」</div><span class="ib">${ico('save')}</span></div>
+      <div class="row click js-delp"><div class="t" style="color:#ffb4ab">删除这个预设<small>用到它的地方改回 Rush</small></div><span class="ib" style="color:#ffb4ab">${ico('delete')}</span></div>
+    </div>
+    <div class="sh-note">移植自 Rush 7.2.1（shub39，GPL-3.0）。原应用另有 2 项保持默认值。</div>
+    <div style="height:84px"></div>`;
+  if (!body) {
+    shC.innerHTML = STATUS() + `<div class="stage-peek art a-rush salt"><span class="cap">歌词页：Rush · 海盐</span></div><div class="scrim"></div><div class="sheet"><div class="grab"></div><div class="sh-head"><h5>歌词动画</h5><p>只在全屏歌词页生效</p></div><div class="sh-body"></div></div><div class="savebar"><span></span><button class="txtbtn js-rdis">放弃</button><button class="btn-f js-rsave">保存并应用</button></div><div class="snack"></div>
+      <div class="dlg-scrim js-namedlg"><div class="dlg"><h5>存成新预设</h5><p>会出现在模式卡片里，排在 Rush 后面。</p><div class="hexf" style="margin-top:14px;font-family:var(--body)">Rush · 夜航 2</div><div class="acts"><button class="txtbtn js-nc">取消</button><button class="btn-f js-nok">保存</button></div></div></div>`;
+    return renderC();
+  }
+  body.innerHTML = html; body.scrollTop = keep;
+  blurSlider = makeSlider($('.js-blur', body), { min: 0, max: 1.5, value: R.blur, ticks: [0, .5, 1, 1.5], snapWithin: .08, onChange: v => { R.blur = Math.round(v * 100) / 100; updC(); } });
+  updC();
+}
+function updC() {
+  const body = $('.sh-body', shC);
+  $('.bigprev', body).innerHTML = rushPreview();
+  const k = R.blur; const sm = $('.js-blur', body).previousElementSibling.querySelector('small');
+  sm.textContent = `${BLUR_L(k)}${k > .01 ? ` · 每离一句多 ${(3 * k).toFixed(1)}dp，最多 ${(10 * k).toFixed(0)}dp` : ''}`;
+  const n = rDirty(), bar = $('.savebar', shC);
+  bar.classList.toggle('on', n > 0); $('span', bar).innerHTML = `<b>${n} 处改动</b> 还没保存`;
+  renderD();
+}
+const snackC = () => snackIn(shC);
+shC.addEventListener('click', e => {
+  const t = e.target; let el;
+  if ((el = t.closest('.ctg button'))) { R[el.parentElement.dataset.k] = el.dataset.v; renderC(); }
+  else if ((el = t.closest('.stp button'))) { R.size = Math.round(Math.max(.8, Math.min(1.4, R.size + .1 * el.dataset.s)) * 10) / 10; renderC(); }
+  else if (t.closest('.js-expr')) { R.expr = !R.expr; renderC(); }
+  else if ((el = t.closest('.swbtn'))) { pickTarget = el.dataset.t; renderC(); }
+  else if (t.closest('.js-rand')) {
+    const pick = a => a[Math.floor(Math.random() * a.length)][0];
+    R.bg = pick(RL.bg); R.rhythm = pick(RL.rhythm); R.pal = pick(RL.pal.slice(0, 3)); R.align = pick(RL.align); renderC();
+    snackC()('随机搭了一套，满意就「存成新预设」');
+  }
+  else if (t.closest('.js-def')) { R = { ...R0, pal: 'vibrant' }; renderC(); }
+  else if (t.closest('.js-rsave')) { Rsaved = { ...R }; updC(); snackC()('已保存并应用到「Rush · 海盐」'); }
+  else if (t.closest('.js-rdis')) { R = { ...Rsaved }; renderC(); }
+  else if (t.closest('.js-saveas')) $('.js-namedlg', shC).classList.add('on');
+  else if (t.closest('.js-nc')) $('.js-namedlg', shC).classList.remove('on');
+  else if (t.closest('.js-nok')) { $('.js-namedlg', shC).classList.remove('on'); snackC()('已存为「Rush · 夜航 2」，在模式卡片里'); }
+  else if (t.closest('.js-over')) { Rsaved = { ...R }; updC(); snackC()('已覆盖「海盐」'); }
+  else if (t.closest('.js-delp')) snackC()('已删除「海盐」，用到它的 2 处改回 Rush', () => {});
+});
+
+/* 取色面板 */
+let recent = ['#ffe9b8', '#1b2a4a', '#f4c7d0'];
+function renderD() {
+  applyPl(shD, rCover.hue);
+  const cur = R[pickTarget], [h, s, l] = rgb2hsl(hex2(cur));
+  const bgc = R.pal === 'custom' ? R.bgc : rushColors()[0], fgc = R.pal === 'custom' ? R.fgc : rushColors()[1];
+  const cr = contrast(bgc, fgc);
+  if (!$('.sh-body', shD)) {
+    shD.innerHTML = STATUS() + `<div class="stage-peek art a-rush salt"></div><div class="scrim"></div><div class="sheet" style="top:96px"><div class="grab"></div><div class="sh-head"><h5></h5><p>Rush · 海盐 · 自定义配色</p></div><div class="sh-body"></div></div>`;
+  }
+  $('.sh-head h5', shD).textContent = pickTarget === 'bgc' ? '背景色' : '文字色';
+  const sw = (list, cls) => `<div class="swatches ${cls}">${list.map(c => `<button data-c="${c}" class="${c.toLowerCase() === cur.toLowerCase() ? 'on' : ''}" style="background:${c}"></button>`).join('')}</div>`;
+  $('.sh-body', shD).innerHTML = `
+    <div class="cp-prev" style="background:${bgc};color:${fgc}">for a signal in the rain<small>等雨里传来一个信号</small></div>
+    <div class="lbl">从封面取</div>${sw(rCover.picks, '')}
+    <div class="lbl">最近用过</div>${sw(recent, '')}
+    <div class="lbl">调整 <small>按 HCT 计算，稿子里用 HSL 近似</small></div>
+    <div style="display:grid;gap:14px">
+      <div class="hsl-row"><span>色相</span><div class="grad-track" data-k="h" style="background:linear-gradient(90deg,${[0, 60, 120, 180, 240, 300, 360].map(x => `hsl(${x},${s}%,${l}%)`).join(',')})"><i style="left:${h / 360 * 100}%"></i></div><b>${Math.round(h)}</b></div>
+      <div class="hsl-row"><span>彩度</span><div class="grad-track" data-k="s" style="background:linear-gradient(90deg,hsl(${h},0%,${l}%),hsl(${h},100%,${l}%))"><i style="left:${s}%"></i></div><b>${Math.round(s)}</b></div>
+      <div class="hsl-row"><span>明度</span><div class="grad-track" data-k="l" style="background:linear-gradient(90deg,#000,hsl(${h},${s}%,50%),#fff)"><i style="left:${l}%"></i></div><b>${Math.round(l)}</b></div>
+    </div>
+    <div class="lbl">十六进制</div><div class="hexf">${cur.toUpperCase()}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap"><span class="ctr ${cr >= 4.5 ? 'ok' : 'bad'}">文字对比度 ${cr.toFixed(1)}:1 · ${cr >= 4.5 ? '够清楚' : '不够清楚'}</span>${cr < 4.5 ? '<button class="txtbtn js-auto-fg">自动配文字色</button>' : ''}</div>
+    <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:18px"><button class="txtbtn">取消</button><button class="btn-f">完成</button></div>
+    <div style="height:24px"></div>`;
+}
+function setFromHsl(k, v) {
+  const [h, s, l] = rgb2hsl(hex2(R[pickTarget])); const n = { h, s, l }; n[k] = v;
+  R[pickTarget] = toHex(hsl(n.h, n.s, n.l)); if (R.pal !== 'custom') R.pal = 'custom';
+}
+shD.addEventListener('pointerdown', e => {
+  const tr = e.target.closest('.grad-track'); if (!tr) return;
+  const k = tr.dataset.k, apply = x => { const r = tr.getBoundingClientRect(); const p = Math.max(0, Math.min(1, (x - r.left) / r.width)); setFromHsl(k, k === 'h' ? p * 359.9 : p * 100); renderC(); };
+  apply(e.clientX);
+  const mv = ev => apply(ev.clientX), up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); };
+  addEventListener('pointermove', mv); addEventListener('pointerup', up);
+});
+shD.addEventListener('click', e => {
+  const b = e.target.closest('.swatches button');
+  if (b) { R[pickTarget] = b.dataset.c; R.pal = 'custom'; renderC(); }
+  if (e.target.closest('.js-auto-fg')) { const [h, s] = rgb2hsl(hex2(R.bgc)); R.fgc = toHex(hsl(h, Math.min(s, 60), lum(R.bgc) > .18 ? 12 : 92)); renderC(); }
+});
+$('#rCovers').innerHTML = COVERS.map((c, i) => `<button data-c="${i}" class="${i === 0 ? 'on' : ''}"><i style="width:14px;height:14px;border-radius:50%;display:inline-block;background:${c.grad}"></i>${c.name}</button>`).join('');
+$('#rCovers').onclick = e => { const b = e.target.closest('button'); if (!b) return; rCover = COVERS[+b.dataset.c]; $$('#rCovers button').forEach(x => x.classList.toggle('on', x === b)); renderC(); };
+renderC();
+
+/* ================= 03 歌词分享 ================= */
+const LYR = [
+  ['The kettle hums a minor key', '水壶哼着小调'],
+  ['I keep the porch light on', '我把门廊的灯一直开着'],
+  ['for a signal in the rain', '等雨里传来一个信号'],
+  ['every echo sounds like you', '每一声回响都像你'],
+  ['calling out my name', '在叫我的名字'],
+  ['so I count the passing cars', '于是我数着经过的车'],
+  ['till the morning breaks again', '直到天又一次亮起'],
+  ['and the porch light fades away', '门廊的灯才慢慢熄掉'],
+];
+const SONG = { title: 'Porch Light', artist: '示例乐队' };
+let pickSel = new Set([1, 2]);
+const SH = { style: 'rushed', pal: 'vibrant', ratio: '4:5', tr: false, seed: 7, fmt: 1 };
+const STYLES = [['block', '色块'], ['rushed', '混排'], ['cover', '封面'], ['player', '播放页']];
+const PALS = [['vibrant', '鲜艳'], ['muted', '柔和'], ['player', '播放页'], ['custom', '自定义']];
+const RATIOS = [['4:5', '4:5'], ['1:1', '1:1'], ['9:16', '9:16']];
+const FMTS = ['只有歌词', '歌词 ＋ 歌名 · 歌手', '歌词 ＋ 歌名 · 歌手 ＋ 链接'];
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function selLines() {
+  const ix = [...pickSel].sort((a, b) => a - b), out = [];
+  ix.forEach((i, k) => { if (k && i - ix[k - 1] > 1) out.push({ gap: true }); out.push({ t: LYR[i][0], tr: LYR[i][1] }); });
+  return out.length ? out : [{ t: LYR[2][0], tr: LYR[2][1] }];
+}
+function palFor(p, cv) {
+  if (p === 'muted') return [cv.muted, '#ffffff'];
+  if (p === 'player') return [plSurface(cv.hue), plOn(cv.hue)];
+  if (p === 'custom') return ['#2c5f5a', '#ffe9b8'];
+  return [cv.vibrant, '#ffffff'];
+}
+function cardHTML(o, w) {
+  const s = w / 300, cv = COVERS[o.cover ?? 0];
+  const h = Math.round(w * { '4:5': 1.25, '1:1': 1, '9:16': 16 / 9 }[o.ratio]);
+  const [bg, fg] = palFor(o.pal, cv);
+  const L = selLines(), n = L.filter(x => !x.gap).length;
+  let fs = Math.max(15, Math.min(25, 29 - n * 2.4)) * s * (o.ratio === '1:1' ? .88 : 1);
+  const rad = 22 * s, pad = 20 * s;
+  const logo = (c, chip) => `<span class="lg" style="font-size:${12.5 * s}px;color:${c}"><i style="width:${19 * s}px;height:${19 * s}px;background:${chip};color:${bg};font-size:${11 * s}px;font-style:normal">♪</i>myMusic</span>`;
+  const trl = (x, c) => o.tr ? `<div style="font-size:${fs * .5}px;font-weight:500;opacity:.78;margin-top:${2 * s}px;color:${c}">${x.tr}</div>` : '';
+  const gapl = c => `<div style="font-size:${fs * .8}px;opacity:.45;color:${c};letter-spacing:.2em">⋯</div>`;
+  const box = (style, inner) => `<div class="lcard" style="width:${w}px;height:${h}px;border-radius:${rad}px;${style}">${inner}</div>`;
+  if (o.style === 'block') {
+    const head = `<div style="display:flex;gap:${10 * s}px;align-items:center"><div style="width:${42 * s}px;height:${42 * s}px;border-radius:${10 * s}px;background:${cv.grad};flex:none"></div><div style="min-width:0"><div style="font-weight:800;font-size:${14.5 * s}px;line-height:1.2">${SONG.title}</div><div style="font-size:${12 * s}px;opacity:.75">${SONG.artist}</div></div></div>`;
+    const lyr = L.map(x => x.gap ? gapl(fg) : `<div style="font-weight:800;font-size:${fs}px;line-height:1.18;margin-top:${7 * s}px">${x.t}</div>${trl(x, fg)}`).join('');
+    return box(`background:${bg};color:${fg};padding:${pad}px`, `${head}<div class="lyr">${lyr}</div>${logo(fg, fg)}`);
+  }
+  if (o.style === 'rushed') {
+    const rnd = mulberry(o.seed);
+    const lyr = L.map(x => x.gap ? gapl(fg) : `<div style="display:flex;flex-wrap:wrap;align-items:baseline;line-height:1.05;margin-top:${4 * s}px">${x.t.split(' ').map(wd => {
+      const r = rnd();
+      const st = r < .28 ? `font-size:${fs * 1.45}px;font-weight:900;text-transform:uppercase;letter-spacing:-.02em` : r < .5 ? `font-size:${fs * 1.08}px;font-style:italic;font-weight:500` : `font-size:${fs * 1.12}px;font-weight:700`;
+      return `<span class="w" style="${st}">${wd}</span>`;
+    }).join('')}</div>${trl(x, fg)}`).join('');
+    const foot = `<div style="display:flex;justify-content:flex-end;align-items:center;gap:${10 * s}px"><div style="text-align:right"><div style="font-weight:800;font-size:${14.5 * s}px">${SONG.title}</div><div style="font-size:${12 * s}px;opacity:.8;font-weight:700">${SONG.artist}</div></div><div style="width:${50 * s}px;height:${50 * s}px;border-radius:${12 * s}px;background:${cv.grad};flex:none"></div></div>`;
+    return box(`background:${bg};color:${fg};padding:${pad}px`, `<div>${logo(fg, fg)}</div><div class="lyr">${lyr}</div>${foot}`);
+  }
+  if (o.style === 'cover') {
+    const c2 = o.pal === 'custom' ? fg : '#ffffff';
+    const lyr = L.map(x => x.gap ? gapl(c2) : `<div style="font-weight:800;font-size:${fs}px;line-height:1.18;margin-top:${6 * s}px">${x.t}</div>${trl(x, c2)}`).join('');
+    return box(`color:${c2};padding:${pad}px`, `<div style="position:absolute;inset:-20%;background:${cv.grad};filter:blur(${16 * s}px)"></div><div style="position:absolute;inset:0;background:linear-gradient(180deg,rgb(0 0 0 / .12),rgb(0 0 0 / .62))"></div>
+      <div style="position:relative;display:flex;justify-content:space-between;align-items:center"><span style="font-size:${12.5 * s}px;font-weight:700;opacity:.9">${SONG.title} · ${SONG.artist}</span>${logo(c2, c2)}</div>
+      <div class="lyr" style="position:relative;justify-content:flex-end">${lyr}</div>`);
+  }
+  // 播放页：PlayerTheme 深色、饼干形封面、当前句逐字填色、底部波浪进度
+  const hue = cv.hue, pbg = plSurface(hue), pon = plOn(hue), ppr = plPrimary(hue), glow = o.pal === 'player' ? toHex(hsl(hue, 40, 22)) : bg;
+  const lyr = L.map((x, i) => x.gap ? gapl(pon) : `<div style="font-weight:800;font-size:${fs}px;line-height:1.2;margin-top:${7 * s}px;${i === 0 ? `background:linear-gradient(90deg,${pon} 0 62%,${pon}66 62%);-webkit-background-clip:text;background-clip:text;color:transparent` : `color:${pon}`}">${x.t}</div>${trl(x, toHex(hsl(hue, 16, 72)))}`).join('');
+  let d = 'M0 6'; for (let x = 0; x <= 150; x += 2) d += ` L${x} ${(6 + 3 * Math.sin(x / 150 * Math.PI * 7)).toFixed(2)}`;
+  return box(`background:radial-gradient(120% 70% at 20% 0%, ${glow}, transparent 70%), ${pbg};color:${pon};padding:${pad}px`, `
+    <div style="display:flex;gap:${12 * s}px;align-items:center"><div style="width:${46 * s}px;height:${46 * s}px;background:${cv.grad};clip-path:${cookiePoly()};flex:none"></div><div><div style="font-weight:800;font-size:${15 * s}px">${SONG.title}</div><div style="font-size:${12.5 * s}px;color:${ppr};font-weight:600">${SONG.artist}</div></div></div>
+    <div class="lyr">${lyr}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:${10 * s}px"><svg viewBox="0 0 260 12" style="width:${150 * s}px;height:${12 * s}px"><path d="${d}" fill="none" stroke="${ppr}" stroke-width="3" stroke-linecap="round"/><path d="M156 6 L258 6" stroke="${toHex(hsl(hue, 45, 24))}" stroke-width="3" stroke-linecap="round"/></svg>${logo(pon, ppr)}</div>`);
+}
+const shE = $('#shE'), shF = $('#shF');
+applyPl(shE, 18); applyPl(shF, 18);
+function renderE() {
+  const n = pickSel.size;
+  shE.innerHTML = STATUS() + `<div class="backdrop" style="background:radial-gradient(90% 50% at 30% 20%, ${toHex(hsl(18, 50, 16))}, transparent 70%), var(--pl-surface)"></div>
+    <div class="topbar newmark" data-new="新：选句" style="border-radius:0"><span class="ib">${ico('close')}</span><div class="ttl">已选 ${n} 句</div><button class="btn-f js-go" ${n ? '' : 'disabled style="opacity:.4"'}>${ico('share', 's18')}分享</button></div>
+    <div class="pk-list">${LYR.map(([t, tr], i) => `<div class="pk ${pickSel.has(i) ? 'on' : ''}" data-i="${i}"><span class="ck2">${ico('check')}</span><div class="tx2"><b>${t}${i === 3 ? '<span class="singing">● 正在唱</span>' : ''}</b><small>${tr}</small></div></div>`).join('')}</div>
+    <div class="hintchip">点句子增减 · 最多 8 句</div><div class="snack"></div>`;
+}
+function renderF() {
+  const lower = $('.share-lower', shF), keep = lower ? lower.scrollTop : 0;
+  const w = SH.ratio === '9:16' ? 180 : SH.ratio === '1:1' ? 290 : 256;
+  shF.innerHTML = STATUS() + `<div class="topbar"><span class="ib">${ico('back')}</span><div class="ttl">分享歌词</div><span class="ib js-dice" title="随机换一套">${ico('dice')}</span></div>
+    <div class="share-prev">${cardHTML({ ...SH }, w)}</div>
+    <div class="share-lower">
+      <div class="stylestrip">${STYLES.map(([k, l]) => `<button data-st="${k}" class="${SH.style === k ? 'on' : ''}"><span class="sw2"><span style="position:absolute;left:50%;top:-8px;transform:translateX(-50%)">${cardHTML({ ...SH, style: k, ratio: '1:1' }, 78)}</span></span>${l}</button>`).join('')}</div>
+      <div class="lbl">配色</div><div class="ctg js-pal">${PALS.map(([k, l]) => `<button data-v="${k}" class="${SH.pal === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="lbl">比例</div><div class="ctg js-ratio">${RATIOS.map(([k, l]) => `<button data-v="${k}" class="${SH.ratio === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="seg" style="margin-top:16px"><div class="row"><div class="t">译文<small>每句下面带一行翻译</small></div><span class="sw js-tr ${SH.tr ? 'on' : ''}"></span></div>
+      <div class="row click js-fmt" style="padding-right:12px"><div class="t">文字格式<small>复制文字、分享时附带的文字</small></div><div class="val">${FMTS[SH.fmt]}${ico('dd', 's20')}</div></div></div>
+      <div style="height:10px"></div>
+    </div>
+    <div class="actbar"><button class="btn-t js-copy">${ico('copy', 's18')}复制文字</button><button class="btn-t js-save">${ico('save', 's18')}保存图片</button><button class="btn-f js-share">${ico('share', 's18')}分享</button></div><div class="snack" style="bottom:96px"></div>`;
+  $('.share-lower', shF).scrollTop = keep;
+}
+function renderGallery() {
+  $('#cardGallery').innerHTML = STYLES.map(([k, l], i) => `<figure class="gal-fig">${cardHTML({ style: k, pal: k === 'player' ? 'player' : ['vibrant', 'vibrant', 'vibrant'][i] || 'vibrant', ratio: '4:5', tr: k !== 'rushed', seed: SH.seed, cover: [2, 0, 1, 0][i] }, 236)}<figcaption><b>${l}</b>${{
+    block: '照 Rush 的 Spotify 卡：封面色铺底，左上小封面和歌名，歌词粗体左对齐，底部角标。',
+    rushed: '照 Rush 的 Rushed 卡（截图那张）：词随机放大、加粗、大写，右下歌名和封面。',
+    cover: '封面模糊铺满，压一层渐黑，歌词靠下；适合封面本身好看的歌。',
+    player: '照现在的全屏歌词：PlayerTheme 深色、饼干形封面、第一句逐字填色、波浪进度条。',
+  }[k]}</figcaption></figure>`).join('');
+}
+shE.addEventListener('click', e => {
+  const p = e.target.closest('.pk');
+  if (p) {
+    const i = +p.dataset.i;
+    if (pickSel.has(i)) pickSel.delete(i); else if (pickSel.size >= 8) { snackIn(shE)('最多选 8 句'); return; } else pickSel.add(i);
+    renderE(); renderF(); renderGallery();
+  }
+  if (e.target.closest('.js-go')) snackIn(shE)('打开分享页 →（右边）');
+});
+shF.addEventListener('click', e => {
+  const t = e.target; let el;
+  if ((el = t.closest('[data-st]'))) SH.style = el.dataset.st;
+  else if ((el = t.closest('.js-pal button'))) SH.pal = el.dataset.v;
+  else if ((el = t.closest('.js-ratio button'))) SH.ratio = el.dataset.v;
+  else if (t.closest('.js-tr')) SH.tr = !SH.tr;
+  else if (t.closest('.js-fmt')) SH.fmt = (SH.fmt + 1) % FMTS.length;
+  else if (t.closest('.js-dice')) { SH.seed++; SH.style = STYLES[Math.floor(Math.random() * 4)][0]; SH.pal = PALS[Math.floor(Math.random() * 3)][0]; }
+  else if (t.closest('.js-copy')) { snackIn(shF)(`已复制 ${pickSel.size} 句歌词`); return; }
+  else if (t.closest('.js-save')) { snackIn(shF)('已保存到相册 Pictures/myMusic'); return; }
+  else if (t.closest('.js-share')) { snackIn(shF)('打开系统分享面板…'); return; }
+  else return;
+  renderF();
+});
+$('#eReset').onclick = () => { pickSel = new Set([1, 2]); renderE(); renderF(); renderGallery(); };
+renderE(); renderF(); renderGallery();
+
+/* ================= 04 播放页加歌单 ================= */
+function playerBase(cv, added) {
+  let d = 'M0 14'; for (let x = 0; x <= 150; x += 2) d += ` L${x} ${(14 + 4 * Math.sin(x / 20 * Math.PI)).toFixed(2)}`;
+  return STATUS() + `<div class="backdrop" style="background:radial-gradient(90% 55% at 50% 25%, ${toHex(hsl(cv.hue, 55, 18))}, transparent 75%), var(--pl-surface)"></div>
+    <div class="topbar" style="z-index:3"><span class="ib">${ico('down')}</span><div class="ttl"></div><span class="ib">${ico('more')}</span></div>
+    <div class="pp-cover" style="background:${cv.grad};clip-path:${cookiePoly(12, .05)};z-index:2"></div>
+    <div class="pp-meta" style="z-index:2"><div class="tt"><b>${SONG.title}</b><span>${SONG.artist}</span></div><span class="favbtn newmark ${added ? 'on' : ''}" data-new="新：加到歌单">${ico(added ? 'check' : 'pladd')}</span><span class="favbtn">${ico('heart-o')}</span></div>
+    <div class="pp-lyr" style="z-index:2">for a signal in the rain<span>every echo sounds like you</span></div>
+    <svg class="pp-wave" viewBox="0 0 312 28" style="z-index:2"><path d="${d}" fill="none" stroke="var(--pl-primary)" stroke-width="4" stroke-linecap="round"/><path d="M160 14 L312 14" stroke="var(--pl-secondary-container)" stroke-width="4" stroke-linecap="round"/></svg>
+    <div class="pp-time" style="z-index:2"><span>1:42</span><span>3:36</span></div>
+    <div class="pp-ctl" style="z-index:2"><div class="ptg"><span class="side l">${ico('prev')}</span>${COOKIE_BTN('pause')}<span class="side r">${ico('next')}</span></div><div class="toolbar"><span class="tb">${ico('lyrics')}</span><span class="tb">${ico('queue')}</span></div></div>`;
+}
+const shG = $('#shG'), shH = $('#shH');
+applyPl(shG, 18); applyPl(shH, 18);
+shG.innerHTML = playerBase(COVERS[0], false);
+const PLAYLISTS = [
+  { name: '通勤路上', n: 127, on: true },
+  { name: '跑步', n: 58, on: false },
+  { name: '夜里听', n: 40, on: false, bound: '写回网易云' },
+  { name: '周末', n: 22, on: false },
+];
+function renderH() {
+  const k = PLAYLISTS.filter(p => p.on).length;
+  shH.innerHTML = playerBase(COVERS[0], k > 0) + `<div class="scrim" style="z-index:19"></div>
+    <div class="sheet" style="top:300px"><div class="grab"></div><div class="sh-head"><h5>加到歌单</h5><p>${SONG.title} · ${SONG.artist} · 已在 ${k} 个歌单里</p></div>
+    <div class="sh-body"><div class="seg">
+      <div class="lrow click"><span class="ic">${ico('add')}</span><div class="t">新建歌单<small>建好后直接把这首加进去</small></div></div>
+      ${PLAYLISTS.map((p, i) => `<div class="lrow click js-pl ${i === 2 ? 'newmark' : ''}" data-i="${i}" ${i === 2 ? 'data-new="绑定歌单"' : ''}><span class="ic">${ico('queue')}</span><div class="t">${p.name}<small>${p.n + (p.on ? 1 : 0)} 首${p.bound ? ` · ${p.bound}` : ''}</small></div><span class="cbx ${p.on ? 'on' : ''}">${ico('check')}</span></div>`).join('')}
+    </div><div class="sh-note">点一下加入或移出，面板不自动关；收藏用旁边的心形。</div></div></div><div class="snack"></div>`;
+}
+shH.addEventListener('click', e => {
+  const r = e.target.closest('.js-pl'); if (!r) return;
+  const p = PLAYLISTS[+r.dataset.i]; p.on = !p.on; renderH();
+  snackIn(shH)(p.on ? `已加到「${p.name}」${p.bound ? '，并写回网易云' : ''}` : `已从「${p.name}」移出`, () => { p.on = !p.on; renderH(); });
+});
+renderH();
+
+/* ================= 05 左右滑 ================= */
+const ACT = {
+  dl: { k: 'k-dl', icon: 'download', label: '下载' },
+  pl: { k: 'k-pl', icon: 'pladd', label: '加到歌单' },
+  fav: { k: 'k-fav', icon: 'heart', label: '收藏' },
+  unfav: { k: 'k-unfav', icon: 'heart-o', label: '取消收藏' },
+  del: { k: 'k-del', icon: 'delete', label: '删除' },
+  next: { k: 'k-next', icon: 'playnext', label: '下一首播放' },
+  none: { label: '不做事' },
+};
+const SW = { start: ['dl', 'pl'], startFull: 'fav', end: ['unfav', 'del'], endFull: 'none' };
+const HIST = [
+  { t: 'Porch Light', a: '示例乐队', tm: '23:05', fav: false },
+  { t: '晚风信号', a: '示例歌手', tm: '23:01', fav: true },
+  { t: 'Glass Harbor', a: '北岸乐团', tm: '22:59', fav: false },
+  { t: '一万次日落', a: '林间', tm: '22:48', fav: true, playing: true },
+  { t: 'Neon Tide', a: 'Polar Echo', tm: '22:45', fav: false },
+  { t: '雨停之前', a: '示例歌手', tm: '22:31', fav: false },
+];
+HIST.forEach((h, i) => { h.art = ART[(i * 3 + 1) % ART.length]; h.id = i; });
+const OPEN = 128;
+function rowHTML(h) {
+  const ends = SW.end.filter(k => k !== 'unfav' || h.fav), wS = OPEN / SW.start.length, wE = OPEN / Math.max(1, ends.length);
+  const btn = (k, w) => `<button class="act ${ACT[k].k}" data-act="${k}" style="width:${w}px">${ico(ACT[k].icon)}${ACT[k].label}</button>`;
+  return `<div class="srow ${h.playing ? 'playing' : ''}" data-id="${h.id}">
+    <div class="under"><div class="side">${SW.start.map(k => btn(k, wS)).join('')}</div><div class="side">${ends.map(k => btn(k, wE)).join('')}</div></div>
+    <div class="flood r" style="background:#ffd8e4;color:#7a1d3e">${ico(ACT[SW.startFull].icon || 'heart')}${ACT[SW.startFull].label}</div>
+    <div class="flood l" style="background:var(--md-surface-container-highest);color:var(--md-on-surface-variant)">${SW.endFull === 'none' ? '左滑到底：未设置' : ACT[SW.endFull].label}${ico('swipe')}</div>
+    <div class="fg"><div class="cv" style="background:${h.art}"></div><div class="tx"><b>${h.t}</b><small>${h.a}</small></div><span class="tm">${h.tm}</span><span class="ib more">${ico('more')}</span></div>
+  </div>`;
+}
+function bindSwipe(root, onAct, snack) {
+  let cur = null;
+  const setX = (row, x, anim = true) => { row.classList.toggle('drag', !anim); $('.fg', row).style.transform = `translateX(${x}px)`; row.dataset.x = x; };
+  root.addEventListener('pointerdown', e => {
+    const fg = e.target.closest('.fg'); if (!fg || e.target.closest('.more')) return;
+    const row = fg.parentElement, w = row.offsetWidth, x0 = e.clientX, base = +(row.dataset.x || 0);
+    const k = root.getBoundingClientRect().width / 360 || 1;
+    $$('.srow', root).forEach(r => { if (r !== row && +(r.dataset.x || 0)) setX(r, 0); });
+    let dx = base, moved = false;
+    fg.setPointerCapture(e.pointerId);
+    const mv = ev => { dx = base + (ev.clientX - x0) / k; moved = moved || Math.abs(ev.clientX - x0) > 4; setX(row, dx, false); row.classList.toggle('full-r', dx > w * .6); row.classList.toggle('full-l', dx < -w * .6); };
+    const up = () => {
+      fg.removeEventListener('pointermove', mv); fg.removeEventListener('pointerup', up); fg.removeEventListener('pointercancel', up);
+      row.classList.remove('drag');
+      const h = HIST[+row.dataset.id];
+      if (dx > w * .6) { onAct(SW.startFull, h, row); setTimeout(() => row.classList.remove('full-r'), 250); setX(row, 0); }
+      else if (dx < -w * .6) { onAct(SW.endFull, h, row); setTimeout(() => row.classList.remove('full-l'), 250); setX(row, 0); }
+      else if (!moved && base) setX(row, 0);
+      else setX(row, dx > 48 ? OPEN : dx < -48 ? -OPEN : 0);
+    };
+    fg.addEventListener('pointermove', mv); fg.addEventListener('pointerup', up); fg.addEventListener('pointercancel', up);
+  });
+  root.addEventListener('click', e => { const b = e.target.closest('.act'); if (!b) return; const row = b.closest('.srow'); onAct(b.dataset.act, HIST[+row.dataset.id], row); setX(row, 0); });
+  return setX;
+}
+const shI = $('#shI'), shJ = $('#shJ');
+let histShown = HIST.map(h => h.id);
+function renderI(openState) {
+  const rows = histShown.map(i => HIST[i]);
+  shI.innerHTML = STATUS('23:10') + `<div class="lbody">
+    <div class="lbar"><span class="ib">${ico('back')}</span><span class="sp"></span><button class="txtbtn">清除</button></div>
+    <div class="lbig"><h5>最近播放</h5><p>只保存在本机，不会上传或同步。</p></div>
+    <div class="dayl">今天</div><div class="slist">${rows.map(rowHTML).join('')}</div></div>
+    <div class="lmini"><div class="cv" style="background:${HIST[3].art}"></div><div class="tx"><b>一万次日落</b><small>林间 · 网易云音乐</small></div><span class="pp">${ico('pause')}</span><span class="ib">${ico('next')}</span></div>
+    <div class="lnav"><span><i>${ico('chart')}</i>榜单</span><span><i>${ico('queue')}</i>歌单</span><span><i>${ico('search')}</i>搜索</span><span class="on"><i>${ico('library')}</i>我的</span></div><div class="snack" style="bottom:164px"></div>`;
+  if (openState) for (const [id, x] of openState) { const r = $(`.srow[data-id="${id}"]`, shI); if (r) setXI(r, x); }
+}
+function actI(k, h, row) {
+  const sn = snackIn(shI);
+  if (k === 'del') {
+    row.style.transition = 'height .3s ease, opacity .2s'; row.style.height = '0px'; row.style.opacity = '0';
+    setTimeout(() => { histShown = histShown.filter(i => i !== h.id); renderI(); sn(`已从最近播放删除「${h.t}」`, () => { histShown = HIST.map(x => x.id).filter(i => i === h.id || histShown.includes(i)); renderI(); }); }, 300);
+  } else if (k === 'fav') sn(h.fav ? `「${h.t}」已在收藏里` : `已收藏「${h.t}」`), h.fav = true;
+  else if (k === 'unfav') { h.fav = false; sn(`已取消收藏「${h.t}」`, () => { h.fav = true; renderI(); }); setTimeout(() => renderI(), 450); }
+  else if (k === 'dl') sn(`开始下载「${h.t}」`);
+  else if (k === 'pl') sn('打开「加到歌单」面板');
+  else if (k === 'next') sn(`「${h.t}」下一首播放`);
+  else sn('左滑到底没有设置动作 · 设置 › 滑动操作');
+}
+const setXI = bindSwipe(shI, actI);
+renderI([[1, -OPEN], [3, OPEN]]);
+$('#iReset').onclick = () => { $$('.srow', shI).forEach(r => setXI(r, 0)); };
+
+function renderJ() {
+  const lb = $('.lbody', shJ), keep = lb ? lb.scrollTop : 0;
+  const slot = (side, i) => { const k = SW[side][i]; return `<div class="row" style="padding-right:4px"><span style="width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:var(--md-secondary-container);color:var(--md-on-secondary-container);font-weight:800;font-size:13px;flex:none">${i + 1}</span><div class="t">${ACT[k].label}<small>露出的第 ${i + 1} 个</small></div><span class="ib js-mv" data-side="${side}" data-i="${i}" data-d="-1" style="opacity:${i === 0 ? .35 : 1}">${ico('arrup')}</span><span class="ib js-mv" data-side="${side}" data-i="${i}" data-d="1" style="opacity:${i === SW[side].length - 1 ? .35 : 1}">${ico('arrdown')}</span></div>`; };
+  const full = (k, hint) => `<div class="row click" style="padding-right:12px"><div class="t">拉到头<small>${hint}</small></div><div class="val">${ACT[k].label}${ico('right', 's20')}</div></div>`;
+  shJ.innerHTML = STATUS('23:12') + `<div class="lbody" style="overflow-y:auto;scrollbar-width:thin">
+    <div class="lbar" style="position:sticky;background:var(--md-surface)"><span class="ib">${ico('back')}</span><span class="ttl"></span></div>
+    <div class="lbig" style="padding-top:36px"><h5>滑动操作</h5><p>在歌曲列表上左右滑；电视上没有。</p></div>
+    <div class="slist" style="margin-top:8px">${rowHTML(HIST[0])}</div>
+    <div class="sh-note" style="padding:6px 20px 0">↔ 拖一下上面这行试试，下面改了它跟着变</div>
+    <div style="margin:12px 16px 0" class="seg"><div class="row"><div class="t">启用滑动操作<small>多选、排序、读屏开着时自动停用</small></div><span class="sw on"></span></div></div>
+    <div class="lbl" style="padding:20px 20px 8px">向右滑</div>
+    <div class="seg" style="margin:0 16px">${SW.start.map((_, i) => slot('start', i)).join('')}${full(SW.startFull, '拉过行宽 60% 松手')}</div>
+    <div class="lbl" style="padding:20px 20px 8px">向左滑</div>
+    <div class="seg" style="margin:0 16px">${SW.end.map((_, i) => slot('end', i)).join('')}${full(SW.endFull, '默认不做事，可以换成任一动作')}</div>
+    <div class="sh-note" style="padding:10px 20px 40px">「删除」在最近播放里是删记录、在歌单里是移出歌单、在下载里是删文件；没东西可删的列表不显示这个按钮。</div>
+  </div>`;
+  $('.lbody', shJ).scrollTop = keep;
+}
+const setXJ = bindSwipe(shJ, (k, h) => snackIn(shJ)(`${ACT[k].label}：${h.t}`));
+shJ.addEventListener('click', e => {
+  const b = e.target.closest('.js-mv'); if (!b) return;
+  const a = SW[b.dataset.side], i = +b.dataset.i, j = i + +b.dataset.d; if (j < 0 || j >= a.length) return;
+  [a[i], a[j]] = [a[j], a[i]]; renderJ(); renderI();
+});
+renderJ();
+
+/* ================= 06 导出 / 落雪导入 ================= */
+const PROV = { wy: ['云', '#e72d2c', '网易云'], tx: ['Q', '#20b26b', 'QQ'], kg: ['K', '#2a8cf0', '酷狗'], kw: ['W', '#f0a800', '酷我'], mg: ['咪', '#e5007f', '咪咕'], am: ['A', '#fa2d48', 'Apple Music'], local: ['本', '#6b7280', '本地'] };
+const pchip = (p, n, skip) => `<span class="pchip ${skip ? 'skip' : ''}"><i style="background:${PROV[p][1]}">${PROV[p][0]}</i>${PROV[p][2]} ${n}</span>`;
+function pageBehind(title, sub, rows) {
+  return `<div class="lbody">
+    <div class="lbar"><span class="ib">${ico('back')}</span><span class="sp"></span><span class="ib">${ico('grid')}</span><span class="ib">${ico('search')}</span><span class="ib">${ico('more')}</span></div>
+    <div style="padding:100px 20px 16px;display:flex;gap:16px;align-items:flex-end"><div style="width:128px;height:128px;border-radius:28px;background:${ART[5]};flex:none;box-shadow:0 18px 30px -16px rgb(0 0 0 / .45)"></div><div><h5 style="font-size:26px;font-weight:800;line-height:1.2">${title}</h5><p style="font-size:13px;color:var(--md-on-surface-variant);margin-top:4px">${sub}</p></div></div>
+    <div style="display:flex;gap:8px;padding:0 16px 14px"><span class="btn-f" style="height:48px;padding:0 22px">${ico('play', 's20')}播放全部</span><span class="btn-t" style="height:48px;width:48px;padding:0;justify-content:center">${ico('shuffle', 's20')}</span></div>
+    <div class="slist">${rows}</div></div>`;
+}
+const RUN = HIST.slice(0, 5).map(h => `<div class="srow"><div class="fg" style="cursor:default"><div class="cv" style="background:${h.art}"></div><div class="tx"><b>${h.t}</b><small>${h.a}</small></div><span class="ib more">${ico('more')}</span></div></div>`).join('');
+$('#shK0').innerHTML = STATUS() + pageBehind('跑步', '58 首 · 自建歌单 · 2 天前更新', RUN) +
+  `<div class="menu" style="right:12px;top:84px"><div>${ico('edit')}重命名</div><div class="newmark" data-new="新增" style="border-radius:0;outline-offset:-2px">${ico('save')}导出歌单…</div><div class="danger">${ico('delete')}删除歌单</div></div>`;
+let FMT = 'mymusic';
+const EXP = [['wy', 30], ['tx', 12], ['kg', 6], ['kw', 4], ['am', 3], ['local', 3]];
+function renderK() {
+  const lx = FMT === 'lx';
+  const note = { mymusic: '本应用的歌单文件，所有平台都能完整还原。发给另一台装了 myMusic 的设备，用「从文件导入」打开。', lx: '落雪音乐能打开的 .lxmc。落雪只认网易云、QQ、酷狗、酷我、咪咕；其他平台跳过，本地歌只带歌名歌手。', txt: '每行「歌名  歌手  专辑」，适合贴到聊天里。只能看，不能再导入。' }[FMT];
+  const ok = lx ? 55 : 58;
+  $('#shK').innerHTML = STATUS() + pageBehind('跑步', '58 首 · 自建歌单 · 2 天前更新', RUN) + `<div class="scrim"></div>
+    <div class="sheet" style="top:300px"><div class="grab"></div><div class="sh-head"><h5>导出「跑步」</h5><p>不包含平台账号和 Cookie</p></div>
+    <div class="sh-body">
+      <div class="lbl" style="padding-top:8px">格式</div>
+      <div class="ctg js-fmt">${[['mymusic', 'myMusic'], ['lx', '落雪'], ['txt', '纯文本']].map(([k, l]) => `<button data-v="${k}" class="${FMT === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="sh-note">${note}</div>
+      <div class="lbl">会导出 <small>${ok} / 58 首</small></div>
+      <div class="pchips">${EXP.map(([p, n]) => pchip(p, n, lx && p === 'am')).join('')}</div>
+      ${lx ? '<div class="sh-note">跳过 3 首 Apple Music；本地 3 首只有歌名歌手。</div>' : ''}
+      <div style="display:flex;gap:8px;margin-top:18px"><button class="btn-t" style="flex:1;justify-content:center;height:48px">${ico('share', 's18')}分享</button><button class="btn-f" style="flex:1;justify-content:center;height:48px">${ico('save', 's18')}保存到文件</button></div>
+      <div class="sh-note" style="text-align:center">文件名：${{ mymusic: '跑步.mymusic.json', lx: 'lx_list_part_跑步.lxmc', txt: '跑步.txt' }[FMT]}</div>
+    </div></div>`;
+}
+$('#shK').addEventListener('click', e => { const b = e.target.closest('.js-fmt button'); if (b) { FMT = b.dataset.v; renderK(); } });
+renderK();
+const LXL = [
+  { name: '试听列表', id: 'default', n: 32, chips: [['wy', 20], ['tx', 8], ['kw', 4]], to: '新建歌单「试听列表」', on: true },
+  { name: '我的收藏', id: 'love', n: 210, chips: [['wy', 120], ['tx', 52], ['kg', 26], ['mg', 10], ['local', 2]], skip: 'local', to: '合并到收藏', on: true },
+  { name: '跑步', id: 'userlist_…', n: 58, chips: [['wy', 30], ['tx', 14], ['kg', 10], ['kw', 4]], to: '合并到同名歌单', on: true },
+];
+function renderL() {
+  const tot = LXL.filter(l => l.on).reduce((s, l) => s + l.n - (l.skip ? 2 : 0), 0), k = LXL.filter(l => l.on).length;
+  $('#shL').innerHTML = STATUS() + `<div class="lbody"><div class="lbar"><span class="sp"></span><span class="ib">${ico('search')}</span><span class="ib">${ico('settings')}</span></div><div class="lbig"><h5>我的</h5><p>歌单、收藏、下载和最近播放</p></div></div><div class="scrim"></div>
+    <div class="sheet" style="top:120px"><div class="grab"></div><div class="sh-head"><h5>从文件导入</h5><p>lx_list.lxmc · 落雪音乐 · 3 个歌单</p></div>
+    <div class="sh-body">
+      <div class="sh-note" style="padding-top:0">认出是落雪导出的歌单文件。勾选要导入的；导入后是普通自建歌单，会跟着同步。</div>
+      <div class="seg" style="margin-top:8px">${LXL.map((l, i) => `<div class="lrow click js-lx" data-i="${i}" style="align-items:flex-start"><span class="cbx ${l.on ? 'on' : ''}" style="margin-top:2px">${ico('check')}</span><div class="t">${l.name} <span style="font-size:13px;color:var(--md-on-surface-variant);font-weight:400">${l.n} 首</span><small>${l.to} ▾</small><div class="pchips">${l.chips.map(([p, n]) => pchip(p, n, p === l.skip)).join('')}</div></div></div>`).join('')}</div>
+      <div class="lbl">同名歌单</div>
+      <div class="ctg"><button class="on">合并</button><button>另建一个</button></div>
+      <div class="lbl">导不了的</div>
+      <div class="sh-note" style="padding-top:0">本地文件 2 首在这台设备上没找到同名歌曲；临时列表（temp）不导入。咪咕 10 首用 copyrightId 换取。</div>
+      <button class="btn-f" style="width:100%;justify-content:center;height:52px;margin-top:16px;font-size:15px">导入 ${k} 个歌单 · ${tot} 首</button>
+      <div style="height:20px"></div>
+    </div></div>`;
+}
+$('#shL').addEventListener('click', e => { const r = e.target.closest('.js-lx'); if (r) { const l = LXL[+r.dataset.i]; l.on = !l.on; renderL(); } });
+renderL();
+
+/* ================= 07 海报墙视角 ================= */
+const shM = $('#shM');
+applyPl(shM, 224);
+let zoom = 1, zSlider;
+function renderWall() {
+  const wall = $('.wall', shM), W = 360, H = 470, p = 56 * zoom, gap = 4 * zoom, rad = Math.max(4, 8 * zoom);
+  let html = '', n = 0;
+  let k = 6; while (k * p - gap < 240) k++; while (k * p - gap > W - 24 && k > 2) k--;
+  const G = k * p - gap, gx = (W - G) / 2, gy = 104;
+  const ox = gx - Math.ceil(gx / p) * p, oy = gy - Math.ceil(gy / p) * p;
+  const cols = Math.ceil((W - ox) / p), rows = Math.ceil((H - oy) / p);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const x = ox + c * p, y = oy + r * p;
+    if (x < gx + G && x + p - gap > gx && y < gy + G && y + p - gap > gy) continue;
+    n++;
+    html += `<div class="tile" style="left:${x}px;top:${y}px;width:${p - gap}px;height:${p - gap}px;border-radius:${rad}px;background:${ART[(r * 7 + c * 3) % ART.length]}">${p >= 40 ? `<b>${String((r * cols + c) % 48 + 1).padStart(2, '0')}</b>` : ''}</div>`;
+  }
+  html += `<div class="tint" style="background:var(--pl-surface);opacity:.38"></div>`;
+  html += `<div class="grown" style="left:${gx}px;top:${gy}px;width:${G}px;height:${G}px;border-radius:24px;background:linear-gradient(180deg,transparent 30%,rgb(0 0 0 / .7)),${ART[3]}"><h6>一万次日落</h6><p>林间 · 第 12 首</p><div class="gl">我们把黄昏数到第一万次</div></div>`;
+  html += `<div class="pill">队列 · 48 首 · ${zoom < 1 ? '看到更多' : zoom > 1 ? '拉近' : '默认'}</div>`;
+  wall.innerHTML = html;
+  $('.js-zv', shM).textContent = `${zoom}×`;
+  $$('[data-z]').forEach(b => b.classList.toggle('on', +b.dataset.z === zoom));
+}
+shM.innerHTML = STATUS() + `<div class="wall"></div>
+  <div class="sheet" style="top:470px;border-radius:28px 28px 0 0"><div class="grab"></div><div class="sh-head" style="padding-bottom:0"><h5 style="font-size:19px">海报墙设置</h5></div>
+  <div class="sh-body" style="padding-top:0">
+    <div class="lbl">海报染色</div><div class="ctg"><button>关</button><button>弱</button><button class="on">中</button><button>强</button></div>
+    <div class="lbl newmark" data-new="新：视角">视角 <small class="js-zv">1×</small></div>
+    <div class="js-zs" style="margin:0 4px"></div><div class="sld-ends" style="margin:0 4px"><span>远</span><span></span><span>默认</span><span>近</span></div>
+    <div class="sh-note">拉远能一屏看到整个歌单，适合截图给朋友看；双指捏合也能调。</div>
+  </div></div>`;
+const ZT = [.5, .75, 1, 1.25];
+const snapZ = v => ZT.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a);
+zSlider = makeSlider($('.js-zs', shM), { min: .5, max: 1.25, value: 1, ticks: ZT, snapWithin: .001, snapOnRelease: snapZ, onChange: (v, done) => { zoom = done ? v : Math.round(v * 100) / 100; renderWall(); } });
+$$('[data-z]').forEach(b => b.onclick = () => { zoom = +b.dataset.z; zSlider.set(zoom); renderWall(); });
+renderWall();
+
+/* ================= 08 横屏 ================= */
+function land(after) {
+  const cv = COVERS[0];
+  const rail = `<div class="rail"><span class="c0" style="background:${cv.grad}"></span>${ico('prev')}<span class="pp2">${ico('pause')}</span>${ico('next')}<span style="width:50%;height:1px;background:var(--pl-outline-variant)"></span><span class="sel">${ico('lyrics')}</span>${ico('spark')}${ico('queue')}</div>`;
+  const lines = after ? `<div class="lz">${[['The kettle hums a minor key', -1], ['I keep the porch light on', 0], ['for a signal in the rain', 1], ['every echo sounds like you', 2]].map(([t, d]) => `<div class="ln" style="font-size:${d === 0 ? 26 : 19}px;color:#fff;opacity:${d === 0 ? 1 : .8};filter:blur(${Math.abs(d) * 1.1}px);transform:scale(${d === 0 ? 1 : .85})">${t}</div>${d === 0 ? '<div style="font-size:12px;color:#fff;opacity:.75;margin:-2px 0 4px">我把门廊的灯一直开着</div>' : ''}`).join('')}</div>` : `<div class="empty">歌词区（约 222dp 高）· 一行都没画</div>`;
+  return `<div class="land"><div class="ls" style="background:${after ? cv.vibrant : 'var(--pl-surface)'}">${rail}<div class="hd" style="${after ? 'color:#ffd9c7' : ''}">${SONG.title} · ${SONG.artist}</div>${lines}</div></div>`;
+}
+$('#lsBefore').innerHTML = land(false); $('#lsAfter').innerHTML = land(true);
+$$('.land').forEach(l => applyPl(l, 18));
+</script>
+</body>
+</html>
