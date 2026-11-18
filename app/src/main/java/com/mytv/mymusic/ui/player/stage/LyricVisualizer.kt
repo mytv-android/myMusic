@@ -14,6 +14,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -31,8 +32,10 @@ import com.mytv.mymusic.playback.RHYTHM_BAND_COUNT
 import com.mytv.mymusic.ui.LyricLine
 import com.mytv.mymusic.ui.LyricWord
 import com.mytv.mymusic.ui.ParsedLyrics
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.random.Random
 
 /*
  * 全屏歌词动画的接口，照 Folium v1.x 的 visualizers 扩展点搬成 Kotlin。
@@ -121,13 +124,23 @@ val DefaultMinTextHeight: Dp = 160.dp
 data class ModOrigin(val mod: String, val version: String, val author: String, val license: String, val kind: String = "模组")
 
 /**
+ * 设置项的显示条件：[key] 那一项的当前值在 [values] 里才显示（比如配色选“自定义”时才出两个色块）。
+ * 不显示的项照样按存的值或默认值读，存的值也不清掉，切回来还在。
+ */
+@Immutable
+data class SettingCondition(val key: String, val values: Set<String>)
+
+/**
  * 设置表的一项。读的时候合并默认值、夹紧数值，写的时候丢掉未知键（见 [SettingValues]、[sanitizeSettings]），
- * 规则和 Folium 一样。要移植的模组没用到 text、color、secret，这三种不做。
+ * 规则和 Folium 一样。Folium 还有 text、secret 两种，要移植的模组没用到，不做。
  */
 sealed interface LyricSetting {
     val key: String
     val label: String
     val summary: String?
+
+    /** 什么时候显示，null 一直显示，见 [SettingCondition]。 */
+    val visibleWhen: SettingCondition? get() = null
 
     /** 数字：面板里是 −/+ 步进行（和“跟拍校准”同款）。 */
     class Number(
@@ -148,13 +161,19 @@ sealed interface LyricSetting {
         }
     }
 
-    /** 选项：面板里是连接按钮组。[options] 是（值, 显示名）。 */
+    /**
+     * 选项：面板里是连接按钮组。[options] 是（值, 显示名）。
+     * [shuffle]：“随机搭配”时动不动它；[shuffleExclude] 是随机搭配不会抽到的选项（比如“自定义”配色）。
+     */
     class Choice(
         override val key: String,
         override val label: String,
         val options: List<Pair<String, String>>,
         val default: String,
         override val summary: String? = null,
+        val shuffle: Boolean = true,
+        val shuffleExclude: Set<String> = emptySet(),
+        override val visibleWhen: SettingCondition? = null,
     ) : LyricSetting
 
     /** 开关：面板里是开关行。 */
@@ -164,6 +183,65 @@ sealed interface LyricSetting {
         val default: Boolean,
         override val summary: String? = null,
     ) : LyricSetting
+
+    /**
+     * 滑块：连续拖动，离 [ticks] 里某个刻度不到 [snapWithin] 时吸过去，刻度下面一排 [tickLabels]。
+     * [legacyToggle]：这一项以前是开关，旧数据里的 "false" / "true" 按（关的值, 开的值）读。
+     * [minSdk]：系统版本低于它时滑块灰掉（效果做不出来，比如 Android 12 以下的实时模糊）。
+     */
+    class Slider(
+        override val key: String,
+        override val label: String,
+        val min: Float,
+        val max: Float,
+        val default: Float,
+        val ticks: List<Float> = emptyList(),
+        val tickLabels: List<String> = emptyList(),
+        val snapWithin: Float = 0.08f,
+        val format: (Float) -> String = ::formatTimes,
+        val legacyToggle: Pair<Float, Float>? = null,
+        val minSdk: Int = 0,
+        override val summary: String? = null,
+        override val visibleWhen: SettingCondition? = null,
+    ) : LyricSetting {
+        /** 夹到范围内、按 0.01 取整；不是数（NaN）时取默认值。 */
+        fun clamp(value: Float): Float {
+            if (value.isNaN()) return default
+            return (Math.round(value.coerceIn(min, max) * 100.0) / 100.0).toFloat().coerceIn(min, max)
+        }
+
+        /** 拖到离某个刻度不到 [snapWithin] 时吸到刻度上，否则原样。 */
+        fun snap(value: Float): Float {
+            val near = ticks.minByOrNull { abs(it - value) } ?: return value
+            return if (abs(near - value) < snapWithin) near else value
+        }
+
+        /** 存的值：数字夹紧；旧版本的开关值按 [legacyToggle] 换算；都不是时为 null。 */
+        fun parse(raw: String?): Float? {
+            if (raw == null) return null
+            raw.toFloatOrNull()?.let { return clamp(it) }
+            val legacy = legacyToggle ?: return null
+            return raw.toBooleanStrictOrNull()?.let { on -> clamp(if (on) legacy.second else legacy.first) }
+        }
+    }
+
+    /**
+     * 颜色：面板里是色块按钮，点开取色面板，值存成 `#RRGGBB`。
+     * 设置表的默认值必须固定，[seed] 是“切到能看见的那一下还没有值时，按舞台配色种一个初值”（比如封面的鲜艳色）。
+     */
+    class Color(
+        override val key: String,
+        override val label: String,
+        val default: String,
+        val seed: ((StageColors) -> androidx.compose.ui.graphics.Color)? = null,
+        override val summary: String? = null,
+        override val visibleWhen: SettingCondition? = null,
+    ) : LyricSetting {
+        /** 默认值规范成大写 `#RRGGBB`。 */
+        val defaultHex: String = parseHexColor(default)?.toHex() ?: "#000000"
+
+        fun parse(raw: String?): androidx.compose.ui.graphics.Color? = raw?.let(::parseHexColor)
+    }
 }
 
 /** ×1.25 这种倍数写法，去掉多余的 0。 */
@@ -198,6 +276,31 @@ class SettingValues(private val schema: List<LyricSetting>, private val raw: Map
         return raw[key]?.takeIf { value -> setting.options.any { it.first == value } } ?: setting.default
     }
 
+    fun slider(key: String): Float {
+        val setting = schema.firstOrNull { it.key == key } as? LyricSetting.Slider ?: error("没有滑块设置 $key")
+        return setting.parse(raw[key]) ?: setting.clamp(setting.default)
+    }
+
+    fun color(key: String): Color {
+        val setting = schema.firstOrNull { it.key == key } as? LyricSetting.Color ?: error("没有颜色设置 $key")
+        return setting.parse(raw[key]) ?: parseHexColor(setting.defaultHex) ?: Color.Black
+    }
+
+    /** 这一项现在显不显示：[LyricSetting.visibleWhen] 那一项的当前值（合法值、没存按默认）在条件里。 */
+    fun visible(setting: LyricSetting): Boolean {
+        val condition = setting.visibleWhen ?: return true
+        val target = schema.firstOrNull { it.key == condition.key } ?: return false
+        return valueText(target) in condition.values
+    }
+
+    private fun valueText(setting: LyricSetting): String = when (setting) {
+        is LyricSetting.Number -> number(setting.key).toString()
+        is LyricSetting.Toggle -> toggle(setting.key).toString()
+        is LyricSetting.Choice -> choice(setting.key)
+        is LyricSetting.Slider -> slider(setting.key).toString()
+        is LyricSetting.Color -> color(setting.key).toHex()
+    }
+
     /** 和默认值不同的项数（面板“恢复默认”是否可用）。 */
     val changed: Int get() = sanitizeSettings(schema, raw).size
 
@@ -205,7 +308,7 @@ class SettingValues(private val schema: List<LyricSetting>, private val raw: Map
     override fun hashCode(): Int = raw.hashCode()
 }
 
-/** 写之前清理：丢掉未知键、类型不对的值和等于默认值的项，数字夹紧到合法刻度。 */
+/** 写之前清理：丢掉未知键、类型不对的值和等于默认值的项，数字夹紧到合法刻度，颜色规范成大写 `#RRGGBB`。 */
 fun sanitizeSettings(schema: List<LyricSetting>, raw: Map<String, String>): Map<String, String> {
     val out = LinkedHashMap<String, String>()
     for (setting in schema) {
@@ -217,7 +320,102 @@ fun sanitizeSettings(schema: List<LyricSetting>, raw: Map<String, String>): Map<
                 ?.takeIf { it != setting.default }?.let { out[setting.key] = it.toString() }
             is LyricSetting.Choice -> value.takeIf { v -> setting.options.any { it.first == v } && v != setting.default }
                 ?.let { out[setting.key] = it }
+            // 旧版本的开关值在这里换成数，下次写这个模式的设置时就改写掉了
+            is LyricSetting.Slider -> setting.parse(value)
+                ?.takeIf { it != setting.clamp(setting.default) }?.let { out[setting.key] = it.toString() }
+            is LyricSetting.Color -> parseHexColor(value)?.toHex()
+                ?.takeIf { it != setting.defaultHex }?.let { out[setting.key] = it }
         }
+    }
+    return out
+}
+
+/** `#RRGGBB` 或 `RRGGBB`（大小写都行）→ 不透明的颜色；别的写法为 null。 */
+fun parseHexColor(text: String): Color? {
+    val hex = text.trim().removePrefix("#")
+    if (hex.length != 6 || hex.any { it !in '0'..'9' && it.lowercaseChar() !in 'a'..'f' }) return null
+    return Color(0xFF000000L or hex.toLong(16))
+}
+
+/** 颜色 → 大写 `#RRGGBB`（不带透明度）。 */
+fun Color.toHex(): String {
+    val argb = toArgb()
+    return "#%02X%02X%02X".format(argb shr 16 and 0xFF, argb shr 8 and 0xFF, argb and 0xFF)
+}
+
+/** 设置表里有没有“随机搭配”能动的项（可抽的选项至少两个）。 */
+fun canShuffleSettings(schema: List<LyricSetting>): Boolean = schema.any { it is LyricSetting.Choice && it.shuffleOptions().size > 1 }
+
+private fun LyricSetting.Choice.shuffleOptions(): List<String> =
+    if (shuffle) options.map { it.first }.filter { it !in shuffleExclude } else emptyList()
+
+/**
+ * 随机搭配：只重抽 [LyricSetting.Choice.shuffle] 的选项（不抽 [LyricSetting.Choice.shuffleExclude]），
+ * 其余项（字号、景深、自定义色……）原样保留。抽出来和原来一模一样就重抽，最多 5 次。
+ */
+fun shuffleSettings(schema: List<LyricSetting>, raw: Map<String, String>, random: Random): Map<String, String> {
+    val choices = schema.filterIsInstance<LyricSetting.Choice>().filter { it.shuffleOptions().size > 1 }
+    if (choices.isEmpty()) return raw
+    val current = SettingValues(schema, raw)
+    val before = choices.map { current.choice(it.key) }
+    var out: Map<String, String> = raw
+    repeat(SHUFFLE_TRIES) {
+        val picked = choices.map { it.shuffleOptions().random(random) }
+        out = raw + choices.mapIndexed { i, choice -> choice.key to picked[i] }
+        if (picked != before) return out
+    }
+    return out
+}
+
+private const val SHUFFLE_TRIES = 5
+
+/**
+ * 选项刚改成 [next] 时补上颜色初值：依赖这个选项、这一下刚变得能看见、原来没存过值、又声明了 [LyricSetting.Color.seed] 的颜色项，
+ * 按舞台配色 [colors] 种一个（比如配色切到“自定义”时，背景、文字取封面的鲜艳色和它的文字色，画面不跳）。
+ */
+internal fun seedNewlyVisibleColors(
+    schema: List<LyricSetting>,
+    before: Map<String, String>,
+    next: Map<String, String>,
+    colors: StageColors,
+): Map<String, String> {
+    val was = SettingValues(schema, before)
+    val now = SettingValues(schema, next)
+    var out = next
+    for (setting in schema) {
+        if (setting !is LyricSetting.Color) continue
+        val seed = setting.seed ?: continue
+        if (setting.key in next || was.visible(setting) || !now.visible(setting)) continue
+        out = out + (setting.key to seed(colors).toHex())
+    }
+    return out
+}
+
+/**
+ * 面板设置表的一行：可见项按顺序一项一行；连续的颜色项并成一行色块，它们的显示条件正好是前一项选项时，
+ * 色块画在那一项的按钮组下面（[head] 是那个选项），否则单独一行（[head] 为 null）。
+ */
+internal class SettingRow(val head: LyricSetting?, val colors: List<LyricSetting.Color>)
+
+internal fun settingRows(visible: List<LyricSetting>): List<SettingRow> {
+    val out = ArrayList<SettingRow>()
+    var i = 0
+    while (i < visible.size) {
+        val setting = visible[i]
+        if (setting is LyricSetting.Color) {
+            val group = visible.drop(i).takeWhile { it is LyricSetting.Color }.filterIsInstance<LyricSetting.Color>()
+            out += SettingRow(null, group)
+            i += group.size
+            continue
+        }
+        val attached = if (setting is LyricSetting.Choice) {
+            visible.drop(i + 1).takeWhile { it is LyricSetting.Color && it.visibleWhen?.key == setting.key }
+                .filterIsInstance<LyricSetting.Color>()
+        } else {
+            emptyList()
+        }
+        out += SettingRow(setting, attached)
+        i += 1 + attached.size
     }
     return out
 }

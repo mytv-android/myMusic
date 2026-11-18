@@ -42,13 +42,8 @@ import com.mytv.mymusic.ui.player.coverBlobColors
  */
 @Composable
 internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStagePrefs, modifier: Modifier = Modifier, big: Boolean = false) {
-    val context = LocalContext.current
     val scheme = MaterialTheme.colorScheme
-    val cover = song?.cover.orEmpty()
-    val coverColors by produceState(blobColorCache.get(cover), cover) { value = coverBlobColors(context, cover) }
-    val colors = remember(scheme.onSurface, scheme.primary, scheme.secondary, scheme.tertiary, scheme.primaryContainer, scheme.surface, coverColors) {
-        stageColors(scheme, coverColors)
-    }
+    val colors = rememberStageColors(song?.cover.orEmpty())
     ResolveStageDevice()
     BoxWithConstraints(
         modifier
@@ -97,6 +92,20 @@ internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStageP
             mode.Stage(ctx, Modifier.fillMaxSize())
             if (mode.hostSubtitles) HostSubtitle(ctx, mode)
         }
+    }
+}
+
+/**
+ * 舞台配色：当前配色（播放页里是 PlayerTheme）加封面 [cover] 的量化色，量化色取到之前用配色补。
+ * 舞台、缩略图和面板（颜色项的初值、取色面板的“从封面取”）共用。
+ */
+@Composable
+internal fun rememberStageColors(cover: String): StageColors {
+    val context = LocalContext.current
+    val scheme = MaterialTheme.colorScheme
+    val coverColors by produceState(blobColorCache.get(cover), cover) { value = coverBlobColors(context, cover) }
+    return remember(scheme.onSurface, scheme.primary, scheme.secondary, scheme.tertiary, scheme.primaryContainer, scheme.surface, coverColors) {
+        stageColors(scheme, coverColors)
     }
 }
 

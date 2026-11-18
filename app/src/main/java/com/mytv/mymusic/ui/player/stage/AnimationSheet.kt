@@ -1,5 +1,6 @@
 package com.mytv.mymusic.ui.player.stage
 
+import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -12,6 +13,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
@@ -50,6 +53,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -74,6 +78,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -84,11 +89,20 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -171,6 +185,8 @@ internal fun AnimationSheet(
     val tv = LocalAppWindow.current.isTv
     val d = draft.draft
     val dirty = isDirty(saved, d)
+    // 颜色项切到能看见时的初值（封面的鲜艳色等）按这首歌的舞台配色算
+    val stageColors = rememberStageColors(song?.cover.orEmpty())
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     // 面板是单独的窗口（平板、电视），外壳的提示条会被盖住：提示条放在面板里
@@ -316,8 +332,10 @@ internal fun AnimationSheet(
                     previewPrefs = saved.withDraft(d),
                     song = song,
                     big = !stageBeside,
+                    stageColors = stageColors,
                     onTarget = { draft.editTarget = it },
                     onWrite = { transform -> draft.update { p -> p.withSettings(target, transform(p.settingsFor(target))) } },
+                    onPickColor = {},
                 )
 
                 if (d.auto == LyricAutoSwitch.Random) ForgetRow(actions, toast)
@@ -707,8 +725,10 @@ private fun ModeSettings(
     previewPrefs: LyricStagePrefs,
     song: Song?,
     big: Boolean,
+    stageColors: StageColors,
     onTarget: (String) -> Unit,
     onWrite: ((Map<String, String>) -> Map<String, String>) -> Unit,
+    onPickColor: (LyricSetting.Color) -> Unit,
 ) {
     val mode = draft.modeOf(target)
     val raw = draft.settingsFor(target)
@@ -764,12 +784,24 @@ private fun ModeSettings(
             if (mode.id == ClassicVisualizer.id) "经典就是原来的整页歌词列表，点一句跳过去，没有可调的项。" else "这个动画没有可调的项。",
         )
     } else {
+        // 先去掉此刻不显示的项（比如没选“自定义”时的色块）再排；挂在某个选项下面的色块和它算一行
+        val rows = settingRows(mode.settings.filter(values::visible))
         SegmentedGroup {
-            mode.settings.forEachIndexed { index, setting ->
-                val count = mode.settings.size
-                when (setting) {
+            rows.forEachIndexed { index, row ->
+                val count = rows.size
+                when (val setting = row.head) {
+                    null -> ColorSegment(row.colors, values, index, count, onPickColor)
                     is LyricSetting.Number -> NumberRow(setting, values.number(setting.key), index, count) { write(setting.key, it.toString()) }
-                    is LyricSetting.Choice -> ChoiceRow(setting, values.choice(setting.key), index, count) { write(setting.key, it) }
+                    is LyricSetting.Choice -> ChoiceRow(
+                        setting,
+                        values.choice(setting.key),
+                        index,
+                        count,
+                        below = if (row.colors.isEmpty()) null else ({ ColorRow(row.colors, values, onPickColor) }),
+                    ) { value ->
+                        // 这一下让颜色项显示出来、它又还没有值：按舞台配色种一个，切过去画面不跳
+                        onWrite { raw -> seedNewlyVisibleColors(mode.settings, raw, raw + (setting.key to value), stageColors) }
+                    }
                     is LyricSetting.Toggle -> SwitchRow(
                         title = setting.label,
                         checked = values.toggle(setting.key),
@@ -778,6 +810,8 @@ private fun ModeSettings(
                         count = count,
                         summary = setting.summary.orEmpty(),
                     )
+                    is LyricSetting.Slider -> SliderRow(setting, values.slider(setting.key), index, count) { write(setting.key, it.toString()) }
+                    is LyricSetting.Color -> ColorSegment(listOf(setting), values, index, count, onPickColor)
                 }
             }
         }
@@ -951,9 +985,16 @@ private fun NumberRow(setting: LyricSetting.Number, value: Float, index: Int, co
     }
 }
 
-/** 选项设置：名字一行，下面连接按钮组。 */
+/** 选项设置：名字一行，下面连接按钮组；[below] 是挂在这一项下面的东西（比如“自定义”配色的两个色块）。 */
 @Composable
-private fun ChoiceRow(setting: LyricSetting.Choice, value: String, index: Int, count: Int, onChange: (String) -> Unit) {
+private fun ChoiceRow(
+    setting: LyricSetting.Choice,
+    value: String,
+    index: Int,
+    count: Int,
+    below: (@Composable () -> Unit)? = null,
+    onChange: (String) -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -973,6 +1014,151 @@ private fun ChoiceRow(setting: LyricSetting.Choice, value: String, index: Int, c
             label = { key -> setting.options.firstOrNull { it.first == key }?.second ?: key },
             modifier = Modifier.fillMaxWidth(),
         )
+        below?.invoke()
+    }
+}
+
+/**
+ * 滑块设置：名字和当前值（[LyricSetting.Slider.format]）一行，下面是连续拖动的滑块，离刻度近了吸过去，
+ * 刻度下面一排名字。电视上左右键每次 ±[TV_SLIDER_STEP]、按住加速，上下键换到别的行。系统版本不够时灰掉。
+ */
+@Composable
+private fun SliderRow(setting: LyricSetting.Slider, value: Float, index: Int, count: Int, onChange: (Float) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val tv = LocalAppWindow.current.isTv
+    val enabled = Build.VERSION.SDK_INT >= setting.minSdk
+    val range = setting.min..setting.max
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(segmentShape(index, count))
+            .background(scheme.surfaceContainer)
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+    ) {
+        Text(setting.label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = scheme.onSurface)
+        Text(
+            setting.format(value),
+            Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (enabled) scheme.primary else scheme.onSurfaceVariant,
+            fontWeight = FontWeight.Medium,
+        )
+        setting.summary?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant) }
+        Slider(
+            value = value,
+            onValueChange = { onChange(setting.clamp(setting.snap(it))) },
+            valueRange = range,
+            enabled = enabled,
+            modifier = Modifier
+                .fillMaxWidth()
+                // 遥控器一下 ±0.05，不吸附（吸附范围比一步大，会一直吸回原刻度）
+                .then(if (tv) Modifier.tvSliderKeys(value, TV_SLIDER_STEP, range) { onChange(setting.clamp(it)) } else Modifier)
+                .tvFocusRing(RoundedCornerShape(12.dp)),
+        )
+        if (setting.tickLabels.isNotEmpty()) TickLabels(setting, enabled)
+    }
+}
+
+/** 滑块下面的刻度名：每个名字的中心对着它的刻度，两头的贴边。 */
+@Composable
+private fun TickLabels(setting: LyricSetting.Slider, enabled: Boolean) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.5f)
+    Layout(
+        content = {
+            setting.tickLabels.forEach { Text(it, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1) }
+        },
+        modifier = Modifier.fillMaxWidth().clearAndSetSemantics {},
+    ) { measurables, constraints ->
+        val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0)) }
+        val width = constraints.maxWidth
+        val height = placeables.maxOfOrNull { it.height } ?: 0
+        layout(width, height) {
+            placeables.forEachIndexed { i, placeable ->
+                val tick = setting.ticks.getOrNull(i) ?: return@forEachIndexed
+                val fraction = ((tick - setting.min) / (setting.max - setting.min)).coerceIn(0f, 1f)
+                val x = (fraction * width - placeable.width / 2f).roundToInt().coerceIn(0, (width - placeable.width).coerceAtLeast(0))
+                placeable.place(x, 0)
+            }
+        }
+    }
+}
+
+/**
+ * 电视遥控器调滑块：左右键每次 ±[step]，按住不放时越按越快（最多 5 倍）；上下键换到上一行 / 下一行，
+ * 不让滑块拿上下键改值（M3 的滑块会这样做）。
+ */
+@Composable
+internal fun Modifier.tvSliderKeys(
+    value: Float,
+    step: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit,
+): Modifier {
+    val focus = LocalFocusManager.current
+    val current = rememberUpdatedState(value)
+    val change = rememberUpdatedState(onChange)
+    return onPreviewKeyEvent { event ->
+        val down = event.type == KeyEventType.KeyDown
+        when (event.key) {
+            Key.DirectionLeft, Key.DirectionRight -> {
+                if (down) {
+                    val boost = (1 + event.nativeKeyEvent.repeatCount / TV_SLIDER_REPEATS_PER_BOOST).coerceAtMost(TV_SLIDER_MAX_BOOST)
+                    val sign = if (event.key == Key.DirectionRight) 1f else -1f
+                    change.value((current.value + sign * step * boost).coerceIn(range.start, range.endInclusive))
+                }
+                true
+            }
+            Key.DirectionUp, Key.DirectionDown -> {
+                if (down) focus.moveFocus(if (event.key == Key.DirectionUp) FocusDirection.Up else FocusDirection.Down)
+                true
+            }
+            else -> false
+        }
+    }
+}
+
+/**
+ * 一排色块按钮（照 Rush 卡片颜色行）：底色就是这项的颜色，铅笔和名字按底色取黑白；点开取色面板。
+ */
+@Composable
+private fun ColorRow(colors: List<LyricSetting.Color>, values: SettingValues, onPick: (LyricSetting.Color) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        colors.forEach { setting ->
+            val color = values.color(setting.key)
+            val content = readableOn(color)
+            val shape = RoundedCornerShape(24.dp)
+            Row(
+                Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .tvFocusRing(shape)
+                    .clip(shape)
+                    .background(color)
+                    .border(1.dp, content.copy(alpha = 0.2f), shape)
+                    .clickable(role = Role.Button, onClickLabel = "改${setting.label}色") { onPick(setting) }
+                    .semantics(mergeDescendants = true) { stateDescription = color.toHex() },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Edit, null, Modifier.size(20.dp), tint = content)
+                Spacer(Modifier.width(8.dp))
+                Text(setting.label, color = content, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** 不挂在选项下面的色块单独一行。 */
+@Composable
+private fun ColorSegment(colors: List<LyricSetting.Color>, values: SettingValues, index: Int, count: Int, onPick: (LyricSetting.Color) -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(segmentShape(index, count))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        ColorRow(colors, values, onPick)
     }
 }
 
@@ -1004,3 +1190,10 @@ private const val DIFF_LINES = 6
 
 /** 保存后等这首歌换上新模式最多等多久。 */
 private const val SAVE_SETTLE_MS = 1_500L
+
+/** 电视上滑块左右键一下走多少。 */
+private const val TV_SLIDER_STEP = 0.05f
+
+/** 按住方向键时每重复几次加一倍速，最多几倍。 */
+internal const val TV_SLIDER_REPEATS_PER_BOOST = 4
+internal const val TV_SLIDER_MAX_BOOST = 5

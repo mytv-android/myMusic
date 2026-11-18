@@ -26,7 +26,6 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -66,8 +65,6 @@ import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.player.RhythmFeed
 import com.mytv.mymusic.ui.player.TvFrameGate
-import com.mytv.mymusic.ui.player.blobColorCache
-import com.mytv.mymusic.ui.player.coverBlobColors
 import com.mytv.mymusic.ui.player.rememberSystemAnimationsOff
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlin.math.exp
@@ -288,11 +285,7 @@ private fun StageHost(
     val audio = remember(wantsAudio) { if (wantsAudio) StageAudio() else null }
     if (wantsAudio) RhythmFeed(analyzer, playing)
 
-    val scheme = MaterialTheme.colorScheme
-    val coverColors by produceState(blobColorCache.get(song.cover), song.cover) { value = coverBlobColors(context, song.cover) }
-    val colors = remember(scheme.onSurface, scheme.primary, scheme.secondary, scheme.tertiary, scheme.primaryContainer, scheme.surface, coverColors) {
-        stageColors(scheme, coverColors)
-    }
+    val colors = rememberStageColors(song.cover)
     // 频谱卡片开着时安全区底部让出卡片那一截（卡片本身按原来的安全区摆）
     val reserve = if (prefs.spectrum && audio != null) with(LocalDensity.current) { SpectrumReserve.toPx() } else 0f
     val touch = mode.interactive && !tv
