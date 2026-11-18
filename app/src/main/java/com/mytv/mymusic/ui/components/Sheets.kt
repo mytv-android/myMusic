@@ -36,13 +36,18 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
@@ -57,6 +62,8 @@ import androidx.compose.ui.window.DialogProperties
 import com.mytv.mymusic.ui.adaptive.DialogFoldAnchor
 import com.mytv.mymusic.ui.adaptive.dialogFoldAnchor
 import com.mytv.mymusic.ui.adaptive.rememberDialogFoldSplit
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -68,6 +75,12 @@ class SheetDismissGuard(val blocked: () -> Boolean, val onBlocked: () -> Unit)
 
 /** 书本姿态 / 双竖时面板放哪一页。 */
 enum class FoldSide { Start, End }
+
+/**
+ * 面板内容自己关面板（不经过 [SheetDismissGuard]，比如确认对话框里选了“放弃改动”）：带退场动画——
+ * 手机上先收下去，平板、电视先滑出去，再调 onDismiss。
+ */
+val LocalSheetClose = staticCompositionLocalOf<() -> Unit> { {} }
 
 /**
  * 自适应面板：手机是底部面板；平板是右侧 400dp 的浮动侧边面板（后面的内容仍可见），
@@ -104,6 +117,11 @@ fun AdaptiveSheet(
                 }
             },
         )
+        val scope = rememberCoroutineScope()
+        val currentDismiss = rememberUpdatedState(onDismiss)
+        val close: () -> Unit = remember(sheetState, scope) {
+            { scope.launch { sheetState.hide() }.invokeOnCompletion { if (!sheetState.isVisible) currentDismiss.value() } }
+        }
         ModalBottomSheet(
             onDismissRequest = onDismiss,
             sheetState = sheetState,
@@ -114,7 +132,7 @@ fun AdaptiveSheet(
             BackHandler(enabled = dismissGuard?.blocked() == true) { guard.value?.onBlocked() }
             Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
                 SheetHeader(title, subtitle, subtitleProvider, null)
-                content()
+                CompositionLocalProvider(LocalSheetClose provides close) { content() }
             }
         }
         return
@@ -130,6 +148,19 @@ fun AdaptiveSheet(
     ) {
         val visible = remember { MutableTransitionState(false) }
         LaunchedEffect(Unit) { visible.targetState = true }
+        // 自己关：先滑出去，退场动画走完再关
+        var closing by remember { mutableStateOf(false) }
+        val close: () -> Unit = remember(visible) {
+            {
+                closing = true
+                visible.targetState = false
+            }
+        }
+        LaunchedEffect(closing) {
+            if (!closing) return@LaunchedEffect
+            snapshotFlow { visible.isIdle && !visible.currentState }.first { it }
+            onDismiss()
+        }
         // 面板的返回：手势过程中面板跟手右移淡出，松手才关闭；有改动时不跟手，按返回直接问
         var backProgress by remember { mutableFloatStateOf(0f) }
         val blocked = dismissGuard?.blocked() == true
@@ -199,7 +230,7 @@ fun AdaptiveSheet(
                 ) {
                     Column(Modifier.fillMaxSize().padding(top = if (tv) 36.dp else 16.dp, bottom = 16.dp)) {
                         SheetHeader(title, subtitle, subtitleProvider, if (tv) null else requestDismiss)
-                        content()
+                        CompositionLocalProvider(LocalSheetClose provides close) { content() }
                     }
                 }
             }

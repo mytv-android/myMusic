@@ -1,5 +1,15 @@
 package com.mytv.mymusic.ui.player.stage
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -10,146 +20,339 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mytv.mymusic.data.LyricAutoSwitch
 import com.mytv.mymusic.data.LyricStagePrefs
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TEMPO_RULE_OPEN_END
 import com.mytv.mymusic.data.TempoRule
 import com.mytv.mymusic.ui.MusicActions
+import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
+import com.mytv.mymusic.ui.components.FoldSide
 import com.mytv.mymusic.ui.components.ListRow
+import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.components.LocalSheetClose
 import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.SegmentedGroup
+import com.mytv.mymusic.ui.components.SheetDismissGuard
 import com.mytv.mymusic.ui.components.SwitchRow
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
+import com.mytv.mymusic.ui.library.TvDefaultFocus
 import com.mytv.mymusic.ui.player.ToolbarIconButton
 import com.mytv.mymusic.ui.theme.LocalAppearance
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.roundToInt
 
 /**
- * 歌词动画面板（全屏歌词页的 ✦、平板工具栏、电视更多菜单、设置 › 播放页都打开它）：
- * 模式缩略图（两列）→ 每首歌换动画（固定 / 随机 / 按速度，按速度时四档各选一个）→ 这首歌固定用它 → 频谱 → 当前模式的设置。
- * 设置表由模式声明生成：数字是 −/+ 步进行，选项是连接按钮组，开关是开关行；原模组没放进来的项数写在最后。
+ * 播放页给面板的“这首歌”一行：正在显示 [shownId]，理由 [decision]，固定用的 [pinnedId]；
+ * [remembered]、[bpm] 是记忆里这首的随机结果和速度（算保存后用哪个）；[waitingFor] 是想换、在等空当的那个。
+ * [onPin] 写这首歌固定用哪个（null 取消固定），立刻生效、不进草稿。
+ */
+internal class SongRowState(
+    val shownId: String,
+    val decision: SongDecision,
+    val pinnedId: String?,
+    val remembered: String?,
+    val bpm: Float?,
+    val waitingFor: String?,
+    val onPin: (String?) -> Unit,
+) {
+    val pinned: Boolean get() = pinnedId != null
+}
+
+/**
+ * 歌词动画面板（全屏歌词页的 ✦、平板工具栏和专注栏、电视控制条、设置 › 播放页都打开它）。从上到下：
+ * 这首歌正在用哪个、为什么（[songRow]，从设置页打开时没有）→ 每首歌换动画（固定 / 随机 / 按速度，按速度时四档跟在下面）
+ * → 模式卡片（固定单选、随机多选组成随机池、按速度整块灰掉）→ 频谱 → 设置（下拉选改哪个模式；舞台不在旁边时顶上有大预览）
+ * → 随机时“忘掉记住的结果”。
  *
- * @param song 正在放的歌；从设置页打开时为 null，不显示“这首歌固定用它”。
- * @param shown 正在显示（选中）的模式 id。
- * @param onPick 点了某个模式。
- * @param onPin “这首歌固定用它”开关；null 时不显示。
+ * 面板里的改动先进草稿 [draft]，底部浮出保存条，“保存并应用”一次写进设置并让这首歌马上按新设置换（[onApplied]，不等空当）；
+ * 有改动时下滑、点外面、返回都先问。这首歌固定用哪个、忘掉记忆是点了就生效的。
+ *
+ * @param stageBeside 舞台露在面板旁边（平板、横屏、书本姿态、电视）：草稿直接画在舞台上，面板里不放大预览，遮罩调淡。
+ * @param onApplied 保存后调，参数是这首歌保存后应该用的模式（随机换法还没记过这首时就用它）。
  */
 @Composable
 internal fun AnimationSheet(
-    prefs: LyricStagePrefs,
+    saved: LyricStagePrefs,
+    draft: AnimationDraftState,
     song: Song?,
-    shown: String,
+    songRow: SongRowState?,
+    stageBeside: Boolean,
     actions: MusicActions,
-    onPick: (String) -> Unit,
-    onPin: ((Boolean) -> Unit)?,
+    onApplied: (previewId: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     // 打开过一次面板，✦ 外面的呼吸提示就不再显示
     LaunchedEffect(Unit) {
-        if (!prefs.hintSeen) actions.setLyricStage { it.copy(hintSeen = true) }
+        if (!saved.hintSeen) actions.setLyricStage { it.copy(hintSeen = true) }
     }
     // 设备档位（模糊默认开不开）要在读设置表之前定下来
     ResolveStageDevice()
-    val mode = LyricVisualizers.byId(shown)
-    AdaptiveSheet(onDismiss = onDismiss, title = "歌词动画", subtitle = "只在全屏歌词页生效") {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-        ) {
-            ModeGrid(prefs, song, mode.id, onPick)
-
-            SectionLabel("每首歌换动画")
-            ConnectedToggleGroup(
-                options = LyricAutoSwitch.entries,
-                selected = prefs.auto,
-                onSelect = { value -> actions.setLyricStage { it.copy(auto = value) } },
-                label = { it.label },
-                modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+    val tv = LocalAppWindow.current.isTv
+    val d = draft.draft
+    val dirty = isDirty(saved, d)
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    // 面板是单独的窗口（平板、电视），外壳的提示条会被盖住：提示条放在面板里
+    val toast: (String, (suspend () -> Unit)?) -> Unit = { text, undo ->
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            val result = snackbar.showSnackbar(text, actionLabel = if (undo != null) "撤销" else null, duration = SnackbarDuration.Short)
+            if (result == SnackbarResult.ActionPerformed) undo?.invoke()
+        }
+    }
+    AdaptiveSheet(
+        onDismiss = onDismiss,
+        title = "歌词动画",
+        subtitle = if (tv) "遥控器：↑↓←→ 移动 · 确认选择 · 返回关闭" else "只在全屏歌词页生效",
+        dismissGuard = SheetDismissGuard({ isDirty(saved, draft.draft) && !draft.saving }, { draft.asking = true }),
+        foldSide = FoldSide.Start,
+        // 舞台在旁边预览草稿：遮罩调淡，配色看得准
+        scrimAlpha = if (stageBeside) 0.08f else 0.32f,
+    ) {
+        val close = LocalSheetClose.current
+        val save: () -> Unit = save@{
+            val current = draft.draft
+            if (!canSave(current) || draft.saving) return@save
+            val applied = previewId(current, saved, songRow?.pinnedId, songRow?.remembered, songRow?.shownId, songRow?.bpm, editTarget = null)
+            draft.saving = true
+            draft.appliedId = if (songRow != null) applied else null
+            actions.setLyricStage { it.withDraft(current) }
+            onApplied(applied)
+            val measuring = songRow != null && !songRow.pinned && current.auto == LyricAutoSwitch.Tempo && songRow.bpm == null
+            toast(
+                when {
+                    songRow == null -> "已保存并应用"
+                    measuring -> "已应用，听出这首的速度后换成对应的动画"
+                    else -> "已应用，这首歌现在用「${current.modeOf(applied).label}」"
+                },
+                null,
             )
-            SheetNote(autoNote(prefs.auto))
-            if (prefs.auto == LyricAutoSwitch.Tempo) {
-                Spacer(Modifier.size(8.dp))
-                TempoRows(prefs.tempoRules) { index, id ->
-                    actions.setLyricStage { p ->
-                        p.copy(tempoRules = p.tempoRules.mapIndexed { i, rule -> if (i == index) rule.copy(mode = id) else rule })
+        }
+        // 保存后等设置写回来、这首歌换上了，才算存完（超过 1.5 秒不再等）；对话框里点的保存，存完再关面板
+        val shownNow = rememberUpdatedState(songRow?.shownId)
+        LaunchedEffect(draft.saving, dirty) {
+            if (!draft.saving || dirty) return@LaunchedEffect
+            val target = draft.appliedId
+            withTimeoutOrNull(SAVE_SETTLE_MS) { snapshotFlow { shownNow.value }.first { it == null || target == null || it == target } }
+            draft.saving = false
+            if (draft.closeAfterSave) {
+                draft.closeAfterSave = false
+                close()
+            }
+        }
+
+        Box(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+            ) {
+                if (songRow != null) {
+                    SongModeRow(
+                        row = songRow,
+                        saved = saved,
+                        song = song,
+                        onPin = { id ->
+                            songRow.onPin(id)
+                            toast("这首歌固定用「${saved.modeOf(id).label}」，立刻生效", null)
+                        },
+                        onUnpin = {
+                            songRow.onPin(null)
+                            toast("已取消固定，这首歌跟着换法走", null)
+                        },
+                    )
+                }
+
+                SectionLabel("每首歌换动画")
+                val autoFocus = remember { FocusRequester() }
+                ConnectedToggleGroup(
+                    options = LyricAutoSwitch.entries,
+                    selected = d.auto,
+                    onSelect = { value -> draft.update { it.copy(auto = value) } },
+                    label = { it.label },
+                    modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
+                    selectedFocus = autoFocus,
+                )
+                TvDefaultFocus(autoFocus)
+                SheetNote(autoNote(d.auto))
+                if (d.auto == LyricAutoSwitch.Tempo) {
+                    Spacer(Modifier.size(8.dp))
+                    TempoRows(d.tempoRules, d) { index, id ->
+                        draft.update { p ->
+                            p.copy(tempoRules = p.tempoRules.mapIndexed { i, rule -> if (i == index) rule.copy(mode = id) else rule })
+                        }
                     }
                 }
-            }
-            val pinned = song != null && prefs.pins.containsKey(song.key)
-            if (onPin != null && song != null && (prefs.auto != LyricAutoSwitch.Fixed || pinned)) {
-                Spacer(Modifier.size(8.dp))
+
+                val cards = d.cards()
+                when (d.auto) {
+                    LyricAutoSwitch.Fixed -> SectionLabel("所有歌都用")
+                    LyricAutoSwitch.Random -> SectionLabel("从这些里随机 · ${cards.count { it.id in d.randomPool }}/${cards.size}") {
+                        TextButton(
+                            onClick = { draft.update { it.copy(randomPool = it.cards().map { mode -> mode.id }.toSet()) } },
+                            modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+                        ) { Text("全选") }
+                        TextButton(
+                            onClick = { draft.update { it.copy(randomPool = emptySet()) } },
+                            modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+                        ) { Text("清空") }
+                    }
+                    LyricAutoSwitch.Tempo -> SectionLabel("动画 · 由上面四档决定")
+                }
+                ModeGrid(cards, d, song, songRow?.shownId) { id ->
+                    draft.update { p ->
+                        when (p.auto) {
+                            LyricAutoSwitch.Fixed -> p.copy(visualizer = id)
+                            LyricAutoSwitch.Random -> p.copy(randomPool = if (id in p.randomPool) p.randomPool - id else p.randomPool + id)
+                            LyricAutoSwitch.Tempo -> p
+                        }
+                    }
+                }
+                if (d.auto == LyricAutoSwitch.Random) {
+                    when (cards.count { it.id in d.randomPool }) {
+                        0 -> SheetNote("至少选 1 个才能保存。", MaterialTheme.colorScheme.error)
+                        1 -> SheetNote("只选了 1 个，等于固定用它。")
+                    }
+                }
+
+                SectionLabel("叠加")
                 SwitchRow(
-                    title = "这首歌固定用它",
-                    checked = pinned,
-                    onCheckedChange = onPin,
+                    title = "频谱",
+                    checked = d.spectrum,
+                    onCheckedChange = { on -> draft.update { it.copy(spectrum = on) } },
                     index = 0,
                     count = 1,
-                    summary = "以后每次放这首歌都用“${mode.label}”，不再自动换",
+                    summary = "全屏歌词页左下角显示 48 段频谱、响度和峰值频率；经典模式不显示",
                 )
+
+                // 设置区改哪个：下拉里明确选过的；否则固定时是选中的，自动换时是这首歌正在显示的
+                val target = draft.editTarget
+                    ?: if (d.auto == LyricAutoSwitch.Fixed) d.visualizer else songRow?.shownId ?: d.visualizer
+                ModeSettings(
+                    target = target,
+                    draft = d,
+                    previewPrefs = saved.withDraft(d),
+                    song = song,
+                    big = !stageBeside,
+                    onTarget = { draft.editTarget = it },
+                    onWrite = { transform -> draft.update { p -> p.withSettings(target, transform(p.settingsFor(target))) } },
+                )
+
+                if (d.auto == LyricAutoSwitch.Random) ForgetRow(actions, toast)
+                // 保存条浮在底部，最后一项要能滚到它上面
+                Spacer(Modifier.height(84.dp))
             }
-
-            SectionLabel("叠加")
-            SwitchRow(
-                title = "频谱",
-                checked = prefs.spectrum,
-                onCheckedChange = { on -> actions.setLyricStage { it.copy(spectrum = on) } },
-                index = 0,
-                count = 1,
-                summary = "全屏歌词页左下角显示 48 段频谱、响度和峰值频率；经典模式不显示",
+            SaveBar(
+                visible = dirty,
+                count = animationDiff(saved, d).size,
+                enabled = canSave(d) && !draft.saving,
+                onDiscard = { draft.discard(saved) },
+                onSave = save,
+                modifier = Modifier.align(Alignment.BottomCenter),
             )
+            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (dirty) 72.dp else 0.dp))
+        }
 
-            ModeSettings(mode, prefs, actions)
+        if (draft.asking) {
+            DiscardDialog(
+                diff = animationDiff(saved, d),
+                canSave = canSave(d),
+                onSave = {
+                    draft.asking = false
+                    draft.closeAfterSave = true
+                    save()
+                },
+                onDiscard = {
+                    draft.asking = false
+                    draft.discard(saved)
+                    close()
+                },
+                onBack = { draft.asking = false },
+            )
         }
     }
 }
@@ -201,14 +404,127 @@ internal fun AnimationSheetButton(hint: Boolean, onClick: () -> Unit, modifier: 
 internal fun ToolbarAnimationButton(onClick: () -> Unit, modifier: Modifier = Modifier) =
     ToolbarIconButton(Icons.Filled.AutoAwesome, "歌词动画", onClick, modifier)
 
-/** 模式卡片两列排：每张是静帧缩略图加名字，选中的描主色边、圆角变大、右上角打勾。 */
+/**
+ * “这首歌：黑胶唱片 / 上次听时抽到的，已记住”：左边小缩略图，右边按钮——没固定时“单独指定… / 改…”弹出全部卡片，
+ * 选了就固定用它；固定了是“取消固定”。
+ */
 @Composable
-private fun ModeGrid(prefs: LyricStagePrefs, song: Song?, selected: String, onPick: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        LyricVisualizers.all.chunked(2).forEach { row ->
+private fun SongModeRow(
+    row: SongRowState,
+    saved: LyricStagePrefs,
+    song: Song?,
+    onPin: (String) -> Unit,
+    onUnpin: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val shown = saved.modeOf(row.shownId)
+    val reason = when {
+        row.pinned -> "已固定，以后放这首都用它"
+        else -> when (val decision = row.decision) {
+            is SongDecision.Pinned -> "已固定，以后放这首都用它"
+            is SongDecision.Fixed -> "跟着下面的选择"
+            is SongDecision.Remembered -> "上次听时抽到的，已记住"
+            is SongDecision.Drawn -> "这次从池里抽到的"
+            is SongDecision.Tempo ->
+                "测得 ${decision.bpm.roundToInt()} 拍/分 → 落在「${TEMPO_NAMES.getOrElse(decision.tier) { "第 ${decision.tier + 1} 档" }}」"
+            SongDecision.Measuring -> "正在听速度…"
+            SongDecision.NoAnalyzer -> "听不出速度，先用正在显示的"
+            SongDecision.Unknown -> "正在决定…"
+        }
+    }
+    val waiting = row.waitingFor?.let { "（等空当换成「${saved.modeOf(it).label}」）" }.orEmpty()
+    Row(
+        Modifier
+            .padding(top = 4.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(scheme.surfaceContainer)
+            .padding(start = 12.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        StagePreview(shown, song, saved, Modifier.size(64.dp, 43.dp).clip(RoundedCornerShape(10.dp)))
+        Column(Modifier.weight(1f)) {
+            Text(
+                "这首歌：${shown.label}",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = scheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                reason + waiting,
+                Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+        }
+        if (row.pinned) {
+            FilledTonalButton(onClick = onUnpin, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("取消固定") }
+        } else {
+            var open by remember { mutableStateOf(false) }
+            Box {
+                FilledTonalButton(onClick = { open = true }, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
+                    Icon(Icons.Filled.PushPin, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (row.decision is SongDecision.Fixed) "单独指定…" else "改…")
+                }
+                ModeMenu(open, saved.cards(), current = row.shownId, onDismiss = { open = false }) { id ->
+                    open = false
+                    onPin(id)
+                }
+            }
+        }
+    }
+}
+
+/** 列出全部卡片的下拉菜单，[current] 那个打勾。 */
+@Composable
+private fun ModeMenu(open: Boolean, cards: List<LyricVisualizer>, current: String?, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    DropdownMenu(open, onDismissRequest = onDismiss, shape = RoundedCornerShape(20.dp)) {
+        cards.forEach { mode ->
+            DropdownMenuItem(
+                text = { Text(mode.label) },
+                trailingIcon = if (mode.id == current) ({ Icon(Icons.Filled.Check, null) }) else null,
+                onClick = { onPick(mode.id) },
+            )
+        }
+    }
+}
+
+private enum class CardMode { Fixed, Random, Tempo }
+
+/**
+ * 模式卡片两列排，含义跟着换法变：固定时单选（选中＝所有歌都用它）；随机时多选（选中的进随机池，右上角是勾或空心圈）；
+ * 按速度时整块灰掉、不能点也不能聚焦（四档在上面选）。缩略图按草稿画；这首歌正在显示的那张左下角标“正在用”。
+ */
+@Composable
+private fun ModeGrid(
+    cards: List<LyricVisualizer>,
+    draft: LyricStagePrefs,
+    song: Song?,
+    shownId: String?,
+    onClick: (String) -> Unit,
+) {
+    val mode = when (draft.auto) {
+        LyricAutoSwitch.Fixed -> CardMode.Fixed
+        LyricAutoSwitch.Random -> CardMode.Random
+        LyricAutoSwitch.Tempo -> CardMode.Tempo
+    }
+    Column(
+        Modifier.fillMaxWidth().then(if (mode == CardMode.Fixed) Modifier.selectableGroup() else Modifier),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        cards.chunked(2).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { mode ->
-                    ModeCard(mode, mode.id == selected, prefs, song, Modifier.weight(1f)) { onPick(mode.id) }
+                row.forEach { card ->
+                    val selected = when (mode) {
+                        CardMode.Fixed -> card.id == draft.visualizer
+                        CardMode.Random -> card.id in draft.randomPool
+                        CardMode.Tempo -> false
+                    }
+                    ModeCard(card, mode, selected, card.id == shownId, draft, song, Modifier.weight(1f)) { onClick(card.id) }
                 }
                 if (row.size == 1) Spacer(Modifier.weight(1f))
             }
@@ -218,34 +534,44 @@ private fun ModeGrid(prefs: LyricStagePrefs, song: Song?, selected: String, onPi
 
 @Composable
 private fun ModeCard(
-    mode: LyricVisualizer,
+    card: LyricVisualizer,
+    mode: CardMode,
     selected: Boolean,
+    showing: Boolean,
     prefs: LyricStagePrefs,
     song: Song?,
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(if (selected) 22.dp else 14.dp)
-    Column(
-        modifier
-            .tvFocusRing(shape)
-            .clip(shape)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
-            .padding(4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+    val outlined = selected && mode != CardMode.Tempo
+    val shape = RoundedCornerShape(if (outlined) 22.dp else 14.dp)
+    val interaction = when (mode) {
+        CardMode.Fixed -> Modifier.tvFocusRing(shape).clip(shape).selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+        CardMode.Random -> Modifier.tvFocusRing(shape).clip(shape).toggleable(value = selected, role = Role.Checkbox, onValueChange = { onClick() })
+        // 按速度：只做预览，不能点，电视上也不能聚焦（从四档按 ↓ 直接跳到“叠加”）
+        CardMode.Tempo -> Modifier.focusProperties { canFocus = false }.semantics { disabled() }
+    }
+    Column(modifier.then(interaction).padding(4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(1.5f)
-                .then(if (selected) Modifier.border(2.5.dp, scheme.primary, shape) else Modifier)
-                .padding(if (selected) 4.dp else 0.dp)
-                .clip(RoundedCornerShape(if (selected) 18.dp else 14.dp)),
+                .then(
+                    when {
+                        mode == CardMode.Tempo -> Modifier.grayscale(0.38f)
+                        mode == CardMode.Random && !selected -> Modifier.alpha(0.62f)
+                        else -> Modifier
+                    },
+                )
+                .then(if (outlined) Modifier.border(2.5.dp, scheme.primary, shape) else Modifier)
+                .padding(if (outlined) 4.dp else 0.dp)
+                .clip(RoundedCornerShape(if (outlined) 18.dp else 14.dp)),
         ) {
-            StagePreview(mode, song, prefs, Modifier.fillMaxSize())
-            if (selected) {
-                Box(
+            StagePreview(card, song, prefs, Modifier.fillMaxSize())
+            when {
+                mode == CardMode.Tempo -> Unit
+                selected -> Box(
                     Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
@@ -256,23 +582,69 @@ private fun ModeCard(
                 ) {
                     Icon(Icons.Filled.Check, null, Modifier.size(14.dp), tint = scheme.onPrimary)
                 }
+                // 随机池里没选的：空心白圈
+                mode == CardMode.Random -> Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .border(2.dp, Color.White.copy(alpha = 0.85f), CircleShape),
+                )
             }
+            if (showing) NowBadge(Modifier.align(Alignment.BottomStart).padding(6.dp))
         }
         Text(
-            mode.label,
-            Modifier.padding(start = 4.dp),
+            card.label,
+            Modifier.padding(start = 4.dp).then(if (mode == CardMode.Tempo) Modifier.alpha(0.45f) else Modifier),
             style = MaterialTheme.typography.labelLarge,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) scheme.onSurface else scheme.onSurfaceVariant,
+            fontWeight = if (outlined) FontWeight.Bold else FontWeight.Medium,
+            color = if (outlined) scheme.onSurface else scheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
+/** 整块去色并压暗（按速度时的卡片）：离屏图层里套饱和度 0 的颜色矩阵，再乘 [alpha]。 */
+private fun Modifier.grayscale(alpha: Float): Modifier = drawWithCache {
+    val paint = Paint().apply {
+        colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+        this.alpha = alpha
+    }
+    onDrawWithContent {
+        drawIntoCanvas { canvas ->
+            canvas.saveLayer(Rect(0f, 0f, size.width, size.height), paint)
+            drawContent()
+            canvas.restore()
+        }
+    }
+}
+
+/** 卡片左下角“正在用”：三根小柱加字。 */
+@Composable
+private fun NowBadge(modifier: Modifier) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(start = 5.dp, end = 7.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(Modifier.height(9.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(1.5.dp)) {
+            listOf(5.dp, 9.dp, 6.dp).forEach { h ->
+                Box(Modifier.width(2.dp).height(h).clip(RoundedCornerShape(1.dp)).background(Color.White))
+            }
+        }
+        Text("正在用", color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
 /** 按速度的四档：每档一行，值是当前对应的模式，点开选。 */
 @Composable
-private fun TempoRows(rules: List<TempoRule>, onChange: (Int, String) -> Unit) {
+private fun TempoRows(rules: List<TempoRule>, prefs: LyricStagePrefs, onChange: (Int, String) -> Unit) {
     SegmentedGroup {
         rules.forEachIndexed { index, rule ->
             var open by remember { mutableStateOf(false) }
@@ -283,19 +655,11 @@ private fun TempoRows(rules: List<TempoRule>, onChange: (Int, String) -> Unit) {
                     count = rules.size,
                     onClick = { open = true },
                     summary = tempoRange(rules, index),
-                    value = LyricVisualizers.byId(rule.mode).label,
+                    value = prefs.modeOf(rule.mode).label,
                 )
-                DropdownMenu(open, onDismissRequest = { open = false }, shape = RoundedCornerShape(20.dp)) {
-                    LyricVisualizers.all.forEach { mode ->
-                        DropdownMenuItem(
-                            text = { Text(mode.label) },
-                            trailingIcon = if (mode.id == rule.mode) ({ Icon(Icons.Filled.Check, null) }) else null,
-                            onClick = {
-                                open = false
-                                onChange(index, mode.id)
-                            },
-                        )
-                    }
+                ModeMenu(open, prefs.cards(), current = rule.mode, onDismiss = { open = false }) { id ->
+                    open = false
+                    onChange(index, id)
                 }
             }
         }
@@ -313,24 +677,67 @@ internal fun tempoRange(rules: List<TempoRule>, index: Int): String {
     }
 }
 
-/** 当前模式的设置表、恢复默认、来源和没放进来的项数。 */
+/**
+ * 设置区：标题旁的下拉换改哪个模式；舞台不在旁边时顶上是大预览（按草稿画）；设置表、恢复默认、来源和没放进来的项数。
+ * 改的都是草稿。
+ */
 @Composable
-private fun ModeSettings(mode: LyricVisualizer, prefs: LyricStagePrefs, actions: MusicActions) {
-    val raw = prefs.pluginSettings[mode.id].orEmpty()
+private fun ModeSettings(
+    target: String,
+    draft: LyricStagePrefs,
+    previewPrefs: LyricStagePrefs,
+    song: Song?,
+    big: Boolean,
+    onTarget: (String) -> Unit,
+    onWrite: ((Map<String, String>) -> Map<String, String>) -> Unit,
+) {
+    val mode = draft.modeOf(target)
+    val raw = draft.settingsFor(target)
     val values = remember(mode, raw) { SettingValues(mode.settings, raw) }
-    val write: (String, String) -> Unit = { key, value ->
-        actions.setLyricStage { p ->
-            val clean = sanitizeSettings(mode.settings, p.pluginSettings[mode.id].orEmpty() + (key to value))
-            p.copy(pluginSettings = if (clean.isEmpty()) p.pluginSettings - mode.id else p.pluginSettings + (mode.id to clean))
+    val write: (String, String) -> Unit = { key, value -> onWrite { it + (key to value) } }
+    SectionLabel("设置") {
+        var open by remember { mutableStateOf(false) }
+        Box {
+            AssistChip(
+                onClick = { open = true },
+                label = { Text(mode.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                trailingIcon = { Icon(Icons.Filled.ArrowDropDown, null, Modifier.size(18.dp)) },
+                modifier = Modifier.widthIn(max = 200.dp).tvFocusRing(RoundedCornerShape(8.dp)),
+            )
+            ModeMenu(open, draft.cards(), current = target, onDismiss = { open = false }) { id ->
+                open = false
+                onTarget(id)
+            }
         }
     }
-    SectionLabel("“${mode.label}”的设置") {
-        if (mode.settings.isNotEmpty()) {
-            TextButton(
-                onClick = { actions.setLyricStage { it.copy(pluginSettings = it.pluginSettings - mode.id) } },
-                enabled = values.changed > 0,
-                modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
-            ) { Text("恢复默认") }
+    if (mode.settings.isNotEmpty()) {
+        TextButton(
+            onClick = { onWrite { emptyMap() } },
+            enabled = values.changed > 0,
+            modifier = Modifier.padding(bottom = 4.dp).tvFocusRing(RoundedCornerShape(20.dp)),
+        ) { Text("恢复默认") }
+    }
+    if (big) {
+        Box(
+            Modifier
+                .padding(bottom = 12.dp)
+                .fillMaxWidth()
+                .aspectRatio(1.6f)
+                .clip(RoundedCornerShape(20.dp)),
+        ) {
+            StagePreview(mode, song, previewPrefs, Modifier.fillMaxSize(), big = true)
+            Text(
+                "预览 · 草稿",
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(10.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
     if (mode.settings.isEmpty()) {
@@ -359,6 +766,131 @@ private fun ModeSettings(mode: LyricVisualizer, prefs: LyricStagePrefs, actions:
     mode.origin?.let { origin ->
         val hidden = if (mode.hiddenSettings > 0) "原${origin.kind}另有 ${mode.hiddenSettings} 项保持默认值。" else ""
         SheetNote("移植自 ${origin.mod} ${origin.version}（${origin.author}，${origin.license}）。$hidden")
+    }
+}
+
+/** 随机换法时最后一行：忘掉每首歌记住的随机结果，点了立刻执行，提示条里能撤销。 */
+@Composable
+private fun ForgetRow(actions: MusicActions, toast: (String, (suspend () -> Unit)?) -> Unit) {
+    var version by remember { mutableIntStateOf(0) }
+    val count by produceState(-1, version) { value = actions.lyricMemoryModeCount() }
+    val scope = rememberCoroutineScope()
+    Spacer(Modifier.size(12.dp))
+    ListRow(
+        title = "忘掉记住的结果",
+        index = 0,
+        count = 1,
+        onClick = if (count > 0) {
+            {
+                scope.launch {
+                    val modes = actions.forgetLyricModes()
+                    version++
+                    toast("已忘掉 ${modes.size} 首的记忆") {
+                        actions.restoreLyricModes(modes)
+                        version++
+                    }
+                }
+            }
+        } else {
+            null
+        },
+        summary = when {
+            count < 0 -> " "
+            count == 0 -> "还没有记住的歌"
+            else -> "已记住 $count 首；清掉后这些歌也从上面选中的里重新抽"
+        },
+        showChevron = false,
+    )
+}
+
+/** 有改动时从底部浮出的保存条：“N 处改动 还没保存”、放弃、保存并应用。 */
+@Composable
+private fun SaveBar(visible: Boolean, count: Int, enabled: Boolean, onDiscard: () -> Unit, onSave: () -> Unit, modifier: Modifier) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = slideInVertically { it } + fadeIn(),
+        exit = slideOutVertically { it } + fadeOut(),
+    ) {
+        SaveBarContent(count, enabled, onDiscard, onSave)
+    }
+}
+
+@Composable
+private fun SaveBarContent(count: Int, enabled: Boolean, onDiscard: () -> Unit, onSave: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        color = scheme.surfaceContainerHighest,
+        shadowElevation = 8.dp,
+    ) {
+        Row(
+            Modifier.padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = scheme.onSurface, fontWeight = FontWeight.Bold)) { append("$count 处改动") }
+                    append(" 还没保存")
+                },
+                Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
+                style = MaterialTheme.typography.bodyMedium,
+                color = scheme.onSurfaceVariant,
+                maxLines = 2,
+            )
+            TextButton(onClick = onDiscard, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("放弃") }
+            Button(onClick = onSave, enabled = enabled, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("保存并应用") }
+        }
+    }
+}
+
+/**
+ * 有改动时关面板：列出改了什么，“保存并应用”或“放弃改动”；点外面、按返回回到面板接着改。
+ * 电视上焦点默认在“保存并应用”（保存不了时在“放弃改动”）。书本姿态下挪到右页。
+ */
+@Composable
+private fun DiscardDialog(diff: List<String>, canSave: Boolean, onSave: () -> Unit, onDiscard: () -> Unit, onBack: () -> Unit) {
+    val tv = LocalAppWindow.current.isTv
+    val saveFocus = remember { FocusRequester() }
+    val discardFocus = remember { FocusRequester() }
+    AlertDialog(
+        onDismissRequest = onBack,
+        title = {
+            DialogAvoidsFold()
+            Text("保存并应用这些改动？")
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("不保存的话，面板里的改动会丢掉，歌词页保持原样。")
+                Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    diff.take(DIFF_LINES).forEach { line ->
+                        Text("· $line", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                    if (diff.size > DIFF_LINES) Text("等 ${diff.size} 处", style = MaterialTheme.typography.bodyMedium)
+                }
+                if (!canSave) Text("随机池至少选 1 个才能保存", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onSave,
+                enabled = canSave,
+                modifier = Modifier.focusRequester(saveFocus).tvFocusRing(RoundedCornerShape(20.dp)),
+            ) { Text("保存并应用") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDiscard, modifier = Modifier.focusRequester(discardFocus).tvFocusRing(RoundedCornerShape(20.dp))) {
+                Text("放弃改动")
+            }
+        },
+    )
+    if (tv) {
+        LaunchedEffect(Unit) {
+            delay(120)
+            runCatching { (if (canSave) saveFocus else discardFocus).requestFocus() }
+        }
     }
 }
 
@@ -422,12 +954,12 @@ private fun ChoiceRow(setting: LyricSetting.Choice, value: String, index: Int, c
 }
 
 @Composable
-private fun SheetNote(text: String) {
+private fun SheetNote(text: String, color: Color = Color.Unspecified) {
     Text(
         text,
         Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
         style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (color != Color.Unspecified) color else MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
@@ -439,8 +971,13 @@ internal val LyricAutoSwitch.label: String
     }
 
 private fun autoNote(auto: LyricAutoSwitch): String = when (auto) {
-    LyricAutoSwitch.Fixed -> "所有歌都用上面选中的动画。"
-    LyricAutoSwitch.Random -> "每首歌随机换一个，不和上一首重复；同一首歌再听还是它（记最近 2000 首）。在上面点了某个动画，这首歌就一直用它。"
-    LyricAutoSwitch.Tempo -> "听出速度后，在两句之间的空当换成对应的动画，不会在一句唱到一半时换；测到的速度会记下来，下次一开始就换。在上面点了某个动画，这首歌就一直用它。"
+    LyricAutoSwitch.Fixed -> "所有歌都用下面选中的动画。"
+    LyricAutoSwitch.Random -> "听过的歌用上次的；没听过的从下面选中的里随机抽一个，不和上一首重复（记最近 2000 首）。"
+    LyricAutoSwitch.Tempo -> "听出速度后按下面四档挑；测到的速度会记下来，下次一开始就是它。卡片这时只做预览，不能选。"
 }
 
+/** 对话框里最多列几处改动。 */
+private const val DIFF_LINES = 6
+
+/** 保存后等这首歌换上新模式最多等多久。 */
+private const val SAVE_SETTLE_MS = 1_500L

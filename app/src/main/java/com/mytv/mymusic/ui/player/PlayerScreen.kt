@@ -88,9 +88,12 @@ import com.mytv.mymusic.data.LyricTextPrefs
 import com.mytv.mymusic.ui.LyricPipeline
 import com.mytv.mymusic.ui.withSubline
 import com.mytv.mymusic.ui.player.stage.AnimationSheet
+import com.mytv.mymusic.ui.player.stage.SongDecision
+import com.mytv.mymusic.ui.player.stage.SongRowState
 import com.mytv.mymusic.ui.player.stage.StageBinding
-import com.mytv.mymusic.ui.player.stage.pick
+import com.mytv.mymusic.ui.player.stage.isKnown
 import com.mytv.mymusic.ui.player.stage.pin
+import com.mytv.mymusic.ui.player.stage.rememberAnimationDraft
 import com.mytv.mymusic.ui.player.stage.rememberLyricDirector
 import com.mytv.mymusic.ui.LyricsParser
 import com.mytv.mymusic.ui.MusicActions
@@ -188,7 +191,9 @@ fun PlayerScreen(
     val lyrics = remember(stageLyrics, state.lyricStage.subline) { stageLyrics.withSubline(state.lyricStage.subline) }
     val lyricsLoading = lyricsState.loading || !lyricsReady
     val director = rememberLyricDirector(song, state.lyricStage, stageLyrics, lyricsLoading, position, state.playing, actions)
-    val stageMode = director.mode
+    val stageMode = director.mode(state.lyricStage)
+    // 动画面板的草稿：面板开着时才有，每次打开重新建
+    val animationDraft = rememberAnimationDraft(animationOpen, state.lyricStage)
     val stage = remember(stageMode, state.lyricStage, stageLyrics) {
         StageBinding(stageMode, state.lyricStage, stageLyrics) { animationOpen = true }
     }
@@ -416,14 +421,26 @@ fun PlayerScreen(
             )
         }
         HeartBurst(burst, heartBurstPlacement(window.fold, book, tabletop))
-        if (animationOpen) {
+        if (animationDraft != null) {
+            val prefs = state.lyricStage
+            val memory = director.memory
             AnimationSheet(
-                prefs = state.lyricStage,
+                saved = prefs,
+                draft = animationDraft,
                 song = song,
-                shown = stageMode.id,
+                // 没有 key 的歌（个别电台）没法单独固定，不显示“这首歌”一行
+                songRow = if (song.key.isBlank()) null else SongRowState(
+                    shownId = stageMode.id,
+                    decision = director.decision,
+                    pinnedId = prefs.pins[song.key]?.takeIf(prefs::isKnown),
+                    remembered = memory?.mode?.takeIf { it.isNotEmpty() },
+                    bpm = memory?.bpm?.takeIf { it > 0f } ?: (director.decision as? SongDecision.Tempo)?.bpm,
+                    waitingFor = director.wanted?.takeIf { it != stageMode.id },
+                    onPin = { id -> director.pin(song, id, actions) },
+                ),
+                stageBeside = false,
                 actions = actions,
-                onPick = { id -> director.pick(song, state.lyricStage, id, actions) },
-                onPin = { on -> director.pin(song, on, actions) },
+                onApplied = { hint -> director.applyNow(song.key, hint) },
                 onDismiss = { animationOpen = false },
             )
         }

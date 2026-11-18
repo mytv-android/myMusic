@@ -143,6 +143,16 @@ internal class AnimationDraftState(initial: LyricStagePrefs) {
     var asking by mutableStateOf(false)
     var saving by mutableStateOf(false)
 
+    /** 保存时算出的“这首歌保存后用哪个”：舞台换到它之前保存条还按“保存中”处理，舞台继续画它（不闪回旧模式）。 */
+    var appliedId: String? = null
+
+    /** 对话框里选了“保存并应用”：设置写回来后再关面板。 */
+    var closeAfterSave = false
+
+    fun update(transform: (LyricStagePrefs) -> LyricStagePrefs) {
+        draft = transform(draft)
+    }
+
     /** 放弃改动：回到已保存的样子。 */
     fun discard(saved: LyricStagePrefs) {
         draft = draftOf(saved)

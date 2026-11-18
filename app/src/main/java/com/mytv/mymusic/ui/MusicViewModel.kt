@@ -5782,8 +5782,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** 忘掉每首歌随机到的模式；挂在应用作用域上，面板关了也会写完。返回撤销要用的原值。 */
     suspend fun forgetLyricModes(): Map<String, String> = app.appScope.async { app.settings.forgetLyricModes() }.await()
 
-    fun restoreLyricModes(modes: Map<String, String>) {
-        app.appScope.launch { app.settings.restoreLyricModes(modes) }
+    suspend fun restoreLyricModes(modes: Map<String, String>) {
+        app.appScope.async { app.settings.restoreLyricModes(modes) }.await()
     }
     fun setCollectionView(value: CollectionView) = viewModelScope.launch { app.settings.collectionView(value) }
     fun setMiniPlayerTarget(value: MiniPlayerTarget) = viewModelScope.launch { app.settings.miniPlayerTarget(value) }

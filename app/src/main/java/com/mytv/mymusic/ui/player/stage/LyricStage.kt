@@ -211,7 +211,7 @@ private fun StageHost(
     val lineIndex = remember { mutableIntStateOf(-1) }
     val paused = rememberUpdatedState(!playing)
     val analyzer = remember(context) { (context.applicationContext as? MyMusicApp)?.rhythmAnalyzer }
-    val raw = prefs.pluginSettings[mode.id].orEmpty()
+    val raw = prefs.settingsFor(mode.id)
     val settings = remember(mode, raw) { SettingValues(mode.settings, raw) }
     // 要不要律动按设置问模式：Rush 只有背景选“律动”时才要，换成别的背景就不再白跑分析
     val modeAudio = mode.wantsAudio(settings)

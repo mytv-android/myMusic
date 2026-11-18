@@ -77,8 +77,9 @@ import com.mytv.mymusic.ui.player.label
 import com.mytv.mymusic.ui.player.polygon
 import com.mytv.mymusic.ui.player.rhythmDebugAvailable
 import com.mytv.mymusic.ui.player.stage.AnimationSheet
-import com.mytv.mymusic.ui.player.stage.LyricVisualizers
 import com.mytv.mymusic.ui.player.stage.label
+import com.mytv.mymusic.ui.player.stage.modeOf
+import com.mytv.mymusic.ui.player.stage.rememberAnimationDraft
 import com.mytv.mymusic.ui.theme.PlayerTheme
 
 internal val LyricsBackgroundMode.label: String
@@ -131,16 +132,18 @@ internal fun LyricsSettingsScreen(
     val mode = state.lyricsBackground
     val debuggable = rhythmDebugAvailable()
     var animationOpen by rememberSaveable { mutableStateOf(false) }
-    if (animationOpen) {
-        // 和全屏歌词页右上角 ✦ 打开的是同一个面板，套播放页的深色配色；这里没有“这首歌”，点模式改的是默认模式
+    val animationDraft = rememberAnimationDraft(animationOpen, state.lyricStage)
+    if (animationDraft != null) {
+        // 和全屏歌词页右上角 ✦ 打开的是同一个面板，套播放页的深色配色；这里没有“这首歌”和舞台，设置区顶上放大预览
         PlayerTheme {
             AnimationSheet(
-                prefs = state.lyricStage,
+                saved = state.lyricStage,
+                draft = animationDraft,
                 song = state.current,
-                shown = state.lyricStage.visualizer,
+                songRow = null,
+                stageBeside = false,
                 actions = actions,
-                onPick = { id -> actions.setLyricStage { it.copy(visualizer = id) } },
-                onPin = null,
+                onApplied = {},
                 onDismiss = { animationOpen = false },
             )
         }
@@ -188,7 +191,7 @@ internal fun LyricsSettingsScreen(
                     count = 3,
                     onClick = { animationOpen = true },
                     summary = "只在全屏歌词页生效",
-                    value = LyricVisualizers.byId(stage.visualizer).label,
+                    value = stage.modeOf(stage.visualizer).label,
                 )
                 ListRow(
                     title = "每首歌换动画",

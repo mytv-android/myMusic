@@ -38,9 +38,10 @@ import com.mytv.mymusic.ui.player.coverBlobColors
  * 动画面板里的缩略图：用模式自己的 [LyricVisualizer.Stage] 按“减少动态效果”画一张静帧（没有帧循环、不开律动），
  * 歌词是一句示例；宿主背景换成封面主色的静态渐变。经典画成三行的小列表。整块不进读屏，也不接收点按。
  * 字号随卡片宽度走（手机上 13sp），电视上卡片窄一些，示例句也不会折行压到副行。
+ * [big]：设置区顶上的大预览，字号上限放到 22sp、四周多留点边。
  */
 @Composable
-internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStagePrefs, modifier: Modifier = Modifier) {
+internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStagePrefs, modifier: Modifier = Modifier, big: Boolean = false) {
     val context = LocalContext.current
     val scheme = MaterialTheme.colorScheme
     val cover = song?.cover.orEmpty()
@@ -54,14 +55,14 @@ internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStageP
             .clearAndSetSemantics {}
             .background(scheme.surface),
     ) {
-        val textSp = (maxWidth.value / CARD_DP_PER_TEXT_SP).coerceIn(MIN_PREVIEW_TEXT_SP, PREVIEW_TEXT_SP)
+        val textSp = (maxWidth.value / CARD_DP_PER_TEXT_SP).coerceIn(MIN_PREVIEW_TEXT_SP, if (big) BIG_PREVIEW_TEXT_SP else PREVIEW_TEXT_SP)
         if (mode.id == ClassicVisualizer.id) {
             PreviewBackdrop(colors)
             ClassicPreview(textSp / PREVIEW_TEXT_SP)
             return@BoxWithConstraints
         }
         val insets = remember { StageInsets() }
-        val raw = prefs.pluginSettings[mode.id].orEmpty()
+        val raw = prefs.settingsFor(mode.id)
         val ctx = remember(mode, song, colors, raw, prefs.subline, textSp) {
             // 能拖动的列表类模式（Rush）在缩略图里看得到上下句，多给一句“上一句”；其它模式的缩略图照旧只有两句
             val lines = if (mode.interactive) SAMPLE_LIST_LINES else SAMPLE_LINES
@@ -86,7 +87,7 @@ internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStageP
                 .fillMaxSize()
                 // 安全区留一圈边，模式按它排字
                 .layout { measurable, constraints ->
-                    val pad = 6.dp.toPx()
+                    val pad = (if (big) 14.dp else 6.dp).toPx()
                     insets.set(pad, pad, pad, pad)
                     val placeable = measurable.measure(constraints)
                     layout(placeable.width, placeable.height) { placeable.place(0, 0) }
@@ -148,6 +149,7 @@ private fun ClassicPreview(scale: Float) {
 }
 
 private const val PREVIEW_TEXT_SP = 13f
+private const val BIG_PREVIEW_TEXT_SP = 22f
 private const val MIN_PREVIEW_TEXT_SP = 9f
 /** 手机面板的卡片约 176dp 宽，配 13sp。 */
 private const val CARD_DP_PER_TEXT_SP = 13.5f
