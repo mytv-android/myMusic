@@ -18,6 +18,8 @@
 // 设置照 LyricsPrefs 取跟全屏歌词有关的 7 项：背景（六种拆成“背景”和“律动样式”两行）、配色（自定义取色器换成“播放页”）、
 // 对齐、字号、景深模糊、逐字粗细；行高、字距保持 Rush 默认（32sp / 0）。页头、分享卡片、LRCLIB 纠错、播放键发光不搬。
 // 2026-11-18 myMusic 改动：景深模糊从开关改成强度滑块（关 · 弱 · 中 · 强，0–1.5 倍），旧的开关值读成 0 或 1。
+// 2026-11-18 myMusic 改动：配色加回“自定义”，选了以后多出“背景”“文字”两个色块（取色面板见 ColorPickerSheet）；
+// 上面“自定义取色器换成播放页”那句不再成立，播放页配色保留。
 package com.mytv.mymusic.ui.player.stage.modes
 
 import androidx.compose.animation.animateColorAsState
@@ -33,6 +35,7 @@ import com.mytv.mymusic.ui.player.stage.LyricSetting
 import com.mytv.mymusic.ui.player.stage.LyricStageContext
 import com.mytv.mymusic.ui.player.stage.LyricVisualizer
 import com.mytv.mymusic.ui.player.stage.ModOrigin
+import com.mytv.mymusic.ui.player.stage.SettingCondition
 import com.mytv.mymusic.ui.player.stage.SettingValues
 import com.mytv.mymusic.ui.player.stage.StageDevice
 import java.util.Locale
@@ -64,7 +67,7 @@ object RushVisualizer : LyricVisualizer {
     @Composable
     override fun Background(ctx: LyricStageContext, modifier: Modifier) {
         val look = remember(ctx.settings) { rushLook(ctx.settings) }
-        val palette = remember(ctx.colors, look.colors) { rushPalette(ctx.colors, look.colors) }
+        val palette = remember(ctx.colors, look.colors, look.customBackground, look.customText) { look.palette(ctx) }
         val spec = colorSpec(ctx)
         val colors = RushBackgroundColors(
             background = animateColorAsState(palette.background, spec, label = "rushBackground"),
@@ -78,7 +81,7 @@ object RushVisualizer : LyricVisualizer {
     @Composable
     override fun Stage(ctx: LyricStageContext, modifier: Modifier) {
         val look = remember(ctx.settings) { rushLook(ctx.settings) }
-        val palette = remember(ctx.colors, look.colors) { rushPalette(ctx.colors, look.colors) }
+        val palette = remember(ctx.colors, look.colors, look.customBackground, look.customText) { look.palette(ctx) }
         val content: State<Color> = animateColorAsState(palette.content, colorSpec(ctx), label = "rushContent")
         RushLyricList(ctx, look, content, modifier)
     }
@@ -102,7 +105,11 @@ internal fun rushLook(settings: SettingValues): RushLook = RushLook(
     size = settings.number(RUSH_KEY_SIZE),
     blur = settings.slider(RUSH_KEY_BLUR),
     expressive = settings.toggle(RUSH_KEY_EXPRESSIVE),
+    customBackground = settings.color(RUSH_KEY_CUSTOM_BACKGROUND),
+    customText = settings.color(RUSH_KEY_CUSTOM_TEXT),
 )
+
+private fun RushLook.palette(ctx: LyricStageContext): RushPalette = rushPalette(ctx.colors, colors, customBackground, customText)
 
 private fun rushSettings(blurDefault: Boolean): List<LyricSetting> = listOf(
     LyricSetting.Choice(
@@ -121,8 +128,25 @@ private fun rushSettings(blurDefault: Boolean): List<LyricSetting> = listOf(
     LyricSetting.Choice(
         RUSH_KEY_COLORS,
         "配色",
-        listOf(RUSH_COLORS_VIBRANT to "鲜艳", RUSH_COLORS_MUTED to "柔和", RUSH_COLORS_PLAYER to "播放页"),
+        listOf(RUSH_COLORS_VIBRANT to "鲜艳", RUSH_COLORS_MUTED to "柔和", RUSH_COLORS_PLAYER to "播放页", RUSH_COLORS_CUSTOM to "自定义"),
         RUSH_COLORS_VIBRANT,
+        // 随机搭配不抽“自定义”：抽到了也只是沿用上次的两个颜色
+        shuffleExclude = setOf(RUSH_COLORS_CUSTOM),
+    ),
+    // 切到“自定义”的那一下按封面的鲜艳色和它的文字色种初值，画面不跳
+    LyricSetting.Color(
+        RUSH_KEY_CUSTOM_BACKGROUND,
+        "背景",
+        RUSH_CUSTOM_BACKGROUND_HEX,
+        seed = { it.coverVibrant },
+        visibleWhen = SettingCondition(RUSH_KEY_COLORS, setOf(RUSH_COLORS_CUSTOM)),
+    ),
+    LyricSetting.Color(
+        RUSH_KEY_CUSTOM_TEXT,
+        "文字",
+        RUSH_CUSTOM_TEXT_HEX,
+        seed = { it.onCoverVibrant },
+        visibleWhen = SettingCondition(RUSH_KEY_COLORS, setOf(RUSH_COLORS_CUSTOM)),
     ),
     LyricSetting.Choice(
         RUSH_KEY_ALIGN,
@@ -168,6 +192,8 @@ private val SETTINGS_BLUR_OFF = rushSettings(blurDefault = false)
 internal const val RUSH_KEY_BACKGROUND = "background"
 internal const val RUSH_KEY_RHYTHM = "rhythm"
 internal const val RUSH_KEY_COLORS = "colors"
+internal const val RUSH_KEY_CUSTOM_BACKGROUND = "customBackground"
+internal const val RUSH_KEY_CUSTOM_TEXT = "customText"
 internal const val RUSH_KEY_ALIGN = "align"
 internal const val RUSH_KEY_SIZE = "size"
 internal const val RUSH_KEY_BLUR = "blur"

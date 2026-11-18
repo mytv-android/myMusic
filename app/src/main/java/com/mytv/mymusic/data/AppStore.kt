@@ -122,7 +122,11 @@ data class LyricStagePrefs(
     val hintSeen: Boolean = false,
     /** 随机池（模式 id）：随机换法从这里面抽。空＝除经典外的全部模式（旧数据、没动过时都是空）。 */
     val randomPool: Set<String> = emptySet(),
+    /** 取色面板“最近用过”：`#RRGGBB`，新的在前，最多 [RECENT_COLORS_LIMIT] 个。点了“完成”就写，不进面板草稿。 */
+    val recentColors: List<String> = emptyList(),
 )
+
+const val RECENT_COLORS_LIMIT = 8
 
 /** 每首歌记下的随机结果和速度（最近 [LYRIC_MEMORY_LIMIT] 首）。 */
 @Serializable
@@ -131,8 +135,11 @@ data class LyricMemoryEntry(val mode: String = "", val bpm: Float = 0f)
 const val LYRIC_MEMORY_LIMIT = 2000
 
 /** JSON 字符串数组 → 集合；读不出来（没写过、格式不对）时为空。 */
-internal fun decodeStringSet(raw: String?): Set<String> =
-    if (raw.isNullOrBlank()) emptySet() else runCatching { Json.decodeFromString<List<String>>(raw).toSet() }.getOrDefault(emptySet())
+internal fun decodeStringSet(raw: String?): Set<String> = decodeStringList(raw).toSet()
+
+/** JSON 字符串数组 → 列表（保持顺序）；读不出来时为空。 */
+internal fun decodeStringList(raw: String?): List<String> =
+    if (raw.isNullOrBlank()) emptyList() else runCatching { Json.decodeFromString<List<String>>(raw) }.getOrDefault(emptyList())
 
 /** 播放页封面形状：随机（每次切歌换一种，不和上一首重复）或固定成某一种 MaterialShapes。 */
 enum class CoverShapeChoice { Random, Cookie12, Cookie9, Cookie7, Sunny, SoftBurst, Clover8 }
@@ -286,6 +293,7 @@ class SettingsStore(private val context: Context) {
     private val lyricSublineKey = stringPreferencesKey("lyric_subline")
     private val lyricHintSeenKey = booleanPreferencesKey("lyric_visualizer_hint_seen")
     private val lyricRandomPoolKey = stringPreferencesKey("lyric_random_pool")
+    private val lyricRecentColorsKey = stringPreferencesKey("lyric_recent_colors")
     private val lyricSplitBilingualKey = booleanPreferencesKey("lyric_split_bilingual")
     private val lyricTraditionalKey = booleanPreferencesKey("lyric_traditional")
     private val lyricAutoRomanizeKey = booleanPreferencesKey("lyric_auto_romanize")
@@ -479,6 +487,7 @@ class SettingsStore(private val context: Context) {
             .getOrDefault(emptyMap()),
         hintSeen = values[lyricHintSeenKey] ?: false,
         randomPool = decodeStringSet(values[lyricRandomPoolKey]),
+        recentColors = decodeStringList(values[lyricRecentColorsKey]).take(RECENT_COLORS_LIMIT),
     )
 
     /** 全屏歌词动画的设置：同一次 edit 里读出当前值再写回，连着改几项不会互相覆盖。 */
@@ -493,6 +502,7 @@ class SettingsStore(private val context: Context) {
         it[lyricVisualizerPinsKey] = json.encodeToString(value.pins)
         it[lyricHintSeenKey] = value.hintSeen
         it[lyricRandomPoolKey] = json.encodeToString(value.randomPool.toList())
+        it[lyricRecentColorsKey] = json.encodeToString(value.recentColors.take(RECENT_COLORS_LIMIT))
     }
 
     suspend fun lyricText(transform: (LyricTextPrefs) -> LyricTextPrefs) = context.dataStore.edit {

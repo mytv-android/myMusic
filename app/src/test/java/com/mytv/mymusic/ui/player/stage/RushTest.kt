@@ -1,11 +1,16 @@
 package com.mytv.mymusic.ui.player.stage
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import com.materialkolor.hct.Hct
+import com.materialkolor.ktx.blend
+import com.materialkolor.ktx.darken
+import com.materialkolor.ktx.lighten
 import com.materialkolor.ktx.toColor
 import com.materialkolor.ktx.toHct
 import com.mytv.mymusic.ui.LyricWord
 import com.mytv.mymusic.ui.player.lyricAnchorError
+import com.mytv.mymusic.ui.player.stage.modes.RUSH_COLORS_CUSTOM
 import com.mytv.mymusic.ui.player.stage.modes.RUSH_COLORS_MUTED
 import com.mytv.mymusic.ui.player.stage.modes.RUSH_COLORS_PLAYER
 import com.mytv.mymusic.ui.player.stage.modes.RUSH_COLORS_VIBRANT
@@ -279,6 +284,109 @@ class RushTest {
     }
 
     @Test
+    fun customPaletteUsesTheTwoSettingColors() {
+        val stage = sampleStage()
+        val background = Color(0xFF1B2A4A)
+        val text = Color(0xFFF4C7D0)
+        val palette = rushPalette(stage, RUSH_COLORS_CUSTOM, background, text)
+        assertEquals(background, palette.background)
+        assertEquals(text, palette.content)
+        assertEquals(background.blend(text, 0.25f), palette.wave)
+        assertEquals(6, palette.hypnotic.size)
+        assertEquals(background.lighten(2f), palette.hypnotic.first())
+        assertEquals(background.darken(2f), palette.hypnotic.last())
+        // 自定义不跟封面变
+        val otherCover = stage.copy(coverVibrant = Color(0xFF203040), cover = List(4) { Color(0xFF00FF00) })
+        assertEquals(palette.background, rushPalette(otherCover, RUSH_COLORS_CUSTOM, background, text).background)
+    }
+
+    @Test
+    fun customColorsAreSettings() {
+        val schema = RushVisualizer.settings
+        val colors = schema[2] as LyricSetting.Choice
+        assertEquals(listOf("vibrant", "muted", "player", "custom"), colors.options.map { it.first })
+        assertEquals("自定义", colors.options.last().second)
+        assertEquals(setOf("custom"), colors.shuffleExclude)
+        val background = schema[3] as LyricSetting.Color
+        val text = schema[4] as LyricSetting.Color
+        assertEquals("背景", background.label)
+        assertEquals("文字", text.label)
+        assertEquals(SettingCondition("colors", setOf("custom")), background.visibleWhen)
+        assertEquals(SettingCondition("colors", setOf("custom")), text.visibleWhen)
+        // 初值取封面的鲜艳色和它的文字色
+        val stage = sampleStage()
+        assertEquals(stage.coverVibrant, background.seed!!(stage))
+        assertEquals(stage.onCoverVibrant, text.seed!!(stage))
+
+        val look = rushLook(SettingValues(schema, mapOf("colors" to "custom", "customBackground" to "#1b2a4a", "customText" to "#F4C7D0")))
+        assertEquals("custom", look.colors)
+        assertEquals(Color(0xFF1B2A4A), look.customBackground)
+        assertEquals(Color(0xFFF4C7D0), look.customText)
+        val defaults = rushLook(SettingValues(schema, emptyMap()))
+        assertEquals(Color(0xFF2C5F5A), defaults.customBackground)
+        assertEquals(Color(0xFFFFE9B8), defaults.customText)
+        // 只有选了自定义才显示两个色块
+        assertFalse(SettingValues(schema, emptyMap()).visible(background))
+        assertTrue(SettingValues(schema, mapOf("colors" to "custom")).visible(text))
+    }
+
+    @Test
+    fun autoTextColorIsAlwaysReadable() {
+        for (hue in 0 until 360 step 36) {
+            for (tone in listOf(8.0, 30.0, 55.0, 85.0)) {
+                for (chroma in listOf(0.0, 40.0, 90.0)) {
+                    val background = Hct.from(hue.toDouble(), chroma, tone).toColor()
+                    val text = autoTextColor(background)
+                    assertTrue("hue=$hue tone=$tone chroma=$chroma", contrastRatio(background, text) >= 4.5f)
+                }
+            }
+        }
+        // 底色亮配深字、底色暗配浅字，同色相、低彩度
+        assertTrue(autoTextColor(Color(0xFFFFE9B8)).luminance() < 0.1f)
+        assertTrue(autoTextColor(Color(0xFF1B2A4A)).luminance() > 0.6f)
+        assertTrue(autoTextColor(Color(0xFF1B2A4A)).toHct().chroma <= 16.5)
+    }
+
+    @Test
+    fun coverSwatchesAreSixDistinctColors() {
+        val swatches = coverSwatches(sampleStage(cover = listOf(Color(0xFFE0485A), Color(0xFF3060C0), Color(0xFF40A070), Color(0xFFE0485A))))
+        assertEquals(6, swatches.size)
+        assertEquals(6, swatches.map { it.toHex() }.toSet().size)
+        // 封面只有一种颜色时也凑得出来，不重复
+        val flat = coverSwatches(sampleStage(cover = List(4) { Color(0xFF808080) }))
+        assertEquals(flat.map { it.toHex() }.toSet().size, flat.size)
+        assertTrue(flat.size in 3..6)
+    }
+
+    @Test
+    fun recentColorsKeepTheNewestEight() {
+        var recent = emptyList<String>()
+        for (i in 1..10) recent = pushRecentColor(recent, Color(0xFF000000 + i))
+        assertEquals(8, recent.size)
+        assertEquals("#00000A", recent.first())
+        recent = pushRecentColor(recent, Color(0xFF000005))
+        assertEquals("#000005", recent.first())
+        assertEquals(1, recent.count { it == "#000005" })
+        assertEquals(listOf("#ABCDEF"), pushRecentColor(listOf("#abcdef"), Color(0xFFABCDEF)))
+    }
+
+    private fun sampleStage(cover: List<Color> = List(4) { Color(0xFFE0485A) }): StageColors {
+        val (v, m) = coverTones(cover[0])
+        return StageColors(
+            text = Color(0xFFE2E2E9),
+            dim = Color(0x47E2E2E9),
+            accent = Color(0xFFAAC7FF),
+            accentAlt = Color(0xFFDCBCE0),
+            surface = Color(0xFF111318),
+            cover = cover,
+            coverVibrant = v,
+            onCoverVibrant = readableOn(v),
+            coverMuted = m,
+            onCoverMuted = readableOn(m),
+        )
+    }
+
+    @Test
     fun gradientColorsIncludeBothEnds() {
         val colors = rushGradientColors(Color.White, Color.Black, 6)
         assertEquals(6, colors.size)
@@ -321,7 +429,10 @@ class RushTest {
     @Test
     fun settingsDefaultsMatchTheDesign() {
         val schema = RushVisualizer.settings
-        assertEquals(listOf("background", "rhythm", "colors", "align", "size", "blur", "expressive"), schema.map { it.key })
+        assertEquals(
+            listOf("background", "rhythm", "colors", "customBackground", "customText", "align", "size", "blur", "expressive"),
+            schema.map { it.key },
+        )
         // 同一台设备上每次拿到的是同一份表（设置值按表身份比较）
         assertSame(schema, RushVisualizer.settings)
         val defaults = SettingValues(schema, emptyMap())
@@ -337,7 +448,7 @@ class RushTest {
         assertEquals(0, defaults.changed)
         assertEquals("背景选“律动”时生效", schema[1].summary)
 
-        val size = schema[4] as LyricSetting.Number
+        val size = schema[6] as LyricSetting.Number
         assertEquals(0.8f, size.min, 0f)
         assertEquals(1.4f, size.max, 0f)
         assertEquals(0.1f, size.step, 0f)
@@ -346,7 +457,7 @@ class RushTest {
         assertEquals("solid", SettingValues(schema, mapOf("background" to "bogus")).choice("background"))
         assertEquals(RushAlign.End, rushLook(SettingValues(schema, mapOf("align" to "end"))).align)
 
-        val blur = schema[5] as LyricSetting.Slider
+        val blur = schema[7] as LyricSetting.Slider
         assertEquals(0f, blur.min, 0f)
         assertEquals(1.5f, blur.max, 0f)
         assertEquals(listOf(0f, 0.5f, 1f, 1.5f), blur.ticks)

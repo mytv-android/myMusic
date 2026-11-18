@@ -161,6 +161,9 @@ internal class RushLook(
     /** 景深强度倍数，0 是关，见 [rushBlurDp]。 */
     val blur: Float,
     val expressive: Boolean,
+    /** 配色选“自定义”时的底色、字色。 */
+    val customBackground: Color,
+    val customText: Color,
 )
 
 /**

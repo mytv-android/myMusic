@@ -185,8 +185,10 @@ internal fun AnimationSheet(
     val tv = LocalAppWindow.current.isTv
     val d = draft.draft
     val dirty = isDirty(saved, d)
-    // 颜色项切到能看见时的初值（封面的鲜艳色等）按这首歌的舞台配色算
+    // 颜色项切到能看见时的初值（封面的鲜艳色等）、取色面板的“从封面取”都按这首歌的舞台配色算
     val stageColors = rememberStageColors(song?.cover.orEmpty())
+    // 正在取色的颜色项（点了设置表里的色块）
+    var picking by remember { mutableStateOf<ColorPick?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     // 面板是单独的窗口（平板、电视），外壳的提示条会被盖住：提示条放在面板里
@@ -335,7 +337,10 @@ internal fun AnimationSheet(
                     stageColors = stageColors,
                     onTarget = { draft.editTarget = it },
                     onWrite = { transform -> draft.update { p -> p.withSettings(target, transform(p.settingsFor(target))) } },
-                    onPickColor = {},
+                    onPickColor = { setting ->
+                        val values = SettingValues(d.modeOf(target).settings, d.settingsFor(target))
+                        picking = ColorPick(target, setting.key, values.color(setting.key))
+                    },
                 )
 
                 if (d.auto == LyricAutoSwitch.Random) ForgetRow(actions, toast)
@@ -351,6 +356,18 @@ internal fun AnimationSheet(
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (dirty) 72.dp else 0.dp))
+        }
+
+        picking?.let { pick ->
+            ColorPickerFor(
+                pick = pick,
+                draft = draft,
+                saved = saved,
+                stageColors = stageColors,
+                stageBeside = stageBeside,
+                actions = actions,
+                onClose = { picking = null },
+            )
         }
 
         if (draft.asking) {
@@ -511,6 +528,63 @@ private fun SongModeRow(
             }
         }
     }
+}
+
+/** 设置表里点了哪张卡片 [target] 的哪个颜色项 [key]，打开时是什么颜色 [initial]（“取消”改回它）。 */
+private class ColorPick(val target: String, val key: String, val initial: Color)
+
+/**
+ * 给 [pick] 那一项开取色面板：改的颜色实时写进草稿。同一显示条件下的颜色项算一对（第一个是底色、第二个是字色），
+ * 预览和对比度按这一对画；“完成”时把颜色记进“最近用过”（立即写，不进草稿）。
+ */
+@Composable
+private fun ColorPickerFor(
+    pick: ColorPick,
+    draft: AnimationDraftState,
+    saved: LyricStagePrefs,
+    stageColors: StageColors,
+    stageBeside: Boolean,
+    actions: MusicActions,
+    onClose: () -> Unit,
+) {
+    val mode = draft.draft.modeOf(pick.target)
+    val values = SettingValues(mode.settings, draft.draft.settingsFor(pick.target))
+    val setting = mode.settings.firstOrNull { it.key == pick.key } as? LyricSetting.Color
+    if (setting == null) {
+        LaunchedEffect(Unit) { onClose() }
+        return
+    }
+    val group = mode.settings.filterIsInstance<LyricSetting.Color>().filter { it.visibleWhen == setting.visibleWhen }
+    val pair = group.size >= 2
+    val backgroundKey = if (pair) group[0].key else setting.key
+    val textKey = if (pair) group[1].key else null
+    val write: (String, Color) -> Unit = { key, color ->
+        draft.update { p -> p.withSettings(pick.target, p.settingsFor(pick.target) + (key to color.toHex())) }
+    }
+    // “Rush · 自定义配色”：模式名加上让它显示出来的那个选项
+    val condition = setting.visibleWhen
+    val choice = condition?.let { c -> mode.settings.firstOrNull { it.key == c.key } as? LyricSetting.Choice }
+    val reason = choice?.let { c -> c.options.firstOrNull { it.first == values.choice(c.key) }?.second?.plus(c.label) }
+    val background = values.color(backgroundKey)
+    ColorPickerSheet(
+        title = "${setting.label}色",
+        subtitle = listOfNotNull(mode.label, reason).joinToString(" · "),
+        initial = pick.initial,
+        background = background,
+        text = textKey?.let(values::color) ?: readableOn(background),
+        editingText = setting.key == textKey,
+        pairs = pair,
+        coverSwatches = coverSwatches(stageColors),
+        recent = saved.recentColors.mapNotNull(::parseHexColor),
+        stageBeside = stageBeside,
+        onChange = { write(setting.key, it) },
+        onAutoText = { color -> textKey?.let { write(it, color) } },
+        onDone = { color ->
+            actions.setLyricStage { it.copy(recentColors = pushRecentColor(it.recentColors, color)) }
+            onClose()
+        },
+        onCancel = onClose,
+    )
 }
 
 /** “这首歌”一行宽度够这么多时按钮和文字排一行，不够时按钮挪到第二行。 */
