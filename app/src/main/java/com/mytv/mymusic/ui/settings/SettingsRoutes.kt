@@ -111,6 +111,10 @@ private fun SectionContent(
             val state by app.model.state.collectAsState()
             SearchBrowseSettingsScreen(state, actions, onBack, embedded, onOpen)
         }
+        SettingsSection.Swipe -> {
+            val state by app.model.state.collectAsState()
+            SwipeSettingsScreen(state.swipe, actions, onBack, embedded)
+        }
         SettingsSection.Accounts -> {
             val state by app.model.state.collectAsState()
             AccountsSettingsScreen(state, actions, onBack, embedded)
@@ -199,8 +203,9 @@ private fun rememberSettingsOverview(app: AppNav, cacheTick: Int): SettingsOverv
         value = app.model.mediaCacheSize()
     }
     val localMusic = rememberLocalSettingsSummary()
-    return remember(state, sync, update, equalizer, cacheBytes, downloadsBytes, localMusic) {
-        settingsOverview(state, sync, update, equalizer, cacheBytes, downloadsBytes, localMusic)
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+    return remember(state, sync, update, equalizer, cacheBytes, downloadsBytes, localMusic, rtl) {
+        settingsOverview(state, sync, update, equalizer, cacheBytes, downloadsBytes, localMusic, rtl)
     }
 }
 

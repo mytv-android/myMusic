@@ -87,6 +87,7 @@ internal fun settingsOverview(
     cacheBytes: Long,
     downloadsBytes: Long,
     localMusic: String = "",
+    rtl: Boolean = false,
 ): SettingsOverview {
     val appearance = state.appearance
     val eqLabel = EqPresets.byId(equalizer.presetId)?.label ?: "自定义"
@@ -112,6 +113,7 @@ internal fun settingsOverview(
             SettingsSection.Equalizer to "$eqLabel · ${if (equalizer.enabled) "已开启" else "已关闭"}",
             SettingsSection.Sources to sourceSummary(state),
             SettingsSection.Search to "默认${providerName(state.providers, state.providerId)}",
+            SettingsSection.Swipe to swipeSummary(state.swipe, rtl),
             SettingsSection.Accounts to when {
                 logged.isEmpty() -> "未登录任何平台"
                 logged.size <= 2 -> "已登录 ${logged.joinToString("、") { it.name }}"
@@ -352,7 +354,7 @@ private fun SettingsGroups(
     itemModifier: (SettingsSection) -> Modifier = { Modifier },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SettingsSection.groups.forEach { group ->
+        SettingsSection.groupsFor(LocalAppWindow.current.isTv).forEach { group ->
             SegmentedGroup {
                 group.forEachIndexed { index, section ->
                     val badge = section == SettingsSection.About && overview.updateAvailable
