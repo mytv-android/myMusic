@@ -474,7 +474,8 @@ fun LocalPlaylistScreen(
             Text("删除歌单", color = MaterialTheme.colorScheme.error)
         }
     }
-    val playActions: @Composable (Boolean) -> Unit = { showEdit ->
+    // showEdit：编辑和“更多”放在操作行（嵌在“我的”时没有顶栏）；compact：双栏左栏窄，“添加”只留图标
+    val playActions: @Composable (showEdit: Boolean, compact: Boolean) -> Unit = { showEdit, compact ->
         if (selection.active) {
             SelectionBar(
                 count = selection.selected.size,
@@ -496,6 +497,7 @@ fun LocalPlaylistScreen(
                 onShuffle = { val list = songs.shuffled(); actions.play(list.first(), list) },
                 onAdd = if (readOnly) null else ({ addOpen = true }),
                 menu = if (showEdit) menu else null,
+                compact = compact,
                 playFocus = playFocus,
                 onMultiSelect = if (songs.isNotEmpty() && !readOnly) ({ selection.start() }) else null,
                 // 嵌在“我的”里没有顶栏，入口放操作行；手机和双栏的左栏操作行已经排满，入口在顶栏
@@ -563,7 +565,7 @@ fun LocalPlaylistScreen(
                                 providers = state.providers,
                             )
                             Spacer(Modifier.size(16.dp))
-                            playActions(true)
+                            playActions(true, false)
                             Spacer(Modifier.size(12.dp))
                         }
                     }
@@ -583,6 +585,13 @@ fun LocalPlaylistScreen(
                         IconButton(onClick = showPoster, modifier = Modifier.tvFocusRing(CircleShape)) {
                             Icon(Icons.Filled.GridView, "海报视图")
                         }
+                        // 左栏操作行放不下编辑和“更多”，和手机一样放顶栏
+                        if (!readOnly) {
+                            IconButton(onClick = { editing = true }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                                Icon(Icons.Filled.Edit, "编辑歌单")
+                            }
+                        }
+                        PlaylistMoreMenu(menu.copy(onEdit = null))
                     }
                 },
             ) { padding ->
@@ -614,7 +623,7 @@ fun LocalPlaylistScreen(
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                    playActions(true)
+                                    playActions(false, true)
                                 }
                             }
                         }
@@ -660,7 +669,7 @@ fun LocalPlaylistScreen(
                                 providers = state.providers,
                             )
                             Spacer(Modifier.size(16.dp))
-                            playActions(false)
+                            playActions(false, false)
                             Spacer(Modifier.size(12.dp))
                         }
                     }
@@ -913,7 +922,8 @@ private fun BoundPlaylistTag(providerId: String, syncedAt: Long, providers: List
 }
 
 /**
- * 播放全部（Split button，展开随机播放）+ 添加；大屏再加编辑和更多。多选入口在最右侧。
+ * 播放全部（Split button，展开随机播放）+ 添加 + 多选；嵌在“我的”里再加编辑和更多。
+ * [compact]：双栏左栏只有 296～316dp，“添加”只留图标，否则多选按钮会被挤掉。
  */
 @Composable
 private fun PlaylistActionRow(
@@ -923,6 +933,7 @@ private fun PlaylistActionRow(
     onAdd: (() -> Unit)?,
     menu: PlaylistMenu?,
     playFocus: FocusRequester,
+    compact: Boolean = false,
     onMultiSelect: (() -> Unit)? = null,
     onPosterView: (() -> Unit)? = null,
 ) {
@@ -942,7 +953,11 @@ private fun PlaylistActionRow(
                 }
             }
         }
-        if (enabled && onAdd != null) {
+        if (enabled && onAdd != null && compact) {
+            FilledTonalIconButton(onClick = onAdd, modifier = Modifier.tvFocusRing(CircleShape)) {
+                Icon(Icons.Filled.Add, contentDescription = "添加歌曲")
+            }
+        } else if (enabled && onAdd != null) {
             FilledTonalButton(onClick = onAdd, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp))) {
                 Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
