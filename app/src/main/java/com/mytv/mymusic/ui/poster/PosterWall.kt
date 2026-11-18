@@ -2,6 +2,7 @@ package com.mytv.mymusic.ui.poster
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -38,6 +39,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.KeyEventType
@@ -127,11 +130,13 @@ internal fun PosterWall(
         Box(modifier.fillMaxSize().wallBackground(state.palette))
         return
     }
-    val metrics = spec.metrics
+    // 视角远近：设备档的格距乘这台设备那一份倍数（手机、平板、电视各存一份）
+    val metrics = spec.metrics.copy(zoom = prefs.zoom.of(spec.metrics.kind.scope))
     val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
     val count = songs.size
     val banded = feed != null
-    val field = remember(metrics, count, banded) { if (banded) feedFor(metrics, count) else fieldFor(count) }
+    // 带子高度只看设备档：换视角倍数不重建
+    val field = remember(metrics.kind, count, banded) { if (banded) feedFor(metrics, count) else fieldFor(count) }
     val scope = rememberCoroutineScope()
     val env = remember(state, scope) { TileEnv(state, scope) }
     val motion = MaterialTheme.motionScheme
@@ -158,6 +163,7 @@ internal fun PosterWall(
         state.onGrownConfirm = onGrownConfirm
         env.metrics = metrics
         env.style = tileStyleFor(metrics.kind)
+        env.compact = metrics.compact
         env.tint = prefs.tint.alpha
         env.lightsOut = prefs.lightsOut
         env.showIndex = prefs.showIndex
@@ -176,6 +182,16 @@ internal fun PosterWall(
     }
     if (autoFocus && window.isTv) LaunchedEffect(state) { state.requestWallFocus() }
     PaletteSync(state.palette)
+    // 换视角倍数后的过渡：图层从旧的大小缩放回 1；减少动画时直接到位
+    val settleSpec = motion.fastSpatialSpec<Float>()
+    LaunchedEffect(state) {
+        snapshotFlow { state.settleRequests }.collectLatest {
+            if (state.layerScale != 1f && !env.reduceMotion) {
+                animate(state.layerScale, 1f, animationSpec = settleSpec) { v, _ -> state.layerScale = v }
+            }
+            state.layerSettled()
+        }
+    }
 
     val ring = remember { Animatable(0f) }
     LaunchedEffect(state, ring) {
@@ -211,9 +227,22 @@ internal fun PosterWall(
     ) {
         // 大卡按墙的格距排版：桌面姿态的上半屏用手机档时，大卡也得是手机档的尺寸和字号
         CompositionLocalProvider(LocalWallMetrics provides metrics) {
-            WallTiles(state, songs, currentIndex, env, grownContent)
+            Box(Modifier.fillMaxSize().wallZoomLayer(state)) {
+                WallTiles(state, songs, currentIndex, env, grownContent)
+            }
         }
         WallOverlay(state, ring)
+    }
+}
+
+/** 换视角倍数时整面墙的过渡缩放（[PosterWallState.layerScale]），只在图层阶段读。 */
+private fun Modifier.wallZoomLayer(state: PosterWallState): Modifier = graphicsLayer {
+    val s = state.layerScale
+    scaleX = s
+    scaleY = s
+    if (s != 1f && size.width > 0f && size.height > 0f) {
+        val o = state.layerOrigin
+        transformOrigin = TransformOrigin(o.x * density / size.width, o.y * density / size.height)
     }
 }
 
@@ -479,17 +508,22 @@ private fun DrawScope.drawFocusRing(state: PosterWallState, f: SlotPos, alpha: F
     val s = state.palette.scheme
     val radius = anim.radius.value * d
     val sw = stroke.width
-    // 内圈贴着格子边往外 0..3dp，外圈 3..6dp
-    for (k in 0..1) {
-        val grow = sw * (k + 0.5f)
-        drawRoundRect(
-            color = if (k == 0) s.surface else s.onSurface,
-            topLeft = Offset(l - grow, t - grow),
-            size = Size(w + 2 * grow, h + 2 * grow),
-            cornerRadius = CornerRadius(radius + grow),
-            style = stroke,
-            alpha = a,
-        )
+    // 换视角的过渡缩放里，焦点环跟着格子一起缩放
+    val zoom = state.layerScale
+    val origin = state.layerOrigin
+    scale(zoom, zoom, pivot = Offset(origin.x * d, origin.y * d)) {
+        // 内圈贴着格子边往外 0..3dp，外圈 3..6dp
+        for (k in 0..1) {
+            val grow = sw * (k + 0.5f)
+            drawRoundRect(
+                color = if (k == 0) s.surface else s.onSurface,
+                topLeft = Offset(l - grow, t - grow),
+                size = Size(w + 2 * grow, h + 2 * grow),
+                cornerRadius = CornerRadius(radius + grow),
+                style = stroke,
+                alpha = a,
+            )
+        }
     }
 }
 

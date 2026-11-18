@@ -539,4 +539,125 @@ class PosterWallStateTest {
         repeat(7) { s.tick(1f) }
         assertFalse(s.chromeVisible)
     }
+
+    // ------------------------------------------------------------------ 视角远近
+
+    private fun WallConfig.zoomed(z: Float) = copy(metrics = metrics.copy(zoom = z))
+
+    @Test
+    fun changingOnlyTheZoomKeepsTheWallAndTheCentredCard() {
+        val s = wall(phone(current = 4), phoneView)
+        s.settle()
+        val generation = s.generation
+        s.configure(phone(current = 4).zoomed(0.5f))
+        assertEquals(generation, s.generation)
+        assertEquals(0.5f, s.metrics.zoom, 0f)
+        assertEquals(28f, s.metrics.pitch, 0f)
+        assertEquals(4, s.grownIndex)
+        val scene = s.scene!!
+        assertEquals(scene.centerTarget(scene.grown!!, s.viewport!!), s.camera.position)
+        assertFalse(s.camera.isAnimating)
+        // 入场波不重放
+        s.settle()
+        assertNull(s.wave)
+        s.configure(phone(current = 4).zoomed(0.5f))
+        assertNull(s.wave)
+        assertEquals(generation, s.generation)
+    }
+
+    @Test
+    fun zoomStartsALayerTransitionFromTheOldSize() {
+        val s = wall(phone(current = 4), phoneView)
+        val before = s.settleRequests
+        s.configure(phone(current = 4).zoomed(0.5f))
+        assertEquals(2f, s.layerScale, 1e-4f)
+        assertEquals(before + 1, s.settleRequests)
+        s.layerSettled()
+        assertEquals(1f, s.layerScale, 0f)
+    }
+
+    @Test
+    fun zoomingInComposesMoreTilesWhileTheLayerIsShrunk() {
+        val s = wall(phone(current = 4), phoneView)
+        val plain = s.composedTiles.size
+        s.configure(phone(current = 4).zoomed(1.25f))
+        // 图层是 0.8，屏幕上露出的比视口大
+        val during = s.composedTiles.size
+        s.layerSettled()
+        assertTrue(during > s.composedTiles.size)
+        assertTrue(plain > 0)
+    }
+
+    @Test
+    fun changingTheKindStillResets() {
+        val s = wall(phone(current = 4), phoneView)
+        val generation = s.generation
+        s.configure(phone(current = 4).copy(metrics = WallMetrics.ShortTablet))
+        assertEquals(generation + 1, s.generation)
+    }
+
+    @Test
+    fun aFarZoomHidesTilesUnderTheBiggerCard() {
+        val s = wall(phone(current = 4), phoneView)
+        s.configure(phone(current = 4).zoomed(0.5f))
+        val scene = s.scene!!
+        val g = scene.grown!!
+        assertEquals(240f, scene.grownDisplay, 1e-3f)
+        assertEquals(240f, scene.tileAt(g).rect.w, 1e-3f)
+        assertEquals(240f, scene.rectAt(g).h, 1e-3f)
+        val card = scene.grownRect!!
+        val inside: (WallRect) -> Boolean = { r -> r.centerX > card.x && r.centerX < card.right && r.centerY > card.y && r.centerY < card.bottom }
+        assertTrue(s.composedTiles.none { !it.grown && inside(it.rect) })
+        // 不画的格子方向键也走不到：从大卡往四个方向走，落点都不在大卡里
+        for ((dx, dy) in listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)) {
+            val next = scene.focusNeighbour(g, dx, dy) ?: continue
+            assertFalse(inside(scene.rectAt(next)))
+        }
+        // 点在大卡露出槽位的那一圈上也算点大卡
+        val p = WallPoint(card.x + 2f, card.y + 2f)
+        assertEquals(g, scene.slotAt(p))
+    }
+
+    @Test
+    fun aNearZoomShrinksTheCardInsideItsSlot() {
+        val s = wall(phone(current = 4), phoneView)
+        s.configure(phone(current = 4).zoomed(1.25f))
+        val scene = s.scene!!
+        val g = scene.grown!!
+        assertEquals(336f, scene.grownDisplay, 1e-3f)
+        assertEquals(336f, scene.tileAt(g).rect.w, 1e-3f)
+        assertTrue(scene.metrics.grownSize > 336f)
+    }
+
+    @Test
+    fun zoomWithoutACentredCardKeepsTheScreenCentre() {
+        val s = wall(phone(current = 4), phoneView)
+        s.settle()
+        s.beginDrag()
+        s.dragBy(130f, -70f)
+        s.endDrag(0f, 0f)
+        val cam = s.camera.position
+        val centre = WallPoint(phoneView.width / 2, phoneView.height / 2)
+        val before = s.scene!!.metrics
+        s.configure(phone(current = 4).zoomed(0.75f))
+        val after = s.scene!!.metrics
+        val now = s.camera.position
+        assertEquals((cam.x + centre.x) / before.pitch, (now.x + centre.x) / after.pitch, 1e-3f)
+        assertEquals((cam.y + centre.y) / before.pitch, (now.y + centre.y) / after.pitch, 1e-3f)
+    }
+
+    @Test
+    fun aFocusCoveredByTheFarCardMovesOntoIt() {
+        val s = wall(tv(current = 4, drift = false), tvView)
+        s.takeFocus()
+        // 焦点挪到大卡右边紧挨着的一格
+        val g = s.scene!!.grown!!
+        assertTrue(s.onKey(WallKey.Right, down = true, repeatCount = 0, longPress = false))
+        val f = s.focus!!
+        assertNotEquals(g, f)
+        s.configure(tv(current = 4, drift = false).zoomed(0.5f))
+        val scene = s.scene!!
+        val focus = s.focus!!
+        assertTrue(focus == scene.grown || !scene.coveredByGrown(focus, scene.rectAt(focus)))
+    }
 }

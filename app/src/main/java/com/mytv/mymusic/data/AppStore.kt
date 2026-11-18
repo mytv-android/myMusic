@@ -301,6 +301,10 @@ class SettingsStore(private val context: Context) {
     private val posterTranslationKey = booleanPreferencesKey("poster_translation")
     private val posterFollowKey = booleanPreferencesKey("poster_follow")
     private val posterTvDriftKey = booleanPreferencesKey("poster_tv_drift")
+    // 视角远近：手机、平板、电视各一份（按墙的格距档存）
+    private val posterZoomPhoneKey = floatPreferencesKey("poster_zoom_phone")
+    private val posterZoomTabletKey = floatPreferencesKey("poster_zoom_tablet")
+    private val posterZoomTvKey = floatPreferencesKey("poster_zoom_tv")
     private val collectionViewKey = stringPreferencesKey("collection_view")
     private val miniPlayerTargetKey = stringPreferencesKey("mini_player_target")
     // 播放上报：把播放记录回传给平台，让推荐流跟着口味走；关掉后一个请求都不发
@@ -493,6 +497,9 @@ class SettingsStore(private val context: Context) {
         it[posterTranslationKey] = value.translation
         it[posterFollowKey] = value.follow
         it[posterTvDriftKey] = value.tvDrift
+        it[posterZoomPhoneKey] = PosterZoom.snap(value.zoom.phone)
+        it[posterZoomTabletKey] = PosterZoom.snap(value.zoom.tablet)
+        it[posterZoomTvKey] = PosterZoom.snap(value.zoom.tv)
     }
 
     /** 滑动操作（设置 › 滑动操作）：只在本机，不进同步。 */
@@ -512,6 +519,11 @@ class SettingsStore(private val context: Context) {
         translation = values[posterTranslationKey] ?: true,
         follow = values[posterFollowKey] ?: true,
         tvDrift = values[posterTvDriftKey] ?: true,
+        zoom = PosterZoom(
+            phone = PosterZoom.snap(values[posterZoomPhoneKey] ?: PosterZoom.DEFAULT),
+            tablet = PosterZoom.snap(values[posterZoomTabletKey] ?: PosterZoom.DEFAULT),
+            tv = PosterZoom.snap(values[posterZoomTvKey] ?: PosterZoom.DEFAULT),
+        ),
     )
 
     private fun lyricStagePrefs(values: Preferences) = LyricStagePrefs(

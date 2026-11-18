@@ -8,6 +8,7 @@
  */
 package com.mytv.mymusic.ui.poster
 
+import com.mytv.mymusic.data.ZoomScope
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -133,6 +134,14 @@ internal enum class WallKind(
 
     /** 倍数为 1 时的大卡边长：332 / 606 / 451 / 451。 */
     val baseGrownSize: Float get() = WallLayout.GROW * pitch - gap
+
+    /** 视角记在哪一份：矮平板和平板同一份。 */
+    val scope: ZoomScope
+        get() = when (this) {
+            Phone -> ZoomScope.Phone
+            Tablet, ShortTablet -> ZoomScope.Tablet
+            Tv -> ZoomScope.Tv
+        }
 }
 
 /**

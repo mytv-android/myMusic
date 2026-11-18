@@ -426,7 +426,7 @@ internal fun CollectionPosterView(
             }
         }
         if (settingsOpen) {
-            PosterSettingsSheet(state.poster, actions::setPosterPrefs) { onSettingsOpenChange(false) }
+            PosterSettingsSheet(state.poster, spec.metrics.kind.scope, actions::setPosterPrefs) { onSettingsOpenChange(false) }
         }
     }
 }

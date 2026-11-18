@@ -312,7 +312,7 @@ internal fun PosterWallScreen(
     }
 
     if (settingsOpen) {
-        PosterSettingsSheet(state.poster, actions::setPosterPrefs) { settingsOpen = false }
+        PosterSettingsSheet(state.poster, metrics.kind.scope, actions::setPosterPrefs) { settingsOpen = false }
     }
     // 电视上墙里的方向键永远留在墙里，顶栏没有能拿焦点的按钮：回到正在播放、海报墙设置接在长按 OK / 菜单键的面板里
     val menuNow = rememberUpdatedState {

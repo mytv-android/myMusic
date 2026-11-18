@@ -177,6 +177,9 @@ internal class TileEnv(val wall: PosterWallState, val scope: CoroutineScope) {
     var showIndex by mutableStateOf(true)
     var titleFamily by mutableStateOf<FontFamily?>(null)
 
+    /** 格子太小（[WallMetrics.compact]）：不画序号、格上的歌名歌手和没封面时的字体海报，只剩封面 / 取色底块。 */
+    var compact by mutableStateOf(false)
+
     /** 减少动画：重排、圆角都直接跳到终点。 */
     var reduceMotion = false
 
@@ -234,6 +237,9 @@ internal class TileAnim(private val env: TileEnv, initial: WallTile, density: Fl
     private var shapePx = -1f
     private var shape: Shape = RectangleShape
 
+    /** 上一次 [update] 时墙的 [PosterWallState.scaleEpoch]：变了说明换了视角倍数，位置和圆角直接跳过去。 */
+    private var epoch = wall.scaleEpoch
+
     /** 封面按格子像素取档：只升不降，放大时不升（大卡自己取大图），这样重排来回不会反复换图。 */
     fun coverPxFor(t: WallTile, density: Float): Int {
         if (!t.grown) coverPx = max(coverPx, (t.rect.w * density).roundToInt())
@@ -245,7 +251,9 @@ internal class TileAnim(private val env: TileEnv, initial: WallTile, density: Fl
         val old = tile
         if (t != old) tile = t
         if (ghostAlpha != ghost) ghostAlpha = ghost
-        val snap = env.reduceMotion
+        val rescaled = epoch != wall.scaleEpoch
+        epoch = wall.scaleEpoch
+        val snap = env.reduceMotion || rescaled
         val target = t.rect.asRect()
         if (target != rectTarget) {
             rectTarget = target
@@ -403,7 +411,7 @@ private fun SongTile(
                     val settled = rememberSettled(anim, tile)
                     Box(Modifier.layoutId(TilePart.Slot)) { grownContent(tile.song, current, settled) }
                 }
-            } else {
+            } else if (!env.compact) {
                 if (env.showIndex) TileBadge(wallBadgeText(tile.song), current, style, palette)
                 val widthDp = tile.rect.w
                 if (fallback) PosterTitle(song.title, style.posterSp(widthDp), env)
@@ -482,7 +490,8 @@ private fun TileFace(
                         val a = tintDimAlpha(env.tint, anim.lift.value)
                         if (a > 0f) drawRect(s.surface.copy(alpha = a))
                     }
-                    if (!fallback && !t.grown) shade.draw(this, s.surface)
+                    // 底部渐变是给格上的字垫的；格子太小不画字时也不画它
+                    if (!fallback && !t.grown && !env.compact) shade.draw(this, s.surface)
                     if (current && !t.grown) {
                         drawRoundRect(
                             color = s.primary,

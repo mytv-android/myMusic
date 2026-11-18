@@ -103,6 +103,16 @@ internal fun initialCamera(metrics: WallMetrics, viewport: WallViewport): WallPo
 /** 镜头所在的格距网格坐标；只有跨过一条格线，要组合的格子才可能变。 */
 internal fun cullCell(camAxis: Float, pitch: Float): Int = floor(camAxis / pitch).toInt()
 
+/**
+ * 图层以屏幕点 [origin] 为中心缩小到 1 / [boost] 时要组合的格子：视口按 [boost] 倍、以 [origin] 为中心放大后再按上面同样剔除。
+ */
+internal fun WallScene.cullTiles(cx: Int, cy: Int, viewport: WallViewport, boost: Float, origin: WallPoint): List<WallTile> {
+    val p = metrics.pitch
+    val left = cx * p + origin.x - origin.x * boost
+    val top = cy * p + origin.y - origin.y * boost
+    return visibleTiles(WallPoint(left, top), WallViewport(viewport.width * boost + p, viewport.height * boost + p))
+}
+
 /** 大卡显示尺寸按视口的大卡那一段重算（转屏、浮层高度、折痕分段、视角都会改它）。 */
 internal fun WallScene.sizedFor(viewport: WallViewport): WallScene = withGrownDisplay(grownDisplaySize(metrics, viewport.cardArea))
 
@@ -212,6 +222,29 @@ internal class PosterWallState internal constructor(
     /** 组合中的格子的动画状态，焦点环和大卡描边按它的实时位置画。 */
     internal val tileAnims = mutableStateMapOf<SlotPos, TileAnim>()
 
+    /**
+     * 换视角倍数时整面墙的过渡缩放：[rescale] 后格子已经按新格距摆好，先用图层缩回旧的大小（[layerScale] = 旧 / 新），
+     * 再由 PosterWall 动画到 1；缩放中心 [layerOrigin] 是屏幕点（dp）。只在图层和绘制阶段读，不重组。
+     */
+    internal var layerScale by mutableFloatStateOf(1f)
+    internal var layerOrigin by mutableStateOf(WallPoint(0f, 0f))
+        private set
+
+    /** 每次需要把 [layerScale] 动画回 1 时加一，PosterWall 收集它。 */
+    internal var settleRequests by mutableIntStateOf(0)
+        private set
+
+    /**
+     * 图层缩小时（拉近的过渡、捏合拉远）屏幕上露出的范围比视口大：要组合的格子按 [cullBoost] 倍的范围算，
+     * 以 [cullOrigin] 为中心向外放；过渡结束回到 1。
+     */
+    private var cullBoost by mutableFloatStateOf(1f)
+    private var cullOrigin = WallPoint(0f, 0f)
+
+    /** 换倍数时加一：格子的位置、圆角这一次直接跳到新值（镜头也是跳的），不从旧格距弹过去。 */
+    internal var scaleEpoch = 0
+        private set
+
     /** 长按（触摸、读屏、长按 OK）和菜单键，参数是第几首、是不是菜单键（菜单键打开的面板焦点直接落在整页操作上）。 */
     internal var onLongPress: (index: Int, fromMenu: Boolean) -> Unit = { _, _ -> }
     internal var onGrownConfirm: (index: Int, current: Boolean) -> Unit = { _, _ -> }
@@ -269,7 +302,12 @@ internal class PosterWallState internal constructor(
     internal val composedTiles: List<WallTile> by derivedStateOf(structuralEqualityPolicy()) {
         val s = scene
         val v = viewport
-        if (s == null || v == null) emptyList() else s.cullTiles(cellX, cellY, v)
+        val boost = cullBoost
+        when {
+            s == null || v == null -> emptyList()
+            boost > 1f -> s.cullTiles(cellX, cellY, v, boost, cullOrigin)
+            else -> s.cullTiles(cellX, cellY, v)
+        }
     }
 
     internal fun isGhost(song: Int): Boolean = scene?.field?.isGhost(song) == true
@@ -294,14 +332,17 @@ internal class PosterWallState internal constructor(
         val s = scene
         if (!initialized || s == null || prev == null) {
             tryInit()
-        } else if (prev.metrics != c.metrics || prev.resetKey != c.resetKey) {
+        } else if (prev.metrics.kind != c.metrics.kind || prev.resetKey != c.resetKey) {
+            // 换设备档（转屏、折叠）或换队列：整面墙重来
             reset()
         } else {
+            // 只换了视角倍数：不重排、不重放入场，镜头按倍数换算
+            if (s.metrics.zoom != c.metrics.zoom) rescale(s.metrics, c.metrics)
             when (fieldChange(s.field, c.field)) {
                 FieldChange.Reset -> reset()
                 FieldChange.Append -> {
                     val from = (s.field as WallField.FeedBand).songs
-                    val ns = s.withField(c.field)
+                    val ns = (scene ?: s).withField(c.field)
                     scene = ns
                     viewport?.let { camera.bounds = ns.bounds(it) }
                     startWave(WallWave.Batch(from, (c.field as WallField.FeedBand).songs, waveStyle(c)))
@@ -403,6 +444,57 @@ internal class PosterWallState internal constructor(
         initialized = false
         generation++
         tryInit()
+    }
+
+    /**
+     * 只换视角倍数（设置里的滑块）：格子按新格距原地重排，不重放入场，[tileAnims] 按位置保留。
+     * 镜头：大卡正停在正中就换完还在正中（稿子「正在播放的那张留在原位」）；否则以 [anchor]（屏幕点，默认屏幕中心）为锚点换算，
+     * 锚点下还是同一处墙面。方向键焦点被拉远后的大卡盖住时挪到大卡上。
+     */
+    private fun rescale(old: WallMetrics, new: WallMetrics, anchor: WallPoint? = null) {
+        val s = scene ?: return
+        val vp = viewport ?: return
+        val g = s.grown
+        val resting = g != null && camera.restingPoint == s.centerTarget(g, vp)
+        val cam = camera.restingPoint
+        val ns = WallScene(new, s.field, g).sizedFor(vp)
+        scene = ns
+        camera.bounds = ns.bounds(vp)
+        val target = when {
+            anchor != null -> zoomCamera(cam, anchor, new.zoom / old.zoom)
+            resting -> ns.centerTarget(g, vp)
+            else -> zoomCamera(cam, WallPoint(vp.width / 2, vp.height / 2), new.zoom / old.zoom)
+        }
+        // 换倍数算一次操作：漂移停下，空闲计时从头算
+        camera.wake()
+        camera.snapTo(target)
+        scaleEpoch++
+        val f = focus
+        if (f != null && g != null && f != g && ns.coveredByGrown(f, ns.rectAt(f))) focus = g
+        // 视觉过渡：图层先缩回旧的大小，再动画到 1。中心取锚点；大卡停在正中时取大卡那一段的中心
+        val origin = when {
+            anchor != null -> anchor
+            resting -> vp.cardArea.let { WallPoint(it.x + it.w / 2, it.y + it.h / 2) }
+            else -> WallPoint(vp.width / 2, vp.height / 2)
+        }
+        startLayerSettle(layerScale * old.zoom / new.zoom, origin)
+    }
+
+    /** 从 [scale] 开始把整面墙的图层动画回 1（PosterWall 收集 [settleRequests]）。 */
+    private fun startLayerSettle(scale: Float, origin: WallPoint) {
+        layerOrigin = origin
+        layerScale = scale
+        if (scale < 1f) {
+            cullOrigin = origin
+            cullBoost = max(cullBoost, 1f / scale)
+        }
+        settleRequests++
+    }
+
+    /** 过渡缩放走完了：图层回到 1，多组合的格子放掉。 */
+    internal fun layerSettled() {
+        layerScale = 1f
+        cullBoost = 1f
     }
 
     private fun waveStyle(c: WallConfig): WaveStyle = when {

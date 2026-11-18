@@ -25,6 +25,13 @@ internal fun grownDisplaySize(m: WallMetrics, area: WallRect): Float {
     }
 }
 
+/**
+ * 换倍数（[ratio] = 新倍数 / 旧倍数）时镜头怎么挪，才能让屏幕点 [anchor]（相对视口左上角，dp）下面还是同一处墙面：
+ * 世界坐标对倍数是线性的（位置 = 格 × 格距），锚点下的墙面点跟着乘 ratio，镜头再减回锚点。
+ */
+internal fun zoomCamera(cam: WallPoint, anchor: WallPoint, ratio: Float): WallPoint =
+    WallPoint((cam.x + anchor.x) * ratio - anchor.x, (cam.y + anchor.y) * ratio - anchor.y)
+
 /** 以中心为准改成 [size] × [size]。 */
 internal fun WallRect.resizedAround(size: Float): WallRect =
     if (w == size && h == size) this else WallRect(centerX - size / 2, centerY - size / 2, size, size)
