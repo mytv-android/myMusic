@@ -1,5 +1,6 @@
 package com.mytv.mymusic.aggregate
 
+import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.lx.LxPlatform
@@ -210,6 +211,11 @@ class SourceResolver(
             }
             val url = stream?.url.orEmpty()
             if (url.isBlank()) {
+                // 洛雪是「换源点了却回退」的主要出处，失败原因要进应用内日志，用户导日志时能看见
+                if (source.providerId == LxPlatform.PROVIDER_ID) {
+                    val reason = repository.customSourceFailure().ifBlank { failure?.message.orEmpty() }
+                    AppLog.w("SourceResolver", "洛雪取流失败《${track.title}》：${reason.take(300)}")
+                }
                 synchronized(lock) {
                     negativeCache[cacheKey] = CachedFailure(System.currentTimeMillis(), customGeneration)
                 }
@@ -247,6 +253,9 @@ class SourceResolver(
             if (preview && !policy.allowPreview && !explicit) {
                 attempts += Attempt(source, "仅提供试听")
                 continue
+            }
+            if (source.providerId == LxPlatform.PROVIDER_ID) {
+                AppLog.d("SourceResolver", "洛雪取流成功《${track.title}》：${stream?.extra?.get("lx_source").orEmpty()}")
             }
             return Resolution.Ready(resolvedSource, url, preview)
         }

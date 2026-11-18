@@ -65,7 +65,9 @@ internal object LxProtocol {
     fun musicInfo(source: String, song: Song): JsonObject = buildJsonObject {
         put("id", song.id)
         put("songmid", song.songMid(source))
-        put("hash", song.extra["hash"].orEmpty().ifBlank { if (source == "kg") song.id else "" })
+        // 没有哈希就不要写这个键：脚本普遍用 `hash ?? songmid ?? id` 取值，空串会让它们直接判成缺 id
+        val hash = song.extra["hash"].orEmpty().ifBlank { if (source == "kg") song.id else "" }
+        if (hash.isNotBlank()) put("hash", hash)
         put("name", song.name)
         put("songname", song.name)
         put("singer", song.artist)

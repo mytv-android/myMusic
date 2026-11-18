@@ -717,12 +717,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             LxSources.records.collect { records ->
                 if (records.none { it.enabled }) return@collect
                 val current = settingsState.value.aggregation
-                // providerPriority 里保留过 lx 表示用户已经做过选择，尤其不能在手动关闭后反复自动打开。
-                if (LxPlatform.PROVIDER_ID !in current.enabledProviders && LxPlatform.PROVIDER_ID !in current.providerPriority) {
+                // 导入了第一个脚本就自动启用；用户手动关过（lxDismissed）就不再擅自打开。
+                if (LxPlatform.PROVIDER_ID !in current.enabledProviders && !current.lxDismissed) {
                     app.settings.saveAggregation(
                         current.copy(
+                            lxDismissed = false,
                             enabledProviders = current.enabledProviders + LxPlatform.PROVIDER_ID,
-                            providerPriority = current.providerPriority + LxPlatform.PROVIDER_ID,
                         ),
                     )
                 }
@@ -4391,6 +4391,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         attempts.firstOrNull { it.source.providerId == LOCAL_SOURCE }?.let { return it.reason }
         val reasons = attempts.map { it.reason }
         val tried = attempts.map { it.source.providerName }.distinct()
+        // 用户明确点了洛雪却没用上：把脚本报的原因带出来，不然只剩一句“都没有返回地址”
+        if (attempts.any { it.source.providerId == LxPlatform.PROVIDER_ID }) {
+            app.repository.customSourceFailure().takeIf { it.isNotBlank() }?.let { return "洛雪：$it" }
+        }
         return when {
             reasons.any { it.contains("签名器") } -> reasons.first { it.contains("签名器") }
             reasons.any { it.contains("登录") || it.contains("会员") } -> "这首歌需要登录或会员后才能播放"
@@ -5884,8 +5888,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (id in enabled) {
             enabled.remove(id)
             priority.remove(id)
-            // 洛雪保留一个末尾标记：关闭后只参与最后的失败回退，也不会被“首次导入”逻辑重新打开。
-            if (id == LxPlatform.PROVIDER_ID) priority += id
         } else {
             // 重新打开的排到最后：顺序是用户自己排的，不猜它想插在哪儿
             enabled += id
@@ -5893,7 +5895,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             priority += id
         }
         searchEngine.clearCache()
-        app.settings.saveAggregation(current.copy(enabledProviders = enabled, providerPriority = priority))
+        app.settings.saveAggregation(
+            current.copy(
+                enabledProviders = enabled,
+                providerPriority = priority,
+                // 关掉洛雪记下来，导入脚本时不再自动启用；重新打开时清掉
+                lxDismissed = if (id == LxPlatform.PROVIDER_ID) id !in enabled else current.lxDismissed,
+            ),
+        )
     }
 
     /** 音乐源排序：只在已启用的平台之间挪。这个顺序同时决定聚合搜索、来源条和换源的先后。 */

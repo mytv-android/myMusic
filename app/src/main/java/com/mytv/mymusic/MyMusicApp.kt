@@ -171,6 +171,8 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         // 本地歌的线索跟着歌单同步：建快照时从本地音乐库取，合并完写回；线索一变（换匹配、上传、删云端）就防抖同步
         sync.localRefs = localLibrary.syncRefs
         localLibrary.onRefsChanged = { sync.onLocalChange() }
+        // 洛雪自定义音源跟着同步走：脚本正文进同步文件，换设备直接能播
+        sync.lxStore = LxSources.syncStore()
         // 本地音乐：启动后等一会儿做一遍增量扫描（没给权限、没加文件夹时什么都不做）
         localLibrary.startupScan()
         // 上传队列：放回上次没传完的；没有后台任务可用（解锁前的进程）时 runner 为空，在进程里直接传

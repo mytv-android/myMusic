@@ -13,12 +13,14 @@ data class SyncContent(
     val playlists: List<SyncPlaylist> = emptyList(),
     val favorites: List<SyncFavorite> = emptyList(),
     val cookies: List<SyncCookie> = emptyList(),
+    val lxSources: List<SyncLxSource> = emptyList(),
 )
 
 data class MergeResult(
     val playlists: List<SyncPlaylist>,
     val favorites: List<SyncFavorite>,
     val cookies: List<SyncCookie>,
+    val lxSources: List<SyncLxSource>,
     val conflicts: List<MergeConflict>,
 )
 
@@ -68,6 +70,7 @@ object SyncMerge {
             playlists = withKnownLinks(playlists, local.playlists),
             favorites = favorites,
             cookies = mergeCookies(base?.cookies.orEmpty(), local.cookies, remote.cookies),
+            lxSources = mergeLxSources(base?.lxSources.orEmpty(), local.lxSources, remote.lxSources),
             conflicts = conflicts,
         )
     }
@@ -103,6 +106,10 @@ object SyncMerge {
         return content.copy(playlists = withKnownLinks(playlists, local.playlists), favorites = favorites)
     }
 
+    /** 从同步文件回到本机音源：删掉的墓碑不传，脚本正文原样带回去。 */
+    fun activeLxSources(sources: List<SyncLxSource>): List<SyncLxSource> =
+        sources.filter { it.deletedAt == null && it.id.isNotBlank() }
+
     /**
      * 选中的是 v2 文件里的那一版时，它不知道绑定状态（[SyncPlaylist.linkKnown] = false）：
      * 用本机同一个歌单的绑定补上再推，不然推上去的 v3 文件会写成“没绑定”，让其他设备误解绑。
@@ -121,8 +128,8 @@ object SyncMerge {
         remote: SyncSnapshot,
         strategy: SyncStrategy,
     ): SyncContent = when (strategy) {
-        SyncStrategy.Local -> SyncContent(local.playlists, local.favorites, local.cookies)
-        SyncStrategy.Remote -> SyncContent(remote.playlists, remote.favorites, remote.cookies)
+        SyncStrategy.Local -> SyncContent(local.playlists, local.favorites, local.cookies, local.lxSources)
+        SyncStrategy.Remote -> SyncContent(remote.playlists, remote.favorites, remote.cookies, remote.lxSources)
         SyncStrategy.Merge -> {
             val localMap = local.playlists.associateBy { it.id }
             val remoteMap = remote.playlists.associateBy { it.id }
@@ -132,6 +139,7 @@ object SyncMerge {
                 },
                 favorites = unionFavorites(local.favorites, remote.favorites),
                 cookies = unionCookies(local.cookies, remote.cookies),
+                lxSources = mergeLxSources(emptyList(), local.lxSources, remote.lxSources),
             )
         }
     }
@@ -184,6 +192,52 @@ object SyncMerge {
                 else -> newerCookie(l, r)
             }
         }
+    }
+
+    /**
+     * 洛雪自定义音源按修改时间取新的；删除的墓碑挡住另一台设备没删的旧版本。
+     * 和 Cookie 一样不做冲突界面：音源是可再导入的配置，没必要为它打断同步。
+     */
+    fun mergeLxSources(
+        base: List<SyncLxSource>,
+        local: List<SyncLxSource>,
+        remote: List<SyncLxSource>,
+    ): List<SyncLxSource> {
+        val baseMap = base.associateBy { it.id }
+        val localMap = local.associateBy { it.id }
+        val remoteMap = remote.associateBy { it.id }
+        val ids = (baseMap.keys + localMap.keys + remoteMap.keys).toSortedSet()
+        return ids.mapNotNull { id ->
+            val b = baseMap[id]
+            val l = localMap[id]
+            val r = remoteMap[id]
+            val localChanged = !sameLx(l, b)
+            val remoteChanged = !sameLx(r, b)
+            when {
+                sameLx(l, r) -> l ?: r
+                localChanged && !remoteChanged -> l ?: lxTombstone(b)
+                !localChanged && remoteChanged -> r ?: lxTombstone(b)
+                else -> newerLx(l, r)
+            }
+        }.sortedBy { it.position }
+    }
+
+    private fun sameLx(a: SyncLxSource?, b: SyncLxSource?): Boolean {
+        if (a == null || b == null) return a == b
+        return a.scriptHash == b.scriptHash && a.enabled == b.enabled && a.position == b.position &&
+            a.deletedAt == b.deletedAt && a.name == b.name
+    }
+
+    private fun newerLx(local: SyncLxSource?, remote: SyncLxSource?): SyncLxSource? {
+        if (local == null) return remote
+        if (remote == null) return local
+        return if (remote.changeTimeMillis() > local.changeTimeMillis()) remote else local
+    }
+
+    private fun lxTombstone(base: SyncLxSource?): SyncLxSource? {
+        if (base == null) return null
+        if (base.deletedAt != null) return base
+        return base.copy(deletedAt = SyncTime.nowIso(), script = "", scriptHash = "")
     }
 
     private fun mergePlaylists(local: SyncPlaylist?, remote: SyncPlaylist?): SyncPlaylist? {

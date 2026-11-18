@@ -143,6 +143,11 @@ data class AggregationSettings(
     val allowPreview: Boolean = false,
     val matchStrictness: MatchStrictness = MatchStrictness.Strict,
     val showUnavailable: Boolean = true,
+    /**
+     * 用户自己把洛雪关掉了。导入脚本时自动启用要绕开这种情况；
+     * 不能拿 [providerPriority] 里有没有 lx 判断：它是默认顺序表，老配置本来就带着 lx。
+     */
+    val lxDismissed: Boolean = false,
 ) {
     fun threshold(): Float = if (matchStrictness == MatchStrictness.Strict) 0.92f else 0.88f
 

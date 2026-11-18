@@ -18,6 +18,7 @@ const val SCHEMA = "mymusic.library"
 /**
  * 3：本地歌多了 local / remote / match 三组线索（设计稿第 08 节）。旧版本读到 3 会停在“请先更新应用”，
  * 这是有意的：旧客户端不认识这几个字段，写回时会把别的设备记下的云端位置和匹配结果丢掉。
+ * 洛雪音源（[SyncSnapshot.lxSources]）是 v3 里的可选字段，不升版本：老客户端会忽略它。
  */
 const val SCHEMA_VERSION = 3
 
@@ -33,7 +34,30 @@ data class SyncSnapshot(
     val playlists: List<SyncPlaylist> = emptyList(),
     val favorites: List<SyncFavorite> = emptyList(),
     val cookies: List<SyncCookie> = emptyList(),
+    /** 洛雪自定义音源，连脚本正文一起同步：本机导入的脚本没有地址，丢了只能重新导入。 */
+    val lxSources: List<SyncLxSource> = emptyList(),
 )
+
+/** 洛雪自定义音源。[script] 是脚本正文，[deletedAt] 非空表示删除的墓碑。 */
+@Serializable
+data class SyncLxSource(
+    val id: String,
+    val name: String = "",
+    val description: String = "",
+    val version: String = "",
+    val author: String = "",
+    val homepage: String = "",
+    val sourceUrl: String = "",
+    val scriptHash: String = "",
+    val script: String = "",
+    val enabled: Boolean = true,
+    /** 导入顺序就是洛雪内部的尝试顺序。 */
+    val position: Int = 0,
+    val updatedAt: String = SyncTime.nowIso(),
+    val deletedAt: String? = null,
+)
+
+fun SyncLxSource.changeTimeMillis(): Long = SyncTime.toMillis(deletedAt ?: updatedAt)
 
 @Serializable
 data class SyncPlaylist(
@@ -231,6 +255,7 @@ fun buildSnapshot(
     cookieUpdatedAt: Map<String, Long> = emptyMap(),
     /** 本地歌的线索，按 Song.key（local:sha256:…）查；平台歌不在里面。 */
     localRefs: Map<String, SyncTrackRefs> = emptyMap(),
+    lxSources: List<SyncLxSource> = emptyList(),
 ): SyncSnapshot {
     val entriesByPlaylist = entries.groupBy { it.playlistId }
     return SyncSnapshot(
@@ -283,6 +308,7 @@ fun buildSnapshot(
                 )
             }
             .filter { includeDeleted },
+        lxSources = lxSources,
     )
 }
 
@@ -375,6 +401,8 @@ fun snapshotSignature(snapshot: SyncSnapshot): String = buildString {
     append(snapshot.cookies.sortedBy { it.provider }.joinToString("\n") { "${it.provider}:${cookieSignature(it)}" })
     append("\n--refs--\n")
     append(refsSignature(snapshot))
+    append("\n--lx--\n")
+    append(snapshot.lxSources.sortedBy { it.id }.joinToString("\n") { "${it.id}:${it.scriptHash}:${it.enabled}:${it.deletedAt}" })
 }
 
 /** 所有带线索的本地歌：key + 三组线索，排好序；同一首在几个歌单里出现只算一次。 */

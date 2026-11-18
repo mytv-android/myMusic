@@ -20,6 +20,8 @@ internal const val MAX_LX_SOURCES = 12
 class LxSourceStore(context: Context) {
     private val directory = File(context.filesDir, "lx-sources")
     private val metadataFile = File(directory, "sources.json")
+    /** 删除记录：id → 删除时间。同步时带给别的设备，让它们也删掉。 */
+    private val tombstonesFile = File(directory, "deleted.json")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
     private val mutex = Mutex()
     private val mutableRecords = MutableStateFlow(readRecords())
@@ -82,8 +84,38 @@ class LxSourceStore(context: Context) {
             val current = mutableRecords.value
             if (current.none { it.id == id }) return@withLock
             writeRecords(current.filterNot { it.id == id })
+            writeTombstones(readTombstones() + (id to System.currentTimeMillis()))
             directory.listFiles()?.filter { it.name.startsWith("$id-") }?.forEach { it.delete() }
         }
+    }
+
+    /** 删除记录：id → 删除时间（毫秒）。同步层拿去写墓碑。 */
+    fun tombstones(): Map<String, Long> = readTombstones()
+
+    /** 同步写回后只保留还没被同步文件承认的删除记录（它们要继续上传，别的地方才能跟着删）。 */
+    suspend fun keepTombstones(ids: Set<String>) = withContext(Dispatchers.IO) {
+        mutex.withLock { writeTombstones(readTombstones().filterKeys { it !in ids }) }
+    }
+
+    /** 不写删除标记地删掉：从云端恢复、清空本机时用，不能反过去把别的设备上的音源也删了。 */
+    suspend fun forget(id: String) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val current = mutableRecords.value
+            if (current.none { it.id == id }) return@withLock
+            writeRecords(current.filterNot { it.id == id })
+            writeTombstones(readTombstones() - id)
+            directory.listFiles()?.filter { it.name.startsWith("$id-") }?.forEach { it.delete() }
+        }
+    }
+
+    private fun readTombstones(): Map<String, Long> = runCatching {
+        json.decodeFromString<Map<String, Long>>(
+            AtomicFile(tombstonesFile).openRead().use { it.readBytes().toString(Charsets.UTF_8) },
+        )
+    }.getOrDefault(emptyMap())
+
+    private fun writeTombstones(value: Map<String, Long>) {
+        atomicWrite(tombstonesFile, json.encodeToString(value).toByteArray(Charsets.UTF_8))
     }
 
     private suspend fun update(id: String, transform: (LxSourceRecord) -> LxSourceRecord) {

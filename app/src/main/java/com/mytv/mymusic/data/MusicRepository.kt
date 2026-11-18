@@ -52,6 +52,9 @@ open class MusicRepository(
     open fun supportsCustomSource(provider: String): Boolean = lxPlayback.supports(provider)
     open fun customSourceGeneration(): Long = lxPlayback.generation
 
+    /** 洛雪上次取流失败的原因；换源面板和播放页的提示用。 */
+    open fun customSourceFailure(): String = (lxPlayback as? LxSources)?.lastFailure.orEmpty()
+
     suspend fun lyrics(song: Song, cookie: String): String =
         requireProvider(song.source).lyrics(cookie, song)
 

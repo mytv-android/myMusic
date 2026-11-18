@@ -147,6 +147,9 @@ class SyncCoordinator(
      */
     @Volatile var localRefs: LocalSyncRefs? = null
 
+    /** 洛雪自定义音源：没接时同步文件里不写这一块（单元测试和老版本行为不变）。 */
+    @Volatile var lxStore: LxSyncStore? = null
+
     private val _state = MutableStateFlow(SyncUiState())
     val state: StateFlow<SyncUiState> = _state.asStateFlow()
     private val _events = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 8)
@@ -377,6 +380,7 @@ class SyncCoordinator(
                                 playlists = result.playlists,
                                 favorites = result.favorites,
                                 cookies = result.cookies,
+                                lxSources = result.lxSources,
                             ),
                             removeAbsent = false,
                             dirty = true,
@@ -415,6 +419,7 @@ class SyncCoordinator(
                         playlists = result.playlists,
                         favorites = result.favorites,
                         cookies = result.cookies,
+                        lxSources = result.lxSources,
                     )
                     var uploaded: RemoteFile? = null
                     var round = 0
@@ -438,6 +443,7 @@ class SyncCoordinator(
                                             playlists = again.playlists,
                                             favorites = again.favorites,
                                             cookies = again.cookies,
+                                            lxSources = again.lxSources,
                                         ),
                                         removeAbsent = false,
                                         dirty = true,
@@ -472,6 +478,7 @@ class SyncCoordinator(
                                 playlists = again.playlists,
                                 favorites = again.favorites,
                                 cookies = again.cookies,
+                                lxSources = again.lxSources,
                             )
                             currentRemoteFile = latest
                             continue
@@ -725,6 +732,7 @@ class SyncCoordinator(
                     playlists = content.playlists,
                     favorites = content.favorites,
                     cookies = content.cookies,
+                    lxSources = content.lxSources,
                 )
             }
             var remoteFile = pending.remoteFile
@@ -1182,6 +1190,7 @@ class SyncCoordinator(
             playlists = content.playlists,
             favorites = content.favorites,
             cookies = content.cookies,
+            lxSources = content.lxSources,
         )
         if (strategy == SyncStrategy.Remote) {
             db.withTransaction { libraryDao.clearPlaylists() }
@@ -1331,6 +1340,7 @@ class SyncCoordinator(
             cookies = cookieSnapshot.cookies,
             cookieUpdatedAt = cookieSnapshot.updatedAt,
             localRefs = refs,
+            lxSources = lxStore?.snapshot().orEmpty(),
         )
     }
 
@@ -1353,6 +1363,22 @@ class SyncCoordinator(
         applyFavorites(snapshot.favorites, removeAbsent)
         applyCookies(snapshot.cookies, removeAbsent)
         applyLocalRefs(SyncRefMerge.index(snapshot).values)
+        applyLxSources(snapshot.lxSources, removeAbsent)
+    }
+
+    /**
+     * 洛雪音源写回本机。脚本正文在同步文件里，所以换一台设备也能直接播放；
+     * 老文件没有这一块（或这台设备没接音源库）时什么都不做。
+     */
+    private suspend fun applyLxSources(sources: List<SyncLxSource>, removeAbsent: Boolean) {
+        val target = lxStore ?: return
+        try {
+            target.apply(sources, removeAbsent)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Exception) {
+            com.mytv.mymusic.AppLog.w("Sync", "洛雪音源写回失败：${error.javaClass.simpleName}: ${error.message}")
+        }
     }
 
     /**
@@ -1563,6 +1589,7 @@ class SyncCoordinator(
                             playlists = result.playlists,
                             favorites = result.favorites,
                             cookies = result.cookies,
+                            lxSources = result.lxSources,
                         ),
                         removeAbsent = false,
                         dirty = true,
@@ -1594,6 +1621,7 @@ class SyncCoordinator(
                 playlists = result.playlists,
                 favorites = result.favorites,
                 cookies = result.cookies,
+                lxSources = result.lxSources,
             )
             // 上传前再确认一次；若又变了，回到循环开头按最新内容重新合并
             val check = provider.read(token, account.remoteId)

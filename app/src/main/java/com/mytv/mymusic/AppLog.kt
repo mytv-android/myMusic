@@ -14,6 +14,8 @@ import java.util.Locale
  * 别往里放 Cookie、token 这类凭证，[redact] 会把常见的几种抹掉，但新的敏感字段要自己注意。
  */
 object AppLog {
+    /** 这些 tag 同时写到 logcat，方便 `adb logcat -s` 直接盯自定义音源的整条链路。 */
+    private val LOGCAT_TAGS = setOf("LxSources", "SourceResolver", "Player")
 
     private const val MAX_ENTRIES = 800
     private const val MAX_MESSAGE = 2_000
@@ -39,6 +41,10 @@ object AppLog {
 
     private fun add(level: String, tag: String, raw: String) {
         val message = redact(raw.take(MAX_MESSAGE))
+        // 自定义音源排查常常没法连 adb：同时打一份到 logcat（单元测试里没有 android.util.Log）
+        if (tag in LOGCAT_TAGS) runCatching {
+            android.util.Log.println(if (level == "E") android.util.Log.ERROR else android.util.Log.DEBUG, "AppLog/$tag", message)
+        }
         synchronized(lock) {
             if (entries.size >= MAX_ENTRIES) entries.removeFirst()
             entries.addLast(Entry(System.currentTimeMillis(), level, tag, message))

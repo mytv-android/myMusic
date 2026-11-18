@@ -272,6 +272,10 @@ private fun LxSourceDetailSheet(
 ) {
     AdaptiveSheet(onDismiss = onDismiss, title = record.name, subtitle = sourceSubtitle(record)) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+            if (record.sourceUrl.isBlank()) {
+                SettingsNote("本地导入的脚本没有下载地址：会连脚本内容一起同步到你连接的 Gist / Gitee / WebDAV；" +
+                    "没连同步时它只存在这台设备上，卸载或清数据就没了，需要重新导入。")
+            }
             if (record.description.isNotBlank()) {
                 Text(
                     record.description,

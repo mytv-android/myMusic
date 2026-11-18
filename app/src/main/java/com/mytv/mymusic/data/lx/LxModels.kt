@@ -97,6 +97,9 @@ internal object LxScriptHeaders {
     fun parse(script: String): LxScriptMetadata {
         require(script.isNotBlank()) { "脚本内容为空" }
         require(script.toByteArray(Charsets.UTF_8).size <= MAX_SCRIPT_BYTES) { "脚本超过 2 MB，无法导入" }
+        require(!isDesktopModule(script)) {
+            "这是洛雪桌面版（Electron）插件，用了 require('axios') 这类 Node 模块，手机端跑不了；请换移动版自定义音源脚本"
+        }
         val header = script.take(16_384)
         val values = fields.associateWith { field ->
             Regex(
@@ -116,6 +119,10 @@ internal object LxScriptHeaders {
     private fun String.clean(maxLength: Int): String = trim()
         .filterNot { it.isISOControl() && it != '\n' && it != '\r' && it != '\t' }
         .take(maxLength)
+
+    /** 桌面版插件导出的是 CommonJS 模块，没声明 `globalThis.lx`，还依赖 Node 内置或三方包。 */
+    private fun isDesktopModule(script: String): Boolean =
+        script.contains("module.exports") && (script.contains("require(\"") || script.contains("require('"))
 }
 
 internal const val MAX_SCRIPT_BYTES = 2 * 1024 * 1024
