@@ -10,7 +10,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
@@ -91,7 +93,12 @@ import com.mytv.mymusic.ui.player.stage.AnimationSheet
 import com.mytv.mymusic.ui.player.stage.SongDecision
 import com.mytv.mymusic.ui.player.stage.SongRowState
 import com.mytv.mymusic.ui.player.stage.StageBinding
+import com.mytv.mymusic.ui.player.stage.StageTag
+import com.mytv.mymusic.ui.player.stage.isDirty
 import com.mytv.mymusic.ui.player.stage.isKnown
+import com.mytv.mymusic.ui.player.stage.modeOf
+import com.mytv.mymusic.ui.player.stage.previewId
+import com.mytv.mymusic.ui.player.stage.withDraft
 import com.mytv.mymusic.ui.player.stage.pin
 import com.mytv.mymusic.ui.player.stage.rememberAnimationDraft
 import com.mytv.mymusic.ui.player.stage.rememberLyricDirector
@@ -153,8 +160,10 @@ fun PlayerScreen(
     var animationOpen by rememberSaveable { mutableStateOf(false) }
     // 「加到歌单」面板：打开那一刻的这首。面板开着时切了歌，勾的还是打开时那首，不会悄悄改到下一首上
     var playlistSong by remember { mutableStateOf<Song?>(null) }
+    // 电视上开着歌词动画面板：直接进环境模式（舞台铺满，草稿画在上面）；其他设备开着面板时不进空闲
     val idle = rememberIdleState(
-        holdAwake = sheetOpen || animationOpen || playlistSong != null || state.sourcePickerTrack != null || tabletop,
+        holdAwake = sheetOpen || (animationOpen && !window.isTv) || playlistSong != null || state.sourcePickerTrack != null || tabletop,
+        forceIdle = animationOpen && window.isTv,
     )
     // 电视环境模式（全屏歌词页）里快退快进的浮层提示：按左右方向键时显示，1.2 秒淡出
     val seekHint = remember { SeekHint() }
@@ -191,11 +200,50 @@ fun PlayerScreen(
     val lyrics = remember(stageLyrics, state.lyricStage.subline) { stageLyrics.withSubline(state.lyricStage.subline) }
     val lyricsLoading = lyricsState.loading || !lyricsReady
     val director = rememberLyricDirector(song, state.lyricStage, stageLyrics, lyricsLoading, position, state.playing, actions)
-    val stageMode = director.mode(state.lyricStage)
+    // 正在显示的模式（舞台不预览草稿时就画它）
+    val shownMode = director.mode(state.lyricStage)
     // 动画面板的草稿：面板开着时才有，每次打开重新建
     val animationDraft = rememberAnimationDraft(animationOpen, state.lyricStage)
-    val stage = remember(stageMode, state.lyricStage, stageLyrics) {
-        StageBinding(stageMode, state.lyricStage, stageLyrics) { animationOpen = true }
+    // 桌面姿态上半屏此刻放什么：设置里选的，或者工具栏、更多菜单临时换成的歌词
+    val tabletopShown = if (lyricsMode) TabletopTop.Lyrics else state.tabletopTop
+    // 舞台露在面板旁边：电视（开面板就进环境模式）、宽屏专注歌词（含书本姿态）、桌面姿态上半屏放歌词
+    val stageBeside = window.isTv || (wideLayout && !tabletop && lyricsMode) || (tabletop && tabletopShown == TabletopTop.Lyrics)
+    val pinnedId = state.lyricStage.pins[song.key]?.takeIf(state.lyricStage::isKnown)
+    val memory = director.memory
+    val rememberedMode = memory?.mode?.takeIf { it.isNotEmpty() }
+    val knownBpm = memory?.bpm?.takeIf { it > 0f } ?: (director.decision as? SongDecision.Tempo)?.bpm
+    // 舞台在旁边时草稿直接画在舞台上；点了保存、这首还没换上之前继续画预览的那个，不闪回旧模式
+    val previewing = animationDraft != null && stageBeside &&
+        (animationDraft.saving || isDirty(state.lyricStage, animationDraft.draft))
+    val stagePrefs = if (previewing) state.lyricStage.withDraft(animationDraft!!.draft) else state.lyricStage
+    val previewMode = if (previewing) {
+        val draft = animationDraft!!
+        stagePrefs.modeOf(previewId(draft.draft, state.lyricStage, pinnedId, rememberedMode, director.shown, knownBpm, draft.editTarget))
+    } else {
+        null
+    }
+    val stageMode = previewMode ?: shownMode
+    val stageTag = when {
+        previewing -> StageTag("预览：${stageMode.label} · 还没保存", preview = true)
+        animationDraft != null && stageBeside -> StageTag("正在用：${shownMode.label}", preview = false)
+        else -> null
+    }
+    // 面板（平板 400dp、电视 360dp）从右边盖住舞台的宽度，文字区让开；书本姿态面板在左页，不盖舞台
+    val coverEnd = when {
+        animationDraft == null || !stageBeside || book -> 0.dp
+        window.isTv -> 400.dp
+        window.widthDp < 900 -> 440.dp
+        else -> 460.dp
+    }
+    val modeFade: FiniteAnimationSpec<Float>? = if (director.appliedSwitch) tween(APPLY_FADE_MS) else null
+    // 旋转、折叠会换排法，绑定不跟着重建：打开面板时读这一刻的排法
+    val focusFirst by rememberUpdatedState(wideLayout && !tabletop)
+    val stage = remember(stageMode, stagePrefs, stageLyrics, stageTag, coverEnd, modeFade) {
+        StageBinding(stageMode, stagePrefs, stageLyrics, stageTag, coverEnd, modeFade) {
+            // 宽屏默认布局没有舞台：先进专注歌词，舞台在面板旁边才能预览
+            if (focusFirst) lyricsMode = true
+            animationOpen = true
+        }
     }
     // 自己画背景的动画（动感波光）铺满歌词页时，底下的流光背景停掉；等歌词页淡入完再停，免得过渡中闪一下纯色。
     // 桌面姿态的舞台只占上半屏，下半屏的控件还要流光背景
@@ -273,8 +321,6 @@ fun PlayerScreen(
             ),
     ) {
         val wideBackdrop = !tabletop && (window.isTv || wideLayout)
-        // 桌面姿态上半屏此刻放什么：设置里选的，或者工具栏、更多菜单临时换成的歌词
-        val tabletopShown = if (lyricsMode) TabletopTop.Lyrics else state.tabletopTop
         LyricsBackdrop(
             cover = song.cover,
             playing = state.playing,
@@ -318,6 +364,7 @@ fun PlayerScreen(
                 seekHint = seekHint,
                 addedToPlaylist = addedToPlaylist,
                 playlistSheetOpen = playlistSong != null,
+                animationSheetOpen = animationOpen,
                 onAddToPlaylist = onAddToPlaylist,
                 onOpenQueue = onOpenQueue,
                 onOpenTimer = onOpenTimer,
@@ -422,23 +469,21 @@ fun PlayerScreen(
         }
         HeartBurst(burst, heartBurstPlacement(window.fold, book, tabletop))
         if (animationDraft != null) {
-            val prefs = state.lyricStage
-            val memory = director.memory
             AnimationSheet(
-                saved = prefs,
+                saved = state.lyricStage,
                 draft = animationDraft,
                 song = song,
                 // 没有 key 的歌（个别电台）没法单独固定，不显示“这首歌”一行
                 songRow = if (song.key.isBlank()) null else SongRowState(
-                    shownId = stageMode.id,
+                    shownId = shownMode.id,
                     decision = director.decision,
-                    pinnedId = prefs.pins[song.key]?.takeIf(prefs::isKnown),
-                    remembered = memory?.mode?.takeIf { it.isNotEmpty() },
-                    bpm = memory?.bpm?.takeIf { it > 0f } ?: (director.decision as? SongDecision.Tempo)?.bpm,
-                    waitingFor = director.wanted?.takeIf { it != stageMode.id },
+                    pinnedId = pinnedId,
+                    remembered = rememberedMode,
+                    bpm = knownBpm,
+                    waitingFor = director.wanted?.takeIf { it != shownMode.id },
                     onPin = { id -> director.pin(song, id, actions) },
                 ),
-                stageBeside = false,
+                stageBeside = stageBeside,
                 actions = actions,
                 onApplied = { hint -> director.applyNow(song.key, hint) },
                 onDismiss = { animationOpen = false },
@@ -479,6 +524,9 @@ internal fun rememberParsedLyrics(raw: String, text: LyricTextPrefs = LyricTextP
 
 /** 自己画背景的动画铺满歌词页后，等这么久（歌词页淡入完）再停流光背景。 */
 private const val BACKDROP_OFF_DELAY_MS = 700L
+
+/** “保存并应用”换模式时的淡入淡出。 */
+private const val APPLY_FADE_MS = 400
 
 /**
  * 空闲时控件淡出的透明度，只在图层里读。空闲状态在效果协程里收集：返回值的函数不是独立的重组作用域，

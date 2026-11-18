@@ -301,6 +301,9 @@ internal fun WidePlayer(
                             insets = stageInsets,
                             modifier = Modifier.fillMaxSize().graphicsLayer { alpha = focusAlpha() },
                             seek = actions::seek,
+                            tag = stage.tag,
+                            coverEnd = stage.coverEnd,
+                            modeFade = stage.modeFade,
                         ) { modifier ->
                             LyricsList(
                                 lyrics,

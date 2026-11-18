@@ -634,6 +634,8 @@ private fun PhoneLyricsPage(
                     insets = insets,
                     modifier = Modifier.fillMaxSize(),
                     seek = actions::seek,
+                    // 手机上舞台被面板挡住，不在舞台上预览草稿，只用保存时的淡入淡出
+                    modeFade = stage.modeFade,
                 ) { modifier ->
                     LyricsList(
                         lyrics,

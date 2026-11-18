@@ -127,13 +127,18 @@ class IdleState {
  * 播放页的唤醒逻辑；照样计时的话环境模式会在面板后面开始，焦点也被挪到看不见的占位上，关掉面板后回不到原来的按钮。
  */
 @Composable
-fun rememberIdleState(holdAwake: Boolean = false, timeoutMs: Long = 4_000L): IdleState {
+fun rememberIdleState(holdAwake: Boolean = false, timeoutMs: Long = 4_000L, forceIdle: Boolean = false): IdleState {
     val state = remember { IdleState() }
     val screenReader = rememberScreenReaderOn()
-    LaunchedEffect(state.tick, screenReader, holdAwake) {
-        state.idle = false
+    LaunchedEffect(state.tick, screenReader, holdAwake, forceIdle) {
         // 读屏用户看不到控件淡入淡出，隐藏后焦点会落到看不见的地方，所以不进入空闲
         state.canAutoHide = !screenReader
+        // [forceIdle]：直接进空闲、不计时（电视开着歌词动画面板时整屏给舞台）；变回 false 时重新计时
+        if (forceIdle && !screenReader) {
+            state.idle = true
+            return@LaunchedEffect
+        }
+        state.idle = false
         if (!screenReader && !holdAwake) {
             delay(timeoutMs)
             state.idle = true

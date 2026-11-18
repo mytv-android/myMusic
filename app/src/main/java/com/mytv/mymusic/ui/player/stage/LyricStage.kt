@@ -1,13 +1,25 @@
 package com.mytv.mymusic.ui.player.stage
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -20,7 +32,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -36,9 +50,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.data.LyricStagePrefs
 import com.mytv.mymusic.data.Song
@@ -54,6 +71,7 @@ import com.mytv.mymusic.ui.player.coverBlobColors
 import com.mytv.mymusic.ui.player.rememberSystemAnimationsOff
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlin.math.exp
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
@@ -68,6 +86,8 @@ import kotlin.math.roundToInt
  * - 自己画背景的模式在等歌词时（加载中、换歌后新歌词还没到）留在模式里画空场，不退回经典：
  *   这时宿主流光背景已经停了，经典会落在一块素底上，等歌词到了又闪回模式背景。
  * - [seek] 接到播放器，只有 [LyricVisualizer.interactive] 的模式用它（点一句跳过去）。
+ * - 动画面板开在旁边时（平板、横屏、书本姿态、电视）：[coverEnd] 是面板从右边盖住的宽度，文字区让开它（开关面板时平滑收放）；
+ *   [tag] 在文字区左上角标“预览：… · 还没保存”（草稿）或“正在用：…”。[modeFade] 是换模式的淡入淡出（保存并应用时 0.4 秒）。
  */
 @Composable
 internal fun LyricStage(
@@ -83,6 +103,9 @@ internal fun LyricStage(
     modifier: Modifier = Modifier,
     edgeFade: Dp = 0.dp,
     seek: (Long) -> Unit = {},
+    tag: StageTag? = null,
+    coverEnd: Dp = 0.dp,
+    modeFade: FiniteAnimationSpec<Float>? = null,
     classic: @Composable (Modifier) -> Unit,
 ) {
     // 设备档位（模糊默认开不开）要在读任何模式设置之前定下来
@@ -92,19 +115,61 @@ internal fun LyricStage(
     val lyricsSong = remember(lyrics) { song.key }
     val stale = lyricsSong != song.key && lyrics.raw.isNotBlank()
     val density = LocalDensity.current
-    BoxWithConstraints(modifier) {
+    // 排法写的安全区再让开面板：面板盖住的右边那一截不排字；有标签时文字区顶上让出标签那一条
+    // （专注歌词的标题行紧贴在文字区上面，标签放不进中间的空隙）。判断太矮退回经典仍按排法的安全区，开面板不会换成经典
+    val spatial = MaterialTheme.motionScheme.defaultSpatialSpec<Dp>()
+    val coverEndPx = animateDpAsState(coverEnd, spatial, label = "stageCoverEnd")
+    val tagReserve = animateDpAsState(if (tag != null) StageTagReserve else 0.dp, spatial, label = "stageTagReserve")
+    val adjusted = remember { StageInsets() }
+    val fade = modeFade ?: MaterialTheme.motionScheme.defaultEffectsSpec()
+    BoxWithConstraints(
+        modifier.layout { measurable, constraints ->
+            adjusted.set(insets.top + tagReserve.value.toPx(), insets.bottom, insets.start, max(insets.end, coverEndPx.value.toPx()))
+            val placeable = measurable.measure(constraints)
+            layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+        },
+    ) {
         val noLyrics = lyrics.raw.isBlank() && !loading
         // 安全区由排法在测量阶段写好、再量舞台，这里（舞台的测量阶段）读到的已经是这一帧的值
         val textHeight = maxHeight - with(density) { (insets.top + insets.bottom).toDp() }
         val waiting = stale || (loading && (lyrics.raw.isBlank() || !lyrics.synced))
         val holdInMode = waiting && !mode.hostBackground
         if (stageUsesClassic(mode, textHeight, noLyrics, lyrics.synced, holdInMode)) {
-            classic(Modifier.fillMaxSize().stageSafePadding(insets))
-            return@BoxWithConstraints
+            classic(Modifier.fillMaxSize().stageSafePadding(adjusted))
+        } else {
+            Crossfade(mode, Modifier.fillMaxSize(), fade, label = "lyricStageMode") { shown ->
+                StageHost(shown, lyrics, waiting, position, playing, song, prefs, textSp, adjusted, edgeFade, seek)
+            }
         }
-        Crossfade(mode, Modifier.fillMaxSize(), MaterialTheme.motionScheme.defaultEffectsSpec(), label = "lyricStageMode") { shown ->
-            StageHost(shown, lyrics, waiting, position, playing, song, prefs, textSp, insets, edgeFade, seek)
-        }
+        if (tag != null) StageTagChip(tag, insets)
+    }
+}
+
+/** 舞台左上角的标签：[preview] 时是草稿预览（黄底），否则是“正在用”（半透明黑底）。 */
+@androidx.compose.runtime.Immutable
+internal data class StageTag(val text: String, val preview: Boolean)
+
+/** 标签摆在排法给的文字区左上角，文字往下让出 [StageTagReserve]。 */
+@Composable
+private fun StageTagChip(tag: StageTag, insets: StageInsets) {
+    val background = if (tag.preview) Color(0xFFFFD54F) else Color.Black.copy(alpha = 0.45f)
+    val content = if (tag.preview) Color(0xFF3A2A00) else Color.White
+    Row(
+        Modifier
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                val x = insets.start.roundToInt()
+                val y = insets.top.roundToInt()
+                layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(IntOffset(x, y)) }
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .background(background)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(Icons.Filled.AutoAwesome, null, Modifier.size(16.dp), tint = content)
+        Text(tag.text, color = content, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
@@ -129,13 +194,17 @@ internal fun stageTooShort(mode: LyricVisualizer, textHeight: Dp): Boolean = tex
 
 /**
  * 播放页传给各排法的舞台参数：正在显示的模式、动画设置、没按“歌词下面那一行”改写过的歌词（舞台自己按设置取副行），
- * 和打开动画面板。
+ * 和打开动画面板。动画面板开在舞台旁边时，[mode]、[prefs] 是草稿（预览），[tag] 是左上角的标签，
+ * [coverEnd] 是面板盖住的右边宽度；[modeFade] 是换模式的过渡（保存并应用时 0.4 秒，平常 null 用默认）。
  */
 @androidx.compose.runtime.Immutable
 internal class StageBinding(
     val mode: LyricVisualizer,
     val prefs: LyricStagePrefs,
     val lyrics: ParsedLyrics,
+    val tag: StageTag? = null,
+    val coverEnd: Dp = 0.dp,
+    val modeFade: FiniteAnimationSpec<Float>? = null,
     val onOpenSheet: () -> Unit,
 ) {
     /** 不是经典：舞台接管整页（手机歌词页、平板专注、电视环境模式）。 */
@@ -455,6 +524,9 @@ private fun StageSemantics(ctx: LyricStageContext) {
     val description = line?.let { listOf(it.text, it.subtitle(ctx.subline)).filter { s -> s.isNotBlank() }.joinToString("，") }.orEmpty()
     Spacer(Modifier.fillMaxSize().clearAndSetSemantics { if (description.isNotEmpty()) contentDescription = description })
 }
+
+/** 舞台标签（约 32dp 高）加和文字的间距。 */
+private val StageTagReserve = 42.dp
 
 /** 频谱卡片 60dp 高、离安全区底 8dp，再留 2dp。 */
 private val SpectrumReserve = 70.dp

@@ -2,6 +2,7 @@ package com.mytv.mymusic.ui.player
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -80,6 +81,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
@@ -144,6 +146,7 @@ internal fun TvPlayer(
     addedToPlaylist: Boolean,
     playlistSheetOpen: Boolean,
     onAddToPlaylist: () -> Unit,
+    animationSheetOpen: Boolean = false,
 ) {
     val motion = MaterialTheme.motionScheme
     val reduceMotion = LocalAppearance.current.reduceMotion
@@ -163,9 +166,24 @@ internal fun TvPlayer(
             runCatching { addFocus.requestFocus() }
         }
     }
+    // 歌词动画面板开着时播放页在环境模式里；面板关了退出环境模式，焦点回到控制条上的 ✦，接着能再按一次
+    val sparkFocus = remember { FocusRequester() }
+    val animationWasOpen = remember { booleanArrayOf(false) }
+    if (animationSheetOpen) animationWasOpen[0] = true
     val ambient = idle.idle
     // 环境模式下焦点交给一个不可见的占位节点，保证第一下按键能被唤醒逻辑收到；唤醒后回到播放键
-    LaunchedEffect(ambient) { runCatching { if (ambient) idleFocus.requestFocus() else playFocus.requestFocus() } }
+    LaunchedEffect(ambient) {
+        when {
+            ambient -> runCatching { idleFocus.requestFocus() }
+            animationWasOpen[0] && !animationSheetOpen -> {
+                animationWasOpen[0] = false
+                // 面板的窗口退场后主窗口才拿回焦点，晚一帧再要
+                withFrameNanos { }
+                runCatching { sparkFocus.requestFocus() }
+            }
+            else -> runCatching { playFocus.requestFocus() }
+        }
+    }
     // 只在环境模式下可聚焦，否则在最左侧控件或歌词上按左键，焦点会跳到这个看不见的节点
     Box(Modifier.size(1.dp).focusRequester(idleFocus).focusProperties { canFocus = ambient }.focusable())
 
@@ -183,8 +201,10 @@ internal fun TvPlayer(
     DisposableEffect(bottomChrome) { onDispose { bottomChrome.clear(PlayerBottomChrome.Tv) } }
     val waveScale = remember(pulse) { { pulseWaveScale(pulse) } }
     val waveBpm = remember(pulse) { { pulseWaveBpm(pulse) } }
-    val policy = remember(progress, ambient, ambientClock, stageInsets, bottomChrome) {
-        TvStagePolicy(progress, ambient, ambientClock, stageInsets, bottomChrome)
+    // 面板盖住右边时时钟跟着左移，不被面板挡住；经典模式环境里歌名还在上面，左移会压到歌名，留在面板下面
+    val clockEnd = animateDpAsState(if (custom) stage.coverEnd else 0.dp, motion.defaultSpatialSpec(), label = "tvClockEnd")
+    val policy = remember(progress, ambient, ambientClock, stageInsets, bottomChrome, clockEnd) {
+        TvStagePolicy(progress, ambient, ambientClock, stageInsets, bottomChrome, clockEnd)
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -248,6 +268,7 @@ internal fun TvPlayer(
                         playFocus = playFocus,
                         rowFocus = dockRow,
                         addFocus = addFocus,
+                        sparkFocus = sparkFocus,
                         addedToPlaylist = addedToPlaylist,
                         onAddToPlaylist = onAddToPlaylist,
                         waveScale = waveScale,
@@ -278,6 +299,9 @@ internal fun TvPlayer(
                             insets = stageInsets,
                             modifier = Modifier.fillMaxSize().graphicsLayer { alpha = fade.value },
                             seek = actions::seek,
+                            tag = stage.tag,
+                            coverEnd = stage.coverEnd,
+                            modeFade = stage.modeFade,
                         ) { modifier ->
                             LyricsList(
                                 lyrics,
@@ -382,6 +406,7 @@ private fun TvDock(
     playFocus: FocusRequester,
     rowFocus: FocusRequester,
     addFocus: FocusRequester,
+    sparkFocus: FocusRequester,
     addedToPlaylist: Boolean,
     onAddToPlaylist: () -> Unit,
     waveScale: () -> Float,
@@ -449,7 +474,7 @@ private fun TvDock(
                 if (artist.isNotBlank()) {
                     DockAction(Icons.Filled.Person, "歌手：$artist", { actions.openArtistByName(artist, song) })
                 }
-                DockAction(Icons.Filled.AutoAwesome, "歌词动画", onOpenSheet)
+                DockAction(Icons.Filled.AutoAwesome, "歌词动画", onOpenSheet, modifier = Modifier.focusRequester(sparkFocus))
             }
         }
         // 时间放在进度条两侧而不是下方：两行的控制条已经比设计稿高，再多一行会压到封面下的音源胶囊
@@ -621,6 +646,7 @@ private class TvStagePolicy(
     private val clock: Boolean,
     private val stageInsets: StageInsets,
     private val bottomChrome: PlayerBottomChrome,
+    private val clockEnd: State<Dp>,
 ) : MultiContentMeasurePolicy {
     override fun MeasureScope.measure(measurables: List<List<Measurable>>, constraints: Constraints): MeasureResult {
         val width = constraints.maxWidth
@@ -670,7 +696,8 @@ private class TvStagePolicy(
             stagePlaceable?.place(0, 0)
             lyrics?.place(textX.roundToInt() - rowPadding, lyricsTop.roundToInt())
             thin?.place(side, height - (TvDp.DockBottom * unit).roundToInt())
-            clockText?.place(width - (TvDp.ClockEnd * unit).roundToInt() - clockText.width, (TvDp.ClockTop * unit).roundToInt())
+            val clockRight = maxOf(TvDp.ClockEnd * unit, clockEnd.value.toPx())
+            clockText?.place(width - clockRight.roundToInt() - clockText.width, (TvDp.ClockTop * unit).roundToInt())
             notice?.place(frame.textX(0f).roundToInt(), dockTop - (TvDp.NoticeGap * unit).roundToInt() - notice.height)
             // 最后摆放：控制条盖在歌词栏和光晕上面
             dock.place(side, dockTop)

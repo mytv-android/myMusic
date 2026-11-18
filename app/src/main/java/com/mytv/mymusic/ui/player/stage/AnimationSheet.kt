@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -88,12 +89,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mytv.mymusic.data.LyricAutoSwitch
@@ -433,18 +431,8 @@ private fun SongModeRow(
         }
     }
     val waiting = row.waitingFor?.let { "（等空当换成「${saved.modeOf(it).label}」）" }.orEmpty()
-    Row(
-        Modifier
-            .padding(top = 4.dp)
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(scheme.surfaceContainer)
-            .padding(start = 12.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        StagePreview(shown, song, saved, Modifier.size(64.dp, 43.dp).clip(RoundedCornerShape(10.dp)))
-        Column(Modifier.weight(1f)) {
+    val texts: @Composable (Modifier) -> Unit = { modifier ->
+        Column(modifier) {
             Text(
                 "这首歌：${shown.label}",
                 style = MaterialTheme.typography.bodyLarge,
@@ -460,6 +448,8 @@ private fun SongModeRow(
                 color = scheme.onSurfaceVariant,
             )
         }
+    }
+    val button: @Composable () -> Unit = {
         if (row.pinned) {
             FilledTonalButton(onClick = onUnpin, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("取消固定") }
         } else {
@@ -477,7 +467,36 @@ private fun SongModeRow(
             }
         }
     }
+    BoxWithConstraints(
+        Modifier
+            .padding(top = 4.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(scheme.surfaceContainer)
+            .padding(start = 12.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+    ) {
+        val thumb = Modifier.size(56.dp, 38.dp).clip(RoundedCornerShape(10.dp))
+        if (maxWidth >= SONG_ROW_INLINE_WIDTH) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StagePreview(shown, song, saved, thumb)
+                texts(Modifier.weight(1f))
+                button()
+            }
+        } else {
+            // 窄面板（横屏手机的侧边面板扣掉导航栏后不到 330dp）：按钮挪到第二行，理由不会被挤成一字一行
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StagePreview(shown, song, saved, thumb)
+                    texts(Modifier.weight(1f))
+                }
+                Box(Modifier.align(Alignment.End)) { button() }
+            }
+        }
+    }
 }
+
+/** “这首歌”一行宽度够这么多时按钮和文字排一行，不够时按钮挪到第二行。 */
+private val SONG_ROW_INLINE_WIDTH = 330.dp
 
 /** 列出全部卡片的下拉菜单，[current] 那个打勾。 */
 @Composable
@@ -830,16 +849,20 @@ private fun SaveBarContent(count: Int, enabled: Boolean, onDiscard: () -> Unit, 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(color = scheme.onSurface, fontWeight = FontWeight.Bold)) { append("$count 处改动") }
-                    append(" 还没保存")
-                },
-                Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
-                style = MaterialTheme.typography.bodyMedium,
-                color = scheme.onSurfaceVariant,
-                maxLines = 2,
-            )
+            // 两行各自不折：横屏面板窄时一行放不下，中文会在「保存」中间断开。
+            Column(
+                Modifier.weight(1f).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+            ) {
+                Text(
+                    "$count 处改动",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurface,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                Text("还没保存", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, softWrap = false)
+            }
             TextButton(onClick = onDiscard, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("放弃") }
             Button(onClick = onSave, enabled = enabled, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) { Text("保存并应用") }
         }

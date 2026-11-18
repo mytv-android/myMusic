@@ -38,6 +38,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -53,12 +54,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import com.mytv.mymusic.ui.adaptive.DialogFoldAnchor
 import com.mytv.mymusic.ui.adaptive.dialogFoldAnchor
 import com.mytv.mymusic.ui.adaptive.rememberDialogFoldSplit
@@ -82,6 +85,9 @@ enum class FoldSide { Start, End }
  */
 val LocalSheetClose = staticCompositionLocalOf<() -> Unit> { {} }
 
+/** 面板默认遮罩透明度；比它淡时连系统的对话框变暗一起关掉。 */
+private const val DEFAULT_SCRIM_ALPHA = 0.32f
+
 /**
  * 自适应面板：手机是底部面板；平板是右侧 400dp 的浮动侧边面板（后面的内容仍可见），
  * 折叠屏书本姿态只占右页（[foldSide] 为 [FoldSide.Start] 时占左页）、双屏横跨上下两块时只放上屏；
@@ -98,7 +104,7 @@ fun AdaptiveSheet(
     subtitleProvider: (() -> String)? = null,
     dismissGuard: SheetDismissGuard? = null,
     foldSide: FoldSide = FoldSide.End,
-    scrimAlpha: Float = 0.32f,
+    scrimAlpha: Float = DEFAULT_SCRIM_ALPHA,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val window = LocalAppWindow.current
@@ -146,6 +152,15 @@ fun AdaptiveSheet(
         onDismissRequest = requestDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        // 系统给对话框窗口的那层变暗（约 0.6）叠在遮罩下面；要淡遮罩时把它关掉，旁边的舞台预览才看得清配色
+        val view = LocalView.current
+        val dialogWindow = remember(view) { ((view as? DialogWindowProvider) ?: (view.parent as? DialogWindowProvider))?.window }
+        val platformDim = remember(dialogWindow) { dialogWindow?.attributes?.dimAmount }
+        SideEffect {
+            if (dialogWindow != null && platformDim != null) {
+                dialogWindow.setDimAmount(if (scrimAlpha < DEFAULT_SCRIM_ALPHA) 0f else platformDim)
+            }
+        }
         val visible = remember { MutableTransitionState(false) }
         LaunchedEffect(Unit) { visible.targetState = true }
         // 自己关：先滑出去，退场动画走完再关
