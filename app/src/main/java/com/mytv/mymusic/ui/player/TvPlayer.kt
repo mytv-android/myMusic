@@ -240,7 +240,9 @@ internal fun TvPlayer(
                 { TvThinProgress(position, duration, fade, song.isLive) },
                 { if (ambientClock) TvClock(fade) },
                 {
-                    // 环境模式的歌词动画舞台：整屏，文字排在时钟下面、细进度上面（安全区由摆放策略写）
+                    // 环境模式的歌词动画舞台：整屏，文字排在时钟下面、细进度上面（安全区由摆放策略写）。
+                    // 完全进入后歌词栏不再组合，舞台退回经典（纯文本歌词、没有歌词）时要自己画列表，
+                    // 字号用经典模式环境模式的那一档，和选“经典”时一样
                     if (custom && stageShown) {
                         LyricStage(
                             mode = stage.mode,
@@ -254,7 +256,18 @@ internal fun TvPlayer(
                             insets = stageInsets,
                             modifier = Modifier.fillMaxSize().graphicsLayer { alpha = fade.value },
                             seek = actions::seek,
-                        )
+                        ) { modifier ->
+                            LyricsList(
+                                lyrics,
+                                active,
+                                actions::seek,
+                                modifier,
+                                loading = lyricsLoading,
+                                position = position,
+                                playing = playing,
+                                sizing = LyricsSizing.TvAmbient,
+                            )
+                        }
                     }
                 },
             ),

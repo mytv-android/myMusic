@@ -10,7 +10,13 @@ import com.mytv.mymusic.data.TempoRule
 import com.mytv.mymusic.ui.LyricLine
 import com.mytv.mymusic.ui.LyricWord
 import com.mytv.mymusic.ui.LyricsParser
+import androidx.compose.ui.unit.dp
+import com.mytv.mymusic.ui.player.stage.ClassicVisualizer
+import com.mytv.mymusic.ui.player.stage.DefaultMinTextHeight
 import com.mytv.mymusic.ui.player.stage.LyricSetting
+import com.mytv.mymusic.ui.player.stage.LyricVisualizers
+import com.mytv.mymusic.ui.player.stage.stageTooShort
+import com.mytv.mymusic.ui.player.stage.stageUsesClassic
 import com.mytv.mymusic.ui.player.stage.SettingValues
 import com.mytv.mymusic.ui.player.stage.StageDisplay
 import com.mytv.mymusic.ui.player.stage.StageInsets
@@ -38,6 +44,47 @@ import kotlin.random.Random
 class LyricStageTest {
     private fun stage(index: Int, start: Long, end: Long, text: String = "句子", words: List<LyricWord> = emptyList()) =
         StageLine(index, start, end, text, words, "", "")
+
+    // ---------- 退回经典 ----------
+
+    @Test
+    fun tooShortAlwaysFallsBackToClassic() {
+        // 文字区不够时，不管歌词什么状态、模式是不是在等歌词，一律交给经典列表（LyricStage 的 classic 是必传的，一定有字）
+        LyricVisualizers.all.forEach { mode ->
+            val short = mode.minTextHeight - 1.dp
+            for (noLyrics in listOf(false, true)) for (synced in listOf(false, true)) for (hold in listOf(false, true)) {
+                assertTrue("${mode.id} $noLyrics $synced $hold", stageTooShort(mode, short))
+                assertTrue("${mode.id} $noLyrics $synced $hold", stageUsesClassic(mode, short, noLyrics, synced, hold))
+            }
+        }
+    }
+
+    @Test
+    fun minTextHeightDefaultsTo160AndOnlyGrows() {
+        LyricVisualizers.all.forEach { assertTrue(it.id, it.minTextHeight >= DefaultMinTextHeight) }
+        assertEquals(160.dp, DefaultMinTextHeight)
+        assertEquals(160.dp, ClassicVisualizer.minTextHeight)
+        // 按文字区判：正好够就放动画
+        val rush = LyricVisualizers.byId("rush")
+        assertFalse(stageTooShort(rush, 160.dp))
+        assertTrue(stageTooShort(rush, 159.dp))
+        assertTrue(stageTooShort(LyricVisualizers.byId("jump"), 222.dp))
+        assertTrue(stageTooShort(LyricVisualizers.byId("cinerama"), 222.dp))
+    }
+
+    @Test
+    fun tallEnoughStagesFallBackOnlyWithoutSyncedLyrics() {
+        val rush = LyricVisualizers.byId("rush")
+        val tall = 400.dp
+        assertFalse(stageUsesClassic(rush, tall, noLyrics = false, synced = true, holdInMode = false))
+        // 纯文本歌词、没有歌词（模式不画空场）：经典
+        assertTrue(stageUsesClassic(rush, tall, noLyrics = false, synced = false, holdInMode = false))
+        assertTrue(stageUsesClassic(rush, tall, noLyrics = true, synced = false, holdInMode = false))
+        // 自己画背景的模式等歌词时留在模式里
+        assertFalse(stageUsesClassic(rush, tall, noLyrics = true, synced = false, holdInMode = true))
+        // 选的就是经典
+        assertTrue(stageUsesClassic(ClassicVisualizer, tall, noLyrics = false, synced = true, holdInMode = false))
+    }
 
     // ---------- 句子和字的时间 ----------
 

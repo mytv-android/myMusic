@@ -279,7 +279,9 @@ internal fun WidePlayer(
                     )
                 },
                 {
-                    // 专注歌词的动画舞台：铺满窗口，文字排在专注歌词那一栏里（安全区由摆放策略按专注布局写）
+                    // 专注歌词的动画舞台：铺满窗口，文字排在专注歌词那一栏里（安全区由摆放策略按专注布局写）。
+                    // 选了动画时上面那个歌词栏已经撤掉，舞台退回经典（纯文本歌词、没有歌词、横屏手机文字区太矮）
+                    // 要自己画专注歌词的列表，不然整栏空白
                     if (showFocus && stage.custom) {
                         LyricStage(
                             mode = stage.mode,
@@ -293,7 +295,18 @@ internal fun WidePlayer(
                             insets = stageInsets,
                             modifier = Modifier.fillMaxSize().graphicsLayer { alpha = focusAlpha() },
                             seek = actions::seek,
-                        )
+                        ) { modifier ->
+                            LyricsList(
+                                lyrics,
+                                active,
+                                actions::seek,
+                                modifier,
+                                loading = lyricsLoading,
+                                position = position,
+                                playing = playing,
+                                sizing = LyricsSizing.TabletFocus,
+                            )
+                        }
                     }
                 },
             ),

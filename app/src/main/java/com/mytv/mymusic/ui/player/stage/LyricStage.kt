@@ -59,8 +59,9 @@ import kotlin.math.roundToInt
 /**
  * 全屏歌词舞台的宿主：按 [mode] 画歌词动画，铺满整页，文字排在 [insets] 划出的安全区里。
  *
- * - 经典模式、没有同步歌词（加载中、未同步的纯文本、没有歌词且模式不画空场）、窗口高度不到 320dp 时，
- *   交给 [classic]（现有的 LyricsList，参数原样），画面和原来一个像素都不差；[classic] 为 null 时什么都不画。
+ * - 经典模式、没有同步歌词（加载中、未同步的纯文本、没有歌词且模式不画空场）、文字区（舞台扣掉 [insets] 上下边）
+ *   矮过模式的 [LyricVisualizer.minTextHeight] 时，交给 [classic]（现有的 LyricsList，参数原样），画面和原来一个像素都不差。
+ *   [classic] 是必传的：哪种排法退回经典都得有字，横屏手机曾经因为宽布局没传它而整页空白。
  * - 其他模式：一个帧循环（电视限 30 帧）推进 [StageClock]、当前句和律动；模式切换时交叉淡入淡出。
  *   页面不在组合里时循环自然停；暂停时只在跳转后更新一次时间；减少动态效果时不跑循环，只在换句时更新。
  * - 宿主副行（翻译或罗马音）画在安全区底部，开着频谱时往上让 70dp；频谱图层在左下角。
@@ -82,7 +83,7 @@ internal fun LyricStage(
     modifier: Modifier = Modifier,
     edgeFade: Dp = 0.dp,
     seek: (Long) -> Unit = {},
-    classic: (@Composable (Modifier) -> Unit)? = null,
+    classic: @Composable (Modifier) -> Unit,
 ) {
     // 设备档位（模糊默认开不开）要在读任何模式设置之前定下来
     ResolveStageDevice()
@@ -90,15 +91,15 @@ internal fun LyricStage(
     // 空歌词不算：两首都没词时解析结果不会换，按“没有歌词”走
     val lyricsSong = remember(lyrics) { song.key }
     val stale = lyricsSong != song.key && lyrics.raw.isNotBlank()
+    val density = LocalDensity.current
     BoxWithConstraints(modifier) {
         val noLyrics = lyrics.raw.isBlank() && !loading
-        val tooShort = maxHeight < MIN_STAGE_HEIGHT
+        // 安全区由排法在测量阶段写好、再量舞台，这里（舞台的测量阶段）读到的已经是这一帧的值
+        val textHeight = maxHeight - with(density) { (insets.top + insets.bottom).toDp() }
         val waiting = stale || (loading && (lyrics.raw.isBlank() || !lyrics.synced))
         val holdInMode = waiting && !mode.hostBackground
-        val useClassic = mode.id == ClassicVisualizer.id || tooShort ||
-            (!holdInMode && ((noLyrics && !mode.drawsWithoutLyrics) || (!noLyrics && !lyrics.synced)))
-        if (useClassic) {
-            classic?.invoke(Modifier.fillMaxSize().stageSafePadding(insets))
+        if (stageUsesClassic(mode, textHeight, noLyrics, lyrics.synced, holdInMode)) {
+            classic(Modifier.fillMaxSize().stageSafePadding(insets))
             return@BoxWithConstraints
         }
         Crossfade(mode, Modifier.fillMaxSize(), MaterialTheme.motionScheme.defaultEffectsSpec(), label = "lyricStageMode") { shown ->
@@ -106,6 +107,25 @@ internal fun LyricStage(
         }
     }
 }
+
+/**
+ * 舞台退不退回经典列表：选的就是经典；文字区 [textHeight] 矮过模式要的高度（[stageTooShort]）；
+ * 或者没有同步歌词——没有歌词且模式不画空场、只有未同步的纯文本。自己画背景的模式等歌词时（[holdInMode]）留在模式里。
+ */
+internal fun stageUsesClassic(
+    mode: LyricVisualizer,
+    textHeight: Dp,
+    noLyrics: Boolean,
+    synced: Boolean,
+    holdInMode: Boolean,
+): Boolean = mode.id == ClassicVisualizer.id || stageTooShort(mode, textHeight) ||
+    (!holdInMode && ((noLyrics && !mode.drawsWithoutLyrics) || (!noLyrics && !synced)))
+
+/**
+ * 文字区放不下 [mode]。量的是扣掉安全区后的文字区，不是整窗：横屏手机整窗常常不到 320dp，
+ * 文字区却还有 220dp 上下，按整窗判会把所有动画都关掉。
+ */
+internal fun stageTooShort(mode: LyricVisualizer, textHeight: Dp): Boolean = textHeight < mode.minTextHeight
 
 /**
  * 播放页传给各排法的舞台参数：正在显示的模式、动画设置、没按“歌词下面那一行”改写过的歌词（舞台自己按设置取副行），
@@ -436,7 +456,6 @@ private fun StageSemantics(ctx: LyricStageContext) {
     Spacer(Modifier.fillMaxSize().clearAndSetSemantics { if (description.isNotEmpty()) contentDescription = description })
 }
 
-private val MIN_STAGE_HEIGHT = 320.dp
 /** 频谱卡片 60dp 高、离安全区底 8dp，再留 2dp。 */
 private val SpectrumReserve = 70.dp
 private const val JITTER_MS = 120L

@@ -6,6 +6,11 @@ import com.mytv.mymusic.ui.player.wideColumns
 import com.mytv.mymusic.ui.player.wideFocusFrame
 import com.mytv.mymusic.ui.player.wideFullTier
 import com.mytv.mymusic.ui.player.wideStackSlots
+import com.mytv.mymusic.ui.player.stage.ClassicVisualizer
+import com.mytv.mymusic.ui.player.stage.LyricVisualizers
+import com.mytv.mymusic.ui.player.stage.stageTooShort
+import com.mytv.mymusic.ui.player.stage.stageUsesClassic
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -165,5 +170,28 @@ class WideStageLayoutTest {
             assertTrue(f.dockX + 88 < f.contentX)
         }
         assertEquals(1f, wideFocusFrame(960, 528, 1f, 88, 413, 22).dockScale)
+    }
+
+    @Test
+    fun landscapePhoneFocusLeavesRoomForTheStage() {
+        // 2400×1080 @480dpi 横过来是 800×360dp，扣掉状态栏和横屏手势条只剩 312dp：整窗不到 320，
+        // 以前按整窗判“太矮”，动画全关又没有兜底，整栏空白。专注歌词那一栏（舞台的文字区）还有 220dp 上下
+        val f = wideFocusFrame(800, 312, 1f, dockWidth = 88, dockHeight = 413, headerHeight = 22)
+        assertTrue("lyricsHeight=${f.lyricsHeight}", f.lyricsHeight in 216..228)
+        val text = f.lyricsHeight.dp
+        // 舞台的安全区就是这一栏：文字区按它算，一般的模式照放动画
+        val wide = LyricVisualizers.all.filter { it.id != ClassicVisualizer.id && it.minTextHeight <= text }
+        assertTrue(wide.size >= 7)
+        wide.forEach { mode ->
+            assertFalse(mode.id, stageTooShort(mode, text))
+            assertFalse(mode.id, stageUsesClassic(mode, text, noLyrics = false, synced = true, holdInMode = false))
+        }
+        // 要更多竖向空间的模式（跳一跳、巨幕）在这里退回经典列表，不是空白
+        LyricVisualizers.all.filter { it.minTextHeight > text }.forEach { mode ->
+            assertTrue(mode.id, stageUsesClassic(mode, text, noLyrics = false, synced = true, holdInMode = true))
+        }
+        // 360dp 的横屏手机（420dpi 同分辨率）跳一跳、巨幕也放得下
+        val roomy = wideFocusFrame(800, 336, 1f, 88, 413, 22).lyricsHeight.dp
+        LyricVisualizers.all.forEach { assertFalse(it.id, stageTooShort(it, roomy)) }
     }
 }

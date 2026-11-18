@@ -65,6 +65,9 @@ object CineramaVisualizer : LyricVisualizer {
     override val drawsWithoutLyrics = false
     override val hiddenSettings = 24
 
+    /** 上下两条跑马灯带和让到带子上面的副行先占掉一截，文字区再矮正文只剩一条缝，退回经典。 */
+    override val minTextHeight = 240.dp
+
     override val settings: List<LyricSetting> = listOf(
         LyricSetting.Choice(
             "marquee",

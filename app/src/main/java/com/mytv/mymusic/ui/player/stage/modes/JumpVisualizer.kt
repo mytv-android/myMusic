@@ -92,6 +92,9 @@ object JumpVisualizer : LyricVisualizer {
     override val drawsWithoutLyrics = false
     override val hiddenSettings = 19
 
+    /** 柱子、小人和跳跃弧线要竖向空间；文字区再矮，格子压到地板（26dp）也装不下一整跳，退回经典。 */
+    override val minTextHeight = 240.dp
+
     override val settings: List<LyricSetting> = listOf(
         LyricSetting.Choice(
             "textFace",

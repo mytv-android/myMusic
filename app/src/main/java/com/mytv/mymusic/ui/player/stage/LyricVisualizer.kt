@@ -20,6 +20,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import com.materialkolor.hct.Hct
 import com.materialkolor.ktx.toColor
 import com.materialkolor.ktx.toHct
@@ -90,6 +92,13 @@ interface LyricVisualizer {
     val drawsWithoutLyrics: Boolean get() = false
 
     /**
+     * 文字区（舞台扣掉安全区上下边）至少多高才放这个模式，不够时宿主退回经典列表。
+     * 默认 [DefaultMinTextHeight]：横屏手机（800×312dp 上下）的文字区约 222dp，放得下；
+     * 版面要竖向空间的模式（跳一跳的柱子和人、巨幕上下两条跑马灯带夹着正文）声明更大的值。
+     */
+    val minTextHeight: Dp get() = DefaultMinTextHeight
+
+    /**
      * 模式占了安全区底部（比如跑马灯带）时，宿主副行再往上让多少（像素）。宿主在副行的布局阶段调用，
      * [stage] 是舞台尺寸（安全区用 `ctx.display.safeRect(stage)` 求），不要在这里读逐帧变化的值。
      */
@@ -103,6 +112,9 @@ interface LyricVisualizer {
     @Composable
     fun Stage(ctx: LyricStageContext, modifier: Modifier)
 }
+
+/** 文字区放得下动画的默认最小高度，见 [LyricVisualizer.minTextHeight]。 */
+val DefaultMinTextHeight: Dp = 160.dp
 
 /** 来源模组：名字、版本、作者、许可。[kind] 是面板里怎么称呼它（Rush 是独立的应用，不是 Folia 模组）。 */
 @Immutable
