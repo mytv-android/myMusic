@@ -109,13 +109,14 @@ internal data class WallViewport(
 }
 
 /**
- * 每种设备的格距和圆角（dp）。格距 = 一格 + 一道缝，放大卡 6 格要放得进屏幕：
+ * 每种设备的格距和圆角（dp），是视角倍数为 1 时的一档。格距 = 一格 + 一道缝，放大卡 6 格要放得进屏幕：
  * 手机 6×56−4 = 332，平板 6×102−6 = 606，电视 6×76−5 = 451（顶部让出 80 后正好放下）。
  * 矮平板（横屏、小平板）放不下 606 的大卡再加上下浮层，用电视的格距，但焦点安全区和平板一样。
- * 圆角三档：短边 2 格 / 短边 3 格以上 / 放大卡，取原型 TILE_STYLE；电视焦点时再加 [FOCUS_RADIUS_BOOST]。
- * [feedRows] 是听歌模式带子的高度（块），[safeMargin] 是方向键焦点的安全区内缩。
+ * 圆角三档：短边 2 格 / 短边 3 格以上 / 放大卡，取原型 TILE_STYLE；电视焦点时再加 [WallMetrics.FOCUS_RADIUS_BOOST]。
+ * [feedRows] 是听歌模式带子的高度（块），[safeMargin] 是方向键焦点的安全区内缩，
+ * [grownMin] 是拉远时大卡至少显示多大（拉远了歌词和按钮也还要能用，见 grownDisplaySize）。
  */
-internal enum class WallMetrics(
+internal enum class WallKind(
     val pitch: Float,
     val gap: Float,
     val feedRows: Int,
@@ -123,17 +124,39 @@ internal enum class WallMetrics(
     val radiusLarge: Float,
     val radiusGrown: Float,
     val safeMargin: Float,
+    val grownMin: Float,
 ) {
-    Phone(pitch = 56f, gap = 4f, feedRows = 2, radiusSmall = 8f, radiusLarge = 10f, radiusGrown = 24f, safeMargin = 24f),
-    Tablet(pitch = 102f, gap = 6f, feedRows = 1, radiusSmall = 12f, radiusLarge = 16f, radiusGrown = 28f, safeMargin = 24f),
-    Tv(pitch = 76f, gap = 5f, feedRows = 1, radiusSmall = 10f, radiusLarge = 14f, radiusGrown = 24f, safeMargin = 40f),
-    ShortTablet(pitch = 76f, gap = 5f, feedRows = 1, radiusSmall = 10f, radiusLarge = 14f, radiusGrown = 24f, safeMargin = 24f);
+    Phone(pitch = 56f, gap = 4f, feedRows = 2, radiusSmall = 8f, radiusLarge = 10f, radiusGrown = 24f, safeMargin = 24f, grownMin = 240f),
+    Tablet(pitch = 102f, gap = 6f, feedRows = 1, radiusSmall = 12f, radiusLarge = 16f, radiusGrown = 28f, safeMargin = 24f, grownMin = 240f),
+    Tv(pitch = 76f, gap = 5f, feedRows = 1, radiusSmall = 10f, radiusLarge = 14f, radiusGrown = 24f, safeMargin = 40f, grownMin = 300f),
+    ShortTablet(pitch = 76f, gap = 5f, feedRows = 1, radiusSmall = 10f, radiusLarge = 14f, radiusGrown = 24f, safeMargin = 24f, grownMin = 240f);
+
+    /** 倍数为 1 时的大卡边长：332 / 606 / 451 / 451。 */
+    val baseGrownSize: Float get() = WallLayout.GROW * pitch - gap
+}
+
+/**
+ * 墙这一次的格距：设备档 [kind] 乘视角倍数 [zoom]（海报墙设置里的「视角」，0.5 远 … 1.25 近）。
+ * 格距、缝、小格圆角跟着倍数缩放，世界坐标对倍数是线性的（换倍数时镜头可以精确换算，见 zoomCamera）；
+ * 大卡圆角、带子高度和焦点安全区（屏幕上的距离）不缩放。大卡的槽位永远是 6×6 格，显示多大另算（grownDisplaySize）。
+ */
+internal data class WallMetrics(val kind: WallKind, val zoom: Float = 1f) {
+    val pitch: Float get() = kind.pitch * zoom
+    val gap: Float get() = kind.gap * zoom
+    val radiusSmall: Float get() = max(MIN_RADIUS, kind.radiusSmall * zoom)
+    val radiusLarge: Float get() = max(MIN_RADIUS, kind.radiusLarge * zoom)
+    val radiusGrown: Float get() = kind.radiusGrown
+    val feedRows: Int get() = kind.feedRows
+    val safeMargin: Float get() = kind.safeMargin
 
     val blockWidth: Float get() = WallLayout.BLOCK_W * pitch
     val blockHeight: Float get() = WallLayout.BLOCK_H * pitch
 
-    /** 放大卡边长。 */
+    /** 放大卡的槽位边长（6×6 格）。 */
     val grownSize: Float get() = WallLayout.GROW * pitch - gap
+
+    /** 格子太小（格距不到 40dp：手机、电视拉到 0.5×）时整面墙收起序号和格子上的字，只剩封面。 */
+    val compact: Boolean get() = pitch < COMPACT_PITCH
 
     fun cornerRadius(cells: UnitRect, grown: Boolean): Float = when {
         grown -> radiusGrown
@@ -142,7 +165,21 @@ internal enum class WallMetrics(
     }
 
     companion object {
+        val Phone = WallMetrics(WallKind.Phone)
+        val Tablet = WallMetrics(WallKind.Tablet)
+        val Tv = WallMetrics(WallKind.Tv)
+        val ShortTablet = WallMetrics(WallKind.ShortTablet)
+
+        /** 四档、倍数 1。 */
+        val entries: List<WallMetrics> = WallKind.entries.map { WallMetrics(it) }
+
         const val FOCUS_RADIUS_BOOST = 8f
+
+        /** 稿子的「格子 < 40dp」：按格距算，整面墙统一收起，不会有的格子有字有的没字。 */
+        const val COMPACT_PITCH = 40f
+
+        /** 拉远后小格圆角的下限（稿子 max(4, 8·zoom)）。 */
+        const val MIN_RADIUS = 4f
     }
 }
 
@@ -277,15 +314,37 @@ internal fun clampLoose(v: Float, lo: Float, hi: Float): Float = min(hi, max(lo,
 /**
  * 墙面查询：哪一格坐哪首、格子在墙面上的位置、可见范围、找最近的一份、方向键焦点。
  * [grown] 是当前放大的格（只有它所在的块按重排表排）。不可变，放大格变了就换一个 [withGrown]。
+ * [grownDisplay] 是大卡实际显示的边长（见 grownDisplaySize）：槽位永远 6×6，显示时以槽位中心放大 / 缩小；
+ * 比槽位大时，中心落进大卡显示矩形的普通格被盖住，不画、不进方向键。
  */
 internal class WallScene(
     val metrics: WallMetrics,
     val field: WallField,
     val grown: SlotPos? = null,
+    val grownDisplay: Float = metrics.grownSize,
 ) {
-    fun withGrown(p: SlotPos?): WallScene = WallScene(metrics, field, p)
+    fun withGrown(p: SlotPos?): WallScene = WallScene(metrics, field, p, grownDisplay)
 
-    fun withField(f: WallField): WallScene = WallScene(metrics, f, grown)
+    fun withField(f: WallField): WallScene = WallScene(metrics, f, grown, grownDisplay)
+
+    fun withGrownDisplay(size: Float): WallScene = if (size == grownDisplay) this else WallScene(metrics, field, grown, size)
+
+    /** 大卡此刻的显示矩形；没有大卡为 null。 */
+    val grownRect: WallRect? by lazy(LazyThreadSafetyMode.NONE) {
+        grown?.let { g -> slotWorld(g).resizedAround(grownDisplay) }
+    }
+
+    /** 普通格被大卡盖住：大卡显示得比槽位大，格子中心落在大卡里。 */
+    fun coveredByGrown(p: SlotPos, w: WallRect): Boolean {
+        if (p == grown || grownDisplay <= metrics.grownSize) return false
+        val g = grownRect ?: return false
+        return w.centerX > g.x && w.centerX < g.right && w.centerY > g.y && w.centerY < g.bottom
+    }
+
+    /** 格子在墙面上的位置：大卡换成显示矩形，其余就是槽位。 */
+    private fun display(p: SlotPos, w: WallRect): WallRect = if (p == grown) w.resizedAround(grownDisplay) else w
+
+    private fun slotWorld(p: SlotPos): WallRect = world(p.bx, p.by, rectsOf(p.bx, p.by)[p.slot])
 
     fun songAt(bx: Int, by: Int, slot: Int): Int = field.songAt(bx, by, slot)
 
@@ -293,11 +352,11 @@ internal class WallScene(
 
     fun world(bx: Int, by: Int, r: UnitRect): WallRect = WallLayout.world(bx, by, r, metrics)
 
-    fun rectAt(p: SlotPos): WallRect = world(p.bx, p.by, rectsOf(p.bx, p.by)[p.slot])
+    fun rectAt(p: SlotPos): WallRect = display(p, slotWorld(p))
 
     fun tileAt(p: SlotPos): WallTile {
         val cells = rectsOf(p.bx, p.by)[p.slot]
-        return WallTile(p, songAt(p.bx, p.by, p.slot), cells, world(p.bx, p.by, cells), p == grown)
+        return WallTile(p, songAt(p.bx, p.by, p.slot), cells, display(p, world(p.bx, p.by, cells)), p == grown)
     }
 
     /** 镜头 [cam] 下要画的块：屏幕四周各多留两个格距。 */
@@ -323,18 +382,19 @@ internal class WallScene(
             for (s in 0 until WallLayout.SLOTS) {
                 val song = songAt(bx, by, s)
                 if (song < 0) continue
-                val w = world(bx, by, rs[s])
+                val p = SlotPos(bx, by, s)
+                val w = display(p, world(bx, by, rs[s]))
                 if (w.right < cam.x - ov || w.x > cam.x + viewport.width + ov ||
                     w.bottom < cam.y - ov || w.y > cam.y + viewport.height + ov
                 ) continue
-                val p = SlotPos(bx, by, s)
+                if (coveredByGrown(p, w)) continue
                 out += WallTile(p, song, rs[s], w, p == grown)
             }
         }
         return out
     }
 
-    /** [p] 所在块和周围 8 块里所有要画的格（方向键只在这里找）。 */
+    /** [p] 所在块和周围 8 块里所有要画的格（方向键只在这里找）；被大卡盖住的不算。 */
     fun tilesNear(p: SlotPos): List<WallTile> {
         val out = ArrayList<WallTile>()
         for (by in p.by - 1..p.by + 1) for (bx in p.bx - 1..p.bx + 1) {
@@ -343,7 +403,9 @@ internal class WallScene(
                 val song = songAt(bx, by, s)
                 if (song < 0) continue
                 val pos = SlotPos(bx, by, s)
-                out += WallTile(pos, song, rs[s], world(bx, by, rs[s]), pos == grown)
+                val w = display(pos, world(bx, by, rs[s]))
+                if (coveredByGrown(pos, w)) continue
+                out += WallTile(pos, song, rs[s], w, pos == grown)
             }
         }
         return out

@@ -371,14 +371,15 @@ internal fun wallInsets(
     safeBottom: Dp,
     heightDp: Int,
     pillOnTop: Boolean = true,
-): Pair<Dp, Dp> = when (metrics) {
-    WallMetrics.Tv -> TvTopRowHeight to 0.dp
-    WallMetrics.Tablet, WallMetrics.ShortTablet -> 0.dp to 0.dp
-    WallMetrics.Phone -> {
+): Pair<Dp, Dp> = when (metrics.kind) {
+    WallKind.Tv -> TvTopRowHeight to 0.dp
+    WallKind.Tablet, WallKind.ShortTablet -> 0.dp to 0.dp
+    WallKind.Phone -> {
         // 桌面姿态胶囊挪到下半屏（WallSpec.lowerTop），上半屏顶上只让状态栏
         val top = safeTop + PhonePillTop + if (pillOnTop) PillHeight else 0.dp
         val bottom = safeBottom + PosterWallBottomChrome
-        if (heightDp.dp - top - bottom >= metrics.grownSize.dp) top to bottom else 0.dp to 0.dp
+        // 按倍数 1 的大卡判断：视角远近不改浮层让位，换倍数时镜头不会因为让位变了再跳一次
+        if (heightDp.dp - top - bottom >= metrics.kind.baseGrownSize.dp) top to bottom else 0.dp to 0.dp
     }
 }
 
@@ -413,7 +414,7 @@ private fun TouchChrome(
     onSettings: () -> Unit,
     onOpenQueue: () -> Unit,
 ) {
-    val phone = metrics == WallMetrics.Phone
+    val phone = metrics.kind == WallKind.Phone
     val pillTop = if (phone) PhonePillTop else 20.dp
     // 这一层按安全区内缩过，墙本地的 lowerTop 要先扣掉顶上的安全区
     val safeTop = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()

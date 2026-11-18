@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.ui.adaptive.FoldSplit
 import com.mytv.mymusic.ui.adaptive.rememberFoldSplit
@@ -89,6 +90,9 @@ internal fun rememberWallSpec(state: PosterWallState): WallSpec {
 
 /** 墙这一次用的格距，PosterWall 交给格子里的大卡（GrownPoster 按它取卡片尺寸和字号）；墙外为 null。 */
 internal val LocalWallMetrics = staticCompositionLocalOf<WallMetrics?> { null }
+
+/** 大卡这一次实际显示的边长（[WallScene.grownDisplay]），GrownPoster 按它排版和取图；墙外为 null。 */
+internal val LocalWallGrownSize = staticCompositionLocalOf<Dp?> { null }
 
 /**
  * 把一个按整墙排的浮层收进 [segment] 那一段：竖的从左边让到那一段起点、宽度取那一段，横的同理取高度。

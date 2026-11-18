@@ -75,4 +75,31 @@ class GrownPosterTest {
         assertEquals(46f, GrownPosterStyle.Tv.bigTitleSp, 0f)
         assertEquals(34f, GrownPosterStyle.Phone.plainTitleSp, 0.001f)
     }
+
+    @Test
+    fun lookAtTheCardSizeIsTheStyleItself() {
+        for (style in GrownPosterStyle.entries) {
+            val look = style.look(style.card.value)
+            assertEquals(style.card, look.card)
+            assertEquals(style.padding, look.padding)
+            assertEquals(style.lyricSp, look.lyricSp, 0f)
+            assertEquals(style.translationSp, look.translationSp, 0f)
+            assertEquals(style.titleSp, look.titleSp, 0f)
+            assertEquals(style.bigTitleSp, look.bigTitleSp, 0f)
+            assertEquals(style.plainTitleSp, look.plainTitleSp, 1e-4f)
+        }
+    }
+
+    @Test
+    fun lookScalesTextWithTheShownCardWithinLimits() {
+        // 手机 0.5× 大卡显示 240dp：332 → 240 是 0.72，字号压到下限 0.8
+        val far = GrownPosterStyle.Phone.look(240f)
+        assertEquals(240f, far.card.value, 0f)
+        assertEquals(20f * 0.8f, far.lyricSp, 1e-4f)
+        // 336dp 只比 332 大一点，按比例放大
+        val near = GrownPosterStyle.Phone.look(336f)
+        assertEquals(34f * 336f / 332f, near.bigTitleSp, 1e-3f)
+        // 上限 1.15
+        assertEquals(26f * 1.15f, GrownPosterStyle.Tv.look(900f).lyricSp, 1e-3f)
+    }
 }

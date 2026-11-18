@@ -133,6 +133,22 @@ internal enum class GrownPosterStyle(
     /** 没有歌词时歌词区换成的大歌名：歌词最大字号的 1.7 倍。 */
     val plainTitleSp: Float get() = lyricSp * 1.7f
 
+    /**
+     * 大卡实际显示 [cardDp] 时的排版（海报墙视角拉远 / 拉近后大卡不再是 [card]，见 grownDisplaySize）：
+     * 内边距和各字号按显示尺寸缩放，倍数夹在 0.8–1.15，拉远时字不至于太小、拉近时不至于太大。显示尺寸就是 [card] 时原样。
+     */
+    fun look(cardDp: Float): GrownLook {
+        val k = (cardDp / card.value).coerceIn(LOOK_MIN, LOOK_MAX)
+        return GrownLook(
+            card = cardDp.dp,
+            padding = padding * k,
+            lyricSp = lyricSp * k,
+            translationSp = translationSp * k,
+            titleSp = titleSp * k,
+            bigTitleSp = bigTitleSp * k,
+        )
+    }
+
     companion object {
         fun of(kind: DeviceKind): GrownPosterStyle = when (kind) {
             DeviceKind.Phone -> Phone
@@ -141,12 +157,29 @@ internal enum class GrownPosterStyle(
         }
 
         /** 按墙的格距取：横屏手机窗口宽 ≥ 600 算平板，但墙用手机格距，大卡只有 332dp，排版也要跟着用手机这一档。 */
-        fun of(metrics: WallMetrics): GrownPosterStyle = when (metrics) {
-            WallMetrics.Phone -> Phone
-            WallMetrics.Tablet -> Tablet
-            WallMetrics.Tv, WallMetrics.ShortTablet -> Tv
+        fun of(metrics: WallMetrics): GrownPosterStyle = when (metrics.kind) {
+            WallKind.Phone -> Phone
+            WallKind.Tablet -> Tablet
+            WallKind.Tv, WallKind.ShortTablet -> Tv
         }
+
+        private const val LOOK_MIN = 0.8f
+        private const val LOOK_MAX = 1.15f
     }
+}
+
+/** 大卡这一次的排版：[GrownPosterStyle] 按实际显示尺寸缩放后的结果（[GrownPosterStyle.look]）。 */
+@Immutable
+internal data class GrownLook(
+    val card: Dp,
+    val padding: Dp,
+    val lyricSp: Float,
+    val translationSp: Float,
+    val titleSp: Float,
+    val bigTitleSp: Float,
+) {
+    /** 没有歌词时歌词区换成的大歌名：歌词最大字号的 1.7 倍。 */
+    val plainTitleSp: Float get() = lyricSp * 1.7f
 }
 
 /** 封面怎么处理：模糊半径（dp）、压一层 surface 的比例、放大倍数（模糊时放大一点盖住发虚的边）、是否提饱和度。 */
@@ -266,7 +299,9 @@ internal fun GrownPoster(
     val window = LocalAppWindow.current
     // 跟墙用同一档格距（折叠屏上按大卡那一段选，可能和按整个窗口算的不一样）；墙外按窗口算
     val style = GrownPosterStyle.of(LocalWallMetrics.current ?: wallMetricsFor(window.isTv, window.widthDp, window.heightDp))
-    val cardPx = with(LocalDensity.current) { style.card.roundToPx() }
+    // 墙上按大卡实际显示的尺寸排版（视角拉远 / 拉近时不是 6×6 槽位），墙外按这一档的卡片尺寸
+    val look = style.look(LocalWallGrownSize.current?.value ?: style.card.value)
+    val cardPx = with(LocalDensity.current) { look.card.roundToPx() }
     // RenderEffect 要 Android 12+；电视即使在外观里强开模糊也只压暗
     val blurAllowed = LocalBlurPolicy.current.enabled && Build.VERSION.SDK_INT >= 31 && !window.isTv
     // 解析放在后台（播放页同一条路径）；不是当前歌、歌词还没取回来时不解析
@@ -311,7 +346,7 @@ internal fun GrownPoster(
                 NowCard(
                     song = song,
                     number = number,
-                    style = style,
+                    style = look,
                     playing = playing,
                     position = position,
                     duration = duration,
@@ -329,7 +364,7 @@ internal fun GrownPoster(
                     onOpenPlayer = onOpenPlayer,
                 )
             } else {
-                OtherCard(song, number, sourceName, style, primaryFocusRequester, onPlay, onPlayNext, onMore)
+                OtherCard(song, number, sourceName, look, primaryFocusRequester, onPlay, onPlayNext, onMore)
             }
         }
     }
@@ -465,7 +500,7 @@ private fun PosterScrims(dim: Float, blackout: Boolean, modifier: Modifier = Mod
 private fun NowCard(
     song: Song,
     number: Int,
-    style: GrownPosterStyle,
+    style: GrownLook,
     playing: Boolean,
     position: State<Long>,
     duration: Long,
@@ -563,7 +598,7 @@ private fun NowCard(
 
 /** 没有歌词：歌词区换成放大的歌名，下面一行“歌手 · 暂无歌词”，贴着控件行。 */
 @Composable
-private fun PlainTitle(song: Song, style: GrownPosterStyle) {
+private fun PlainTitle(song: Song, style: GrownLook) {
     Column(
         Modifier.fillMaxSize().padding(bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
@@ -686,7 +721,7 @@ private fun OtherCard(
     song: Song,
     number: Int,
     sourceName: String,
-    style: GrownPosterStyle,
+    style: GrownLook,
     focusRequester: FocusRequester?,
     onPlay: () -> Unit,
     onPlayNext: () -> Unit,

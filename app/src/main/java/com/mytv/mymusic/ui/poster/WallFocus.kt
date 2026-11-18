@@ -124,12 +124,18 @@ internal fun wallBackStep(
  * 量的是放大重排后的目标位置；重排弹簧走到一半时点按的偏差可以忽略。
  */
 internal fun WallScene.slotAt(p: WallPoint): SlotPos? {
+    // 大卡显示得比槽位大（视角拉远）时盖在邻格上面：点在大卡里就是点大卡
+    val g = grown
+    val gr = grownRect
+    if (g != null && gr != null && p.x >= gr.x && p.x < gr.right && p.y >= gr.y && p.y < gr.bottom) return g
     val bx = floor(p.x / metrics.blockWidth).toInt()
     val by = floor(p.y / metrics.blockHeight).toInt()
     val rects = rectsOf(bx, by)
     for (s in 0 until WallLayout.SLOTS) {
         val r = world(bx, by, rects[s])
         if (p.x >= r.x && p.x < r.right && p.y >= r.y && p.y < r.bottom) {
+            // 大卡比槽位小（拉近）时槽位四周露出的空隙不算点到大卡
+            if (SlotPos(bx, by, s) == g) return null
             return if (songAt(bx, by, s) >= 0) SlotPos(bx, by, s) else null
         }
     }

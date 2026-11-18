@@ -119,10 +119,10 @@ internal enum class TileStyle(
     fun posterSp(widthDp: Float): Float = titleSp(widthDp) * POSTER_TITLE_SCALE
 }
 
-internal fun tileStyleFor(metrics: WallMetrics): TileStyle = when (metrics) {
-    WallMetrics.Phone -> TileStyle.Phone
-    WallMetrics.Tablet -> TileStyle.Tablet
-    WallMetrics.Tv, WallMetrics.ShortTablet -> TileStyle.Tv
+internal fun tileStyleFor(kind: WallKind): TileStyle = when (kind) {
+    WallKind.Phone -> TileStyle.Phone
+    WallKind.Tablet -> TileStyle.Tablet
+    WallKind.Tv, WallKind.ShortTablet -> TileStyle.Tv
 }
 
 /** 序号小牌上的字：两位起，不够补零。 */

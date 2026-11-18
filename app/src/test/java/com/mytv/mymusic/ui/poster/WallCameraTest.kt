@@ -16,10 +16,10 @@ class WallCameraTest {
     private val tabletView = WallViewport(1280f, 800f)
     private val tvView = WallViewport(960f, 540f, insetTop = 80f)
 
-    private fun viewOf(m: WallMetrics) = when (m) {
-        WallMetrics.Phone -> phoneView
-        WallMetrics.Tablet, WallMetrics.ShortTablet -> tabletView
-        WallMetrics.Tv -> tvView
+    private fun viewOf(m: WallMetrics) = when (m.kind) {
+        WallKind.Phone -> phoneView
+        WallKind.Tablet, WallKind.ShortTablet -> tabletView
+        WallKind.Tv -> tvView
     }
 
     private val tvFeed = WallScene(WallMetrics.Tv, feedFor(WallMetrics.Tv, 15))

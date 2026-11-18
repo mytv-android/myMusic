@@ -157,7 +157,7 @@ internal fun PosterWall(
         state.onLongPress = onLongPress
         state.onGrownConfirm = onGrownConfirm
         env.metrics = metrics
-        env.style = tileStyleFor(metrics)
+        env.style = tileStyleFor(metrics.kind)
         env.tint = prefs.tint.alpha
         env.lightsOut = prefs.lightsOut
         env.showIndex = prefs.showIndex
@@ -250,26 +250,30 @@ private fun WallTiles(
 ) {
     val tiles = state.composedTiles
     val generation = state.generation
-    val band = state.scene?.field as? WallField.FeedBand
+    val scene = state.scene
+    val band = scene?.field as? WallField.FeedBand
     val policy = remember(state) { WallMeasurePolicy(state) }
-    Layout(
-        content = {
-            for (t in tiles) {
-                key(generation, t.pos) {
-                    val ghost = if (band != null && band.isGhost(t.song)) band.ghostAlpha(t.song) else null
-                    PosterTile(
-                        tile = t,
-                        song = songs.getOrNull(t.song),
-                        ghostAlpha = ghost,
-                        current = currentIndex >= 0 && t.song == currentIndex,
-                        env = env,
-                        grownContent = if (t.grown) grownContent else null,
-                    )
+    // 大卡按实际显示的尺寸排版（视角拉远 / 拉近时不是 6×6 槽位）
+    CompositionLocalProvider(LocalWallGrownSize provides scene?.grownDisplay?.dp) {
+        Layout(
+            content = {
+                for (t in tiles) {
+                    key(generation, t.pos) {
+                        val ghost = if (band != null && band.isGhost(t.song)) band.ghostAlpha(t.song) else null
+                        PosterTile(
+                            tile = t,
+                            song = songs.getOrNull(t.song),
+                            ghostAlpha = ghost,
+                            current = currentIndex >= 0 && t.song == currentIndex,
+                            env = env,
+                            grownContent = if (t.grown) grownContent else null,
+                        )
+                    }
                 }
-            }
-        },
-        measurePolicy = policy,
-    )
+            },
+            measurePolicy = policy,
+        )
+    }
 }
 
 /**

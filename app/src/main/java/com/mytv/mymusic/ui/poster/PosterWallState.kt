@@ -93,7 +93,7 @@ private const val TABLET_CHROME_HEIGHT = 320f
  * 块比屏幕宽（电视详情页左边让出导航栏后只剩 870dp 上下）时不居中，和手机一样左边留 12dp，第 1 位不被切掉。
  */
 internal fun initialCamera(metrics: WallMetrics, viewport: WallViewport): WallPoint {
-    if (metrics == WallMetrics.Phone) return WallPoint(-12f, -viewport.insetTop - 4f)
+    if (metrics.kind == WallKind.Phone) return WallPoint(-12f, -viewport.insetTop - 4f)
     val x = min(metrics.blockWidth / 2 - viewport.width / 2, -12f)
     val spare = viewport.usableHeight - metrics.blockHeight
     val top = viewport.insetTop + max(0f, spare / 2)
@@ -102,6 +102,9 @@ internal fun initialCamera(metrics: WallMetrics, viewport: WallViewport): WallPo
 
 /** 镜头所在的格距网格坐标；只有跨过一条格线，要组合的格子才可能变。 */
 internal fun cullCell(camAxis: Float, pitch: Float): Int = floor(camAxis / pitch).toInt()
+
+/** 大卡显示尺寸按视口的大卡那一段重算（转屏、浮层高度、折痕分段、视角都会改它）。 */
+internal fun WallScene.sizedFor(viewport: WallViewport): WallScene = withGrownDisplay(grownDisplaySize(metrics, viewport.cardArea))
 
 /**
  * 网格坐标 ([cx], [cy]) 时要组合的格子。镜头在 [cx]·p ..< ([cx] + 1)·p 之间走，所以按格点起算、视口放宽一个格距，
@@ -259,6 +262,9 @@ internal class PosterWallState internal constructor(
 
     internal val metrics: WallMetrics get() = scene?.metrics ?: config?.metrics ?: WallMetrics.Phone
 
+    /** 大卡这一次显示的边长（dp），见 grownDisplaySize。 */
+    internal val grownDisplay: Float get() = scene?.grownDisplay ?: metrics.grownSize
+
     /** 要组合的格子；只在放大格、视口变化或镜头跨过格线时重算，结果相同不通知。 */
     internal val composedTiles: List<WallTile> by derivedStateOf(structuralEqualityPolicy()) {
         val s = scene
@@ -321,10 +327,12 @@ internal class PosterWallState internal constructor(
         )
         if (vp == old) return
         viewport = vp
-        val s = scene
-        if (!initialized || s == null) {
+        val s0 = scene
+        if (!initialized || s0 == null) {
             tryInit()
         } else {
+            val s = s0.sizedFor(vp)
+            scene = s
             camera.bounds = s.bounds(vp)
             // 转屏、分屏改了尺寸：大卡留在中间
             val g = s.grown
@@ -341,11 +349,13 @@ internal class PosterWallState internal constructor(
     private fun changeInsets(old: WallViewport, c: WallConfig) {
         val vp = old.copy(insetTop = c.insetTop, insetBottom = c.insetBottom, segment = c.segment)
         viewport = vp
-        val s = scene ?: return
+        val s0 = scene ?: return
         if (!initialized) return
+        val s = s0.sizedFor(vp)
+        scene = s
         camera.bounds = s.bounds(vp)
         val g = s.grown ?: return
-        if (camera.restingPoint == s.centerTarget(g, old)) {
+        if (camera.restingPoint == s0.centerTarget(g, old)) {
             val target = s.centerTarget(g, vp)
             if (c.reduceMotion || !camera.isAnimating) camera.snapTo(target) else camera.animateTo(target)
         }
@@ -367,7 +377,7 @@ internal class PosterWallState internal constructor(
     private fun tryInit() {
         val c = config ?: return
         val vp = viewport ?: return
-        val base = WallScene(c.metrics, c.field)
+        val base = WallScene(c.metrics, c.field).sizedFor(vp)
         current = c.current
         currentKey = c.currentKey
         focus = null

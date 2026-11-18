@@ -23,9 +23,9 @@ class PosterTileTest {
 
     @Test
     fun styleFollowsTheMetrics() {
-        assertEquals(TileStyle.Phone, tileStyleFor(WallMetrics.Phone))
-        assertEquals(TileStyle.Tablet, tileStyleFor(WallMetrics.Tablet))
-        assertEquals(TileStyle.Tv, tileStyleFor(WallMetrics.Tv))
+        assertEquals(TileStyle.Phone, tileStyleFor(WallKind.Phone))
+        assertEquals(TileStyle.Tablet, tileStyleFor(WallKind.Tablet))
+        assertEquals(TileStyle.Tv, tileStyleFor(WallKind.Tv))
     }
 
     @Test
