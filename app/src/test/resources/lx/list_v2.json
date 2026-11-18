@@ -1,0 +1,6 @@
+{"type":"playList_v2","data":[
+{"id":"default","name":"list__name_default","list":[{"id":"wy_1","name":"歌一","singer":"甲","source":"wy","interval":"03:00","meta":{"songId":1}}]},
+{"id":"love","name":"list__name_love","list":[{"id":"wy_2","name":"歌二","singer":null,"source":"wy","interval":null,"meta":{"songId":2}},{"id":"kw_3","name":"歌三","singer":"丙","source":"kw","interval":"1:02:03","meta":{"songId":"3"}}]},
+{"id":"temp","name":"临时列表","list":[{"id":"wy_4","name":"歌四","singer":"丁","source":"wy","interval":"02:00","meta":{"songId":4}}]},
+{"id":"userlist_1","name":"跑步","source":"wy","sourceListId":"123","list":[{"id":"wy_5","name":"歌五","singer":"戊","source":"wy","interval":"02:30","meta":{"songId":5}}]}
+]}

@@ -1,0 +1,12 @@
+{"type":"playListPart_v2","data":{"id":"userlist_1700000000000","name":"跑步","source":"wy","sourceListId":"8888","locationUpdateTime":null,"list":[
+{"id":"wy_1901371647","name":"孤勇者","singer":"陈奕迅","source":"wy","interval":"04:16","meta":{"songId":1901371647,"albumName":"孤勇者","picUrl":"https://p1.music.126.net/a.jpg","qualitys":[{"type":"128k","size":"3.9M"}],"_qualitys":{"128k":true},"albumId":149221050}},
+{"id":"tx_0039MnYb0qxYhV","name":"晴天","singer":"周杰伦","source":"tx","interval":"04:29","meta":{"songId":"0039MnYb0qxYhV","albumName":"叶惠美","picUrl":"https://y.gtimg.cn/a.jpg","albumId":"8220","strMediaMid":"0039MnYb0qxYhV","id":97773,"albumMid":"000MkMni19ClKG"}},
+{"id":"tx_002Zkt5S2z8JZx","name":"七里香","singer":"周杰伦","source":"tx","interval":"04:59","meta":{"songId":"002Zkt5S2z8JZx","albumName":"七里香","picUrl":null,"strMediaMid":"001XqR0r2nqMrX","id":102065756,"albumMid":"003DFRzD192KKD"}},
+{"id":"32218394_9E0A6B6B1A7DEF8A6A1D0E3C6F7B2E21","name":"海阔天空","singer":"Beyond","source":"kg","interval":"05:26","meta":{"songId":32218394,"albumName":"海阔天空","picUrl":"http://imge.kugou.com/a.jpg","hash":"9E0A6B6B1A7DEF8A6A1D0E3C6F7B2E21","albumAudioId":"107019867","albumId":"960399"}},
+{"id":"kw_228908","name":"光辉岁月","singer":"Beyond","source":"kw","interval":"05:00","meta":{"songId":"MUSIC_228908","albumName":"光辉岁月"}},
+{"id":"mg_1121438701","name":"小幸运","singer":"田馥甄","source":"mg","interval":"04:25","meta":{"songId":"1121438701","copyrightId":"60084600529","albumName":"我的少女时代","lrcUrl":"http://a/lrc"}},
+{"id":"local_/storage/emulated/0/Music/夜曲.mp3","name":"夜曲","singer":"周杰伦","source":"local","interval":"03:46","meta":{"songId":"/storage/emulated/0/Music/夜曲.mp3","filePath":"/storage/emulated/0/Music/夜曲.mp3","ext":"mp3","albumName":"十一月的萧邦","picUrl":"/storage/emulated/0/Music/cover.jpg"}},
+{"id":"xyz_1","name":"自定义源的歌","singer":"某人","source":"xyz","interval":"03:00","meta":{"songId":"1"}},
+{"id":"","name":"没有 id","singer":"某人","source":"wy","interval":"03:00","meta":{"songId":"2"}},
+{"id":"wy_1901371647","name":"孤勇者","singer":"陈奕迅","source":"wy","interval":"04:16","meta":{"songId":1901371647}}
+]}}

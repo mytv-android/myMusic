@@ -1,0 +1,6 @@
+{"type":"playListPart","data":{"id":"userlist_old","name":"旧歌单","list":[
+{"songmid":"32218394","name":"海阔天空","singer":"Beyond","source":"kg","interval":"05:26","albumName":"海阔天空","albumId":"960399","img":"http://imge.kugou.com/a.jpg","types":[{"type":"128k","size":"5M"}],"_types":{"128k":{"size":"5M"}},"hash":"9E0A6B6B1A7DEF8A6A1D0E3C6F7B2E21","albumAudioId":"107019867"},
+{"songmid":"0039MnYb0qxYhV","name":"晴天","singer":"周杰伦","source":"tx","interval":"04:29","albumName":"叶惠美","img":"https://y.gtimg.cn/a.jpg","types":[],"songId":97773,"strMediaMid":"0039MnYb0qxYhV","albumMid":"000MkMni19ClKG"},
+{"songmid":"1121438701","name":"小幸运","singer":"田馥甄","source":"mg","interval":"04:25","copyrightId":"60084600529","lrcUrl":"http://a/lrc"},
+{"songmid":"/sdcard/Music/夜曲.flac","name":"夜曲","singer":"周杰伦","source":"local","interval":"03:46"}
+]}}
