@@ -88,6 +88,8 @@ import com.mytv.mymusic.ui.components.PageScaffold
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.components.SwipeDelete
+import com.mytv.mymusic.ui.components.rememberRowSwipe
 import com.mytv.mymusic.ui.local.LocalSongBadge
 import com.mytv.mymusic.ui.local.LocalUnplayableSheets
 import com.mytv.mymusic.ui.local.localSubtitle
@@ -201,6 +203,14 @@ fun FavoritesScreen(
                     }
                 },
                 onMore = { actionSong = saved to song },
+                // 收藏里「删除」就是取消收藏（和行尾的心一样带撤销）；两个都露出来时只留一个
+                swipe = rememberRowSwipe(
+                    song,
+                    songs,
+                    delete = SwipeDelete("取消收藏", "取消收藏", sameAsUnfavorite = true) { unfavorite(saved, song) },
+                ),
+                // 行尾的心本身是按钮：悬停按钮插在它前面，不替换
+                hoverReplacesTrailing = false,
             )
         }
     }
@@ -372,6 +382,8 @@ fun HistoryScreen(
                     )
                 },
                 onMore = { actionItem = saved to song },
+                // 左滑「删除」= 删这条记录，和 ⋮ 面板里的「从最近播放删除」同一份（撤销按原时间写回）
+                swipe = rememberRowSwipe(song, queue, delete = SwipeDelete("删除", "从最近播放删除") { removeOne(saved, song) }),
             )
         }
     }
@@ -512,6 +524,7 @@ fun DownloadsScreen(
         }
     }
     val done = prepared.sections.done
+    val doneSongs = remember(done) { done.map { it.song } }
     val active = prepared.sections.active
     val failed = prepared.sections.failed
     val freeBytes = prepared.freeBytes
@@ -610,6 +623,13 @@ fun DownloadsScreen(
                         Icon(Icons.Outlined.Delete, "删除“${item.song.title}”的下载文件", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
+                // 「删除」在下载里是删文件：和行尾按钮一样先弹确认框
+                swipe = rememberRowSwipe(
+                    item.song,
+                    doneSongs,
+                    delete = SwipeDelete("删文件", "删除下载文件", icon = Icons.Outlined.Delete) { deleting = item.record },
+                ),
+                hoverReplacesTrailing = false,
             )
         }
     }

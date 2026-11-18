@@ -122,6 +122,8 @@ import com.mytv.mymusic.ui.components.SelectionState
 import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.components.SwipeDelete
+import com.mytv.mymusic.ui.components.rememberRowSwipe
 import com.mytv.mymusic.ui.local.LocalSongBadge
 import com.mytv.mymusic.ui.local.LocalUnplayableSheets
 import com.mytv.mymusic.ui.local.localElsewhereNote
@@ -370,6 +372,13 @@ fun LocalPlaylistScreen(
                     trailing = selectTrailing ?: durationTrailing,
                     onMore = rowMore,
                     onLongClick = rowLongPress,
+                    // 「删除」= 从歌单移出（绑定歌单照写回规则同步到平台，撤销按原位置插回）；收藏来的只读歌单没有
+                    swipe = rememberRowSwipe(
+                        song,
+                        songs,
+                        delete = if (readOnly) null else SwipeDelete("移出", "从歌单移出") { remove(entry, song) },
+                        enabled = !picking,
+                    ),
                 )
             }
         }
