@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>用户建议改进稿 · myMusic</title>
-<meta name="description" content="按用户提的 15 条建议整理的改进稿（手机、平板、横屏、折叠屏、电视都画了）：歌词动画面板（按速度灰掉、随机池、保存并应用）、Rush 自定义配色/景深强度/风格预设、长按歌词分享卡片（Rush 九种卡片＋播放页样式）、播放页加歌单、列表左右滑操作、歌单导出与落雪导入、海报墙视角远近、电视海报视图去掉浮动工具栏、手机横屏全屏歌词修复。">
+<meta name="description" content="按用户提的 16 条建议整理的改进稿（手机、平板、横屏、折叠屏、电视都画了）：歌词动画面板（按速度灰掉、随机池、保存并应用）、Rush 自定义配色/景深强度/风格预设、长按歌词分享卡片（Rush 九种卡片＋播放页样式）、播放页加歌单、列表左右滑操作、歌单导出与落雪导入、海报墙视角远近、电视海报视图去掉浮动工具栏、手机底栏统一成浮动导航条、手机横屏全屏歌词修复。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=Roboto+Flex:opsz,slnt,wdth,wght@8..144,-10..0,25..151,100..1000&display=swap" rel="stylesheet">
@@ -679,6 +679,67 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
 .pl .sheet.tvp .lrow { background: var(--pl-surface-container-low); }
 .sheet.tvp .sh-body { scrollbar-width: none; }
 .sheet.tvp .sh-body::-webkit-scrollbar { display: none; }
+
+/* ── 09 手机底栏 ── 深色用品牌色深色方案（同 floating-navbar.html） */
+.navdk { --md-primary:#82d5c7; --md-on-primary:#003730; --md-primary-container:#005047; --md-on-primary-container:#9cf2e2;
+  --md-secondary-container:#334b45; --md-on-secondary-container:#d0e8e1;
+  --md-surface:#0f1513; --md-surface-container-low:#151b19; --md-surface-container:#1b211f; --md-surface-container-high:#252c2a; --md-surface-container-highest:#303735;
+  --md-on-surface:#dee4e0; --md-on-surface-variant:#bbc8c2; --md-outline:#86958e; --md-outline-variant:#3b4944; }
+.navdk.scr.lt { background: var(--md-surface); color: var(--md-on-surface); }
+.navdk .navpill { background: rgb(255 255 255 / .45); }
+#nvDemo { gap: 22px; }
+#nvDemo figure { position: relative; }
+#nvDemo .rec { position: absolute; left: 50%; top: -12px; transform: translateX(-50%); z-index: 50; background: var(--red); color: #fff; font: 800 12px/1 var(--body); padding: 5px 10px; border-radius: 8px; }
+.nvpage { position: absolute; inset: 0; overflow: hidden; }
+.nvpage .lbig { padding-top: 64px; }
+.nvchips { display: flex; gap: 8px; padding: 6px 16px 12px; }
+.nvchips span { height: 32px; padding: 0 14px; border-radius: 8px; display: inline-flex; align-items: center; font-size: 14px; font-weight: 500; border: 1px solid var(--md-outline-variant); color: var(--md-on-surface-variant); }
+.nvchips span.on { background: var(--md-secondary-container); color: var(--md-on-secondary-container); border-color: transparent; }
+.nvpage .srow .fg { cursor: default; }
+.nvpage .srow .rk { width: 26px; font-size: 15px; font-weight: 800; color: var(--md-on-surface-variant); text-align: center; flex: none; margin-right: 6px; }
+.frost { -webkit-backdrop-filter: blur(20px) saturate(1.3); backdrop-filter: blur(20px) saturate(1.3); }
+/* 导航项（ShortNavigationBar 的项样式）：56×32 指示器 + 12sp 字 */
+.nvi { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--md-on-surface-variant); cursor: pointer; min-width: 0; }
+.nvi i { width: 56px; height: 32px; display: grid; place-items: center; border-radius: 16px; transition: background .25s; }
+.nvi svg { width: 24px; height: 24px; fill: currentColor; }
+.nvi.on { color: var(--md-on-surface); font-weight: 700; }
+.nvi.on i { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+/* 现在：贴底 ShortNavigationBar（64dp + 手势条） */
+.nv-dock { position: absolute; left: 0; right: 0; bottom: 0; height: 88px; padding-bottom: 24px; display: grid; grid-template-columns: repeat(4, 1fr); z-index: 12; background: color-mix(in srgb, var(--md-surface-container) 72%, transparent); }
+/* 现在：没歌时的 FloatingToolbar（56×48 槽位、整块选中底色、无阴影） */
+.nv-ft { position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%); height: 64px; padding: 0 8px; border-radius: 32px; display: flex; align-items: center; gap: 4px; z-index: 12; background: color-mix(in srgb, var(--md-surface-container) 72%, transparent); }
+.nv-ft span { width: 56px; height: 48px; border-radius: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; line-height: 13px; color: var(--md-on-surface); cursor: pointer; }
+.nv-ft span svg { width: 22px; height: 22px; fill: currentColor; }
+.nv-ft span.on { background: var(--md-secondary-container); color: var(--md-on-secondary-container); font-weight: 800; }
+/* 新：浮动导航条（A 居中收缩，B 满宽留 12dp） */
+.nv-pill { position: absolute; bottom: 36px; height: 64px; border-radius: 32px; display: flex; align-items: center; padding: 0 6px; z-index: 12;
+  background: color-mix(in srgb, var(--md-surface-container) 88%, transparent);
+  box-shadow: 0 6px 16px -6px rgb(0 0 0 / .32), 0 1px 3px rgb(0 0 0 / .14), inset 0 0 0 1px color-mix(in srgb, var(--md-outline-variant) 40%, transparent); }
+.navdk .nv-pill { box-shadow: 0 6px 16px -6px rgb(0 0 0 / .6), 0 1px 3px rgb(0 0 0 / .3); }
+.nv-pill.a { left: 50%; transform: translateX(-50%); width: 304px; bottom: 40px; }
+.nv-pill.b { left: 12px; right: 12px; }
+.nv-pill .nvi { flex: 1; }
+/* 迷你播放器：现在（20dp 圆角、底边进度线）和 B（全圆角、圆封面、进度环） */
+.nv-mini { position: absolute; left: 12px; right: 12px; height: 64px; display: flex; align-items: center; gap: 12px; padding: 0 4px 0 8px; z-index: 13; color: var(--md-on-secondary-container);
+  background: color-mix(in srgb, var(--md-secondary-container) 82%, transparent); box-shadow: 0 8px 18px -8px rgb(0 0 0 / .35);
+  transition: transform .45s var(--spring), opacity .3s; }
+.nv-mini .cv { width: 48px; height: 48px; flex: none; }
+.nv-mini .tx { flex: 1; min-width: 0; } .nv-mini .tx b { display: block; font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nv-mini .tx small { display: block; font-size: 12px; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nv-mini .pp { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--md-primary); color: var(--md-on-primary); flex: none; position: relative; }
+.nv-mini .pp svg { width: 22px; height: 22px; fill: currentColor; }
+.nv-mini .nx { width: 48px; height: 48px; display: grid; place-items: center; flex: none; } .nv-mini .nx svg { width: 24px; height: 24px; fill: currentColor; }
+.nv-mini.now { border-radius: 20px; overflow: hidden; }
+.nv-mini.now .cv { border-radius: 12px; }
+.nv-mini.now::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 47%; background: var(--md-primary); }
+.nv-mini.now::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: color-mix(in srgb, var(--md-on-secondary-container) 12%, transparent); }
+.nv-mini.b { border-radius: 32px; padding-left: 8px; bottom: 108px; }
+.nv-mini.b .cv { border-radius: 50%; }
+.nv-mini.b .pp { margin-right: 2px; }
+.nv-mini.b .ring { position: absolute; inset: -5px; width: 50px; height: 50px; transform: rotate(-90deg); }
+.nv-mini.b .ring circle { fill: none; stroke-width: 2.5; }
+.nv-mini.off { opacity: 0; transform: translateY(72px) scale(.96); pointer-events: none; }
+.nv-mini .newmark::after, .nv-pill.newmark::after { right: 14px; top: -11px; }
 </style>
 </head>
 <body>
@@ -749,7 +810,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
 
 <header class="page-head">
   <div class="doc-label">改 进 稿 · 2 0 2 6 - 1 1 - 1 8</div>
-  <h1>用户提的 15 条建议，<em>逐条</em>落到界面上</h1>
+  <h1>用户提的 16 条建议，<em>逐条</em>落到界面上</h1>
   <p class="lede">
     这份稿子按用户的反馈截图和原话整理，每条先对照<strong>现在代码里是怎么做的</strong>，再给出改法和交互稿。界面一律照现有组件画：歌词动画面板是 <code>AnimationSheet</code>（<code>AdaptiveSheet</code> + <code>ConnectedToggleGroup</code> + 两列 <code>ModeCard</code>），列表是 <code>SongRow</code> 分段列表，设置行是 <code>SegmentedGroup</code> 里的 <code>ListRow</code> / <code>SwitchRow</code>。
     深色稿是播放页的 <strong>PlayerTheme</strong>（跟封面色相走），浅色稿是 <strong>BrandSeed #006B5F</strong> 的 M3 浅色方案。带 <span class="tag">红色虚线</span> 的是新增或改动的部分。
@@ -757,7 +818,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
   </p>
   <div class="chips">
     <span class="chip2"><span class="dot"></span>来源：用户反馈 <b>7 张截图 + 原话</b></span>
-    <span class="chip2">建议 <b>15</b> 条 · 归成 <b>8</b> 块</span>
+    <span class="chip2">建议 <b>16</b> 条 · 归成 <b>9</b> 块</span>
     <span class="chip2">真 bug <b>1</b> 个：手机横屏全屏歌词空白</span>
     <span class="chip2">设备 <b>5</b> 种：手机 · 平板 · 横屏 · 折叠屏 · 电视</span>
     <span class="chip2">分享卡 <b>10</b> 种：Rush 九种 ＋ 播放页</span>
@@ -773,7 +834,8 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
     <a href="#files"><b>06</b>歌单导出、落雪导入</a>
     <a href="#wall"><b>07</b>海报墙视角、电视工具栏</a>
     <a href="#landscape"><b>08</b>横屏全屏歌词</a>
-    <a href="#impl"><b>09</b>实现与分期</a>
+    <a href="#navbar"><b>09</b>手机底栏</a>
+    <a href="#impl"><b>10</b>实现与分期</a>
   </nav>
 </header>
 
@@ -800,6 +862,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
       <tr><td>13</td><td>海报墙设置加视角远近滑块</td><td>格距按设备写死（手机 56dp、平板 102dp、电视 76dp，<code>WallMetrics</code>）。</td><td>海报墙设置加「视角」滑块（远 0.5× ～ 近 1.25×，默认 1×），手机、平板上也能双指捏合；拉远到一定程度自动收起序号和字。</td><td><a href="#wall">07</a></td></tr>
       <tr><td>14</td><td>手机横屏时全屏歌词用不了</td><td><b>bug。</b>横屏走 <code>WidePlayer</code>。舞台高度不到 320dp 时 <code>LyricStage</code> 改用经典列表兜底，但 <code>WidePlayer</code> 没传兜底列表，结果一行都不画。常见手机横屏后高度约 312–336dp，正好卡在线下。</td><td>补上兜底列表（电视同样）；高度门槛改成按文字区算，手机横屏也能放动画。</td><td><a href="#landscape">08</a></td></tr>
       <tr><td>15</td><td>电视上海报界面不要浮动工具栏，遥控器选不到</td><td>详情页（歌单、专辑、榜单、自建歌单）的海报视图，电视把浮动工具栏放在顶排胶囊右边（<code>CollectionPosterView</code>）。墙接管方向键且是无限的，选中格子后上键一直在墙里走，工具栏选不到。队列海报墙顶排本来就没按钮。</td><td>电视上不画工具栏，顶排只留标题和时钟，焦点直接进墙。工具栏的几项挪进长按确认键的面板，排在单曲操作下面一组；菜单键直接跳到这一组。读取失败、空歌单的提示里加「切回列表视图」。</td><td><a href="#wall">07</a></td></tr>
+      <tr><td>16</td><td>手机浮动导航栏怪怪的，不好看</td><td>没歌在播时是 <code>HorizontalFloatingToolbar</code> 胶囊：图标和字挤在 56×48 槽位里、选中底色把字也包进去、没有阴影、按内容收缩居中；一放歌整条换成贴底 <code>ShortNavigationBar</code>（<code>PhoneBottomBar.kt</code>），底栏「变身」、让位高度跳。</td><td>有没有歌都用同一条浮动导航条：满宽留 12dp、64dp 全圆角、带阴影，指示器只在图标后面。有歌时迷你播放器同宽同圆角叠在上面，封面变圆、进度改成播放键外圈；开始放歌时导航条不动，迷你播放器从它后面升上来。</td><td><a href="#navbar">09</a></td></tr>
     </tbody>
   </table></div>
 </section>
@@ -1116,8 +1179,54 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
   </ul>
 </section>
 
+
+<section class="block" id="navbar">
+  <div class="block-head"><span class="kicker">09</span><h2>手机底栏：不再两套来回换，导航条和迷你播放器一起浮着</h2></div>
+  <div class="quote">这个浮动的导航栏也怪怪的，不是很美观，你也优化一下。</div>
+  <p class="sub">手机竖屏的底栏现在有<strong>两套</strong>（<code>PhoneBottomBar.kt</code>）：没歌在播时是一条 <code>HorizontalFloatingToolbar</code> 胶囊浮在内容上；一开始放歌，整条换成贴底满宽的 <code>ShortNavigationBar</code>，上面再浮一个迷你播放器。浮动那条本身也不是按导航来画的。改法是有没有歌都用<strong>同一条浮动导航条</strong>，按导航栏的规矩画（指示器只在图标后面、带阴影、满宽留边）；有歌时迷你播放器同宽同圆角叠在它上面。</p>
+
+  <h3>现在哪里怪</h3>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:22%">问题</th><th style="width:44%">现在的代码</th><th>看上去</th></tr></thead>
+    <tbody>
+      <tr><td>两套底栏来回换</td><td><code>state.current != null</code> 时 <code>ShortNavigationBar</code> 贴底，否则 <code>FloatingToolbar</code> 悬浮；<code>phoneOverlayHeight</code> 在 80dp 和 144dp 之间跳</td><td>第一次点播放，底栏从胶囊「变身」成满宽条，列表底部让位也跟着跳一下</td></tr>
+      <tr><td>图标和字挤在按钮里</td><td>槽位定死 56×48，22dp 图标下面压 11sp 字，上下只剩约 3dp</td><td>字贴着图标、贴着边，像四个小按钮而不是导航</td></tr>
+      <tr><td>选中底色把字也包进去</td><td>选中项整块 56×48 胶囊铺 <code>secondaryContainer</code></td><td>导航栏的指示器应该只在图标后面（56×32），文字在下面；现在和贴底那套的样子也对不上</td></tr>
+      <tr><td>浮着但没有阴影</td><td>FloatingToolbar 展开态 elevation 是 0，只有 72% 的 <code>surfaceContainer</code> 磨砂</td><td>浅色主题下是一块发灰的圆角块压在白列表上，边缘糊，看不出是浮着的</td></tr>
+      <tr><td>宽度、圆角对不上</td><td>胶囊按内容收缩约 252dp 居中；迷你播放器满宽留 12dp、20dp 圆角</td><td>同一屏里两种宽度、两种圆角</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>四种对比</h3>
+  <div class="demo-bar">
+    <div class="grp"><span>状态</span><button data-nvplay="0" class="on">没歌在播</button><button data-nvplay="1">有歌在播</button></div>
+    <span class="sep"></span>
+    <div class="grp"><span>主题</span><button data-nvdark="0" class="on">浅色</button><button data-nvdark="1">深色</button></div>
+    <span class="sep"></span>
+    <span>四台手机同时切；底栏上的四个标签都能点。切「有歌在播」看底栏怎么变。</span>
+  </div>
+  <div class="demo" id="nvDemo"></div>
+
+  <h3>推荐 B：尺寸和行为</h3>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:18%">项</th><th style="width:44%">做法</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>导航条</td><td>左右各留 12dp，离系统手势条 12dp，高 64dp，全圆角；底色 <code>surfaceContainer</code> 88%（开模糊时磨砂，关模糊时实色）；阴影 Level 2，浅色主题再加一圈 1dp <code>outlineVariant</code> 40% 描边</td><td>和迷你播放器同宽同圆角，两块叠起来是一组；描边让浅色下边缘清楚</td></tr>
+      <tr><td>导航项</td><td>四项平分宽度；24dp 图标放在 56×32 的指示器里（16dp 圆角），下面 12sp 文字，间距 4dp；选中：实心图标、<code>secondaryContainer</code> 指示器、文字加粗；没选中：线框图标、<code>onSurfaceVariant</code></td><td>就是 <code>ShortNavigationBar</code> 的项样式，只是放进浮动容器；读屏照旧是 Tab 角色、带选中态</td></tr>
+      <tr><td>迷你播放器</td><td>同宽、高 64dp、全圆角，在导航条上方 8dp；封面 48dp 改成圆形（和胶囊两端同心）；底色仍是 <code>secondaryContainer</code></td><td>手势（左右滑切歌、上滑展开、长按队列）和读屏操作全部不变</td></tr>
+      <tr><td>进度</td><td>底边 2dp 进度线去掉，改成播放键外圈 2.5dp 的进度环</td><td>胶囊两端是半圆，底边直线会被切掉两头；环在按钮上更好认</td></tr>
+      <tr><td>开始 / 停止播放</td><td>导航条位置不动；迷你播放器从导航条后面升上来（淡入 + 上移 72dp），停播时反过来</td><td>不再整条换组件；列表底部让位只差迷你播放器那 72dp，用同一条动画</td></tr>
+      <tr><td>让位高度</td><td><code>phoneOverlayHeight</code>：没歌 64 + 12 = 76dp；有歌 64 + 8 + 64 + 12 = 148dp（都再加系统导航栏）</td><td>和现在差不多（80 / 144），列表最后一行照样露得出来</td></tr>
+      <tr><td>大字号</td><td>容器 <code>heightIn(min = 64.dp)</code>，文字放大时跟着长高，不裁字</td><td>1.3× 字号下约 70dp</td></tr>
+      <tr><td>键盘</td><td>输入法弹出时整组淡出，收起再出现</td><td>浮着的底栏不该被键盘顶到半屏</td></tr>
+      <tr><td>滚动</td><td>滚动时不收起</td><td>音乐应用切页很频繁，收起后还要多一步</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note"><b>只有手机竖屏有这条底栏</b>（折叠屏合上时的外屏也是手机窗口，一样）。平板、手机横屏、展开的折叠屏宽度 ≥600dp，用的是左侧导航栏加底部 <code>BottomPlayerBar</code>；电视是顶部标签。这些都不动，所以这一节只画手机。实现：<code>PhoneBottomBar.kt</code> 里一个 <code>FloatingNavBar</code> 取代现在的 <code>HorizontalFloatingToolbar</code> 和 <code>ShortNavigationBar</code> 两套；<code>MiniPlayer</code> 改胶囊、圆封面、进度环（<code>PlayPauseButton</code> 加可选的进度环）；<code>AppNavigation.kt</code> 的 <code>phoneOverlayHeight</code> 按新尺寸算。不新增依赖。</div>
+</section>
+
 <section class="block" id="impl">
-  <div class="block-head"><span class="kicker">09</span><h2>实现与分期</h2></div>
+  <div class="block-head"><span class="kicker">10</span><h2>实现与分期</h2></div>
   <p class="sub">确认后按下面的顺序一次做完，每一期单独提交、跑单测。</p>
   <div class="scroll"><table>
     <thead><tr><th style="width:15%">块</th><th style="width:45%">主要改动的文件</th><th>新增数据 / 接口</th></tr></thead>
@@ -1130,11 +1239,12 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
       <tr><td>滑动操作</td><td><code>components/Lists.kt</code>（<code>SongRow</code> 加 <code>swipe</code> 参数）、新 <code>components/SwipeActions.kt</code>（滑动 ＋ 指针悬停按钮）、各列表页传上下文、电视 <code>TrackActionsSheet</code> 加「从最近播放删除」、新设置页 <code>SwipeSettingsScreen</code>、<code>LibraryCollections.kt</code>（最近播放删除）</td><td><code>SwipePrefs</code>；<code>MusicActions.removeHistory(key)</code></td></tr>
       <tr><td>导出 / 落雪导入</td><td>新 <code>data/transfer/</code>：<code>PlaylistExport</code>（三种格式）、<code>LxImport</code>（gzip 嗅探、v1→v2、平台映射）；<code>LocalPlaylistScreen.kt</code>、<code>SyncScreens.kt</code>、<code>LibraryScreen.kt</code>（导入预览面板）；电视没有文件选择器时复用 <code>SyncSetupServer</code> 出二维码，网页里上传 / 下载文件</td><td>—（导入后是普通自建歌单，走现有同步）；网页会话沿用 10 分钟时效和「附近的设备」权限提示</td></tr>
       <tr><td>海报墙视角</td><td><code>WallGeometry.kt</code>（<code>WallMetrics.scaled(zoom)</code>）、<code>PosterWall.kt</code>（捏合）、<code>PosterSettingsSheet.kt</code></td><td><code>PosterPrefs.zoom</code>（<code>poster_zoom_phone/tablet/tv</code>）</td></tr>
+      <tr><td>手机底栏</td><td><code>adaptive/PhoneBottomBar.kt</code>（<code>FloatingNavBar</code> 取代 <code>HorizontalFloatingToolbar</code> 和 <code>ShortNavigationBar</code> 两套；<code>MiniPlayer</code> 改全圆角、圆封面、进度环）、<code>components/Buttons.kt</code>（<code>PlayPauseButton</code> 可带进度环）、<code>AppNavigation.kt</code>（<code>phoneOverlayHeight</code> 新尺寸、键盘弹出时隐藏）</td><td>—</td></tr>
       <tr><td>电视海报视图</td><td><code>CollectionPosterView.kt</code>（电视不画 <code>PosterToolbar</code>，默认焦点给墙，去掉顶排接管下键）、<code>PosterWallScreen.kt</code>（提示）、<code>PosterWall.kt</code> / <code>PosterWallState.kt</code>（去掉没人再用的 <code>chromeAbove</code>、<code>escapeUp</code>、<code>focusFromAbove</code>；菜单键带上「从菜单键来」）、<code>AppUi.kt</code>（<code>TrackActionsSheet</code> 的 <code>onWallLocate</code> / <code>onWallSettings</code> 换成一组整页操作）、<code>CollectionScreen.kt</code>、<code>LocalPlaylistScreen.kt</code>（读取失败、空歌单加第二个按钮）</td><td>—</td></tr>
     </tbody>
   </table></div>
   <div class="phases" style="margin-top:16px">
-    <div class="phase"><header><span class="tag">P1</span><h3>修 bug 和小缺口</h3></header><ul><li>横屏全屏歌词兜底 + 门槛</li><li>最近播放单条删除（⋮ 面板）</li><li>电视海报视图去掉浮动工具栏，整页操作进长按面板</li><li>播放页「加到歌单」按钮和面板</li><li>单测：横屏 800×312、兜底必有</li></ul></div>
+    <div class="phase"><header><span class="tag">P1</span><h3>修 bug 和小缺口</h3></header><ul><li>横屏全屏歌词兜底 + 门槛</li><li>最近播放单条删除（⋮ 面板）</li><li>电视海报视图去掉浮动工具栏，整页操作进长按面板</li><li>手机底栏统一成一条浮动导航条，迷你播放器同宽叠在上面</li><li>播放页「加到歌单」按钮和面板</li><li>单测：横屏 800×312、兜底必有</li></ul></div>
     <div class="phase"><header><span class="tag">P2</span><h3>动画面板</h3></header><ul><li>换法置顶、卡片三态、「这首歌」一行</li><li>随机池 + 记忆优先</li><li>草稿、保存条、关闭确认、立即应用</li><li>宽屏舞台预览草稿、书本姿态面板放左页、电视焦点</li><li>单测：抽取顺序、池为空兼容、applyNow 跳过空当</li></ul></div>
     <div class="phase"><header><span class="tag">P3</span><h3>Rush 三项</h3></header><ul><li>Color / Slider 设置控件 + 取色面板</li><li>自定义配色、景深强度（含旧值迁移）</li><li>随机搭配、预设增删改、预设进池和四档</li></ul></div>
     <div class="phase"><header><span class="tag">P4</span><h3>滑动操作</h3></header><ul><li>SwipeActions + 各列表上下文</li><li>设置页（示例行、排序、选动作）</li><li>读屏自定义操作、手势冲突规则</li></ul></div>
@@ -2575,6 +2685,52 @@ devBlock('#dvTvWall', [
     cap: '墙上没有歌时没有格子可长按，整页操作就够不到了。读取失败用的 <code>DiscoverErrorState</code> 本来就留了第二个按钮的位置，电视上填「切回列表视图」；空的自建歌单（<code>EmptyState</code>「添加歌曲」）同样在旁边加这个按钮。焦点照旧在第一个按钮上。读取中墙上是占位格，等歌到了再操作。',
   }),
 ]);
+
+/* ---------- 09 手机底栏 ----------
+   照 PhoneBottomBar.kt 画「现在」：没歌在播 = HorizontalFloatingToolbar（64dp、内边距 8、槽位 56×48、22dp 图标 + 11sp 字、
+   选中整块 secondaryContainer、72% surfaceContainer 磨砂、无阴影、离底 16dp）；有歌在播 = 迷你播放器（20dp 圆角）+ 贴底 ShortNavigationBar。 */
+const NV = { play: false, dark: false, tab: 0 };
+const NV_TABS = [['chart', '榜单'], ['queue', '歌单'], ['search', '搜索'], ['library', '我的']];
+const NV_SONGS = [['海底（Live）', '一支榴莲'], ['晚风心里吹', '阿梨粤'], ['若把你', 'KIV'], ['精神体验', '草东没有派对'], ['床边故事', '周杰伦'], ['慢冷', '梁静茹'], ['一万次日落', '林间'], ['Porch Light', '示例乐队'], ['雨停之前', '示例歌手'], ['Glass Harbor', '北岸乐团']];
+function nvPage() {
+  return `<div class="nvpage"><div class="lbig"><h5>${NV_TABS[NV.tab][1]}</h5><p>网易云音乐 · 每天 10 点更新</p></div>
+    <div class="nvchips"><span class="on">热门</span><span>新歌</span><span>飙升</span><span>原创</span></div>
+    <div class="slist">${NV_SONGS.map(([t, a], i) => `<div class="srow ${NV.play && i === 6 ? 'playing' : ''}"><div class="fg"><span class="rk">${i + 1}</span><div class="cv" style="background:${ART[i % ART.length]}"></div><div class="tx"><b>${t}</b><small>${a}</small></div><span class="ib more">${ico('more')}</span></div></div>`).join('')}</div></div>`;
+}
+const nvItems = (cls = 'nvi') => NV_TABS.map(([i, l], k) => `<span class="${cls} ${k === NV.tab ? 'on' : ''}" data-nvtab="${k}"><i>${ico(i)}</i>${l}</span>`).join('');
+function nvMini(kind, extra = '') {
+  const ring = kind === 'b' ? `<svg class="ring" viewBox="0 0 50 50"><circle cx="25" cy="25" r="23.5" stroke="color-mix(in srgb, var(--md-on-secondary-container) 15%, transparent)"/><circle cx="25" cy="25" r="23.5" stroke="var(--md-primary)" stroke-dasharray="${(2 * Math.PI * 23.5 * .47).toFixed(1)} 999" stroke-linecap="round"/></svg>` : '';
+  return `<div class="nv-mini ${kind} frost ${extra}"><div class="cv" style="background:${ART[6]}"></div><div class="tx"><b>一万次日落</b><small>林间 · 网易云音乐</small></div><span class="pp">${ring}${ico('pause')}</span><span class="nx">${ico('next')}</span></div>`;
+}
+const NV_VARIANTS = [
+  { key: 'now', title: '现在', cap: '没歌时是 <code>HorizontalFloatingToolbar</code>：槽位 56×48 里塞图标和字，选中底色整块包住，没有阴影；有歌时整条换成贴底 <code>ShortNavigationBar</code>，上面浮迷你播放器（20dp 圆角、底边进度线）。',
+    bar() { return NV.play ? `${nvMini('now').replace('class="nv-mini now', 'style="bottom:96px" class="nv-mini now')}<div class="nv-dock frost">${nvItems()}</div>` : `<div class="nv-ft frost">${NV_TABS.map(([i, l], k) => `<span class="${k === NV.tab ? 'on' : ''}" data-nvtab="${k}">${ico(i)}${l}</span>`).join('')}</div>`; } },
+  { key: 'a', title: 'A · 只修浮动条', cap: '浮动条换成导航项样式（指示器只在图标后面）、加阴影、宽 304dp 居中。有歌在播时<b>仍然换成贴底条</b>，「变身」和宽度不一致的问题还在。',
+    bar() { return NV.play ? `${nvMini('now').replace('class="nv-mini now', 'style="bottom:96px" class="nv-mini now')}<div class="nv-dock frost">${nvItems()}</div>` : `<div class="nv-pill a frost">${nvItems()}</div>`; } },
+  { key: 'b', title: 'B · 一直浮着（推荐）', rec: true, cap: '有没有歌都是同一条浮动导航条：满宽留 12dp、64dp 全圆角、带阴影。有歌时迷你播放器同宽同圆角叠在上面，封面变圆，进度挪到播放键外圈；开始放歌时导航条不动，迷你播放器从它后面升上来。',
+    bar() { return `${nvMini('b', NV.play ? '' : 'off')}<div class="nv-pill b frost">${nvItems()}</div>`; } },
+  { key: 'c', title: 'C · 一直贴底', cap: '去掉浮动条，有没有歌都用贴底 <code>ShortNavigationBar</code>。最稳、最省事，但没歌时底部多一条满宽色块，看起来比现在更「重」，也不是用户想要的方向。',
+    bar() { return `${NV.play ? nvMini('now').replace('class="nv-mini now', 'style="bottom:96px" class="nv-mini now') : ''}<div class="nv-dock frost">${nvItems()}</div>`; } },
+];
+function renderNav() {
+  const host = $('#nvDemo'); if (!host) return;
+  if (!host.children.length) {
+    host.innerHTML = NV_VARIANTS.map(v => `<figure>${v.rec ? '<span class="rec">推荐</span>' : ''}<div class="phone"><div class="scr lt" data-nv="${v.key}"></div></div><figcaption><b>${v.title}</b>${v.cap}</figcaption></figure>`).join('');
+    host.addEventListener('click', e => { const t = e.target.closest('[data-nvtab]'); if (t) { NV.tab = +t.dataset.nvtab; renderNav(); } });
+  }
+  NV_VARIANTS.forEach(v => {
+    const scr = $(`.scr[data-nv="${v.key}"]`, host);
+    scr.classList.toggle('navdk', NV.dark);
+    const prev = $('.nv-mini.b', scr);
+    scr.innerHTML = STATUS('9:41') + nvPage() + v.bar();
+    /* B：迷你播放器从导航条后面升上来——先按上一状态画，下一帧再切 */
+    const mini = $('.nv-mini.b', scr);
+    if (mini && prev) { const was = prev.classList.contains('off'); mini.classList.toggle('off', was); requestAnimationFrame(() => requestAnimationFrame(() => mini.classList.toggle('off', !NV.play))); }
+  });
+}
+$$('[data-nvplay]').forEach(b => b.onclick = () => { NV.play = b.dataset.nvplay === '1'; $$('[data-nvplay]').forEach(x => x.classList.toggle('on', x === b)); renderNav(); });
+$$('[data-nvdark]').forEach(b => b.onclick = () => { NV.dark = b.dataset.nvdark === '1'; $$('[data-nvdark]').forEach(x => x.classList.toggle('on', x === b)); renderNav(); });
+renderNav();
 </script>
 </body>
 </html>
