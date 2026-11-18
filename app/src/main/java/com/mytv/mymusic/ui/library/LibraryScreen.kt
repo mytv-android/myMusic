@@ -4,6 +4,8 @@ import android.content.ActivityNotFoundException
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -531,8 +533,12 @@ private fun TvLibrary(
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             item(key = "tiles", contentType = "bento") {
+                // 磁贴加起来比屏宽：不横向滚动的话 Row 把后面几块压成一条缝（“最近播放”“下载”只露 50dp），
+                // 方向键也走不过去。横向滚动后焦点移到哪块，哪块自己滚进来
                 Row(
-                    Modifier.padding(horizontal = window.gutter, vertical = 8.dp),
+                    Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = window.gutter, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
                     TvTile(
