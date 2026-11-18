@@ -18,6 +18,7 @@
 // 当前句停在 1/3、其余句缩到 0.8 并按距离模糊、拖动暂停 3 秒、距离超过 10 句直接跳、点一句跳过去照原样；
 // 改动：列表排在舞台安全区里（最宽 720dp）、上下两端渐隐；锚点用上下留白 + 量出来的误差对齐，不靠每项高度表；
 // 间奏三点按句间空档合成（myMusic 的解析器不保留空行）；换歌后新歌词到之前只显示三点；减少动画时整页静止。
+// 2026-11-18 myMusic 改动：景深模糊有强度（0–1.5 倍），每句的模糊和上限都乘它。
 package com.mytv.mymusic.ui.player.stage.modes
 
 import androidx.compose.animation.core.AnimationSpec
@@ -135,9 +136,12 @@ internal fun rushCurrentRow(rows: List<RushRow>, ms: Long): Int {
     return found.coerceAtLeast(0)
 }
 
-/** 景深模糊（dp，按 28sp 计）：每离当前句一行多 3dp，最多 10dp；关掉或手动滚动时为 0。 */
-internal fun rushBlurDp(distance: Int, enabled: Boolean, manual: Boolean): Float =
-    if (!enabled || manual) 0f else (abs(distance) * RUSH_BLUR_STEP_DP).coerceAtMost(RUSH_BLUR_MAX_DP)
+/**
+ * 景深模糊（dp，按 28sp 计）：强度 [depth] 为 1（“中”，Rush 原样）时每离当前句一行多 3dp、最多 10dp，
+ * 其它强度两个数都乘它（“强”1.5 倍最多 15dp）；强度为 0 或手动滚动时为 0。
+ */
+internal fun rushBlurDp(distance: Int, depth: Float, manual: Boolean): Float =
+    if (depth <= 0f || manual) 0f else min(abs(distance) * RUSH_BLUR_STEP_DP * depth, RUSH_BLUR_MAX_DP * depth)
 
 /** 自动滚动这一下要不要直接跳：还没摆过、减少动画、视口高度变了，或离第一个可见行超过 10 行。 */
 internal fun rushShouldSnap(target: Int, firstVisible: Int, placed: Boolean, reduceMotion: Boolean, resized: Boolean): Boolean =
@@ -154,7 +158,8 @@ internal class RushLook(
     val colors: String,
     val align: RushAlign,
     val size: Float,
-    val blur: Boolean,
+    /** 景深强度倍数，0 是关，见 [rushBlurDp]。 */
+    val blur: Float,
     val expressive: Boolean,
 )
 
@@ -212,7 +217,9 @@ internal fun RushLyricList(ctx: LyricStageContext, look: RushLook, content: Stat
         RushAlign.Center -> TransformOrigin(0.5f, 0.5f)
         RushAlign.End -> TransformOrigin(if (rtl) 0f else 1f, 0.5f)
     }
-    val blur = look.blur && android.os.Build.VERSION.SDK_INT >= 31
+    // Android 12 以下没有实时模糊，强度一律按 0；开着模糊时当前句的发光也跟着开
+    val depth = if (android.os.Build.VERSION.SDK_INT >= 31) look.blur else 0f
+    val blur = depth > RUSH_BLUR_OFF
     val shape = MaterialTheme.shapes.medium
     val haptics = LocalHapticFeedback.current
     LazyColumn(
@@ -238,7 +245,7 @@ internal fun RushLyricList(ctx: LyricStageContext, look: RushLook, content: Stat
             val spatial: AnimationSpec<Float> = if (reduceMotion) snap() else motion.fastSpatialSpec()
             val effects: AnimationSpec<Float> = if (reduceMotion) snap() else motion.fastEffectsSpec()
             val scale = animateFloatAsState(if (relation == 0) 1f else RUSH_OTHER_SCALE, spatial, label = "rushScale")
-            val blurDp = animateFloatAsState(rushBlurDp(relation, blur, manual.value), effects, label = "rushBlur")
+            val blurDp = animateFloatAsState(rushBlurDp(relation, if (blur) depth else 0f, manual.value), effects, label = "rushBlur")
             val underAlpha = animateFloatAsState(if (relation == 0) RUSH_CURRENT_UNDER_ALPHA else RUSH_OTHER_UNDER_ALPHA, effects, label = "rushUnder")
             Row(Modifier.fillMaxWidth(), horizontalArrangement = arrangement) {
                 Box(

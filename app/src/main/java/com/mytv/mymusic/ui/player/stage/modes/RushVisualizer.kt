@@ -17,6 +17,7 @@
 // 2026-11-09 myMusic 改写：Rush 7.2.1 的歌词页（LyricsPage 里画歌词和背景的部分）做成 myMusic 的一种全屏歌词动画。
 // 设置照 LyricsPrefs 取跟全屏歌词有关的 7 项：背景（六种拆成“背景”和“律动样式”两行）、配色（自定义取色器换成“播放页”）、
 // 对齐、字号、景深模糊、逐字粗细；行高、字距保持 Rush 默认（32sp / 0）。页头、分享卡片、LRCLIB 纠错、播放键发光不搬。
+// 2026-11-18 myMusic 改动：景深模糊从开关改成强度滑块（关 · 弱 · 中 · 强，0–1.5 倍），旧的开关值读成 0 或 1。
 package com.mytv.mymusic.ui.player.stage.modes
 
 import androidx.compose.animation.animateColorAsState
@@ -34,6 +35,8 @@ import com.mytv.mymusic.ui.player.stage.LyricVisualizer
 import com.mytv.mymusic.ui.player.stage.ModOrigin
 import com.mytv.mymusic.ui.player.stage.SettingValues
 import com.mytv.mymusic.ui.player.stage.StageDevice
+import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * Rush：封面取色铺满整页，左对齐的粗体大字，当前句停在安全区上三分之一处，前后的句子缩到 80% 并按距离模糊，
@@ -97,7 +100,7 @@ internal fun rushLook(settings: SettingValues): RushLook = RushLook(
         else -> RushAlign.Start
     },
     size = settings.number(RUSH_KEY_SIZE),
-    blur = settings.toggle(RUSH_KEY_BLUR),
+    blur = settings.slider(RUSH_KEY_BLUR),
     expressive = settings.toggle(RUSH_KEY_EXPRESSIVE),
 )
 
@@ -128,9 +131,36 @@ private fun rushSettings(blurDefault: Boolean): List<LyricSetting> = listOf(
         RUSH_ALIGN_START,
     ),
     LyricSetting.Number(RUSH_KEY_SIZE, "字号", 0.8f, 1.4f, 0.1f, 1f),
-    LyricSetting.Toggle(RUSH_KEY_BLUR, "景深模糊", blurDefault, summary = "离当前句越远越模糊，拖动歌词时取消；Android 12 起"),
+    // “中”就是原来开着时的强度；电视、低内存、Android 12 以下默认关
+    LyricSetting.Slider(
+        RUSH_KEY_BLUR,
+        "景深模糊",
+        0f,
+        RUSH_BLUR_DEPTH_MAX,
+        default = if (blurDefault) 1f else 0f,
+        ticks = listOf(0f, 0.5f, 1f, RUSH_BLUR_DEPTH_MAX),
+        tickLabels = listOf("关", "弱", "中", "强"),
+        format = ::rushBlurLabel,
+        legacyToggle = 0f to 1f,
+        minSdk = 31,
+        summary = "离当前句越远越模糊，拖动歌词时取消；Android 12 起",
+    ),
     LyricSetting.Toggle(RUSH_KEY_EXPRESSIVE, "逐字粗细", false, summary = "唱得越长的字越粗；需要字体有字重轴"),
 )
+
+/**
+ * 景深滑块的读数：“关”，或“中 · 每离一句多 3.0dp，最多 10dp”（[depth] 是强度倍数，见 [rushBlurDp]）。
+ */
+internal fun rushBlurLabel(depth: Float): String {
+    if (depth <= RUSH_BLUR_OFF) return "关"
+    val level = when {
+        depth < 0.75f -> "弱"
+        depth < 1.25f -> "中"
+        else -> "强"
+    }
+    val step = String.format(Locale.ROOT, "%.1f", RUSH_BLUR_STEP_DP * depth)
+    return "$level · 每离一句多 ${step}dp，最多 ${(RUSH_BLUR_MAX_DP * depth).roundToInt()}dp"
+}
 
 private val SETTINGS_BLUR_ON = rushSettings(blurDefault = true)
 private val SETTINGS_BLUR_OFF = rushSettings(blurDefault = false)
@@ -142,6 +172,12 @@ internal const val RUSH_KEY_ALIGN = "align"
 internal const val RUSH_KEY_SIZE = "size"
 internal const val RUSH_KEY_BLUR = "blur"
 internal const val RUSH_KEY_EXPRESSIVE = "expressive"
+
+/** 景深强度上限（“强”）：最多模糊 15dp。 */
+internal const val RUSH_BLUR_DEPTH_MAX = 1.5f
+
+/** 强度不到这个就算关。 */
+internal const val RUSH_BLUR_OFF = 0.01f
 private const val RUSH_ALIGN_START = "start"
 private const val RUSH_ALIGN_CENTER = "center"
 private const val RUSH_ALIGN_END = "end"

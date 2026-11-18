@@ -14,6 +14,7 @@ import com.mytv.mymusic.ui.player.stage.modes.RushSpring
 import com.mytv.mymusic.ui.player.stage.modes.RushVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.rushAnchorPadding
 import com.mytv.mymusic.ui.player.stage.modes.rushBlurDp
+import com.mytv.mymusic.ui.player.stage.modes.rushBlurLabel
 import com.mytv.mymusic.ui.player.stage.modes.rushCurrentRow
 import com.mytv.mymusic.ui.player.stage.modes.rushDotProgress
 import com.mytv.mymusic.ui.player.stage.modes.rushGradientColors
@@ -31,6 +32,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.roundToInt
 
 class RushTest {
 
@@ -113,10 +115,32 @@ class RushTest {
 
     @Test
     fun blurLadderAddsThreeDpPerLineUpToTen() {
-        assertEquals(listOf(0f, 3f, 6f, 9f, 10f, 10f), (0..5).map { rushBlurDp(it, enabled = true, manual = false) })
-        assertEquals(6f, rushBlurDp(-2, enabled = true, manual = false), 0f)
-        assertEquals(0f, rushBlurDp(3, enabled = false, manual = false), 0f)
-        assertEquals(0f, rushBlurDp(3, enabled = true, manual = true), 0f)
+        // 强度 1（“中”）就是原来开着的样子
+        assertEquals(listOf(0f, 3f, 6f, 9f, 10f, 10f), (0..5).map { rushBlurDp(it, depth = 1f, manual = false) })
+        assertEquals(6f, rushBlurDp(-2, depth = 1f, manual = false), 0f)
+        assertEquals(0f, rushBlurDp(3, depth = 0f, manual = false), 0f)
+        assertEquals(0f, rushBlurDp(3, depth = 1f, manual = true), 0f)
+    }
+
+    @Test
+    fun blurDepthScalesStepAndCap() {
+        val strong = (1..4).map { rushBlurDp(it, depth = 1.5f, manual = false) }
+        assertEquals(listOf(4.5f, 9f, 13.5f, 15f), strong.map { (it * 100).roundToInt() / 100f })
+        val weak = (1..4).map { rushBlurDp(it, depth = 0.5f, manual = false) }
+        assertEquals(listOf(1.5f, 3f, 4.5f, 5f), weak.map { (it * 100).roundToInt() / 100f })
+        assertEquals(0f, rushBlurDp(2, depth = 1.5f, manual = true), 0f)
+    }
+
+    @Test
+    fun blurLabelNamesTheLevel() {
+        assertEquals("关", rushBlurLabel(0f))
+        assertEquals("关", rushBlurLabel(0.01f))
+        assertEquals("弱 · 每离一句多 1.5dp，最多 5dp", rushBlurLabel(0.5f))
+        assertEquals("中 · 每离一句多 3.0dp，最多 10dp", rushBlurLabel(1f))
+        assertEquals("中 · 每离一句多 2.3dp，最多 8dp", rushBlurLabel(0.75f))
+        assertEquals("强 · 每离一句多 4.5dp，最多 15dp", rushBlurLabel(1.5f))
+        assertTrue(rushBlurLabel(0.74f).startsWith("弱"))
+        assertTrue(rushBlurLabel(1.25f).startsWith("强"))
     }
 
     // ---- 间奏三点 ----
@@ -307,8 +331,8 @@ class RushTest {
         assertEquals("vibrant", look.colors)
         assertEquals(RushAlign.Start, look.align)
         assertEquals(1f, look.size, 0f)
-        // 单测里没定设备档位，按能实时模糊算
-        assertTrue(look.blur)
+        // 单测里没定设备档位，按能实时模糊算：默认“中”
+        assertEquals(1f, look.blur, 0f)
         assertFalse(look.expressive)
         assertEquals(0, defaults.changed)
         assertEquals("背景选“律动”时生效", schema[1].summary)
@@ -321,6 +345,25 @@ class RushTest {
         assertEquals(1.2f, SettingValues(schema, mapOf("size" to "1.2")).number("size"), 1e-6f)
         assertEquals("solid", SettingValues(schema, mapOf("background" to "bogus")).choice("background"))
         assertEquals(RushAlign.End, rushLook(SettingValues(schema, mapOf("align" to "end"))).align)
+
+        val blur = schema[5] as LyricSetting.Slider
+        assertEquals(0f, blur.min, 0f)
+        assertEquals(1.5f, blur.max, 0f)
+        assertEquals(listOf(0f, 0.5f, 1f, 1.5f), blur.ticks)
+        assertEquals(listOf("关", "弱", "中", "强"), blur.tickLabels)
+        assertEquals(31, blur.minSdk)
+        assertEquals(1.5f, rushLook(SettingValues(schema, mapOf("blur" to "1.5"))).blur, 0f)
+    }
+
+    @Test
+    fun oldBlurToggleMigrates() {
+        val schema = RushVisualizer.settings
+        // 旧版本存的是开关
+        assertEquals(0f, rushLook(SettingValues(schema, mapOf("blur" to "false"))).blur, 0f)
+        assertEquals(1f, rushLook(SettingValues(schema, mapOf("blur" to "true"))).blur, 0f)
+        // 下次写设置时改写成数（等于默认的“中”就不存）
+        assertEquals(mapOf("blur" to "0.0"), sanitizeSettings(schema, mapOf("blur" to "false")))
+        assertEquals(emptyMap<String, String>(), sanitizeSettings(schema, mapOf("blur" to "true")))
     }
 
     @Test
