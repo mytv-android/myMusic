@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>用户建议改进稿 · myMusic</title>
-<meta name="description" content="按用户提的 16 条建议整理的改进稿（手机、平板、横屏、折叠屏、电视都画了）：歌词动画面板（按速度灰掉、随机池、保存并应用）、Rush 自定义配色/景深强度/风格预设、长按歌词分享卡片（Rush 九种卡片＋播放页样式）、播放页加歌单、列表左右滑操作、歌单导出与落雪导入、海报墙视角远近、电视海报视图去掉浮动工具栏、手机底栏统一成浮动导航条、手机横屏全屏歌词修复。">
+<meta name="description" content="按用户提的 16 条建议整理的改进稿（手机、平板、横屏、折叠屏、电视都画了）：歌词动画面板（按速度灰掉、随机池、保存并应用）、Rush 自定义配色/景深强度/风格预设、长按歌词分享卡片（Rush 九种卡片＋播放页样式）、播放页加歌单、列表左右滑操作、歌单导出与落雪导入、海报墙视角远近、电视海报视图去掉浮动工具栏、手机底栏浮动条重画、手机横屏全屏歌词修复。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=Roboto+Flex:opsz,slnt,wdth,wght@8..144,-10..0,25..151,100..1000&display=swap" rel="stylesheet">
@@ -862,7 +862,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
       <tr><td>13</td><td>海报墙设置加视角远近滑块</td><td>格距按设备写死（手机 56dp、平板 102dp、电视 76dp，<code>WallMetrics</code>）。</td><td>海报墙设置加「视角」滑块（远 0.5× ～ 近 1.25×，默认 1×），手机、平板上也能双指捏合；拉远到一定程度自动收起序号和字。</td><td><a href="#wall">07</a></td></tr>
       <tr><td>14</td><td>手机横屏时全屏歌词用不了</td><td><b>bug。</b>横屏走 <code>WidePlayer</code>。舞台高度不到 320dp 时 <code>LyricStage</code> 改用经典列表兜底，但 <code>WidePlayer</code> 没传兜底列表，结果一行都不画。常见手机横屏后高度约 312–336dp，正好卡在线下。</td><td>补上兜底列表（电视同样）；高度门槛改成按文字区算，手机横屏也能放动画。</td><td><a href="#landscape">08</a></td></tr>
       <tr><td>15</td><td>电视上海报界面不要浮动工具栏，遥控器选不到</td><td>详情页（歌单、专辑、榜单、自建歌单）的海报视图，电视把浮动工具栏放在顶排胶囊右边（<code>CollectionPosterView</code>）。墙接管方向键且是无限的，选中格子后上键一直在墙里走，工具栏选不到。队列海报墙顶排本来就没按钮。</td><td>电视上不画工具栏，顶排只留标题和时钟，焦点直接进墙。工具栏的几项挪进长按确认键的面板，排在单曲操作下面一组；菜单键直接跳到这一组。读取失败、空歌单的提示里加「切回列表视图」。</td><td><a href="#wall">07</a></td></tr>
-      <tr><td>16</td><td>手机浮动导航栏怪怪的，不好看</td><td>没歌在播时是 <code>HorizontalFloatingToolbar</code> 胶囊：图标和字挤在 56×48 槽位里、选中底色把字也包进去、没有阴影、按内容收缩居中；一放歌整条换成贴底 <code>ShortNavigationBar</code>（<code>PhoneBottomBar.kt</code>），底栏「变身」、让位高度跳。</td><td>有没有歌都用同一条浮动导航条：满宽留 12dp、64dp 全圆角、带阴影，指示器只在图标后面。有歌时迷你播放器同宽同圆角叠在上面，封面变圆、进度改成播放键外圈；开始放歌时导航条不动，迷你播放器从它后面升上来。</td><td><a href="#navbar">09</a></td></tr>
+      <tr><td>16</td><td>手机浮动导航栏怪怪的，不好看</td><td>没歌在播时是 <code>HorizontalFloatingToolbar</code> 胶囊：图标和字挤在 56×48 槽位里、选中底色把字也包进去、没有阴影、按内容收缩居中；一放歌整条换成贴底 <code>ShortNavigationBar</code>（<code>PhoneBottomBar.kt</code>），底栏「变身」、让位高度跳。</td><td>（选定 A）没歌时的浮动条按导航栏的样子重画：指示器只在图标后面、24dp 图标 + 12sp 字、每项 72dp、带阴影和描边、304dp 居中；有歌时的贴底导航栏和迷你播放器不变。</td><td><a href="#navbar">09</a></td></tr>
     </tbody>
   </table></div>
 </section>
@@ -1181,9 +1181,9 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
 
 
 <section class="block" id="navbar">
-  <div class="block-head"><span class="kicker">09</span><h2>手机底栏：不再两套来回换，导航条和迷你播放器一起浮着</h2></div>
+  <div class="block-head"><span class="kicker">09</span><h2>手机底栏：没歌在播时的浮动条按导航栏的样子重画（选定 A）</h2></div>
   <div class="quote">这个浮动的导航栏也怪怪的，不是很美观，你也优化一下。</div>
-  <p class="sub">手机竖屏的底栏现在有<strong>两套</strong>（<code>PhoneBottomBar.kt</code>）：没歌在播时是一条 <code>HorizontalFloatingToolbar</code> 胶囊浮在内容上；一开始放歌，整条换成贴底满宽的 <code>ShortNavigationBar</code>，上面再浮一个迷你播放器。浮动那条本身也不是按导航来画的。改法是有没有歌都用<strong>同一条浮动导航条</strong>，按导航栏的规矩画（指示器只在图标后面、带阴影、满宽留边）；有歌时迷你播放器同宽同圆角叠在它上面。</p>
+  <p class="sub">手机竖屏的底栏现在有<strong>两套</strong>（<code>PhoneBottomBar.kt</code>）：没歌在播时是一条 <code>HorizontalFloatingToolbar</code> 胶囊浮在内容上；一开始放歌，整条换成贴底满宽的 <code>ShortNavigationBar</code>，上面再浮一个迷你播放器。浮动那条本身也不是按导航来画的。下面画了四种，<strong>用户选定 A</strong>：只重画没歌在播时的浮动条，按导航栏的规矩画（指示器只在图标后面、24dp 图标 + 12sp 字、带阴影和描边、304dp 居中）；有歌在播时保持现在的贴底导航栏 ＋ 迷你播放器不动。</p>
 
   <h3>现在哪里怪</h3>
   <div class="scroll"><table>
@@ -1207,22 +1207,20 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
   </div>
   <div class="demo" id="nvDemo"></div>
 
-  <h3>推荐 B：尺寸和行为</h3>
+  <h3>选定 A：尺寸和行为</h3>
   <div class="scroll"><table>
     <thead><tr><th style="width:18%">项</th><th style="width:44%">做法</th><th>说明</th></tr></thead>
     <tbody>
-      <tr><td>导航条</td><td>左右各留 12dp，离系统手势条 12dp，高 64dp，全圆角；底色 <code>surfaceContainer</code> 88%（开模糊时磨砂，关模糊时实色）；阴影 Level 2，浅色主题再加一圈 1dp <code>outlineVariant</code> 40% 描边</td><td>和迷你播放器同宽同圆角，两块叠起来是一组；描边让浅色下边缘清楚</td></tr>
-      <tr><td>导航项</td><td>四项平分宽度；24dp 图标放在 56×32 的指示器里（16dp 圆角），下面 12sp 文字，间距 4dp；选中：实心图标、<code>secondaryContainer</code> 指示器、文字加粗；没选中：线框图标、<code>onSurfaceVariant</code></td><td>就是 <code>ShortNavigationBar</code> 的项样式，只是放进浮动容器；读屏照旧是 Tab 角色、带选中态</td></tr>
-      <tr><td>迷你播放器</td><td>同宽、高 64dp、全圆角，在导航条上方 8dp；封面 48dp 改成圆形（和胶囊两端同心）；底色仍是 <code>secondaryContainer</code></td><td>手势（左右滑切歌、上滑展开、长按队列）和读屏操作全部不变</td></tr>
-      <tr><td>进度</td><td>底边 2dp 进度线去掉，改成播放键外圈 2.5dp 的进度环</td><td>胶囊两端是半圆，底边直线会被切掉两头；环在按钮上更好认</td></tr>
-      <tr><td>开始 / 停止播放</td><td>导航条位置不动；迷你播放器从导航条后面升上来（淡入 + 上移 72dp），停播时反过来</td><td>不再整条换组件；列表底部让位只差迷你播放器那 72dp，用同一条动画</td></tr>
-      <tr><td>让位高度</td><td><code>phoneOverlayHeight</code>：没歌 64 + 12 = 76dp；有歌 64 + 8 + 64 + 12 = 148dp（都再加系统导航栏）</td><td>和现在差不多（80 / 144），列表最后一行照样露得出来</td></tr>
-      <tr><td>大字号</td><td>容器 <code>heightIn(min = 64.dp)</code>，文字放大时跟着长高，不裁字</td><td>1.3× 字号下约 70dp</td></tr>
-      <tr><td>键盘</td><td>输入法弹出时整组淡出，收起再出现</td><td>浮着的底栏不该被键盘顶到半屏</td></tr>
-      <tr><td>滚动</td><td>滚动时不收起</td><td>音乐应用切页很频繁，收起后还要多一步</td></tr>
+      <tr><td>什么时候出现</td><td>和现在一样：只在没歌在播时出现；有歌在播时还是贴底 <code>ShortNavigationBar</code> ＋ 迷你播放器，一点不动</td><td>用户选定 A，「放歌时底栏换形态」保留</td></tr>
+      <tr><td>容器</td><td>高 64dp、全圆角、宽按内容 = 4 × 72dp ＋ 左右各 8dp ≈ 304dp，水平居中；离系统手势条 16dp（不变）；底色 <code>surfaceContainer</code> 88%（开模糊时磨砂，关模糊时实色）</td><td>比现在宽约 50dp，四项不再挤；离底距离不变，列表让位不用改</td></tr>
+      <tr><td>阴影和描边</td><td>阴影 Level 2；浅色主题再加一圈 1dp <code>outlineVariant</code> 40% 描边；深色只有阴影</td><td>浅色下能看出是浮在列表上的一层，边缘不再发糊</td></tr>
+      <tr><td>导航项</td><td>每项 72dp 宽；24dp 图标放在 56×32 的指示器里（16dp 圆角），下面 12sp 文字，间距 4dp；选中：实心图标、<code>secondaryContainer</code> 指示器、文字加粗、<code>onSurface</code>；没选中：线框图标、<code>onSurfaceVariant</code></td><td>和有歌时贴底那条的项<b>一模一样</b>，两种形态切换时只是容器变了，图标和文字不跳</td></tr>
+      <tr><td>点按反馈</td><td>水波纹只铺在指示器那块 56×32 上</td><td>现在整块 56×48 槽位都有底色和水波纹</td></tr>
+      <tr><td>大字号</td><td>容器 <code>heightIn(min = 64.dp)</code>，文字放大时跟着长高，不裁字；字太长时单行省略</td><td>1.3× 字号下约 70dp</td></tr>
+      <tr><td>读屏</td><td>每项 Tab 角色、带选中态（不变）</td><td>—</td></tr>
     </tbody>
   </table></div>
-  <div class="note"><b>只有手机竖屏有这条底栏</b>（折叠屏合上时的外屏也是手机窗口，一样）。平板、手机横屏、展开的折叠屏宽度 ≥600dp，用的是左侧导航栏加底部 <code>BottomPlayerBar</code>；电视是顶部标签。这些都不动，所以这一节只画手机。实现：<code>PhoneBottomBar.kt</code> 里一个 <code>FloatingNavBar</code> 取代现在的 <code>HorizontalFloatingToolbar</code> 和 <code>ShortNavigationBar</code> 两套；<code>MiniPlayer</code> 改胶囊、圆封面、进度环（<code>PlayPauseButton</code> 加可选的进度环）；<code>AppNavigation.kt</code> 的 <code>phoneOverlayHeight</code> 按新尺寸算。不新增依赖。</div>
+  <div class="note"><b>只有手机竖屏有这条底栏</b>（折叠屏合上时的外屏也是手机窗口，一样）。平板、手机横屏、展开的折叠屏宽度 ≥600dp，用的是左侧导航栏加底部 <code>BottomPlayerBar</code>；电视是顶部标签。这些都不动，所以这一节只画手机。实现只动 <code>PhoneBottomBar.kt</code> 里没歌时的 <code>FloatingToolbar</code>：容器加阴影和描边、宽度按 72dp 一项算，槽位换成和 <code>ShortNavigationBarItem</code> 一样的「指示器 + 文字」排法；迷你播放器、贴底导航栏、<code>phoneOverlayHeight</code> 都不改。不新增依赖。</div>
 </section>
 
 <section class="block" id="impl">
@@ -1239,12 +1237,12 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
       <tr><td>滑动操作</td><td><code>components/Lists.kt</code>（<code>SongRow</code> 加 <code>swipe</code> 参数）、新 <code>components/SwipeActions.kt</code>（滑动 ＋ 指针悬停按钮）、各列表页传上下文、电视 <code>TrackActionsSheet</code> 加「从最近播放删除」、新设置页 <code>SwipeSettingsScreen</code>、<code>LibraryCollections.kt</code>（最近播放删除）</td><td><code>SwipePrefs</code>；<code>MusicActions.removeHistory(key)</code></td></tr>
       <tr><td>导出 / 落雪导入</td><td>新 <code>data/transfer/</code>：<code>PlaylistExport</code>（三种格式）、<code>LxImport</code>（gzip 嗅探、v1→v2、平台映射）；<code>LocalPlaylistScreen.kt</code>、<code>SyncScreens.kt</code>、<code>LibraryScreen.kt</code>（导入预览面板）；电视没有文件选择器时复用 <code>SyncSetupServer</code> 出二维码，网页里上传 / 下载文件</td><td>—（导入后是普通自建歌单，走现有同步）；网页会话沿用 10 分钟时效和「附近的设备」权限提示</td></tr>
       <tr><td>海报墙视角</td><td><code>WallGeometry.kt</code>（<code>WallMetrics.scaled(zoom)</code>）、<code>PosterWall.kt</code>（捏合）、<code>PosterSettingsSheet.kt</code></td><td><code>PosterPrefs.zoom</code>（<code>poster_zoom_phone/tablet/tv</code>）</td></tr>
-      <tr><td>手机底栏</td><td><code>adaptive/PhoneBottomBar.kt</code>（<code>FloatingNavBar</code> 取代 <code>HorizontalFloatingToolbar</code> 和 <code>ShortNavigationBar</code> 两套；<code>MiniPlayer</code> 改全圆角、圆封面、进度环）、<code>components/Buttons.kt</code>（<code>PlayPauseButton</code> 可带进度环）、<code>AppNavigation.kt</code>（<code>phoneOverlayHeight</code> 新尺寸、键盘弹出时隐藏）</td><td>—</td></tr>
+      <tr><td>手机底栏（A）</td><td><code>adaptive/PhoneBottomBar.kt</code>：只改没歌时的 <code>FloatingToolbar</code>（阴影 + 描边、72dp 一项、指示器 + 文字的项样式）；迷你播放器、贴底导航栏、<code>phoneOverlayHeight</code> 不动</td><td>—</td></tr>
       <tr><td>电视海报视图</td><td><code>CollectionPosterView.kt</code>（电视不画 <code>PosterToolbar</code>，默认焦点给墙，去掉顶排接管下键）、<code>PosterWallScreen.kt</code>（提示）、<code>PosterWall.kt</code> / <code>PosterWallState.kt</code>（去掉没人再用的 <code>chromeAbove</code>、<code>escapeUp</code>、<code>focusFromAbove</code>；菜单键带上「从菜单键来」）、<code>AppUi.kt</code>（<code>TrackActionsSheet</code> 的 <code>onWallLocate</code> / <code>onWallSettings</code> 换成一组整页操作）、<code>CollectionScreen.kt</code>、<code>LocalPlaylistScreen.kt</code>（读取失败、空歌单加第二个按钮）</td><td>—</td></tr>
     </tbody>
   </table></div>
   <div class="phases" style="margin-top:16px">
-    <div class="phase"><header><span class="tag">P1</span><h3>修 bug 和小缺口</h3></header><ul><li>横屏全屏歌词兜底 + 门槛</li><li>最近播放单条删除（⋮ 面板）</li><li>电视海报视图去掉浮动工具栏，整页操作进长按面板</li><li>手机底栏统一成一条浮动导航条，迷你播放器同宽叠在上面</li><li>播放页「加到歌单」按钮和面板</li><li>单测：横屏 800×312、兜底必有</li></ul></div>
+    <div class="phase"><header><span class="tag">P1</span><h3>修 bug 和小缺口</h3></header><ul><li>横屏全屏歌词兜底 + 门槛</li><li>最近播放单条删除（⋮ 面板）</li><li>电视海报视图去掉浮动工具栏，整页操作进长按面板</li><li>手机底栏：没歌时的浮动条按导航栏样子重画（A）</li><li>播放页「加到歌单」按钮和面板</li><li>单测：横屏 800×312、兜底必有</li></ul></div>
     <div class="phase"><header><span class="tag">P2</span><h3>动画面板</h3></header><ul><li>换法置顶、卡片三态、「这首歌」一行</li><li>随机池 + 记忆优先</li><li>草稿、保存条、关闭确认、立即应用</li><li>宽屏舞台预览草稿、书本姿态面板放左页、电视焦点</li><li>单测：抽取顺序、池为空兼容、applyNow 跳过空当</li></ul></div>
     <div class="phase"><header><span class="tag">P3</span><h3>Rush 三项</h3></header><ul><li>Color / Slider 设置控件 + 取色面板</li><li>自定义配色、景深强度（含旧值迁移）</li><li>随机搭配、预设增删改、预设进池和四档</li></ul></div>
     <div class="phase"><header><span class="tag">P4</span><h3>滑动操作</h3></header><ul><li>SwipeActions + 各列表上下文</li><li>设置页（示例行、排序、选动作）</li><li>读屏自定义操作、手势冲突规则</li></ul></div>
@@ -2705,9 +2703,9 @@ function nvMini(kind, extra = '') {
 const NV_VARIANTS = [
   { key: 'now', title: '现在', cap: '没歌时是 <code>HorizontalFloatingToolbar</code>：槽位 56×48 里塞图标和字，选中底色整块包住，没有阴影；有歌时整条换成贴底 <code>ShortNavigationBar</code>，上面浮迷你播放器（20dp 圆角、底边进度线）。',
     bar() { return NV.play ? `${nvMini('now').replace('class="nv-mini now', 'style="bottom:96px" class="nv-mini now')}<div class="nv-dock frost">${nvItems()}</div>` : `<div class="nv-ft frost">${NV_TABS.map(([i, l], k) => `<span class="${k === NV.tab ? 'on' : ''}" data-nvtab="${k}">${ico(i)}${l}</span>`).join('')}</div>`; } },
-  { key: 'a', title: 'A · 只修浮动条', cap: '浮动条换成导航项样式（指示器只在图标后面）、加阴影、宽 304dp 居中。有歌在播时<b>仍然换成贴底条</b>，「变身」和宽度不一致的问题还在。',
+  { key: 'a', title: 'A · 只修浮动条（已选定）', rec: true, cap: '浮动条换成导航项样式（指示器只在图标后面、24dp 图标 + 12sp 字）、加阴影和描边、宽 304dp 居中。有歌在播时照旧是贴底条 ＋ 迷你播放器，和现在一样。',
     bar() { return NV.play ? `${nvMini('now').replace('class="nv-mini now', 'style="bottom:96px" class="nv-mini now')}<div class="nv-dock frost">${nvItems()}</div>` : `<div class="nv-pill a frost">${nvItems()}</div>`; } },
-  { key: 'b', title: 'B · 一直浮着（推荐）', rec: true, cap: '有没有歌都是同一条浮动导航条：满宽留 12dp、64dp 全圆角、带阴影。有歌时迷你播放器同宽同圆角叠在上面，封面变圆，进度挪到播放键外圈；开始放歌时导航条不动，迷你播放器从它后面升上来。',
+  { key: 'b', title: 'B · 一直浮着', cap: '有没有歌都是同一条浮动导航条：满宽留 12dp、64dp 全圆角、带阴影。有歌时迷你播放器同宽同圆角叠在上面，封面变圆，进度挪到播放键外圈；开始放歌时导航条不动，迷你播放器从它后面升上来。',
     bar() { return `${nvMini('b', NV.play ? '' : 'off')}<div class="nv-pill b frost">${nvItems()}</div>`; } },
   { key: 'c', title: 'C · 一直贴底', cap: '去掉浮动条，有没有歌都用贴底 <code>ShortNavigationBar</code>。最稳、最省事，但没歌时底部多一条满宽色块，看起来比现在更「重」，也不是用户想要的方向。',
     bar() { return `${NV.play ? nvMini('now').replace('class="nv-mini now', 'style="bottom:96px" class="nv-mini now') : ''}<div class="nv-dock frost">${nvItems()}</div>`; } },
@@ -2715,7 +2713,7 @@ const NV_VARIANTS = [
 function renderNav() {
   const host = $('#nvDemo'); if (!host) return;
   if (!host.children.length) {
-    host.innerHTML = NV_VARIANTS.map(v => `<figure>${v.rec ? '<span class="rec">推荐</span>' : ''}<div class="phone"><div class="scr lt" data-nv="${v.key}"></div></div><figcaption><b>${v.title}</b>${v.cap}</figcaption></figure>`).join('');
+    host.innerHTML = NV_VARIANTS.map(v => `<figure>${v.rec ? '<span class="rec">已选定</span>' : ''}<div class="phone"><div class="scr lt" data-nv="${v.key}"></div></div><figcaption><b>${v.title}</b>${v.cap}</figcaption></figure>`).join('');
     host.addEventListener('click', e => { const t = e.target.closest('[data-nvtab]'); if (t) { NV.tab = +t.dataset.nvtab; renderNav(); } });
   }
   NV_VARIANTS.forEach(v => {
