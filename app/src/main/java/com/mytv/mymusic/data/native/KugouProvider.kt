@@ -1265,7 +1265,7 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         )
     }
 
-    private suspend fun fetchUnionVip(
+    internal suspend fun fetchUnionVip(
         cookie: String,
         token: String,
         userid: String,
@@ -1293,6 +1293,52 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         )
         val root = json.parseToJsonElement(body).jsonObject
         return root["data"] as? JsonObject
+    }
+
+    /**
+     * 概念版 youth 活动接口的签名 POST：公共参数 + [extra] + signature，请求体为空。
+     * 算法和 [fetchUnionVip]、云盘写入、账号资料同一套（`MD5(salt + 排序参数 + body + salt)`），
+     * 只是路径和业务参数不一样，见 [KugouWelfare]。
+     */
+    internal suspend fun kugouYouthRequest(
+        cookie: String,
+        path: String,
+        extra: Map<String, String> = emptyMap(),
+    ): String {
+        val cookieMap = parseKugouCookie(cookie)
+        val mid = firstNonEmpty(
+            cookieMap["KUGOU_API_MID"].orEmpty(),
+            cookieMap["kg_mid"].orEmpty(),
+            cookieMap["mid"].orEmpty(),
+            "-",
+        )
+        val dfid = firstNonEmpty(
+            cookieMap["dfid"].orEmpty(),
+            cookieMap["KUGOU_API_DFID"].orEmpty(),
+            cookieMap["kg_dfid"].orEmpty(),
+            "-",
+        )
+        val clienttime = nowSeconds()
+        val params = mutableMapOf(
+            "dfid" to dfid,
+            "mid" to mid,
+            "uuid" to "-",
+            "appid" to KUGOU_LITE_APP_ID,
+            "clientver" to KUGOU_LITE_VER,
+            "clienttime" to clienttime,
+            "token" to cookieMap["token"].orEmpty().trim(),
+            "userid" to cookieMap["userid"].orEmpty().trim(),
+        )
+        params.putAll(extra)
+        // 业务参数全在 query 里，body 是空的；签名按空 body 算，和官方客户端一致
+        return NativeHttp.postForm(
+            buildAndroidUrl(KUGOU_GATEWAY + path, params, ""),
+            emptyMap(),
+            headers = androidHeaders(dfid, mid, clienttime),
+            cookie = cookie,
+            randomIp = true,
+            userAgent = KUGOU_ANDROID_UA,
+        ).body
     }
 
     // ---- song info / download ----
@@ -2969,18 +3015,6 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         return result
     }
 
-    private fun parseKugouCookie(cookie: String): Map<String, String> {
-        val result = mutableMapOf<String, String>()
-        for (pair in cookie.split(';')) {
-            val trimmed = pair.trim()
-            if (trimmed.isEmpty()) continue
-            val index = trimmed.indexOf('=')
-            if (index <= 0) continue
-            result[trimmed.substring(0, index).trim()] = trimmed.substring(index + 1).trim()
-        }
-        return result
-    }
-
     private fun kugouHasAppCookie(cookie: Map<String, String>): Boolean =
         cookie["token"].orEmpty().trim().isNotEmpty() &&
             cookie["userid"].orEmpty().trim().isNotEmpty() &&
@@ -3492,6 +3526,22 @@ internal fun kugouMembershipLabel(vipType: Int, userType: Int, products: Map<Str
     if ((products["tvip"] ?: 0) > 0) return "畅听VIP"
     if (vipType > 0 || products.values.any { it > 0 }) return "VIP"
     return null
+}
+
+/**
+ * 酷狗 Cookie 拆成字段表。概念版的 youth 活动接口和账号资料接口都要从里面取
+ * token / userid / mid / dfid，见 [KugouWelfare]。
+ */
+internal fun parseKugouCookie(cookie: String): Map<String, String> {
+    val result = mutableMapOf<String, String>()
+    for (pair in cookie.split(';')) {
+        val trimmed = pair.trim()
+        if (trimmed.isEmpty()) continue
+        val index = trimmed.indexOf('=')
+        if (index <= 0) continue
+        result[trimmed.substring(0, index).trim()] = trimmed.substring(index + 1).trim()
+    }
+    return result
 }
 
 // ---- response DTOs ----

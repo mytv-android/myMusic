@@ -115,6 +115,7 @@ import com.mytv.mymusic.data.DOWNLOAD_DONE
 import com.mytv.mymusic.data.DOWNLOAD_FAILED
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.ListenTaskState
+import com.mytv.mymusic.ui.KugouWelfareUi
 import com.mytv.mymusic.ui.SodaWelfareUi
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.SavedSong
@@ -171,6 +172,7 @@ class LibraryNav(
     val openDownloads: () -> Unit,
     val openCharts: () -> Unit,
     val openWelfare: () -> Unit,
+    val openKugouWelfare: () -> Unit = {},
     val openLocalMusic: () -> Unit = {},
 )
 
@@ -188,6 +190,7 @@ fun LibraryScreen(
     sync: SyncUiState,
     listen: ListenTaskState,
     soda: SodaWelfareUi,
+    kugou: KugouWelfareUi,
     actions: MusicActions,
     nav: LibraryNav,
     detailPane: @Composable (playlistId: String, onClosed: () -> Unit) -> Unit,
@@ -204,9 +207,9 @@ fun LibraryScreen(
     }
 
     when {
-        window.isTv -> TvLibrary(state, history, playlists, covers, sync, stats, listen, soda, actions, nav, menu)
-        window.isTablet && window.twoPane -> TabletLibrary(playlists, covers, sync, stats, favorites, listen, soda, actions, nav, menu, detailPane, state.providers)
-        else -> PhoneLibrary(playlists, covers, sync, stats, favorites, listen, soda, actions, nav, menu, state.providers)
+        window.isTv -> TvLibrary(state, history, playlists, covers, sync, stats, listen, soda, kugou, actions, nav, menu)
+        window.isTablet && window.twoPane -> TabletLibrary(playlists, covers, sync, stats, favorites, listen, soda, kugou, actions, nav, menu, detailPane, state.providers)
+        else -> PhoneLibrary(playlists, covers, sync, stats, favorites, listen, soda, kugou, actions, nav, menu, state.providers)
     }
 
     if (createOpen) {
@@ -238,6 +241,7 @@ private fun PhoneLibrary(
     favorites: List<SavedSong>,
     listen: ListenTaskState,
     soda: SodaWelfareUi,
+    kugou: KugouWelfareUi,
     actions: MusicActions,
     nav: LibraryNav,
     menu: NewMenu,
@@ -281,12 +285,15 @@ private fun PhoneLibrary(
                         tileHeight = if (phone) 100.dp else 112.dp,
                     )
                 }
-                // 本地音乐和“汽水天天送会员”并成一组（两行分段圆角）
+                // 本地音乐、汽水天天送会员、酷狗概念版领会员并成一组（三行分段圆角）
                 item(key = "localMusic", contentType = "card") {
-                    LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 2, modifier = Modifier.padding(top = 12.dp))
+                    LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 3, modifier = Modifier.padding(top = 12.dp))
                 }
                 item(key = "welfare", contentType = "card") {
-                    WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 2, modifier = Modifier)
+                    WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 3, modifier = Modifier)
+                }
+                item(key = "kugouWelfare", contentType = "card") {
+                    KugouWelfareEntryCard(kugou, nav.openKugouWelfare, index = 2, count = 3, modifier = Modifier)
                 }
                 item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
@@ -372,6 +379,7 @@ private fun TabletLibrary(
     favorites: List<SavedSong>,
     listen: ListenTaskState,
     soda: SodaWelfareUi,
+    kugou: KugouWelfareUi,
     actions: MusicActions,
     nav: LibraryNav,
     menu: NewMenu,
@@ -438,12 +446,15 @@ private fun TabletLibrary(
                         }
                     }
                 }
-                // 本地音乐和“汽水天天送会员”并成一组（两行分段圆角）
+                // 本地音乐、汽水天天送会员、酷狗概念版领会员并成一组（三行分段圆角）
                 item(key = "localMusic", contentType = "card") {
-                    LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 2, modifier = Modifier.padding(top = 12.dp))
+                    LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 3, modifier = Modifier.padding(top = 12.dp))
                 }
                 item(key = "welfare", contentType = "card") {
-                    WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 2, modifier = Modifier)
+                    WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 3, modifier = Modifier)
+                }
+                item(key = "kugouWelfare", contentType = "card") {
+                    KugouWelfareEntryCard(kugou, nav.openKugouWelfare, index = 2, count = 3, modifier = Modifier)
                 }
                 item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
@@ -495,6 +506,7 @@ private fun TvLibrary(
     stats: LibraryStats,
     listen: ListenTaskState,
     soda: SodaWelfareUi,
+    kugou: KugouWelfareUi,
     actions: MusicActions,
     nav: LibraryNav,
     menu: NewMenu,
@@ -546,6 +558,15 @@ private fun TvLibrary(
                     ) {
                         Text("汽水天天送会员", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text(welfareHeadline(soda, listen.todayMinutes), style = MaterialTheme.typography.bodyMedium)
+                    }
+                    TvTile(
+                        modifier = Modifier.width(240.dp),
+                        container = MaterialTheme.colorScheme.secondaryContainer,
+                        content = MaterialTheme.colorScheme.onSecondaryContainer,
+                        onClick = nav.openKugouWelfare,
+                    ) {
+                        Text("酷狗概念版领会员", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(kugouWelfareHeadline(kugou), style = MaterialTheme.typography.bodyMedium)
                     }
                     TvTile(
                         modifier = Modifier.width(200.dp),

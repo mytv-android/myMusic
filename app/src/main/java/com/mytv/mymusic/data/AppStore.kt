@@ -266,6 +266,9 @@ class SettingsStore(private val context: Context) {
     private val playReportEnabledKey = booleanPreferencesKey("play_report_enabled")
     // 汽水上报用的设备标识：每次启动重新生成就没法积累口味，所以落盘
     private val sodaReportDeviceIdKey = stringPreferencesKey("soda_report_device_id")
+    // 酷狗概念版「听歌领会员」：启动时自动领一天的开关，和上次自动领取的日期（只用来去重）
+    private val kugouWelfareAutoKey = booleanPreferencesKey("kugou_welfare_auto")
+    private val kugouWelfareLastDateKey = stringPreferencesKey("kugou_welfare_last_date")
     // 全屏歌词动画与歌词文字变换
     private val lyricVisualizerKey = stringPreferencesKey("lyric_visualizer")
     private val lyricVisualizerAutoKey = stringPreferencesKey("lyric_visualizer_auto")
@@ -328,6 +331,8 @@ class SettingsStore(private val context: Context) {
             miniPlayerTarget = values[miniPlayerTargetKey].toMiniPlayerTarget(),
             playReportEnabled = values[playReportEnabledKey] ?: true,
             sodaReportDeviceId = values[sodaReportDeviceIdKey] ?: "",
+            kugouWelfareAuto = values[kugouWelfareAutoKey] ?: true,
+            kugouWelfareLastClaimDate = values[kugouWelfareLastDateKey] ?: "",
             lyricStage = lyricStagePrefs(values),
             lyricText = LyricTextPrefs(
                 splitBilingual = values[lyricSplitBilingualKey] ?: false,
@@ -403,6 +408,13 @@ class SettingsStore(private val context: Context) {
     suspend fun collectionView(value: CollectionView) = context.dataStore.edit { it[collectionViewKey] = value.name }
     suspend fun miniPlayerTarget(value: MiniPlayerTarget) = context.dataStore.edit { it[miniPlayerTargetKey] = value.name }
     suspend fun playReportEnabled(value: Boolean) = context.dataStore.edit { it[playReportEnabledKey] = value }
+
+    /** 酷狗概念版「听歌领会员」的自动领取开关。 */
+    suspend fun kugouWelfareAuto(value: Boolean) = context.dataStore.edit { it[kugouWelfareAutoKey] = value }
+
+    /** 记一次自动领取的日期（北京时间），同一天不再重复打接口。 */
+    suspend fun kugouWelfareLastClaimDate(value: String) =
+        context.dataStore.edit { it[kugouWelfareLastDateKey] = value }
 
     /**
      * 汽水上报的设备标识：第一次用随机值落盘，之后一直复用。
@@ -692,6 +704,10 @@ data class AppSettings(
     val playReportEnabled: Boolean = true,
     /** 汽水上报用的设备标识，空表示还没生成过（见 SettingsStore.sodaReportDeviceId）。 */
     val sodaReportDeviceId: String = "",
+    /** 酷狗概念版「听歌领会员」是否在启动时自动领一天。 */
+    val kugouWelfareAuto: Boolean = true,
+    /** 上次自动领取的日期（北京时间 yyyy-MM-dd），空表示还没自动领过。 */
+    val kugouWelfareLastClaimDate: String = "",
     /** 全屏歌词动画。 */
     val lyricStage: LyricStagePrefs = LyricStagePrefs(),
     /** 歌词文字变换（拆单行双语、简转繁、补罗马音）。 */

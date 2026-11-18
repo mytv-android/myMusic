@@ -69,6 +69,17 @@ These are best-effort unofficial interfaces. They are only used when the user ex
 - Upstream: https://github.com/MakcRe/KuGouMusicApi (MIT License), https://github.com/MoeKoeMusic/MoeKoeMusic
 - Usage: reference for the `fingerprint.service/v1/music_trackid_mulit` request format (8 kHz 16-bit mono PCM body plus the Android signature). The Kotlin implementation in `data/native/KugouProvider.kt` (`matchAudio`) is written against the protocol; no upstream code or binary is bundled.
 
+## Kugou Concept Edition daily "listen for VIP" reward (protocol only)
+
+The Kugou **Concept Edition** client (`com.kugou.android.lite`) runs a daily activity that grants one day of listening VIP. `data/native/KugouWelfare.kt` calls that activity on the signed-in Kugou account, which in this app is already the Concept Edition app id (`appid=3116`) and signing salt, so no second login is involved.
+
+- `POST https://gateway.kugou.com/youth/v1/recharge/receive_vip_listen_song` (`source_id=90139`, `receive_day`, `signature`) — claims the day's listening VIP. `status=1` = claimed, `error_code=131001` = already claimed today, `20028` = account risk-controlled, `20018` = login expired.
+- `POST https://gateway.kugou.com/youth/v1/listen_song/upgrade_vip_reward` (`kugouid`, `ad_type=1`) — upgrades the day's reward to Concept Edition VIP. Failure does not affect the claim.
+- `GET https://gateway.kugou.com/youth/v1/activity/get_month_vip_record` — the month's claim records, used only to display how many days were claimed this month; when no date can be read out of the response the count is simply not shown.
+- `GET https://kugouvip.kugou.com/v1/get_union_vip?busi_type=concept` — Concept Edition (`svip`) / listening (`tvip`) VIP state and expiry.
+
+References: https://github.com/MakcRe/KuGouMusicApi (`module/youth_day_vip.js`, `youth_day_vip_upgrade.js`, `youth_month_vip_record.js`, `youth_union_vip.js`, MIT License), https://github.com/develop202/kgcheckin (`api/module/youth_*.js`), https://github.com/liuran001/MusicBot-Go (`plugins/kugou/concept_client.go`), https://github.com/Linsxyx/KugouMusic.NET (`src/Libraries/KuGou.Net/Protocol/Raw/RawUserApi.cs`), https://github.com/lladlam/MeloX-Android (`docs/KUGOU-LITE.md`). The request formats were cross-checked across these independent implementations; no upstream source code is bundled, and the Kotlin implementation is written against the protocol.
+
 ## Apple Music anonymous lyrics proxies
 
 Apple Music no longer returns song lyrics to unauthenticated clients: `amp-api.music.apple.com`'s `include=lyrics` / `with=lyrics` / `extend=lyrics` no longer yields a `relationships.lyrics` resource, and the only remaining anonymous endpoint (`/v1/lyrics/{storefront}/snippet/songs/{id}`) requires a `tk` token that Apple's native apps mint server-side when sharing a lyrics snippet. Full lyrics require a `media-user-token`, i.e. a signed-in Apple Music account, which this app does not have.

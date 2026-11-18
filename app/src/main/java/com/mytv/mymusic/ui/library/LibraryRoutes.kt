@@ -34,6 +34,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
         val sync by app.model.syncState.collectAsState()
         val listen by app.model.listenTaskState.collectAsState()
         val soda by app.model.sodaWelfare.collectAsState()
+        val kugou by app.model.kugouWelfare.collectAsState()
         val nav = remember(app) {
             LibraryNav(
                 openSettings = { app.openSettings("settings") },
@@ -44,11 +45,15 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
                 openDownloads = { app.nav.navigate("downloads") },
                 openCharts = { app.openTab("charts") },
                 openWelfare = { app.nav.navigate("welfare") },
+                openKugouWelfare = { app.nav.navigate("kugouWelfare") },
                 openLocalMusic = { app.nav.navigate(LOCAL_MUSIC_ROUTE) },
             )
         }
         // 「我的」页的入口卡也要显示任务进度，进页面就把服务端状态读回来
-        LaunchedEffect(Unit) { app.model.ensureSodaWelfareLoaded() }
+        LaunchedEffect(Unit) {
+            app.model.ensureSodaWelfareLoaded()
+            app.model.ensureKugouWelfareLoaded()
+        }
         LibraryScreen(
             state = state,
             favorites = favorites,
@@ -59,6 +64,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
             sync = sync,
             listen = listen,
             soda = soda,
+            kugou = kugou,
             actions = app.actions,
             nav = nav,
             // ≥840dp 平板：选中的歌单直接显示在右栏，不跳页
@@ -132,6 +138,27 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
                 }
             },
             // 没登录汽水时去平台账号页扫码
+            onLogin = { app.openSettings("settings/accounts") },
+            onBack = app::back,
+        )
+    }
+    composable("kugouWelfare") {
+        TvExitBackHandler()
+        val kugou by app.model.kugouWelfare.collectAsState()
+        val state by app.model.state.collectAsState()
+        val snackbar = LocalAppSnackbar.current
+        val scope = rememberCoroutineScope()
+        KugouWelfareScreen(
+            kugou = kugou,
+            autoClaim = state.kugouWelfareAuto,
+            onAutoClaimChange = app.model::setKugouWelfareAuto,
+            onRefresh = app.model::refreshKugouWelfare,
+            onClaim = {
+                app.model.claimKugouDayVip { result ->
+                    scope.launch { snackbar.showSnackbar(result.message) }
+                }
+            },
+            // 没登录酷狗时去平台账号页扫码
             onLogin = { app.openSettings("settings/accounts") },
             onBack = app::back,
         )

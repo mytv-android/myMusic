@@ -106,6 +106,10 @@ import com.mytv.mymusic.data.TrackOverrideEntity
 import com.mytv.mymusic.data.native.AppleLyricsConfig
 import com.mytv.mymusic.data.native.AudioQuality
 import com.mytv.mymusic.data.native.KugouProvider
+import com.mytv.mymusic.data.native.KugouClaimOutcome
+import com.mytv.mymusic.data.native.KugouRewardResult
+import com.mytv.mymusic.data.native.KugouWelfare
+import com.mytv.mymusic.data.native.KugouWelfareInfo
 import com.mytv.mymusic.data.native.NativeProviders
 import com.mytv.mymusic.data.native.NetEaseProvider
 import com.mytv.mymusic.data.native.PlaylistWriteException
@@ -209,6 +213,26 @@ data class SodaWelfareUi(
     val error: String = "",
 )
 
+/**
+ * 酷狗概念版「听歌领会员」的界面状态。VIP 生效、到期和领取结果都以服务端为准
+ * （见 [com.mytv.mymusic.data.native.KugouWelfare]），本机只存加载态和领取态。
+ */
+data class KugouWelfareUi(
+    // 首帧当成正在读，入口卡才不会闪一下「获取失败」
+    val loading: Boolean = true,
+    val claiming: Boolean = false,
+    /** 是否已登录酷狗（概念版）；未登录时界面引导去扫码。 */
+    val loggedIn: Boolean = true,
+    val info: KugouWelfareInfo = KugouWelfareInfo(),
+    /** 今天手动领取的结果，用来在卡片上显示「已领取 / 风控」这类反馈。 */
+    val lastClaim: KugouRewardResult? = null,
+    val error: String = "",
+) {
+    /** 今天这一份已经到手：服务端说领过，或者这次手动领成功了。 */
+    val todayClaimed: Boolean
+        get() = info.todayClaimed || lastClaim?.already == true || lastClaim?.success == true
+}
+
 data class MusicUiState(
     val providers: List<ProviderInfo> = emptyList(),
     val providerId: String = "netease",
@@ -247,6 +271,8 @@ data class MusicUiState(
     val miniPlayerTarget: MiniPlayerTarget = MiniPlayerTarget.Player,
     /** 播放上报总开关；关掉后不再把播放记录回传给任何平台。 */
     val playReportEnabled: Boolean = true,
+    /** 酷狗概念版「听歌领会员」是否启动时自动领一天。 */
+    val kugouWelfareAuto: Boolean = true,
     val coverSeed: Int = 0,
     val sleepFade: Boolean = true,
     /** 切歌过渡总开关，见 [AppSettings.crossfadeEnabled]。 */
@@ -495,6 +521,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (_sodaWelfare.value.info.statusCode < 0) refreshSodaWelfare()
     }
 
+    /** 酷狗概念版「听歌领会员」：服务端的 VIP 状态和领取。 */
+    private val _kugouWelfare = MutableStateFlow(KugouWelfareUi())
+    val kugouWelfare: StateFlow<KugouWelfareUi> = _kugouWelfare.asStateFlow()
+    private var kugouWelfareJob: Job? = null
+
+    /** 和汽水一样：只在没读过时请求，进「我的」页调。 */
+    fun ensureKugouWelfareLoaded() {
+        if (_kugouWelfare.value.info.status < 0) refreshKugouWelfare()
+    }
+
     private val _recognition = MutableStateFlow(RecognitionUiState())
     val recognitionState: StateFlow<RecognitionUiState> = _recognition
     private var recognitionJob: Job? = null
@@ -591,6 +627,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             collectionView = settings.collectionView,
             miniPlayerTarget = settings.miniPlayerTarget,
             playReportEnabled = settings.playReportEnabled,
+            kugouWelfareAuto = settings.kugouWelfareAuto,
             sleepFade = settings.sleepFade,
             crossfadeEnabled = settings.crossfadeEnabled,
             crossfadeSeconds = settings.crossfadeSeconds,
@@ -663,6 +700,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             AppleLyricsConfig.configure(settingsState.value.thirdPartyLyrics)
             _settingsReady.value = true
         }
+        // 酷狗概念版「听歌领会员」：进程里第一次拿到设置就试着把今天那一份领了，
+        // 同一天只试一次；领不到就等用户手动点，见 autoClaimKugouWelfareIfNeeded
+        viewModelScope.launch { autoClaimKugouWelfareIfNeeded() }
         viewModelScope.launch {
             app.settings.state.first()
             LxSources.records.collect { records ->
@@ -5038,6 +5078,97 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (result.success) refreshSodaWelfare()
             onResult(result)
         }
+    }
+
+    /** 刷新酷狗概念版「听歌领会员」状态；没登录酷狗时只回一个未登录态。 */
+    fun refreshKugouWelfare() {
+        val cookie = settingsState.value.cookies[KugouWelfare.KUGOU_PROVIDER_ID].orEmpty()
+        if (cookie.isBlank()) {
+            _kugouWelfare.value = KugouWelfareUi(loading = false, loggedIn = false)
+            return
+        }
+        kugouWelfareJob?.cancel()
+        kugouWelfareJob = viewModelScope.launch {
+            _kugouWelfare.value = _kugouWelfare.value.copy(loading = true, loggedIn = true, error = "")
+            val result = runCatching { KugouWelfare.status(cookie) }
+            _kugouWelfare.value = result.fold(
+                onSuccess = { info ->
+                    KugouWelfareUi(
+                        loading = false,
+                        loggedIn = info.loggedIn,
+                        info = info,
+                        lastClaim = _kugouWelfare.value.lastClaim,
+                        error = if (info.ok || !info.loggedIn) "" else info.statusMsg,
+                    )
+                },
+                onFailure = { error ->
+                    AppLog.w(
+                        "Kugou",
+                        "概念版听歌领会员请求失败：" +
+                            "${error.javaClass.simpleName}: ${error.message}",
+                    )
+                    KugouWelfareUi(
+                        loading = false,
+                        loggedIn = true,
+                        info = _kugouWelfare.value.info,
+                        lastClaim = _kugouWelfare.value.lastClaim,
+                        error = error.message.orEmpty(),
+                    )
+                },
+            )
+        }
+    }
+
+    /** 手动领一天的畅听 VIP（可选一起升级成概念版 VIP）；[onResult] 带服务端返回的提示。 */
+    fun claimKugouDayVip(onResult: (KugouClaimOutcome) -> Unit = {}) {
+        val cookie = settingsState.value.cookies[KugouWelfare.KUGOU_PROVIDER_ID].orEmpty()
+        if (cookie.isBlank()) {
+            onResult(KugouClaimOutcome(KugouRewardResult(message = "未登录酷狗音乐")))
+            return
+        }
+        viewModelScope.launch {
+            _kugouWelfare.value = _kugouWelfare.value.copy(claiming = true)
+            val result = runCatching { KugouWelfare.claimAll(cookie) }.getOrElse {
+                AppLog.w("Kugou", "概念版领会员请求失败：${it.javaClass.simpleName}: ${it.message}")
+                KugouClaimOutcome(KugouRewardResult(message = it.message.orEmpty()))
+            }
+            _kugouWelfare.value = _kugouWelfare.value.copy(
+                claiming = false,
+                lastClaim = result.claim,
+            )
+            if (result.success || result.already) refreshKugouWelfare()
+            onResult(result)
+        }
+    }
+
+    /**
+     * 启动时自动领一天：同一天只试一次（日期按北京时间，和服务端一致），
+     * 开关在概念版页面里。领不到（风控 / 未登录 / 活动结束）就当天不再重试，
+     * 用户手动点领取不受这个限制。
+     */
+    fun autoClaimKugouWelfareIfNeeded() {
+        viewModelScope.launch {
+            val settings = app.settings.state.first()
+            if (!settings.kugouWelfareAuto) return@launch
+            val today = KugouWelfare.beijingToday()
+            if (settings.kugouWelfareLastClaimDate == today) return@launch
+            val cookie = settings.cookies[KugouWelfare.KUGOU_PROVIDER_ID].orEmpty()
+            if (cookie.isBlank()) return@launch
+            // 先记日期：请求发出去了当天就不再来，失败留给用户手动补领
+            app.settings.kugouWelfareLastClaimDate(today)
+            AppLog.i("Kugou", "启动自动领取概念版听歌会员 $today")
+            val result = runCatching { KugouWelfare.claimAll(cookie) }.getOrElse {
+                AppLog.w("Kugou", "启动自动领取失败：${it.javaClass.simpleName}: ${it.message}")
+                KugouClaimOutcome(KugouRewardResult(message = it.message.orEmpty()))
+            }
+            _kugouWelfare.value = _kugouWelfare.value.copy(lastClaim = result.claim)
+            if (result.success || result.already) refreshKugouWelfare()
+        }
+    }
+
+    /** 概念版页面里的自动领取开关。 */
+    fun setKugouWelfareAuto(value: Boolean) {
+        viewModelScope.launch { app.settings.kugouWelfareAuto(value) }
     }
 
     /** 播放进度的本地时钟；[positionAt] 按 elapsedRealtime 外推，不跟着会话推送的节奏跳。 */
