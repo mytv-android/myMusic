@@ -173,6 +173,9 @@ data class PlaylistEditResult(
     val removed: List<PlaylistEntryEntity> = emptyList(),
 )
 
+/** 播放队列移出的一首：撤销时按原位置（队列变短了放末尾）插回。[track] 是聚合曲目，旧数据对不上时为 null。 */
+data class QueueRemoval(val index: Int, val song: Song, val track: CanonicalTrack?)
+
 data class LocalPlaylistDetail(
     val playlist: PlaylistEntity,
     val entries: List<PlaylistEntryEntity>,

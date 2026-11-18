@@ -4151,6 +4151,60 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         message("下一首播放：${song.title}")
     }
 
+    /** 一首接到播放队列末尾（滑动的「加到播放队列」）；队列空着就直接放，已经在队列里只提示。 */
+    fun addToQueue(song: Song) = enqueueSongs(listOf(song))
+
+    /**
+     * 播放队列里移出第 [index] 首（[songKey] 给了就按它核对，位置变了按歌找回）。正在放的这首不能移：
+     * 停播、跳歌不该由一次滑动触发，返回 null 并提示。返回值交给撤销（[restoreQueueItem]）。
+     */
+    fun removeQueueIndex(index: Int, songKey: String? = null): QueueRemoval? {
+        val player = controller ?: return null
+        materializeDormant(player)
+        val state = base.value
+        val at = if (songKey == null || state.queue.getOrNull(index)?.key == songKey) {
+            index
+        } else {
+            state.queue.indexOfFirst { it.key == songKey }
+        }
+        if (at < 0 || player.mediaItemCount != state.queue.size) return null
+        if (!queueRemovalAllowed(at, player.currentMediaItemIndex, state.queue.size)) {
+            if (at == player.currentMediaItemIndex) message("正在播放的歌不能移出队列")
+            return null
+        }
+        val removal = QueueRemoval(at, state.queue[at], state.canonicalQueue.getOrNull(at))
+        player.removeMediaItem(at)
+        base.value = state.copy(
+            queue = state.queue.toMutableList().apply { removeAt(at) },
+            canonicalQueue = state.canonicalQueue.toMutableList().apply { if (at in indices) removeAt(at) },
+        )
+        return removal
+    }
+
+    /**
+     * 撤销移出：插回原位置（队列变短了放末尾）。这首已经又在队列里了就不重复插；队列清空了不再放回。
+     * 随机播放开着时插回的这首排在它前一首的紧后面（QueueShuffleOrder.cloneAndInsert），随机顺序不保证和原来一样。
+     */
+    fun restoreQueueItem(removal: QueueRemoval) {
+        val player = controller ?: return
+        materializeDormant(player)
+        val state = base.value
+        if (state.queue.isEmpty()) {
+            message("播放队列已经清空，没有放回")
+            return
+        }
+        val trackId = removal.track?.id
+        if (state.queue.any { it.key == removal.song.key } || (trackId != null && state.canonicalQueue.any { it.id == trackId })) return
+        val at = queueRestoreAt(removal.index, state.queue.size)
+        player.addMediaItem(at, mediaItem(removal.song))
+        base.value = state.copy(
+            queue = state.queue.toMutableList().apply { add(at, removal.song) },
+            canonicalQueue = removal.track?.let { track ->
+                state.canonicalQueue.toMutableList().apply { add(at.coerceAtMost(size), track) }
+            } ?: state.canonicalQueue,
+        )
+    }
+
     /** 第 [hint] 位原来是 [track]；解析、换源要等一阵，期间“下一首播放”可能把它挪了位：按歌找回现在的位置，不在队列里了返回 -1。 */
     private fun queueIndexOf(track: CanonicalTrack, hint: Int): Int {
         val queue = base.value.canonicalQueue
@@ -6552,6 +6606,12 @@ internal fun queueMoveNextTarget(from: Int, current: Int, size: Int): Int? {
     // 从前面挪走后当前这首退到 current - 1，插到它后面正好是 current
     return if (from < current) current else current + 1
 }
+
+/** 队列里第 [index] 首能不能移出：越界或者就是正在放的第 [current] 首都不行。 */
+internal fun queueRemovalAllowed(index: Int, current: Int, size: Int): Boolean = index in 0 until size && index != current
+
+/** 撤销移出时插回哪一位：原位置还在就是原位置，队列变短了接在末尾。 */
+internal fun queueRestoreAt(index: Int, size: Int): Int = index.coerceIn(0, size)
 
 /** “下一首播放”插入一首不在队列里的歌：插到当前第 [current] 首后面；当前位置无效时接在队尾。 */
 internal fun queueInsertNextAt(current: Int, size: Int): Int = if (current in 0 until size) current + 1 else size
