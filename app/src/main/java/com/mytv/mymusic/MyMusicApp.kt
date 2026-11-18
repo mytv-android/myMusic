@@ -58,7 +58,10 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
     lateinit var automixStore: com.mytv.mymusic.playback.AutomixAnalysisStore
     val automixAnalyzer by lazy {
         com.mytv.mymusic.playback.AutomixAnalyzer(this, mediaCache, automixStore) {
-            cloud.routing(androidx.media3.datasource.DefaultDataSource.Factory(this))
+            // 和播放侧同一套工厂：本地歌的 WebDAV 副本带认证，B 站 CDN 带防盗链头
+            com.mytv.mymusic.playback.BilibiliCdnFactory(
+                cloud.routing(androidx.media3.datasource.DefaultDataSource.Factory(this))
+            )
         }
     }
     lateinit var sync: SyncCoordinator

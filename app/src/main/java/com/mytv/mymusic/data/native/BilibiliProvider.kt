@@ -10,9 +10,9 @@ import com.mytv.mymusic.data.Song
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
-import java.io.File
 
 private val BILIBILI_INFO = ProviderInfo(
     id = "bilibili",
@@ -26,9 +26,6 @@ private val BILIBILI_INFO = ProviderInfo(
     qrLogin = true,
 )
 
-private const val BILIBILI_USER_AGENT =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0"
-private const val BILIBILI_REFERER = "https://www.bilibili.com/"
 private const val BILIBILI_DEFAULT_COOKIE =
     "buvid3=2E109C72-251F-3827-FA8E-921FA0D7EC5291319infoc; SESSDATA=your_sessdata;"
 
@@ -57,9 +54,9 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
         val body = NativeHttp.get(
             searchUrl(keyword),
-            headers = mapOf("Referer" to BILIBILI_REFERER),
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
             cookie = effectiveCookie(cookie),
-            userAgent = BILIBILI_USER_AGENT,
+            userAgent = BilibiliCdn.USER_AGENT,
         )
         val response = json.decodeFromString<BilibiliSearchResponse>(body)
         val songs = mutableListOf<Song>()
@@ -207,7 +204,10 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         val option = BILIBILI_QUALITY_DEFINITIONS[quality]?.option
         return PlayableStream(
             url = url,
-            ext = option?.format ?: song.ext.ifBlank { extensionFromUrl(url) },
+            // 自动档时 fetchAudioUrl 挑的是「Hi-Res > 全景声 > 最高 DASH 档 > durl」，
+            // 挑中了哪一档没随地址带下来，而 DASH 音频在 B 站一律是 fMP4（地址后缀 .m4s，
+            // extensionFromUrl 认不出来），后缀为空就按 m4a 兜，别让下载文件命名成 .m4s
+            ext = option?.format ?: song.ext.ifBlank { "m4a" },
             bitrate = option?.bitrate?.takeIf { it > 0 } ?: song.bitrate,
         )
     }
@@ -222,9 +222,9 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
         val body = NativeHttp.get(
             searchUrl(keyword),
-            headers = mapOf("Referer" to BILIBILI_REFERER),
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
             cookie = effectiveCookie(cookie),
-            userAgent = BILIBILI_USER_AGENT,
+            userAgent = BilibiliCdn.USER_AGENT,
         )
         val response = json.decodeFromString<BilibiliSearchResponse>(body)
         val seen = mutableSetOf<String>()
@@ -444,9 +444,9 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
     override suspend fun createLogin(type: String): QRCreateResult {
         val body = NativeHttp.get(
             BILIBILI_QR_GENERATE_API,
-            headers = mapOf("Referer" to BILIBILI_REFERER),
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
             randomIp = true,
-            userAgent = BILIBILI_USER_AGENT,
+            userAgent = BilibiliCdn.USER_AGENT,
         )
         val response = json.decodeFromString<BilibiliQrGenerateResponse>(body)
         val data = response.data ?: BilibiliQrGenerateData()
@@ -483,8 +483,8 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
 
         val response = NativeHttp.getResponse(
             "$BILIBILI_QR_POLL_API?qrcode_key=${encode(qrKey)}",
-            headers = mapOf("Referer" to BILIBILI_REFERER),
-            userAgent = BILIBILI_USER_AGENT,
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
+            userAgent = BilibiliCdn.USER_AGENT,
         )
         val payload = json.decodeFromString<BilibiliQrPollResponse>(response.body)
         val data = payload.data ?: BilibiliQrPollData()
@@ -509,7 +509,7 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         val body = NativeHttp.get(
             "$BILIBILI_VIEW_API?bvid=$bvid",
             cookie = effectiveCookie(cookie),
-            userAgent = BILIBILI_USER_AGENT,
+            userAgent = BilibiliCdn.USER_AGENT,
         )
         return json.decodeFromString<BilibiliViewResponse>(body).data ?: BilibiliViewData()
     }
@@ -517,9 +517,9 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
     private suspend fun fetchPageList(cookie: String, bvid: String): List<BilibiliPage> {
         val body = NativeHttp.get(
             "$BILIBILI_PAGE_LIST_API?bvid=$bvid",
-            headers = mapOf("Referer" to BILIBILI_REFERER),
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
             cookie = effectiveCookie(cookie),
-            userAgent = BILIBILI_USER_AGENT,
+            userAgent = BilibiliCdn.USER_AGENT,
         )
         val response = json.decodeFromString<BilibiliPageListResponse>(body)
         if (response.code != 0) {
@@ -622,9 +622,9 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
             "&page_num=$pageNum&page_size=$BILIBILI_SEASON_PAGE_SIZE"
         val body = NativeHttp.get(
             url,
-            headers = mapOf("Referer" to BILIBILI_REFERER),
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
             cookie = effectiveCookie(cookie),
-            userAgent = BILIBILI_USER_AGENT,
+            userAgent = BilibiliCdn.USER_AGENT,
         )
         val response = json.decodeFromString<BilibiliSeasonResponse>(body)
         if (response.code != 0) {
@@ -643,9 +643,9 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         val url = "$BILIBILI_PLAY_URL_API?fnval=$fnval&qn=127&bvid=$bvid&cid=$cid"
         val body = NativeHttp.get(
             url,
-            headers = mapOf("Referer" to BILIBILI_REFERER),
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
             cookie = effectiveCookie(cookie),
-            userAgent = BILIBILI_USER_AGENT,
+            userAgent = BilibiliCdn.USER_AGENT,
         )
         // Go ignores JSON unmarshal errors here, treating a bad body as an empty response.
         val response = runCatching {
@@ -696,9 +696,9 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         val url = "$BILIBILI_PLAY_URL_API?fnval=$fnval&qn=127&bvid=$bvid&cid=$cid"
         val body = NativeHttp.get(
             url,
-            headers = mapOf("Referer" to BILIBILI_REFERER),
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
             cookie = effectiveCookie(cookie),
-            userAgent = BILIBILI_USER_AGENT,
+            userAgent = BilibiliCdn.USER_AGENT,
         )
         val response = json.decodeFromString<BilibiliPlayUrlResponse>(body)
         if (response.code != 0) {
@@ -740,9 +740,9 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         val body = runCatching {
             NativeHttp.get(
                 BILIBILI_NAV_API,
-                headers = mapOf("Referer" to BILIBILI_REFERER),
+                headers = mapOf("Referer" to BilibiliCdn.REFERER),
                 cookie = effective,
-                userAgent = BILIBILI_USER_AGENT,
+                userAgent = BilibiliCdn.USER_AGENT,
             )
         }.getOrNull() ?: return false
 
@@ -765,9 +765,9 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         val body = runCatching {
             NativeHttp.get(
                 BILIBILI_NAV_API,
-                headers = mapOf("Referer" to BILIBILI_REFERER),
+                headers = mapOf("Referer" to BilibiliCdn.REFERER),
                 cookie = effective,
-                userAgent = BILIBILI_USER_AGENT,
+                userAgent = BilibiliCdn.USER_AGENT,
             )
         }.getOrNull() ?: return null
         val response = runCatching { json.decodeFromString<BilibiliNavResponse>(body) }.getOrNull() ?: return null

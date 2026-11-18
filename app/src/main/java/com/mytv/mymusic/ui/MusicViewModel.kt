@@ -105,6 +105,7 @@ import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.TrackOverrideEntity
 import com.mytv.mymusic.data.native.AppleLyricsConfig
 import com.mytv.mymusic.data.native.AudioQuality
+import com.mytv.mymusic.data.native.BilibiliCdn
 import com.mytv.mymusic.data.native.KugouProvider
 import com.mytv.mymusic.data.native.KugouClaimOutcome
 import com.mytv.mymusic.data.native.KugouRewardResult
@@ -3309,7 +3310,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     if (!cached.isFile) error("本地缓存文件不存在")
                     cached.copyTo(temp, overwrite = true)
                 } else {
-                    http.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                    // B 站的音频字节在 *.bilivideo.com 上，不带 Referer 和浏览器档 UA 就是 403
+                    // （播放侧那套工厂管不到这里，这次下载是自己发的请求）
+                    val builder = Request.Builder().url(url)
+                    BilibiliCdn.headers(url).forEach { (name, value) -> builder.header(name, value) }
+                    http.newCall(builder.build()).execute().use { response ->
                         if (!response.isSuccessful) error("下载失败：${response.code} ${response.message}")
                         temp.outputStream().use { output -> response.body.byteStream().copyTo(output) }
                     }
