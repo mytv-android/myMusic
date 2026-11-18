@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>用户建议改进稿 · myMusic</title>
-<meta name="description" content="按用户提的 14 条建议整理的改进稿（手机、平板、横屏、折叠屏、电视都画了）：歌词动画面板（按速度灰掉、随机池、保存并应用）、Rush 自定义配色/景深强度/风格预设、长按歌词分享卡片（Rush 九种卡片＋播放页样式）、播放页加歌单、列表左右滑操作、歌单导出与落雪导入、海报墙视角远近、手机横屏全屏歌词修复。">
+<meta name="description" content="按用户提的 15 条建议整理的改进稿（手机、平板、横屏、折叠屏、电视都画了）：歌词动画面板（按速度灰掉、随机池、保存并应用）、Rush 自定义配色/景深强度/风格预设、长按歌词分享卡片（Rush 九种卡片＋播放页样式）、播放页加歌单、列表左右滑操作、歌单导出与落雪导入、海报墙视角远近、电视海报视图去掉浮动工具栏、手机横屏全屏歌词修复。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=Roboto+Flex:opsz,slnt,wdth,wght@8..144,-10..0,25..151,100..1000&display=swap" rel="stylesheet">
@@ -634,6 +634,51 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
 @media (max-width: 1000px) { .devpane.on { overflow-x: auto; padding-bottom: 40px; } }
 .js-stage.picking .pvchip { display: none; }
 .js-stage.picking .stl { opacity: .2; }
+
+/* 电视海报视图（CollectionPosterView 电视分支）：顶排、胶囊、浮动工具栏、提示、长按面板 */
+.tvwrow { position: absolute; left: 32px; right: 32px; top: 20px; height: 56px; display: flex; align-items: center; gap: 16px; z-index: 8; }
+.tvwrow .sp { flex: 1; }
+.tvwpill { min-height: 48px; padding: 6px 18px 6px 20px; border-radius: 24px; display: flex; flex-direction: column; justify-content: center; background: color-mix(in srgb, var(--pl-surface-container-high) 86%, transparent); box-shadow: 0 3px 8px rgb(0 0 0 / .3); max-width: 420px; flex: none; }
+.tvwpill b { font-size: 14px; font-weight: 800; line-height: 20px; }
+.tvwpill span { font-size: 12px; font-weight: 500; line-height: 16px; color: var(--pl-on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tvwbar { height: 56px; padding: 0 4px; border-radius: 28px; display: flex; align-items: center; background: color-mix(in srgb, var(--pl-surface-container-high) 90%, transparent); flex: none; }
+.tvwbar .pa { height: 48px; padding: 0 18px 0 14px; border-radius: 24px; display: inline-flex; align-items: center; gap: 6px; background: var(--pl-primary); color: var(--pl-on-primary); font-size: 14px; font-weight: 700; margin-right: 6px; }
+.tvwbar .tb48 { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--pl-on-surface); }
+.tvwbar svg { fill: currentColor; } .tvwbar .tb48 svg { width: 24px; height: 24px; }
+.tvwbar.gone { position: relative; outline: 3px dashed #ff6b6b; outline-offset: 3px; }
+.tvwbar.gone::before { content: ""; position: absolute; left: 8px; right: 8px; top: 50%; height: 3px; background: #ff6b6b; transform: rotate(-6deg); border-radius: 2px; }
+.tvwbar.gone::after { content: attr(data-new); position: absolute; right: 10px; top: -14px; background: #ff6b6b; color: #fff; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+.tvwclock { font-size: 34px; line-height: 34px; font-weight: 300; letter-spacing: .02em; font-variant-numeric: tabular-nums; color: var(--pl-on-surface); text-shadow: 0 2px 12px rgb(0 0 0 / .5); }
+.tvwhint { height: 36px; padding: 0 14px; border-radius: 18px; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--pl-on-surface); background: rgb(0 0 0 / .38); white-space: nowrap; }
+.tvwhint i { font-style: normal; font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 6px; border: 1.5px solid currentColor; }
+.tvwcall { position: absolute; z-index: 9; padding: 8px 12px; border-radius: 12px; background: #ff6b6b; color: #fff; font-size: 13px; font-weight: 700; line-height: 1.4; white-space: nowrap; box-shadow: 0 8px 20px rgb(0 0 0 / .4); }
+.wall .tile.fr, .wall .grown.fr { outline: 3px solid #fff !important; outline-offset: 3px; z-index: 4; }
+.wall .grown.fr { transform: none; }
+/* TrackActionsSheet：三个快捷操作（QuickAction 72dp、20dp 圆角）＋ 分组小标题 */
+.qacts { display: flex; gap: 8px; margin: 0 0 12px; }
+.qacts span { flex: 1; height: 72px; border-radius: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 14px; font-weight: 500; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); }
+.qacts span.on { background: var(--pl-primary); color: var(--pl-on-primary); }
+.qacts svg { width: 24px; height: 24px; fill: currentColor; }
+.wglbl { padding: 16px 4px 8px; margin-top: 4px; font-size: 14px; font-weight: 500; color: var(--pl-on-surface-variant); }
+.pl .lrow.danger .t { color: #ffb4ab; }
+.pl .lrow .ic.er { background: #93000a; color: #ffdad6; }
+.sheet.tvp .sh-body { padding-bottom: 40px; }
+/* 读取失败（DiscoverErrorState）：132dp 四叶草 errorContainer ＋ 两个按钮 */
+.tvwerr { position: absolute; left: 0; right: 0; top: 80px; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; z-index: 4; }
+.tvwerr .clv { width: 132px; height: 132px; display: grid; place-items: center; background: #93000a; color: #ffdad6; }
+.tvwerr .clv svg { width: 52px; height: 52px; fill: currentColor; }
+.tvwerr h5 { font-size: 24px; font-weight: 800; margin-top: 20px; }
+.tvwerr p { font-size: 14px; color: var(--pl-on-surface-variant); margin-top: 8px; }
+.tvwerr .btns { display: flex; gap: 8px; margin-top: 18px; }
+.tvwerr .btns span { height: 48px; padding: 0 20px; border-radius: 24px; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.tvwerr .btn-f { background: var(--pl-primary); color: var(--pl-on-primary); }
+.tvwerr .btn-t { background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); }
+.tvwerr svg { fill: currentColor; }
+/* AdaptiveSheet 电视形态：面板 surfaceContainer、行 surfaceContainerLow、标题离顶 36dp；电视不显示滚动条 */
+.sheet.tvp .sh-head { padding-top: 36px; }
+.pl .sheet.tvp .lrow { background: var(--pl-surface-container-low); }
+.sheet.tvp .sh-body { scrollbar-width: none; }
+.sheet.tvp .sh-body::-webkit-scrollbar { display: none; }
 </style>
 </head>
 <body>
@@ -695,11 +740,16 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
 <symbol id="i-qr" viewBox="0 0 24 24"><path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zM13 3v8h8V3h-8zm6 6h-4V5h4v4zM19 19h2v2h-2zM13 13h2v2h-2zM15 15h2v2h-2zM13 17h2v2h-2zM15 19h2v2h-2zM17 17h2v2h-2zM17 13h2v2h-2zM19 15h2v2h-2z"/></symbol>
 <symbol id="i-phone" viewBox="0 0 24 24"><path d="M17 1.01 7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></symbol>
 <symbol id="i-mouse" viewBox="0 0 24 24"><path d="M13 1.07V9h7c0-4.08-3.05-7.44-7-7.93zM4 15c0 4.42 3.58 8 8 8s8-3.58 8-8v-4H4v4zm7-13.93C7.05 1.56 4 4.92 4 9h7V1.07z"/></symbol>
+<symbol id="i-locate" viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></symbol>
+<symbol id="i-viewlist" viewBox="0 0 24 24"><path d="M3 14h4v-4H3v4zm0 5h4v-4H3v4zM3 9h4V5H3v4zm5 5h13v-4H8v4zm0 5h13v-4H8v4zM8 5v4h13V5H8z"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></symbol>
+<symbol id="i-cloudoff" viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4c-1.48 0-2.85.43-4.01 1.17l1.46 1.46a5.497 5.497 0 0 1 8.05 4.87v.5H19c1.66 0 3 1.34 3 3 0 1.13-.64 2.11-1.56 2.62l1.45 1.45C23.16 18.16 24 16.68 24 15c0-2.64-2.05-4.78-4.65-4.96zM3 5.27l2.75 2.74C2.56 8.15 0 10.77 0 14c0 3.31 2.69 6 6 6h11.73l2 2L21 20.73 4.27 4 3 5.27zM7.73 10l8 8H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h1.73z"/></symbol>
+<symbol id="i-album" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/></symbol>
 </svg>
 
 <header class="page-head">
   <div class="doc-label">改 进 稿 · 2 0 2 6 - 1 1 - 1 8</div>
-  <h1>用户提的 14 条建议，<em>逐条</em>落到界面上</h1>
+  <h1>用户提的 15 条建议，<em>逐条</em>落到界面上</h1>
   <p class="lede">
     这份稿子按用户的反馈截图和原话整理，每条先对照<strong>现在代码里是怎么做的</strong>，再给出改法和交互稿。界面一律照现有组件画：歌词动画面板是 <code>AnimationSheet</code>（<code>AdaptiveSheet</code> + <code>ConnectedToggleGroup</code> + 两列 <code>ModeCard</code>），列表是 <code>SongRow</code> 分段列表，设置行是 <code>SegmentedGroup</code> 里的 <code>ListRow</code> / <code>SwitchRow</code>。
     深色稿是播放页的 <strong>PlayerTheme</strong>（跟封面色相走），浅色稿是 <strong>BrandSeed #006B5F</strong> 的 M3 浅色方案。带 <span class="tag">红色虚线</span> 的是新增或改动的部分。
@@ -707,7 +757,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
   </p>
   <div class="chips">
     <span class="chip2"><span class="dot"></span>来源：用户反馈 <b>7 张截图 + 原话</b></span>
-    <span class="chip2">建议 <b>14</b> 条 · 归成 <b>8</b> 块</span>
+    <span class="chip2">建议 <b>15</b> 条 · 归成 <b>8</b> 块</span>
     <span class="chip2">真 bug <b>1</b> 个：手机横屏全屏歌词空白</span>
     <span class="chip2">设备 <b>5</b> 种：手机 · 平板 · 横屏 · 折叠屏 · 电视</span>
     <span class="chip2">分享卡 <b>10</b> 种：Rush 九种 ＋ 播放页</span>
@@ -721,7 +771,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
     <a href="#addto"><b>04</b>播放页加歌单</a>
     <a href="#swipe"><b>05</b>列表左右滑</a>
     <a href="#files"><b>06</b>歌单导出、落雪导入</a>
-    <a href="#wall"><b>07</b>海报墙视角远近</a>
+    <a href="#wall"><b>07</b>海报墙视角、电视工具栏</a>
     <a href="#landscape"><b>08</b>横屏全屏歌词</a>
     <a href="#impl"><b>09</b>实现与分期</a>
   </nav>
@@ -731,7 +781,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
 
 <section class="block" id="overview">
   <div class="block-head"><span class="kicker">00</span><h2>总览：现在是怎样，改成怎样</h2></div>
-  <p class="sub">「现在」一栏都是读代码得到的，括号里是出处。只有第 14 条是真 bug，其余是功能缺口或交互不清楚。</p>
+  <p class="sub">「现在」一栏都是读代码得到的，括号里是出处。只有第 14 条是真 bug；第 15 条是电视上的可达性问题（按钮画着、遥控器到不了）；其余是功能缺口或交互不清楚。</p>
   <div class="scroll"><table>
     <thead><tr><th style="width:4%">#</th><th style="width:19%">建议</th><th style="width:36%">现在</th><th>改成</th><th style="width:6%">节</th></tr></thead>
     <tbody>
@@ -749,6 +799,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
       <tr><td>12</td><td>像落雪那样把本地歌单导出成文件</td><td>只有 同步 › 备份 › 导出到文件：一次导出全部歌单、收藏<b>和平台 Cookie</b>，不适合发给别人。</td><td>歌单 ⋮ 加「导出歌单」，可选 myMusic / 落雪 <code>.lxmc</code> / 纯文本；不带 Cookie。同步页加「导出歌单…」可多选。</td><td><a href="#files">06</a></td></tr>
       <tr><td>13</td><td>海报墙设置加视角远近滑块</td><td>格距按设备写死（手机 56dp、平板 102dp、电视 76dp，<code>WallMetrics</code>）。</td><td>海报墙设置加「视角」滑块（远 0.5× ～ 近 1.25×，默认 1×），手机、平板上也能双指捏合；拉远到一定程度自动收起序号和字。</td><td><a href="#wall">07</a></td></tr>
       <tr><td>14</td><td>手机横屏时全屏歌词用不了</td><td><b>bug。</b>横屏走 <code>WidePlayer</code>。舞台高度不到 320dp 时 <code>LyricStage</code> 改用经典列表兜底，但 <code>WidePlayer</code> 没传兜底列表，结果一行都不画。常见手机横屏后高度约 312–336dp，正好卡在线下。</td><td>补上兜底列表（电视同样）；高度门槛改成按文字区算，手机横屏也能放动画。</td><td><a href="#landscape">08</a></td></tr>
+      <tr><td>15</td><td>电视上海报界面不要浮动工具栏，遥控器选不到</td><td>详情页（歌单、专辑、榜单、自建歌单）的海报视图，电视把浮动工具栏放在顶排胶囊右边（<code>CollectionPosterView</code>）。墙接管方向键且是无限的，选中格子后上键一直在墙里走，工具栏选不到。队列海报墙顶排本来就没按钮。</td><td>电视上不画工具栏，顶排只留标题和时钟，焦点直接进墙。工具栏的几项挪进长按确认键的面板，排在单曲操作下面一组；菜单键直接跳到这一组。读取失败、空歌单的提示里加「切回列表视图」。</td><td><a href="#wall">07</a></td></tr>
     </tbody>
   </table></div>
 </section>
@@ -986,7 +1037,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
 </section>
 
 <section class="block" id="wall">
-  <div class="block-head"><span class="kicker">07</span><h2>海报墙：视角远近滑块</h2></div>
+  <div class="block-head"><span class="kicker">07</span><h2>海报墙：视角远近滑块，电视上不放浮动工具栏</h2></div>
   <div class="quote">海报墙的设置里面可以增加一个视角远近的滑块调节，就是可以拉近拉远视角。如果拉远视角的话，感觉非常适合给同好展示，然后正常视角就是正常用。</div>
   <p class="sub">海报墙的格距现在按设备写死：手机 56dp、平板 102dp、电视 76dp（<code>WallMetrics</code>）。加一个缩放倍数乘在格距上就是「视角远近」。海报墙设置在「海报染色」下面加一节「视角」，放 M3E 滑块；手机和平板上还能直接<strong>双指捏合</strong>，松手吸附到最近的刻度并记住。</p>
   <div class="demo-bar">
@@ -1016,6 +1067,22 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
   <h3>平板和电视</h3>
   <p class="sub">滑块拖哪一个都行，三处（上面手机、平板、电视）是同一个值，方便对比同一个倍数在不同格距下的样子；实际按设备各存一份。</p>
   <div class="devblock" id="dvWall"></div>
+
+  <h3>电视：海报视图顶上不放浮动工具栏</h3>
+  <div class="quote">电视上的海报界面不要悬浮工具栏，因为遥控器根本无法选到。</div>
+  <p class="sub">队列海报墙在电视上顶排本来就只有标题和时钟；出问题的是<strong>详情页的海报视图</strong>（歌单、专辑、榜单、自建歌单切到海报时），电视把手机底部那条浮动工具栏挪到了顶排。墙自己接管方向键，而且是无限的，选中格子后上键永远在墙里走，工具栏实际选不到。改法：电视上一个按钮都不放，顶排和队列海报墙一样；工具栏上的操作挪进长按确认键的面板，菜单键直接跳到那一组。下面五帧可以切着看。</p>
+  <div class="devblock" id="dvTvWall"></div>
+  <div class="scroll" style="margin-top:18px"><table>
+    <thead><tr><th style="width:16%">项</th><th style="width:42%">改法</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>顶排</td><td>只留标题胶囊和时钟，去掉 <code>PosterToolbar</code>。胶囊右边加一行纯文字提示「长按 OK 或菜单：播放全部、随机、切回列表…」，空闲 6 秒和胶囊一起淡出。</td><td>墙让出的高度还是 80dp，大卡位置不变。队列海报墙也加同样的提示（「长按 OK：回到正在播放、海报墙设置」）。</td></tr>
+      <tr><td>默认焦点</td><td>进页面直接给墙：这张歌单正在放就落在大卡上，否则落在离中心最近的格。</td><td>以前落在「播放全部」上。</td></tr>
+      <tr><td>整页操作</td><td>长按确认键的单曲面板里，单曲操作下面加一组，小标题「歌单 · 深夜车载」：播放全部 · 随机播放 · 绑定 / 收藏 / 编辑 · 回到正在播放 · 换源设置（榜单）· 切回列表视图 · 海报墙设置。</td><td>就是原来工具栏上的那几个按钮，一项不少；用不上的不出（这张歌单没在放就没有「回到正在播放」）。队列海报墙原来的「回到正在播放 / 海报墙设置」两行也归进这样一组。</td></tr>
+      <tr><td>菜单键</td><td>打开同一个面板，滚到整页那一组，焦点在「播放全部」。</td><td>长按确认键照旧，焦点在第一个快捷操作上。</td></tr>
+      <tr><td>没有歌</td><td>读取失败的提示加第二个按钮「切回列表视图」，空的自建歌单在「添加歌曲」旁边也加。</td><td>墙上没格子时长按和菜单键都没有对象，靠这个按钮出去。</td></tr>
+      <tr><td>手机、平板</td><td>不变：左上胶囊、底部浮动工具栏。</td><td>触摸点得到，不存在这个问题。</td></tr>
+    </tbody>
+  </table></div>
 </section>
 
 <section class="block" id="landscape">
@@ -1063,10 +1130,11 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
       <tr><td>滑动操作</td><td><code>components/Lists.kt</code>（<code>SongRow</code> 加 <code>swipe</code> 参数）、新 <code>components/SwipeActions.kt</code>（滑动 ＋ 指针悬停按钮）、各列表页传上下文、电视 <code>TrackActionsSheet</code> 加「从最近播放删除」、新设置页 <code>SwipeSettingsScreen</code>、<code>LibraryCollections.kt</code>（最近播放删除）</td><td><code>SwipePrefs</code>；<code>MusicActions.removeHistory(key)</code></td></tr>
       <tr><td>导出 / 落雪导入</td><td>新 <code>data/transfer/</code>：<code>PlaylistExport</code>（三种格式）、<code>LxImport</code>（gzip 嗅探、v1→v2、平台映射）；<code>LocalPlaylistScreen.kt</code>、<code>SyncScreens.kt</code>、<code>LibraryScreen.kt</code>（导入预览面板）；电视没有文件选择器时复用 <code>SyncSetupServer</code> 出二维码，网页里上传 / 下载文件</td><td>—（导入后是普通自建歌单，走现有同步）；网页会话沿用 10 分钟时效和「附近的设备」权限提示</td></tr>
       <tr><td>海报墙视角</td><td><code>WallGeometry.kt</code>（<code>WallMetrics.scaled(zoom)</code>）、<code>PosterWall.kt</code>（捏合）、<code>PosterSettingsSheet.kt</code></td><td><code>PosterPrefs.zoom</code>（<code>poster_zoom_phone/tablet/tv</code>）</td></tr>
+      <tr><td>电视海报视图</td><td><code>CollectionPosterView.kt</code>（电视不画 <code>PosterToolbar</code>，默认焦点给墙，去掉顶排接管下键）、<code>PosterWallScreen.kt</code>（提示）、<code>PosterWall.kt</code> / <code>PosterWallState.kt</code>（去掉没人再用的 <code>chromeAbove</code>、<code>escapeUp</code>、<code>focusFromAbove</code>；菜单键带上「从菜单键来」）、<code>AppUi.kt</code>（<code>TrackActionsSheet</code> 的 <code>onWallLocate</code> / <code>onWallSettings</code> 换成一组整页操作）、<code>CollectionScreen.kt</code>、<code>LocalPlaylistScreen.kt</code>（读取失败、空歌单加第二个按钮）</td><td>—</td></tr>
     </tbody>
   </table></div>
   <div class="phases" style="margin-top:16px">
-    <div class="phase"><header><span class="tag">P1</span><h3>修 bug 和小缺口</h3></header><ul><li>横屏全屏歌词兜底 + 门槛</li><li>最近播放单条删除（⋮ 面板）</li><li>播放页「加到歌单」按钮和面板</li><li>单测：横屏 800×312、兜底必有</li></ul></div>
+    <div class="phase"><header><span class="tag">P1</span><h3>修 bug 和小缺口</h3></header><ul><li>横屏全屏歌词兜底 + 门槛</li><li>最近播放单条删除（⋮ 面板）</li><li>电视海报视图去掉浮动工具栏，整页操作进长按面板</li><li>播放页「加到歌单」按钮和面板</li><li>单测：横屏 800×312、兜底必有</li></ul></div>
     <div class="phase"><header><span class="tag">P2</span><h3>动画面板</h3></header><ul><li>换法置顶、卡片三态、「这首歌」一行</li><li>随机池 + 记忆优先</li><li>草稿、保存条、关闭确认、立即应用</li><li>宽屏舞台预览草稿、书本姿态面板放左页、电视焦点</li><li>单测：抽取顺序、池为空兼容、applyNow 跳过空当</li></ul></div>
     <div class="phase"><header><span class="tag">P3</span><h3>Rush 三项</h3></header><ul><li>Color / Slider 设置控件 + 取色面板</li><li>自定义配色、景深强度（含旧值迁移）</li><li>随机搭配、预设增删改、预设进池和四档</li></ul></div>
     <div class="phase"><header><span class="tag">P4</span><h3>滑动操作</h3></header><ul><li>SwipeActions + 各列表上下文</li><li>设置页（示例行、排序、选动作）</li><li>读屏自定义操作、手势冲突规则</li></ul></div>
@@ -1080,7 +1148,7 @@ figcaption .en { font: 600 11px var(--mono); color: var(--muted); margin-left: 4
 
 <footer>
   <b>myMusic 改进稿 · 2026-11-18</b><br>
-  稿子里的歌名、歌词、歌单都是为这份稿子编的示例。参考：用户反馈截图与原话；shub39/Rush（GPL-3.0）分享页、九种分享卡（<code>SpotifyShareCard</code> … <code>BratShareCard</code>）与自定义歌词页；lx-music-desktop @ 323e4ba、lx-music-mobile @ 0669d1b 的列表导入导出源码。界面组件照仓库当前代码：<code>AnimationSheet</code>、<code>ModeCard</code>、<code>ConnectedToggleGroup</code>、<code>SegmentedGroup</code>、<code>SongRow</code>、<code>TrackActionsSheet</code>、<code>PlaylistPickerSheet</code>、<code>PosterSettingsSheet</code>、<code>FavoriteToggle</code>、<code>WidePlayer</code> 的专注栏和常规左栏、<code>TabletopPlayer</code>、<code>TvPlayer</code> 的控制条、<code>AdaptiveSheet</code> 的平板 / 电视 / 折叠屏形态。设备外框按 dp 原尺寸排版后整体缩放：平板 1280×800、手机横屏 800×360、折叠屏 841×701（书本）/ 701×841（桌面）、电视 960×540。
+  稿子里的歌名、歌词、歌单都是为这份稿子编的示例。参考：用户反馈截图与原话；shub39/Rush（GPL-3.0）分享页、九种分享卡（<code>SpotifyShareCard</code> … <code>BratShareCard</code>）与自定义歌词页；lx-music-desktop @ 323e4ba、lx-music-mobile @ 0669d1b 的列表导入导出源码。界面组件照仓库当前代码：<code>AnimationSheet</code>、<code>ModeCard</code>、<code>ConnectedToggleGroup</code>、<code>SegmentedGroup</code>、<code>SongRow</code>、<code>TrackActionsSheet</code>（含电视上的快捷操作排法）、<code>PlaylistPickerSheet</code>、<code>PosterSettingsSheet</code>、<code>CollectionPosterView</code> 的电视顶排、<code>FavoriteToggle</code>、<code>WidePlayer</code> 的专注栏和常规左栏、<code>TabletopPlayer</code>、<code>TvPlayer</code> 的控制条、<code>AdaptiveSheet</code> 的平板 / 电视 / 折叠屏形态。设备外框按 dp 原尺寸排版后整体缩放：平板 1280×800、手机横屏 800×360、折叠屏 841×701（书本）/ 701×841（桌面）、电视 960×540。
 </footer>
 <script>
 
@@ -2312,9 +2380,8 @@ devBlock('#dvSwipe', [
     kind: 'tv', hue: 'brand', tab: '电视', title: '电视 · 不滑，长按确认键出操作面板',
     html: `<div class="tvhist"><div class="tvleft"><h5>最近播放</h5><p>6 首 · 只保存在本机</p><span class="btn-t" style="height:44px;margin-top:18px">${ico('delete', 's18')}清除全部</span></div>
       <div class="tvlist">${HIST.map((h, i) => `<div class="tvrow ${i === 1 ? 'fr' : ''}"><div class="cv" style="background:${h.art}"></div><div class="tx"><b>${h.t}</b><small>${h.a}</small></div><span class="tm">${h.tm}</span></div>`).join('')}</div></div>
-      <div class="scrim"></div><div class="sheet tvp"><div class="sh-head" style="display:flex;gap:12px;align-items:center"><div class="cv" style="width:56px;height:56px;border-radius:14px;flex:none;background:${HIST[1].art}"></div><div><h5 style="font-size:19px">${HIST[1].t}</h5><p>${HIST[1].a}</p></div></div>
-      <div class="sh-body"><div class="seg">${[['playnext', '下一首播放'], ['queue', '加到播放队列'], ['pladd', '加到歌单…'], ['heart-o', '取消收藏'], ['delete', '从最近播放删除', 1], ['person', '查看歌手'], ['library', '查看专辑']].map(([i, l, nw]) => `<div class="lrow ${nw ? 'fr newmark' : ''}" ${nw ? 'data-new="新增"' : ''}><span class="ic">${ico(i)}</span><div class="t">${l}</div></div>`).join('')}</div></div></div>`,
-    cap: '电视没有滑动，也不出设置 › 滑动操作。最近播放每行长按确认键（或菜单键）打开 <code>TrackActionsSheet</code>（右侧 360dp），新加「从最近播放删除」，删后底部出撤销条，焦点移到下一行。手机上 ⋮ 面板同样有这一项。',
+      <div class="scrim"></div><div class="sheet tvp">${tvTrackSheet({ title: HIST[1].t, sub: `${HIST[1].a} · ${HIST[1].t}`, fav: HIST[1].fav, rows: [['person', `查看歌手：${HIST[1].a}`], ['album', `查看专辑：${HIST[1].t}`], ['swap', '选择音源 / 查看其他版本'], ['delete', '从最近播放删除', { danger: true, fr: true, mark: '新增' }]] })}</div>`,
+    cap: '电视没有滑动，也不出设置 › 滑动操作。最近播放每行长按确认键（或菜单键）打开 <code>TrackActionsSheet</code>（右侧 360dp：收藏 / 下载 / 加到歌单三个快捷操作，下面查看歌手、查看专辑、选择音源），在最后加「从最近播放删除」（红色，和自建歌单里的「从歌单移除」同一种样式），删后底部出撤销条，焦点移到下一行。图里焦点挪到这一项是为了标出它，实际打开时焦点在第一个快捷操作上。手机上 ⋮ 面板同样有这一项。',
   },
 ]);
 
@@ -2374,9 +2441,10 @@ devBlock('#dvFiles', [
 ]);
 
 /* ---------- 07 海报墙视角 ---------- */
-function wallHTML(W, H, pitch, gap0, growMin, cx, gy, title = true) {
+function wallHTML(W, H, pitch, gap0, growMin, cx, gy, title = true, capG) {
   const p = pitch * zoom, gap = gap0 * zoom, rad = Math.max(4, 8 * zoom);
-  let k = 6; while (k * p - gap < growMin) k++; while (k * p - gap > Math.min(W - 24, H - gy - 24) && k > 2) k--;
+  const cap = capG ?? Math.min(W - 24, H - gy - 24);
+  let k = 6; while (k * p - gap < growMin) k++; while (k * p - gap > cap && k > 2) k--;
   const G = k * p - gap, gx = cx - G / 2;
   const ox = gx - Math.ceil(gx / p) * p, oy = gy - Math.ceil(gy / p) * p;
   const cols = Math.ceil((W - ox) / p), rows = Math.ceil((H - oy) / p);
@@ -2416,6 +2484,97 @@ devBlock('#dvWall', [
   { ...wallPane('tv', 960, 540, 76, 5, 300, true), tab: '电视', title: '电视 · 设置在右侧面板，左右键调', cap: '电视海报墙顶上一排没有按钮，长按确认键或菜单键出「回到正在播放 / 海报墙设置」。设置面板里视角滑块获得焦点时左右键按刻度跳（0.5 / 0.75 / 1 / 1.25），不做连续值；电视独有的「空闲时镜头漂移」照旧在下面。' },
 ]);
 document.fonts && document.fonts.ready.then(() => fitCards(document));
+
+/* ---------- 07 续：电视上海报视图不放浮动工具栏 ----------
+   照 CollectionPosterView 电视分支画：顶排 = 左 32 / 右 32、离顶 20、高 56；TitlePill 48dp 胶囊（surfaceContainerHigh 86%）；
+   PosterToolbar = HorizontalFloatingToolbar 56dp 高、左右 4dp，「播放全部」48dp 主按钮 + 48dp 图标钮；AmbientClock 34sp 细体。
+   墙让出顶上 80dp，电视大卡 6 格 = 451dp，居中在 80–540 之间。长按面板是 TrackActionsSheet 的电视形态（右侧 360dp）。 */
+const TVW = { title: '深夜车载', sub: '歌单 · 网易云音乐 · 48 首 · 正在播放第 12 首', hue: 206 };
+function tvWall() {
+  const z0 = zoom; zoom = 1;
+  const html = wallHTML(960, 540, 76, 5, 451, 480, 84, false, 451);
+  zoom = z0; return html;
+}
+function tvPill(sub = TVW.sub) {
+  return `<div class="tvwpill"><b>${TVW.title}</b><span>${sub}</span></div>`;
+}
+function tvToolbarNow() {
+  return `<div class="tvwbar gone" data-new="电视上去掉"><span class="pa">${ico('play', 's20')}播放全部</span>${['shuffle', 'link', 'locate', 'viewlist', 'tune'].map(i => `<span class="tb48">${ico(i)}</span>`).join('')}</div>`;
+}
+function tvTopRow(mid) {
+  return `<div class="tvwrow">${tvPill()}${mid}<span class="sp"></span><span class="tvwclock">22:48</span></div>`;
+}
+const TVW_HINT = `<span class="tvwhint newmark" data-new="新：只是提示，选不到">长按 <i>OK</i> 或 <i>菜单</i>：播放全部、随机、切回列表…</span>`;
+/* 歌曲操作面板（TrackActionsSheet）：标题 ＋ 三个快捷操作 ＋ 一列行；group 是新加的整页一组 */
+function tvTrackSheet({ title, sub, fav = false, rows, group, focus }) {
+  const r = (list) => `<div class="seg">${list.map(([i, l, o = {}]) => `<div class="lrow ${o.danger ? 'danger' : ''} ${o.fr ? 'fr' : ''} ${o.mark ? 'newmark' : ''}" ${o.mark ? `data-new="${o.mark}"` : ''}><span class="ic ${o.danger ? 'er' : ''}">${ico(i)}</span><div class="t">${l}${o.small ? `<small>${o.small}</small>` : ''}</div></div>`).join('')}</div>`;
+  return `<div class="sh-head"><h5>${title}</h5><p>${sub}</p></div><div class="sh-body">
+    <div class="qacts"><span class="${fav ? 'on' : ''} ${focus === 'fav' ? 'fr' : ''}">${ico(fav ? 'heart' : 'heart-o')}${fav ? '已收藏' : '收藏'}</span><span>${ico('download')}下载</span><span>${ico('pladd')}加到歌单</span></div>
+    ${r(rows)}
+    ${group ? `<div class="wglbl js-grp newmark" data-new="新：整页一组">${group.title}</div>${r(group.rows)}` : ''}</div>`;
+}
+const TVW_SONG = { title: '一万次日落', sub: '林间 · 一万次日落' };
+const TVW_SONG_ROWS = [['person', '查看歌手：林间'], ['album', '查看专辑：一万次日落'], ['swap', '选择音源 / 查看其他版本']];
+const tvwGroup = (focusFirst) => ({
+  title: `歌单 · ${TVW.title}`,
+  rows: [
+    ['play', '播放全部', { fr: focusFirst }],
+    ['shuffle', '随机播放'],
+    ['link', '绑定到我的歌单'],
+    ['locate', '回到正在播放'],
+    ['viewlist', '切回列表视图'],
+    ['tune', '海报墙设置'],
+  ],
+});
+function tvwFocusTile(scr, dx, dy) {
+  const g = $('.grown', scr); if (!g) return;
+  const tx = g.offsetLeft + dx, ty = g.offsetTop + dy;
+  let best = null, bd = 1e9;
+  $$('.tile', scr).forEach(t => { const d = Math.hypot(t.offsetLeft - tx, t.offsetTop - ty); if (d < bd) { bd = d; best = t; } });
+  if (best) best.classList.add('fr');
+  return best;
+}
+const tvwPane = (o) => ({ kind: 'tv', hue: TVW.hue, ...o });
+devBlock('#dvTvWall', [
+  tvwPane({
+    tab: '现在', title: '现在 · 工具栏在顶排，进了墙就回不去',
+    html: tvWall() + tvTopRow(tvToolbarNow()),
+    init(scr) {
+      const t = tvwFocusTile(scr, -76, 76);
+      if (t) {
+        const c = document.createElement('div'); c.className = 'tvwcall';
+        c.style.cssText = `left:${t.offsetLeft - 8}px;top:${t.offsetTop + 80}px`;
+        c.innerHTML = '↑ 选中格子后，上键只在墙里移动<br>（墙是无限的，没有「最上面一格」）';
+        scr.appendChild(c);
+      }
+    },
+    cap: '详情页（歌单、专辑、榜单、自建歌单）切到海报视图时，电视把浮动工具栏挪到顶排胶囊右边（<code>CollectionPosterView</code>，<code>toolbarOnTop</code>）。进页面时焦点在「播放全部」，按下键进墙；可一旦墙上选中了格子，方向键就只在墙里走，<b>上键再也到不了工具栏</b>。只有先按返回键清掉选中格、再按上键才回得去，没人会这样按。队列海报墙的顶排本来就没有按钮（<code>TvTopRow</code>）。',
+  }),
+  tvwPane({
+    tab: '改后', title: '改后 · 顶排只留标题和时钟，焦点直接在墙上',
+    html: tvWall() + tvTopRow(TVW_HINT),
+    init(scr) { const g = $('.grown', scr); if (g) g.classList.add('fr'); },
+    cap: '电视上不画工具栏，顶排和队列海报墙一样：左边标题胶囊，右边时钟。墙让出的 80dp 不变，大卡不挪位置。进页面焦点<b>直接落在墙上</b>：这张歌单正在放就落在大卡上，否则落在离中心最近的那格。胶囊右边多一行提示（纯文字，拿不到焦点），告诉用户整页操作在哪；它和胶囊一起在空闲 6 秒后淡出。',
+  }),
+  tvwPane({
+    tab: '长按确认键', title: '长按确认键 · 单曲操作下面多一组整页操作',
+    html: tvWall() + tvTopRow('') + `<div class="scrim"></div><div class="sheet tvp">${tvTrackSheet({ ...TVW_SONG, fav: true, rows: TVW_SONG_ROWS, group: tvwGroup(false), focus: 'fav' })}</div>`,
+    cap: '工具栏上的几项挪进长按确认键打开的 <code>TrackActionsSheet</code>（右侧 360dp），排在单曲操作下面单独一组，小标题是这一页（「歌单 · 深夜车载」）：播放全部、随机播放、绑定到我的歌单（榜单、专辑是「收藏到本地歌单」，自建歌单是「编辑歌单」）、回到正在播放（这张歌单在放时才有）、换源设置（只有榜单）、切回列表视图、海报墙设置。焦点照旧落在第一个快捷操作上，往下翻就是这一组。',
+  }),
+  tvwPane({
+    tab: '菜单键', title: '菜单键 · 同一个面板，焦点直接在「播放全部」',
+    html: tvWall() + tvTopRow('') + `<div class="scrim"></div><div class="sheet tvp">${tvTrackSheet({ ...TVW_SONG, fav: true, rows: TVW_SONG_ROWS, group: tvwGroup(true) })}</div>`,
+    show(scr) { const b = $('.sh-body', scr), g = $('.js-grp', scr); if (b && g) b.scrollTop = g.offsetTop - 24; },
+    cap: '现在菜单键和长按确认键一样，都打开单曲面板。改成：菜单键打开的是<b>同一个面板</b>，但直接滚到整页那一组、焦点在「播放全部」，有菜单键的遥控器两下就能「播放全部」。没有菜单键的遥控器（比如 Google TV 那种）照样长按确认键再往下翻。',
+  }),
+  tvwPane({
+    tab: '没有歌时', title: '读取失败、空歌单 · 提示里加「切回列表视图」',
+    html: `<div class="tvbg" style="background:radial-gradient(60% 70% at 30% 30%, ${toHex(hsl(TVW.hue, 45, 16))}, transparent 70%), var(--pl-surface)"></div>` + tvTopRow('').replace(TVW.sub, '歌单 · 网易云音乐') +
+      `<div class="tvwerr"><div class="clv" style="clip-path:${cookiePoly(4, .16)}">${ico('cloudoff')}</div><h5>歌曲没有加载出来</h5><p>网易云音乐：连接超时</p>
+      <div class="btns"><span class="btn-f fr">${ico('refresh', 's18')}重试</span><span class="btn-t newmark" data-new="新：电视上加">切回列表视图</span></div></div>`,
+    cap: '墙上没有歌时没有格子可长按，整页操作就够不到了。读取失败用的 <code>DiscoverErrorState</code> 本来就留了第二个按钮的位置，电视上填「切回列表视图」；空的自建歌单（<code>EmptyState</code>「添加歌曲」）同样在旁边加这个按钮。焦点照旧在第一个按钮上。读取中墙上是占位格，等歌到了再操作。',
+  }),
+]);
 </script>
 </body>
 </html>
