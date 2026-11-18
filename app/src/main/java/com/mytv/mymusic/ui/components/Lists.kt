@@ -6,6 +6,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -124,65 +125,112 @@ fun SongRow(
     rankEmphasis: Boolean = true,
     /** 序号的读屏文案；默认“第 N 名”，专辑曲目传“第 N 首”。 */
     rankLabel: (Int) -> String = { "第 $it 名" },
+    /** 左右滑（[rememberRowSwipe]）；null = 不滑（电视、没接入的列表、多选中）。 */
+    swipe: RowSwipe? = null,
+    /** 鼠标悬停时滑动按钮替换 [trailing]；trailing 本身是按钮的列表传 false，滑动按钮插在它前面。 */
+    hoverReplacesTrailing: Boolean = true,
 ) {
     val shape = segmentShape(index, count)
-    val fade = if (dimmed) Modifier.alpha(0.5f) else Modifier
     val background = if (playing) MaterialTheme.colorScheme.secondaryContainer else container
-    val content = if (playing) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
-    Row(
-        modifier
-            .fillMaxWidth()
-            .heightIn(min = 64.dp)
-            .tvFocusRing(shape, scale = 1.02f)
-            .clip(shape)
-            .background(background)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = onLongClick?.let { "更多操作" })
-            // 正在播放只靠底色和字重区分，读屏要单独说出来
-            .semantics { if (playing) stateDescription = "正在播放" }
-            .padding(start = if (rank != null) 8.dp else 12.dp, end = if (onMore != null) 0.dp else 16.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (rank != null) {
-            val emphasized = rankEmphasis && rank <= 3
-            Text(
-                rank.toString(),
-                Modifier.width(32.dp).semantics { contentDescription = rankLabel(rank) },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = if (emphasized) FontWeight.Black else FontWeight.Medium,
-                color = if (emphasized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
+    val padding = PaddingValues(start = if (rank != null) 8.dp else 12.dp, end = if (onMore != null) 0.dp else 16.dp, top = 8.dp, bottom = 8.dp)
+    if (swipe == null) {
+        Row(
+            modifier
+                .fillMaxWidth()
+                .heightIn(min = 64.dp)
+                .tvFocusRing(shape, scale = 1.02f)
+                .clip(shape)
+                .background(background)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = onLongClick?.let { "更多操作" })
+                // 正在播放只靠底色和字重区分，读屏要单独说出来
+                .semantics { if (playing) stateDescription = "正在播放" }
+                .padding(padding),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SongRowBody(title, subtitle, cover, rank, playing, badges, trailing, onMore, dimmed, showCover, rankEmphasis, rankLabel)
         }
-        if (showCover) Box(fade) { Cover(cover, title, 48.dp, corner = 12.dp) }
-        Column(Modifier.weight(1f).padding(start = if (showCover) 14.dp else 6.dp, end = 8.dp)) {
+        return
+    }
+    SwipeRowFrame(
+        swipe = swipe,
+        shape = shape,
+        modifier = modifier,
+        background = background,
+        onClick = onClick,
+        onLongClick = onLongClick,
+        playing = playing,
+        padding = padding,
+    ) { hovered ->
+        // 鼠标悬停：行尾换成滑动的那几个按钮（稿子里时长藏起来、按钮出来）
+        val shownTrailing: (@Composable RowScope.() -> Unit)? = if (hovered) {
+            {
+                SwipeHoverButtons(swipe)
+                if (!hoverReplacesTrailing) trailing?.invoke(this)
+            }
+        } else {
+            trailing
+        }
+        SongRowBody(title, subtitle, cover, rank, playing, badges, shownTrailing, onMore, dimmed, showCover, rankEmphasis, rankLabel)
+    }
+}
+
+@Composable
+private fun RowScope.SongRowBody(
+    title: String,
+    subtitle: String,
+    cover: String,
+    rank: Int?,
+    playing: Boolean,
+    badges: @Composable (RowScope.() -> Unit)?,
+    trailing: @Composable (RowScope.() -> Unit)?,
+    onMore: (() -> Unit)?,
+    dimmed: Boolean,
+    showCover: Boolean,
+    rankEmphasis: Boolean,
+    rankLabel: (Int) -> String,
+) {
+    val fade = if (dimmed) Modifier.alpha(0.5f) else Modifier
+    val content = if (playing) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+    if (rank != null) {
+        val emphasized = rankEmphasis && rank <= 3
+        Text(
+            rank.toString(),
+            Modifier.width(32.dp).semantics { contentDescription = rankLabel(rank) },
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = if (emphasized) FontWeight.Black else FontWeight.Medium,
+            color = if (emphasized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+    if (showCover) Box(fade) { Cover(cover, title, 48.dp, corner = 12.dp) }
+    Column(Modifier.weight(1f).padding(start = if (showCover) 14.dp else 6.dp, end = 8.dp)) {
+        Text(
+            title,
+            modifier = fade,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (playing) FontWeight.Bold else FontWeight.Medium,
+            color = content,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            badges?.let {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) { it() }
+                Box(Modifier.width(6.dp))
+            }
             Text(
-                title,
-                modifier = fade,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (playing) FontWeight.Bold else FontWeight.Medium,
-                color = content,
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (playing) content.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                badges?.let {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) { it() }
-                    Box(Modifier.width(6.dp))
-                }
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (playing) content.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
         }
-        trailing?.invoke(this)
-        if (onMore != null) {
-            IconButton(onClick = onMore, modifier = Modifier.tvFocusRing(CircleShape)) {
-                Icon(Icons.Filled.MoreVert, "更多操作：$title", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+    }
+    trailing?.invoke(this)
+    if (onMore != null) {
+        IconButton(onClick = onMore, modifier = Modifier.tvFocusRing(CircleShape)) {
+            Icon(Icons.Filled.MoreVert, "更多操作：$title", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

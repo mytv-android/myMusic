@@ -52,10 +52,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,6 +74,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.mytv.mymusic.data.Song
 import kotlin.coroutines.cancellation.CancellationException
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.ui.adaptive.BottomPlayerBar
@@ -82,6 +86,11 @@ import com.mytv.mymusic.ui.adaptive.TabletNavRail
 import com.mytv.mymusic.ui.adaptive.phoneOverlayHeight
 import com.mytv.mymusic.ui.charts.discoverRoutes
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
+import com.mytv.mymusic.ui.components.LocalSongSwipeEnv
+import com.mytv.mymusic.ui.components.LocalSwipeNotifier
+import com.mytv.mymusic.ui.components.SongSwipeEnv
+import com.mytv.mymusic.ui.components.SwipeCoordinator
+import com.mytv.mymusic.ui.components.SwipeNotifier
 import com.mytv.mymusic.ui.components.LocalCoverVisibilityScope
 import com.mytv.mymusic.ui.components.LocalSharedTransitionScope
 import com.mytv.mymusic.ui.components.LocalAppWindow
@@ -94,6 +103,7 @@ import com.mytv.mymusic.ui.player.LocalPlayerBottomChrome
 import com.mytv.mymusic.ui.player.PlayerBottomChrome
 import com.mytv.mymusic.ui.player.PlayerScreen
 import com.mytv.mymusic.ui.player.QueueSheet
+import com.mytv.mymusic.ui.player.rememberScreenReaderOn
 import com.mytv.mymusic.ui.player.SleepTimerSheet
 import com.mytv.mymusic.ui.poster.PosterWallBottomChrome
 import com.mytv.mymusic.ui.poster.PosterWallScreen
@@ -145,7 +155,8 @@ fun MyMusicApp(model: MusicViewModel) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
         return
     }
-    val favorites by model.favorites.collectAsState()
+    val favoritesState = model.favorites.collectAsState()
+    val favorites by favoritesState
     val search by model.searchState.collectAsState()
     val sleep by model.sleepTimer.collectAsState()
     // 不在这里读 value：进度每 100ms 变一次，读了会让整棵界面跟着重组
@@ -166,6 +177,33 @@ fun MyMusicApp(model: MusicViewModel) {
     var selectedTab by rememberSaveable { mutableStateOf(startupTab.route) }
     var queueOpen by rememberSaveable { mutableStateOf(false) }
     var timerOpen by rememberSaveable { mutableStateOf(false) }
+    // 列表左右滑：收藏 / 下载状态包成 State 交给滑开的那一行自己读，平时列表不跟着下载进度重组
+    val downloadsState = model.downloads.collectAsState()
+    val swipePrefs = rememberUpdatedState(state.swipe)
+    val screenReader = rememberUpdatedState(rememberScreenReaderOn())
+    var swipePlaylistSong by remember { mutableStateOf<Song?>(null) }
+    val swipeEnv = remember(actions) {
+        SongSwipeEnv(
+            actions = actions,
+            prefs = swipePrefs,
+            favorites = derivedStateOf { favoritesState.value.associateBy { it.key } },
+            downloads = derivedStateOf { downloadsState.value.associate { it.key to it.state } },
+            screenReader = screenReader,
+            openAddToPlaylist = { swipePlaylistSong = it },
+            coordinator = SwipeCoordinator(),
+        )
+    }
+    val swipeScope = rememberCoroutineScope()
+    // 滑动的提示走外壳的 Snackbar（和撤销条同一个），有撤销时带「撤销」按钮
+    val swipeNotifier = remember(snackbar, swipeScope) {
+        SwipeNotifier { message, undo ->
+            swipeScope.launch {
+                snackbar.currentSnackbarData?.dismiss()
+                val result = snackbar.showSnackbar(message, actionLabel = if (undo != null) "撤销" else null, duration = SnackbarDuration.Short)
+                if (result == SnackbarResult.ActionPerformed) undo?.invoke()
+            }
+        }
+    }
 
     fun openTab(tab: String) {
         if (selectedTab == tab) {
@@ -325,6 +363,9 @@ fun MyMusicApp(model: MusicViewModel) {
         LocalAppWindow provides window,
         LocalHazeState provides hazeState,
         LocalAppSnackbar provides snackbar,
+        // 电视不滑：不给环境，整套滑动代码不进组合
+        LocalSongSwipeEnv provides if (window.isTv) null else swipeEnv,
+        LocalSwipeNotifier provides swipeNotifier,
         LocalPageChromeScheme provides pageChrome,
         // 播放页在这里往上报底部控件高度，胶囊在同一个范围里读
         LocalPlayerBottomChrome provides playerChrome,
@@ -367,7 +408,8 @@ fun MyMusicApp(model: MusicViewModel) {
                             NavHost(
                                 navController = nav,
                                 startDestination = startupTab.route,
-                                modifier = Modifier.fillMaxSize().hazeSource(hazeState),
+                                // 手指一滚列表，开着的那一行收起
+                                modifier = Modifier.fillMaxSize().nestedScroll(swipeEnv.coordinator.scrollConnection).hazeSource(hazeState),
                                 enterTransition = { if (state.reduceMotion) EnterTransition.None else fadeIn(enterSpec) },
                                 exitTransition = { if (state.reduceMotion) ExitTransition.None else fadeOut(exitSpec) },
                                 popEnterTransition = { if (state.reduceMotion) EnterTransition.None else fadeIn(enterSpec) },
@@ -480,6 +522,10 @@ fun MyMusicApp(model: MusicViewModel) {
         }
         if (timerOpen) {
             PlayerTheme { SleepTimerSheet(state, sleep, actions, onDismiss = { timerOpen = false }) }
+        }
+        // 列表滑动的「加到歌单」：和播放页同一个勾选面板
+        swipePlaylistSong?.let { song ->
+            AddToPlaylistSheet(song = song, providers = state.providers, actions = actions, onDismiss = { swipePlaylistSong = null })
         }
         // 本地歌的上传面板（设计稿第 ⑥ 张）：本地音乐页、歌曲信息、加进歌单后的提示都从这里打开
         com.mytv.mymusic.ui.local.LocalUploadSheetHost(
