@@ -63,6 +63,20 @@ import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatTime
 import kotlinx.coroutines.delay
 import java.util.Locale
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.mytv.mymusic.ui.components.LocalSongSwipeEnv
+import com.mytv.mymusic.ui.components.LocalSwipeNotifier
+import com.mytv.mymusic.ui.components.SwipeDelete
+import com.mytv.mymusic.ui.components.SwipeNotifier
+import com.mytv.mymusic.ui.components.rememberRowSwipe
+import kotlinx.coroutines.launch
 
 /** 剩余时间，每秒刷新。返回 State，让调用方只在真正显示倒计时的位置读值。 */
 @Composable
@@ -97,6 +111,19 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
     // 本地歌标出会放哪份（本机 / 云端副本 / 平台版本）；哪里都放不了的点了打开“只在 X 上”面板
     val localCopies = rememberLocalCopies()
     val unplayable = rememberLocalUnplayableHost()
+    // 左滑「移出」的撤销条：面板是单独的窗口，外壳的 Snackbar 被它盖着，提示放在面板里
+    val sheetSnackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val sheetNotifier = remember(sheetSnackbar, scope) {
+        SwipeNotifier { message, undo ->
+            scope.launch {
+                sheetSnackbar.currentSnackbarData?.dismiss()
+                val result = sheetSnackbar.showSnackbar(message, actionLabel = if (undo != null) "撤销" else null, duration = SnackbarDuration.Short)
+                if (result == SnackbarResult.ActionPerformed) undo?.invoke()
+            }
+        }
+    }
+    val swipeScroll = LocalSongSwipeEnv.current?.coordinator?.scrollConnection
     AdaptiveSheet(
         onDismiss = onDismiss,
         title = "播放队列",
@@ -155,8 +182,14 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
             }
         }
         Spacer(Modifier.height(8.dp))
+        CompositionLocalProvider(LocalSwipeNotifier provides sheetNotifier) {
+        Box {
         LazyColumn(
-            Modifier.fillMaxWidth().heightIn(max = 560.dp),
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 560.dp)
+                // 面板是单独窗口，外壳 NavHost 上那个收不到：这里再挂一次，一滚就收起开着的行
+                .then(if (swipeScroll != null) Modifier.nestedScroll(swipeScroll) else Modifier),
             state = list,
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -186,11 +219,28 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
                             Text(formatTime(song.duration * 1000L), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     },
+                    // 左滑「移出」= 移出播放队列，撤销插回原位置；正在放的这首不能移
+                    swipe = rememberRowSwipe(
+                        song,
+                        state.queue,
+                        delete = if (playing) {
+                            null
+                        } else {
+                            SwipeDelete("移出", "移出播放队列") {
+                                actions.removeQueueIndex(index, song.key)?.let { removal ->
+                                    sheetNotifier.show("已移出「${song.title}」") { actions.restoreQueueItem(removal) }
+                                }
+                            }
+                        },
+                    ),
                 )
             }
         }
+        SnackbarHost(sheetSnackbar, Modifier.align(Alignment.BottomCenter))
+        }
+        }
     }
-    // 队列里没有逐条移除，面板只给“找一首平台版本”
+    // 放不了的本地歌：面板只给“找一首平台版本”（移出队列在行上左滑）
     LocalUnplayableSheets(host = unplayable)
 }
 
