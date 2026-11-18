@@ -268,6 +268,8 @@ data class MusicUiState(
     val poster: PosterPrefs = PosterPrefs(),
     /** 歌曲列表左右滑（设置 › 滑动操作）。 */
     val swipe: com.mytv.mymusic.data.SwipePrefs = com.mytv.mymusic.data.SwipePrefs(),
+    /** 歌词分享页的选项。 */
+    val share: com.mytv.mymusic.data.SharePrefs = com.mytv.mymusic.data.SharePrefs(),
     /** 全屏歌词动画（模式、自动切换、频谱、各模式设置）。 */
     val lyricStage: LyricStagePrefs = LyricStagePrefs(),
     /** 歌词文字变换（拆单行双语、简转繁、补罗马音）。 */
@@ -631,6 +633,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             rhythmDebug = settings.rhythmDebug,
             poster = settings.poster,
             swipe = settings.swipe,
+            share = settings.share,
             lyricStage = settings.lyricStage,
             lyricText = settings.lyricText,
             collectionView = settings.collectionView,
@@ -5831,6 +5834,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setPosterPrefs(transform: (PosterPrefs) -> PosterPrefs) = viewModelScope.launch { app.settings.poster(transform) }
     fun setSwipePrefs(transform: (com.mytv.mymusic.data.SwipePrefs) -> com.mytv.mymusic.data.SwipePrefs) =
         viewModelScope.launch { app.settings.swipe(transform) }
+    fun setSharePrefs(transform: (com.mytv.mymusic.data.SharePrefs) -> com.mytv.mymusic.data.SharePrefs) =
+        viewModelScope.launch { app.settings.share(transform) }
     fun setLyricStage(transform: (LyricStagePrefs) -> LyricStagePrefs) = viewModelScope.launch { app.settings.lyricStage(transform) }
     fun setLyricText(transform: (LyricTextPrefs) -> LyricTextPrefs) = viewModelScope.launch { app.settings.lyricText(transform) }
     suspend fun lyricMemory(songKey: String): LyricMemoryEntry? = app.settings.lyricMemory(songKey)

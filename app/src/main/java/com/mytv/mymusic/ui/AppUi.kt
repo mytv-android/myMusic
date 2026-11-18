@@ -281,6 +281,8 @@ class MusicActions(private val model: MusicViewModel) {
         model.setPosterPrefs(transform)
     fun setSwipePrefs(transform: (com.mytv.mymusic.data.SwipePrefs) -> com.mytv.mymusic.data.SwipePrefs) =
         model.setSwipePrefs(transform)
+    fun setSharePrefs(transform: (com.mytv.mymusic.data.SharePrefs) -> com.mytv.mymusic.data.SharePrefs) =
+        model.setSharePrefs(transform)
     fun setLyricStage(transform: (com.mytv.mymusic.data.LyricStagePrefs) -> com.mytv.mymusic.data.LyricStagePrefs) =
         model.setLyricStage(transform)
     fun setLyricText(transform: (com.mytv.mymusic.data.LyricTextPrefs) -> com.mytv.mymusic.data.LyricTextPrefs) =

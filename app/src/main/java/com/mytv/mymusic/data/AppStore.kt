@@ -372,6 +372,7 @@ class SettingsStore(private val context: Context) {
             rhythmDebug = values[rhythmDebugKey] ?: false,
             poster = posterPrefs(values),
             swipe = SwipePrefsCodec.read(values),
+            share = SharePrefsCodec.read(values),
             collectionView = values[collectionViewKey].toCollectionView(),
             miniPlayerTarget = values[miniPlayerTargetKey].toMiniPlayerTarget(),
             playReportEnabled = values[playReportEnabledKey] ?: true,
@@ -497,6 +498,11 @@ class SettingsStore(private val context: Context) {
     /** 滑动操作（设置 › 滑动操作）：只在本机，不进同步。 */
     suspend fun swipe(transform: (SwipePrefs) -> SwipePrefs) = context.dataStore.edit {
         SwipePrefsCodec.write(it, transform(SwipePrefsCodec.read(it)))
+    }
+
+    /** 歌词分享页的选项：只在本机，不进同步。 */
+    suspend fun share(transform: (SharePrefs) -> SharePrefs) = context.dataStore.edit {
+        SharePrefsCodec.write(it, transform(SharePrefsCodec.read(it)))
     }
 
     private fun posterPrefs(values: Preferences) = PosterPrefs(
@@ -792,6 +798,8 @@ data class AppSettings(
     val poster: PosterPrefs = PosterPrefs(),
     /** 歌曲列表左右滑的按钮和拉到头（设置 › 滑动操作）。 */
     val swipe: SwipePrefs = SwipePrefs(),
+    /** 歌词分享页上次用的样式、配色等选项。 */
+    val share: SharePrefs = SharePrefs(),
     /** 详情页上次用的视图（列表 / 海报），不单独做设置项。 */
     val collectionView: CollectionView = CollectionView.List,
     /** 点按迷你播放器打开播放页还是海报墙（设置 › 播放页）。 */
