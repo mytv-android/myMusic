@@ -143,6 +143,8 @@ internal fun WidePlayer(
     pulse: BackdropPulse,
     coverShape: CoverShapeChoice,
     transitionAnimation: CrossfadeAnimation,
+    addedToPlaylist: Boolean,
+    onAddToPlaylist: () -> Unit,
 ) {
     val motion = MaterialTheme.motionScheme
     val reduceMotion = LocalAppearance.current.reduceMotion
@@ -191,11 +193,11 @@ internal fun WidePlayer(
                 {
                     if (showDefault) {
                         WideGuard(idle, lyricsMode, Modifier.graphicsLayer { alpha = defaultChrome() }) {
-                            MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+                            MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
                         }
                     }
                 },
-                { if (showDefault) WideMeta(song, favorite, actions, lyricsMode, defaultAlpha) },
+                { if (showDefault) WideMeta(song, favorite, addedToPlaylist, actions, onAddToPlaylist, lyricsMode, defaultAlpha) },
                 {
                     if (showDefault && full) {
                         // 空闲时跟着控制栏一起淡出，否则底部进度条和按钮组会一直留在画面上
@@ -233,12 +235,16 @@ internal fun WidePlayer(
                                 ToolbarQueueButton(onOpenQueue)
                                 ToolbarSleepButton(sleep, onOpenTimer)
                                 ToolbarSourceButton(onOpenSource)
-                                MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+                                MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
                             }
                         }
                     }
                 },
-                { if (showFocus) FocusHeader(song, focusAlpha) },
+                {
+                    if (showFocus) {
+                        FocusHeader(song, favorite, addedToPlaylist, actions, onAddToPlaylist, idle, !lyricsMode, focusChrome)
+                    }
+                },
                 { if (showFocus) FocusDock(playing, actions, idle, !lyricsMode, focusChrome, onLyricsMode, onOpenQueue, stage.onOpenSheet) },
                 {
                     // 专注歌词换成了动画舞台时，歌词栏随过渡淡出，稳定后不再组合
@@ -325,57 +331,90 @@ private fun WideGuard(idle: IdleState?, blocked: Boolean, modifier: Modifier, co
     Box(modifier.blockTouchesWhen(blocked || idle?.idle == true)) { content() }
 }
 
-/** 歌名 34sp 粗体，两行内放不下才逐级缩小；歌手名 19sp primary 色；右侧收藏。切歌时文字淡出淡入。 */
+/** 歌名 34sp 粗体，两行内放不下才逐级缩小；歌手名 19sp primary 色；右侧「加到歌单」（够宽时）和收藏。切歌时文字淡出淡入。 */
 @Composable
-private fun WideMeta(song: Song, favorite: Boolean, actions: MusicActions, blocked: Boolean, alpha: () -> Float) {
-    Row(
-        Modifier.graphicsLayer { this.alpha = alpha() }.blockTouchesWhen(blocked),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        val fade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
-        AnimatedContent(
-            targetState = song,
-            modifier = Modifier.weight(1f),
-            transitionSpec = { (fadeIn(fade) togetherWith fadeOut(fade)).using(null) },
-            contentKey = { it.key },
-            label = "wideTitle",
-        ) { shown ->
-            Column {
-                Text(
-                    shown.title,
-                    style = MaterialTheme.typography.displaySmall.copy(lineHeight = 1.18.em),
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    autoSize = TextAutoSize.StepBased(minFontSize = 26.sp, maxFontSize = 34.sp, stepSize = 2.sp),
-                )
-                Text(
-                    shown.artist,
-                    Modifier.padding(top = 2.dp),
-                    style = MaterialTheme.typography.titleLarge.merge(ArtistStyle),
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+private fun WideMeta(
+    song: Song,
+    favorite: Boolean,
+    addedToPlaylist: Boolean,
+    actions: MusicActions,
+    onAddToPlaylist: () -> Unit,
+    blocked: Boolean,
+    alpha: () -> Float,
+) {
+    // 横屏手机的左栏只有 200dp 上下，再塞一个按钮歌名就被挤成一列两三个字：窄的时候只留收藏，
+    // 加到歌单从 ⋮ 菜单、长按收藏或专注歌词的标题行进
+    BoxWithConstraints(Modifier.graphicsLayer { this.alpha = alpha() }.blockTouchesWhen(blocked)) {
+        val roomy = maxWidth >= WideMetaAddMinWidth
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val fade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+            AnimatedContent(
+                targetState = song,
+                modifier = Modifier.weight(1f),
+                transitionSpec = { (fadeIn(fade) togetherWith fadeOut(fade)).using(null) },
+                contentKey = { it.key },
+                label = "wideTitle",
+            ) { shown ->
+                Column {
+                    Text(
+                        shown.title,
+                        style = MaterialTheme.typography.displaySmall.copy(lineHeight = 1.18.em),
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        autoSize = TextAutoSize.StepBased(minFontSize = 26.sp, maxFontSize = 34.sp, stepSize = 2.sp),
+                    )
+                    Text(
+                        shown.artist,
+                        Modifier.padding(top = 2.dp),
+                        style = MaterialTheme.typography.titleLarge.merge(ArtistStyle),
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (roomy) AddToPlaylistButton(addedToPlaylist, onAddToPlaylist)
+                FavoriteToggle(song, favorite, actions, onLongClick = onAddToPlaylist)
             }
         }
-        FavoriteToggle(song, favorite, actions)
     }
 }
 
-/** 专注歌词顶部的“歌名 · 歌手”。 */
+/**
+ * 专注歌词顶部的标题行：“歌名 · 歌手”，右端「加到歌单」和收藏两个 40dp 按钮（左边的竖向工具栏已经塞满，放不下）。
+ * 空闲时整行和控件一起淡出、不接点按。行比文字高，摆放时按文字那一行的中线对齐（见 [WideStagePolicy]），歌词位置不变。
+ */
 @Composable
-private fun FocusHeader(song: Song, alpha: () -> Float) {
-    Text(
-        "${song.title} · ${song.artist}",
-        Modifier.graphicsLayer { this.alpha = alpha() },
-        style = MaterialTheme.typography.titleMedium.merge(HeaderStyle),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
+private fun FocusHeader(
+    song: Song,
+    favorite: Boolean,
+    addedToPlaylist: Boolean,
+    actions: MusicActions,
+    onAddToPlaylist: () -> Unit,
+    idle: IdleState,
+    blocked: Boolean,
+    alpha: () -> Float,
+) {
+    WideGuard(idle, blocked, Modifier.graphicsLayer { this.alpha = alpha() }) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "${song.title} · ${song.artist}",
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium.merge(HeaderStyle),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            AddToPlaylistButton(addedToPlaylist, onAddToPlaylist, size = FocusHeaderButton)
+            FavoriteToggle(song, favorite, actions, size = FocusHeaderButton, onLongClick = onAddToPlaylist)
+        }
+    }
 }
 
 /**
@@ -634,7 +673,8 @@ private class WideStagePolicy(
                 scaleY = frame.dockScale
                 translationX = -(1f - move.value) * slide
             }
-            header?.place(frame.contentX, frame.headerY)
+            // 标题行带 40dp 按钮，比文字高：按文字那一行（estimate.header）的中线放，歌词的位置不跟着变
+            header?.let { it.place(frame.contentX, (frame.headerY + (estimate.header - it.height) / 2).coerceAtLeast(0)) }
             // 封面压在竖向工具栏上面，但在标题等默认控件下面：光晕画在封面边界外，不能盖住歌名
             val coverLeft = coverX.roundToInt()
             val coverTop = coverY.roundToInt()
@@ -848,6 +888,10 @@ private val ShortIdealGaps = intArrayOf(44, 18, 16, 12, 22, 30)
 private val ShortMinGaps = intArrayOf(12, 12, 8, 6, 12, 12)
 
 private val ToolbarHeight = 56.dp
+/** 专注歌词标题行右端「加到歌单」和收藏的尺寸。 */
+private val FocusHeaderButton = 40.dp
+/** 歌名行至少这么宽才放「加到歌单」：两个按钮 100dp 之外歌名还剩 150dp 上下。 */
+private val WideMetaAddMinWidth = 260.dp
 private val PillHeight = 32.dp
 private val CornerMargin = 16.dp
 private val CornerTop = 6.dp

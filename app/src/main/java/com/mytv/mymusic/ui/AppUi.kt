@@ -79,6 +79,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -214,6 +215,15 @@ class MusicActions(private val model: MusicViewModel) {
     fun addSongToPlaylist(id: String, song: Song) = model.addSongToPlaylist(id, song)
     fun addSongsToPlaylist(id: String, songs: List<Song>) = model.addSongsToPlaylist(id, songs)
     fun addSongsToNewPlaylist(name: String, songs: List<Song>) = model.addSongsToNewPlaylist(name, songs)
+
+    /** 自建歌单列表（「加到歌单」面板自己取，播放页不用为它多传一层参数）。 */
+    val localPlaylists: kotlinx.coroutines.flow.StateFlow<List<LocalPlaylistSummary>> get() = model.localPlaylists
+    /** 这首（含同一首的其他平台版本）在哪些自建歌单里，按歌单 id。 */
+    fun playlistsContaining(song: Song): kotlinx.coroutines.flow.Flow<Set<String>> = model.playlistsContaining(song)
+    /** 「加到歌单」面板的加入 / 移出 / 新建并加入：提示交回面板显示（见 [PlaylistEditResult]）。 */
+    fun addSongToPlaylistQuietly(id: String, song: Song) = model.addSongToPlaylistQuietly(id, song)
+    fun removeSongFromPlaylist(id: String, song: Song) = model.removeSongFromPlaylistQuietly(id, song)
+    fun createPlaylistWithSong(name: String, song: Song) = model.createPlaylistWithSongQuietly(name, song)
     fun removeEntry(id: String, position: Int) = model.removePlaylistEntry(id, position)
     fun removeEntries(id: String, positions: List<Int>) = model.removePlaylistEntries(id, positions)
     fun moveEntry(id: String, position: Int, delta: Int) = model.movePlaylistEntry(id, position, delta)
@@ -815,8 +825,20 @@ private fun WallPageGroup(menu: WallMenu, scroll: androidx.compose.foundation.Sc
 }
 
 /**
- * 批量加入歌单：列出本地歌单，也可以新建一个并直接加入。
- * 常规单曲入口在 TrackActionsSheet 里，这里只服务多选。
+ * 单曲勾选模式里一个歌单行的样子：[checked] 已经有这首；[busy] 正在加入 / 移出（转圈，点了不算）；
+ * [note] 绑定歌单改动后会怎样（写回网易云音乐 / 改动后解除绑定 / 收藏的歌单不能改）；[locked] 不能改。
+ */
+@androidx.compose.runtime.Immutable
+class PlaylistCheck(val checked: Boolean, val busy: Boolean = false, val note: String = "", val locked: Boolean = false)
+
+/**
+ * 加入歌单：列出本地歌单，也可以新建一个并直接加入。
+ * 默认是多选的批量加入：点一行就加入并关面板。常规单曲入口在 TrackActionsSheet 里。
+ *
+ * 传了 [checks] 是单曲勾选模式（播放页「加到歌单」，见 [AddToPlaylistSheet]）：每行右边是勾选框，已经有这首的勾上，
+ * 点一下由 [onPick] 加入或移出；新建歌单后回到列表；面板不自动关，可以一次加到几个歌单。
+ * [snackbar] 是面板自己的提示条（撤销）：面板是单独的窗口，外壳的 Snackbar 被它盖着，看不见也点不到。
+ * [focusId] 是电视上打开时焦点落的那一行（第一个还没加入的歌单），没有就落在「新建歌单」。
  */
 @Composable
 fun PlaylistPickerSheet(
@@ -824,25 +846,72 @@ fun PlaylistPickerSheet(
     onPick: (String) -> Unit,
     onCreate: (String) -> Unit,
     onDismiss: () -> Unit,
+    title: String = "加入歌单",
+    subtitle: String = "选中的歌曲会按原来的顺序加入",
+    checks: ((String) -> PlaylistCheck)? = null,
+    note: String = "",
+    snackbar: androidx.compose.material3.SnackbarHostState? = null,
+    focusId: String? = null,
 ) {
     var creating by remember { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
+    val window = com.mytv.mymusic.ui.components.LocalAppWindow.current
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val focusRow = remember { androidx.compose.ui.focus.FocusRequester() }
+    val focusField = remember { androidx.compose.ui.focus.FocusRequester() }
+    var rowFocused by remember { mutableStateOf(false) }
+    fun submit() {
+        if (name.isBlank()) return
+        onCreate(name.trim())
+        if (checks == null) {
+            onDismiss()
+        } else {
+            // 勾选模式建好就回到列表，新歌单排在最前、已经勾上
+            creating = false
+            name = ""
+        }
+    }
+    // 电视：打开时焦点落在第一个还没加入的歌单上（没有就落在「新建歌单」），确认键直接勾。
+    // 面板是滑进来的，内容晚几帧才摆好，没接住就下一帧再试；只在打开时落一次，之后焦点跟着用户走
+    val target by androidx.compose.runtime.rememberUpdatedState(
+        if (focusId == null) 0 else playlists.indexOfFirst { it.id == focusId } + 1,
+    )
+    val focusIndex = target
     com.mytv.mymusic.ui.components.AdaptiveSheet(
         onDismiss = onDismiss,
-        title = if (creating) "新建歌单" else "加入歌单",
-        subtitle = if (creating) "" else "选中的歌曲会按原来的顺序加入",
+        title = if (creating) "新建歌单" else title,
+        subtitle = if (creating) "" else subtitle,
     ) {
+        // 新建完回到列表时再落一次：输入框没了，焦点不能丢
+        if (checks != null && window.isTv && !creating) {
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                rowFocused = false
+                repeat(10) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    if (rowFocused) return@LaunchedEffect
+                    runCatching { listState.scrollToItem(target) }
+                    runCatching { focusRow.requestFocus() }
+                }
+            }
+        }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             if (creating) {
+                // 点掉的「新建歌单」行已经不在了，焦点直接放进输入框（电视上不然会丢）。
+                // 电视遥控器的方向键在输入框里只挪光标，走不到旁边的「创建并加入」，所以键盘的完成键也能建
+                androidx.compose.runtime.LaunchedEffect(Unit) { runCatching { focusField.requestFocus() } }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    Modifier.fillMaxWidth().tvFocusRing(RoundedCornerShape(4.dp)),
+                    Modifier.fillMaxWidth().focusRequester(focusField).tvFocusRing(RoundedCornerShape(4.dp)),
                     singleLine = true,
                     placeholder = { Text("歌单名称") },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                    ),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { submit() }),
                     trailingIcon = {
                         TextButton(
-                            onClick = { onCreate(name.trim()); onDismiss() },
+                            onClick = ::submit,
                             enabled = name.isNotBlank(),
                             modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
                         ) { Text("创建并加入") }
@@ -851,28 +920,89 @@ fun PlaylistPickerSheet(
                 TextButton(onClick = { creating = false }, modifier = Modifier.padding(top = 8.dp)) { Text("返回") }
             } else {
                 val rows = playlists.size + 1
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                LazyColumn(
+                    Modifier.fillMaxWidth().heightIn(max = 380.dp),
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
                     item(key = "new", contentType = "pickerNew") {
                         com.mytv.mymusic.ui.components.ListRow(
                             title = "新建歌单",
                             index = 0,
                             count = rows,
                             onClick = { creating = true },
+                            modifier = if (checks != null && focusIndex == 0) {
+                                Modifier.focusRequester(focusRow).onFocusChanged { rowFocused = it.isFocused }
+                            } else {
+                                Modifier
+                            },
                             icon = Icons.Filled.Add,
+                            summary = if (checks != null) "建好后直接把这首加进去" else "",
                             showChevron = false,
                         )
                     }
                     itemsIndexed(playlists, key = { _, playlist -> playlist.id }, contentType = { _, _ -> "pickerPlaylist" }) { index, playlist ->
-                        com.mytv.mymusic.ui.components.ListRow(
-                            title = playlist.name,
-                            index = index + 1,
-                            count = rows,
-                            onClick = { onPick(playlist.id); onDismiss() },
-                            icon = Icons.AutoMirrored.Filled.QueueMusic,
-                            value = "${playlist.trackCount} 首",
-                            showChevron = false,
+                        if (checks == null) {
+                            com.mytv.mymusic.ui.components.ListRow(
+                                title = playlist.name,
+                                index = index + 1,
+                                count = rows,
+                                onClick = { onPick(playlist.id); onDismiss() },
+                                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                                value = "${playlist.trackCount} 首",
+                                showChevron = false,
+                            )
+                        } else {
+                            val check = checks(playlist.id)
+                            com.mytv.mymusic.ui.components.ListRow(
+                                title = playlist.name,
+                                index = index + 1,
+                                count = rows,
+                                onClick = if (check.locked) null else ({ if (!check.busy) onPick(playlist.id) }),
+                                // 行内勾选框不带语义，勾没勾由整行提供（同 SwitchRow）
+                                modifier = Modifier
+                                    .then(
+                                        if (focusIndex == index + 1) {
+                                            Modifier.focusRequester(focusRow).onFocusChanged { rowFocused = it.isFocused }
+                                        } else {
+                                            Modifier
+                                        },
+                                    )
+                                    .semantics {
+                                        role = androidx.compose.ui.semantics.Role.Checkbox
+                                        toggleableState = androidx.compose.ui.state.ToggleableState(check.checked)
+                                    },
+                                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                                summary = listOf("${playlist.trackCount} 首", check.note).filter { it.isNotBlank() }.joinToString(" · "),
+                                showChevron = false,
+                                trailing = {
+                                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                                        if (check.busy) {
+                                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                                        } else {
+                                            androidx.compose.material3.Checkbox(
+                                                checked = check.checked,
+                                                onCheckedChange = null,
+                                                enabled = !check.locked,
+                                            )
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+                // 提示条压在说明那一块上，那块按提示条的高度留够：压在列表上会挡住刚点的那一行的勾
+                Box(Modifier.fillMaxWidth().heightIn(min = if (snackbar != null) 72.dp else 0.dp)) {
+                    if (note.isNotBlank()) {
+                        Text(
+                            note,
+                            Modifier.padding(start = 4.dp, end = 4.dp, top = 12.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    snackbar?.let { androidx.compose.material3.SnackbarHost(it, Modifier.align(Alignment.BottomCenter)) }
                 }
             }
         }

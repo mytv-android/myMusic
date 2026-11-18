@@ -24,6 +24,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
+import androidx.compose.material3.IconButtonShapes
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.unit.Dp
+import com.mytv.mymusic.ui.AddToPlaylistSheet
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -137,7 +148,11 @@ fun PlayerScreen(
     val wideLayout = book || (window.widthDp >= 600 && window.widthDp > window.heightDp)
     // 暂停时也照样计时：控制栏几秒后淡出，按确认键或点按唤醒。桌面姿态下半屏是平放着用手点的那一面，不进入空闲
     var animationOpen by rememberSaveable { mutableStateOf(false) }
-    val idle = rememberIdleState(holdAwake = sheetOpen || animationOpen || state.sourcePickerTrack != null || tabletop)
+    // 「加到歌单」面板：打开那一刻的这首。面板开着时切了歌，勾的还是打开时那首，不会悄悄改到下一首上
+    var playlistSong by remember { mutableStateOf<Song?>(null) }
+    val idle = rememberIdleState(
+        holdAwake = sheetOpen || animationOpen || playlistSong != null || state.sourcePickerTrack != null || tabletop,
+    )
     // 电视环境模式（全屏歌词页）里快退快进的浮层提示：按左右方向键时显示，1.2 秒淡出
     val seekHint = remember { SeekHint() }
     PredictiveBackHandler { events ->
@@ -160,6 +175,10 @@ fun PlayerScreen(
     }
     val pulse = rememberBackdropPulse()
     val favorite = remember(favorites, song.key) { favorites.any { it.key == song.key } }
+    // 这首（含同一首的其他平台版本）已经在任一自建歌单里：「加到歌单」按钮换成打勾的图标、填上底色
+    val inPlaylists by remember(song.key) { actions.playlistsContaining(song) }.collectAsState(initial = emptySet())
+    val addedToPlaylist = inPlaylists.isNotEmpty()
+    val onAddToPlaylist: () -> Unit = { playlistSong = song }
     // 切歌后新歌词取回来之前 state.lyrics 还是上一首的（解析失败跳过、取词慢时会一直挂着）：没对上这首就按“还在取”处理
     val lyricsReady = state.lyricsKey == song.key
     // 解析放在后台；状态不随原文重建，换歌词文字设置时先保留上一份结果，等新原文解析完成再替换。
@@ -292,6 +311,9 @@ fun PlayerScreen(
                 transitionAnimation = state.crossfadeAnimation,
                 ambientClock = state.tvAmbientClock,
                 seekHint = seekHint,
+                addedToPlaylist = addedToPlaylist,
+                playlistSheetOpen = playlistSong != null,
+                onAddToPlaylist = onAddToPlaylist,
                 onOpenQueue = onOpenQueue,
                 onOpenTimer = onOpenTimer,
                 onOpenSource = onOpenSource,
@@ -325,6 +347,8 @@ fun PlayerScreen(
                 pulse = pulse,
                 coverShape = state.coverShape,
                 transitionAnimation = state.crossfadeAnimation,
+                addedToPlaylist = addedToPlaylist,
+                onAddToPlaylist = onAddToPlaylist,
             )
             wideLayout -> WidePlayer(
                 song = song,
@@ -355,6 +379,8 @@ fun PlayerScreen(
                 pulse = pulse,
                 coverShape = state.coverShape,
                 transitionAnimation = state.crossfadeAnimation,
+                addedToPlaylist = addedToPlaylist,
+                onAddToPlaylist = onAddToPlaylist,
             )
             else -> PhonePlayer(
                 song = song,
@@ -385,6 +411,8 @@ fun PlayerScreen(
                 pulse = pulse,
                 coverShape = state.coverShape,
                 transitionAnimation = state.crossfadeAnimation,
+                addedToPlaylist = addedToPlaylist,
+                onAddToPlaylist = onAddToPlaylist,
             )
         }
         HeartBurst(burst, heartBurstPlacement(window.fold, book, tabletop))
@@ -398,6 +426,9 @@ fun PlayerScreen(
                 onPin = { on -> director.pin(song, on, actions) },
                 onDismiss = { animationOpen = false },
             )
+        }
+        playlistSong?.let { target ->
+            AddToPlaylistSheet(song = target, providers = state.providers, actions = actions, onDismiss = { playlistSong = null })
         }
         if (state.rhythmDebug && rhythmDebugAvailable()) {
             RhythmDebugOverlay(pulse, state.rhythmOffsetMs, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp))
@@ -453,6 +484,7 @@ internal fun MoreMenu(
     actions: MusicActions,
     onOpenSource: () -> Unit,
     onLyricsMode: (Boolean) -> Unit,
+    onAddToPlaylist: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -462,6 +494,12 @@ internal fun MoreMenu(
             // 收起播放页，露出队列海报墙
             DropdownMenuItem(text = { Text("海报墙") }, leadingIcon = { Icon(Icons.Filled.GridView, null) }, onClick = { open = false; actions.openPosterWall() })
             DropdownMenuItem(text = { Text("选择音源") }, leadingIcon = { Icon(Icons.Filled.SwapHoriz, null) }, onClick = { open = false; onOpenSource() })
+            // 和歌名行的「加到歌单」按钮是同一个面板；控件淡出、矮窗口里也总能在这里找到
+            DropdownMenuItem(
+                text = { Text("加到歌单…") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
+                onClick = { open = false; onAddToPlaylist() },
+            )
             // 收起播放页，打开歌手页 / 专辑页；直播（电台）没有这两项
             if (!song.isLive) {
                 splitArtistNames(song.artist).take(3).forEach { name ->
@@ -504,22 +542,44 @@ internal fun pulseWaveBpm(pulse: BackdropPulse): Float =
     if (pulse.reactive && pulse.intensity != RhythmIntensity.Soft) pulse.bpm else 0f
 
 /**
- * 收藏切换按钮（M3E）：48dp，未收藏是透明底的圆，收藏后变成 14dp 圆角的 primaryContainer 方块，
+ * 收藏切换按钮（M3E）：48dp（专注歌词标题行是 40dp），未收藏是透明底的圆，收藏后变成 14dp 圆角的 primaryContainer 方块，
  * 圆角随快速空间弹簧过渡。读屏文案与原来的收藏按钮一致。
+ * [onLongClick]：长按打开「加到歌单」面板（和旁边那个按钮同一个面板），读屏用户走长按操作。
  */
 @Composable
-internal fun FavoriteToggle(song: Song, favorite: Boolean, actions: MusicActions, modifier: Modifier = Modifier) {
+internal fun FavoriteToggle(
+    song: Song,
+    favorite: Boolean,
+    actions: MusicActions,
+    modifier: Modifier = Modifier,
+    size: Dp = 48.dp,
+    onLongClick: (() -> Unit)? = null,
+) {
+    val checkedShape = RoundedCornerShape(checkedCorner(size))
+    val haptics = LocalHapticFeedback.current
     IconToggleButton(
         checked = favorite,
         onCheckedChange = { actions.favorite(song) },
         shapes = IconToggleButtonShapes(
             shape = CircleShape,
             pressedShape = RoundedCornerShape(12.dp),
-            checkedShape = RoundedCornerShape(14.dp),
+            checkedShape = checkedShape,
         ),
         modifier = modifier
-            .size(48.dp)
-            .tvFocusRing(if (favorite) RoundedCornerShape(14.dp) else CircleShape)
+            .size(size)
+            .tvFocusRing(if (favorite) checkedShape else CircleShape)
+            .then(
+                if (onLongClick == null) {
+                    Modifier
+                } else {
+                    Modifier
+                        .longPressFirst {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongClick()
+                        }
+                        .semantics { onLongClick(label = "加到歌单") { onLongClick(); true } }
+                },
+            )
             .semantics { stateDescription = if (favorite) "已收藏" else "未收藏" },
         colors = IconButtonDefaults.iconToggleButtonColors(
             containerColor = Color.Transparent,
@@ -529,6 +589,58 @@ internal fun FavoriteToggle(song: Song, favorite: Boolean, actions: MusicActions
         ),
     ) {
         Icon(if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏")
+    }
+}
+
+/** 选中态的圆角：48dp 按钮是 14dp，40dp 的小一号按 12dp，看上去一样方。 */
+private fun checkedCorner(size: Dp): Dp = if (size >= 48.dp) 14.dp else 12.dp
+
+/**
+ * 「加到歌单」按钮：和收藏同尺寸，排在收藏左边，点了打开加到歌单面板（[AddToPlaylistSheet]）。
+ * 这首已经在任一自建歌单里（[added]）时图标换成 PlaylistAddCheck，底色同收藏按钮的选中态（primaryContainer、14dp 圆角）。
+ * 不是开关：点它不会直接加或移出，读屏读“加到歌单”加上现在在不在歌单里。
+ */
+@Composable
+internal fun AddToPlaylistButton(added: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, size: Dp = 48.dp) {
+    val shape = if (added) RoundedCornerShape(checkedCorner(size)) else CircleShape
+    IconButton(
+        onClick = onClick,
+        shapes = IconButtonShapes(shape = shape, pressedShape = RoundedCornerShape(12.dp)),
+        modifier = modifier
+            .size(size)
+            .tvFocusRing(shape)
+            .semantics { stateDescription = if (added) "已在歌单里" else "不在歌单里" },
+        colors = IconButtonDefaults.iconButtonColors(
+            containerColor = if (added) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+            contentColor = if (added) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        ),
+    ) {
+        Icon(if (added) Icons.AutoMirrored.Filled.PlaylistAddCheck else Icons.AutoMirrored.Filled.PlaylistAdd, "加到歌单")
+    }
+}
+
+/**
+ * 长按：在 Initial 阶段抢在按钮自己的点按之前看。按满长按时长就触发，并吃掉这一下后面的事件，按钮不会再当成一次点按；
+ * 没到时长就松手、或者手指移出触摸容差，事件原样交给按钮。
+ */
+private fun Modifier.longPressFirst(onLongPress: () -> Unit): Modifier = pointerInput(onLongPress) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        val ended = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+            var done = false
+            while (!done) {
+                val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id }
+                done = change == null || !change.pressed ||
+                    (change.position - down.position).getDistance() > viewConfiguration.touchSlop
+            }
+            true
+        }
+        if (ended != null) return@awaitEachGesture
+        onLongPress()
+        do {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            event.changes.forEach { it.consume() }
+        } while (event.changes.any { it.pressed })
     }
 }
 

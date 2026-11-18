@@ -24,6 +24,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.FastForward
@@ -103,7 +106,7 @@ import kotlinx.coroutines.delay
  * 空闲 4 秒进入环境模式：控制条和胶囊淡出，封面放大一点，歌词向下扩展、当前行放大，底部只留一条细进度，
  * 右上角显示时钟（[ambientClock]，设置里可关）。
  *
- * 控制条分两行：上行按钮组 + 定时 / 收藏 / 队列 / 海报墙 / 音源，下行整宽的波浪进度。进度条要吃掉左右键快退快进，
+ * 控制条分两行：上行按钮组 + 定时 / 收藏 / 加到歌单 / 队列 / 海报墙 / 音源，下行整宽的波浪进度。进度条要吃掉左右键快退快进，
  * 按设计稿把它夹在按钮组和四个按钮中间的话，焦点一到进度条就再也走不到右边的按钮；分两行后用上下键换行。
  * 控制条亮着时方向键照旧在按钮间走；淡出进入环境模式（全屏歌词页）后方向键直接控制播放：上下切歌、左右快退快进
  * （`wakeOnInput` 里接管，提示见 [TvSeekHint]），按确认键才调出控制条。
@@ -138,12 +141,28 @@ internal fun TvPlayer(
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
     onOpenSource: () -> Unit,
+    addedToPlaylist: Boolean,
+    playlistSheetOpen: Boolean,
+    onAddToPlaylist: () -> Unit,
 ) {
     val motion = MaterialTheme.motionScheme
     val reduceMotion = LocalAppearance.current.reduceMotion
     val playFocus = remember { FocusRequester() }
     val idleFocus = remember { FocusRequester() }
     val dockRow = remember { FocusRequester() }
+    val addFocus = remember { FocusRequester() }
+    // 「加到歌单」面板关了（返回键或点遮罩）：焦点回到控制条上的这个按钮，接着能再按一次
+    val sheetWasOpen = remember { booleanArrayOf(false) }
+    LaunchedEffect(playlistSheetOpen) {
+        if (playlistSheetOpen) {
+            sheetWasOpen[0] = true
+        } else if (sheetWasOpen[0]) {
+            sheetWasOpen[0] = false
+            // 面板的窗口退场后主窗口才拿回焦点，晚一帧再要
+            withFrameNanos { }
+            runCatching { addFocus.requestFocus() }
+        }
+    }
     val ambient = idle.idle
     // 环境模式下焦点交给一个不可见的占位节点，保证第一下按键能被唤醒逻辑收到；唤醒后回到播放键
     LaunchedEffect(ambient) { runCatching { if (ambient) idleFocus.requestFocus() else playFocus.requestFocus() } }
@@ -228,6 +247,9 @@ internal fun TvPlayer(
                         actions = actions,
                         playFocus = playFocus,
                         rowFocus = dockRow,
+                        addFocus = addFocus,
+                        addedToPlaylist = addedToPlaylist,
+                        onAddToPlaylist = onAddToPlaylist,
                         waveScale = waveScale,
                         waveBpm = waveBpm,
                         alpha = chromeAlpha,
@@ -359,6 +381,9 @@ private fun TvDock(
     actions: MusicActions,
     playFocus: FocusRequester,
     rowFocus: FocusRequester,
+    addFocus: FocusRequester,
+    addedToPlaylist: Boolean,
+    onAddToPlaylist: () -> Unit,
     waveScale: () -> Float,
     waveBpm: () -> Float,
     alpha: () -> Float,
@@ -407,6 +432,15 @@ private fun TvDock(
                     favorite,
                     state = if (favorite) "已收藏" else "未收藏",
                 )
+                // 确认键打开右侧的加到歌单面板，返回键关掉后焦点回到这里
+                DockAction(
+                    if (addedToPlaylist) Icons.AutoMirrored.Filled.PlaylistAddCheck else Icons.AutoMirrored.Filled.PlaylistAdd,
+                    "加到歌单",
+                    onAddToPlaylist,
+                    addedToPlaylist,
+                    state = if (addedToPlaylist) "已在歌单里" else "不在歌单里",
+                    modifier = Modifier.focusRequester(addFocus),
+                )
                 DockAction(Icons.AutoMirrored.Filled.QueueMusic, "播放队列", onOpenQueue)
                 DockAction(Icons.Filled.GridView, "海报墙", actions::openPosterWall)
                 DockAction(Icons.Filled.SwapHoriz, "换音源", onOpenSource)
@@ -449,7 +483,7 @@ private fun ElapsedTime(position: State<Long>) {
     Text(formatTime(seconds * 1_000L), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-/** 控制条上的圆形按钮：48dp，未开是 12% onSurface 底，开着（定时中、已收藏）是 primaryContainer。 */
+/** 控制条上的圆形按钮：48dp，未开是 12% onSurface 底，开着（定时中、已收藏、已在歌单里）是 primaryContainer。 */
 @Composable
 private fun DockAction(
     icon: ImageVector,
@@ -457,10 +491,11 @@ private fun DockAction(
     onClick: () -> Unit,
     on: Boolean = false,
     state: String? = null,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier
             .size(48.dp)
             .tvFocusRing(CircleShape)
             .semantics {

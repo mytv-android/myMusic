@@ -118,6 +118,8 @@ internal fun TabletopPlayer(
     pulse: BackdropPulse,
     coverShape: CoverShapeChoice,
     transitionAnimation: CrossfadeAnimation,
+    addedToPlaylist: Boolean,
+    onAddToPlaylist: () -> Unit,
 ) {
     val window = LocalAppWindow.current
     val density = LocalDensity.current
@@ -147,7 +149,7 @@ internal fun TabletopPlayer(
         val policy = remember(frame, bottomChrome) { TabletopPolicy(frame, bottomChrome) }
         Layout(
             contents = listOf<@Composable () -> Unit>(
-                { TabletopTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, onClose, onOpenSource, onLyricsMode) },
+                { TabletopTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, onClose, onOpenSource, onLyricsMode, onAddToPlaylist) },
                 {
                     TabletopStage(
                         shown = shown,
@@ -168,7 +170,7 @@ internal fun TabletopPlayer(
                     )
                 },
                 { WideNotice(notice) },
-                { TabletopMeta(song, favorite, actions, thumb = shown != TabletopTop.Cover) },
+                { TabletopMeta(song, favorite, addedToPlaylist, actions, onAddToPlaylist, thumb = shown != TabletopTop.Cover) },
                 { WavySeekBar(position, duration, playing, actions::seek, Modifier.fillMaxWidth(), amplitudeScale = waveScale, waveBpm = waveBpm, live = song.isLive) },
                 {
                     TransportButtonGroup(
@@ -186,7 +188,7 @@ internal fun TabletopPlayer(
                         ToolbarQueueButton(onOpenQueue)
                         ToolbarSleepButton(sleep, onOpenTimer)
                         ToolbarSourceButton(onOpenSource)
-                        MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+                        MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
                     }
                 },
             ),
@@ -208,6 +210,7 @@ private fun TabletopTopBar(
     onClose: () -> Unit,
     onOpenSource: () -> Unit,
     onLyricsMode: (Boolean) -> Unit,
+    onAddToPlaylist: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().height(TabletopBarHeight).padding(horizontal = 8.dp),
@@ -217,7 +220,7 @@ private fun TabletopTopBar(
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             SourcePill(song, sourceProvider, sourceDetail, playbackMode, onOpenSource)
         }
-        MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+        MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
     }
 }
 
@@ -350,9 +353,16 @@ private fun TabletopClock(title: String, modifier: Modifier) {
     }
 }
 
-/** 下半屏的歌名行：56dp 圆角小封面（上半屏是封面时不放）、歌名和歌手、收藏。切歌时文字淡出淡入。 */
+/** 下半屏的歌名行：56dp 圆角小封面（上半屏是封面时不放）、歌名和歌手、「加到歌单」和收藏。切歌时文字淡出淡入。 */
 @Composable
-private fun TabletopMeta(song: Song, favorite: Boolean, actions: MusicActions, thumb: Boolean) {
+private fun TabletopMeta(
+    song: Song,
+    favorite: Boolean,
+    addedToPlaylist: Boolean,
+    actions: MusicActions,
+    onAddToPlaylist: () -> Unit,
+    thumb: Boolean,
+) {
     Row(
         Modifier.fillMaxWidth().height(TabletopMetaHeight),
         verticalAlignment = Alignment.CenterVertically,
@@ -386,7 +396,10 @@ private fun TabletopMeta(song: Song, favorite: Boolean, actions: MusicActions, t
                 )
             }
         }
-        FavoriteToggle(song, favorite, actions)
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            AddToPlaylistButton(addedToPlaylist, onAddToPlaylist)
+            FavoriteToggle(song, favorite, actions, onLongClick = onAddToPlaylist)
+        }
     }
 }
 

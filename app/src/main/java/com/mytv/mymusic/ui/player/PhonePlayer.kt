@@ -121,6 +121,8 @@ internal fun PhonePlayer(
     pulse: BackdropPulse,
     coverShape: CoverShapeChoice,
     transitionAnimation: CrossfadeAnimation,
+    addedToPlaylist: Boolean,
+    onAddToPlaylist: () -> Unit,
 ) {
     val motion = MaterialTheme.motionScheme
     val reduceMotion = LocalAppearance.current.reduceMotion
@@ -160,13 +162,13 @@ internal fun PhonePlayer(
             {
                 if (showDefault) {
                     if (short) {
-                        PhoneShortTopBar(song, sleep, deepLink, actions, onClose, onOpenSource, onLyricsMode, onOpenQueue, onOpenTimer, idle, lyricsMode, chromeAlpha)
+                        PhoneShortTopBar(song, sleep, deepLink, actions, onClose, onOpenSource, onLyricsMode, onOpenQueue, onOpenTimer, onAddToPlaylist, idle, lyricsMode, chromeAlpha)
                     } else {
-                        PhoneTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, onClose, onOpenSource, onLyricsMode, idle, lyricsMode, chromeAlpha)
+                        PhoneTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, onClose, onOpenSource, onLyricsMode, onAddToPlaylist, idle, lyricsMode, chromeAlpha)
                     }
                 }
             },
-            { if (showDefault) PhoneMeta(song, favorite, actions, idle, chrome, lyricsMode, defaultAlpha, short) },
+            { if (showDefault) PhoneMeta(song, favorite, addedToPlaylist, actions, onAddToPlaylist, idle, chrome, lyricsMode, defaultAlpha, short) },
             {
                 if (showDefault) {
                     PhoneLyricsPreview(lyrics, active, position, playing, idle, lyricsMode, if (short) defaultAlpha else chromeAlpha, short) { onLyricsMode(true) }
@@ -191,6 +193,7 @@ internal fun PhonePlayer(
                         onOpenQueue = onOpenQueue,
                         onOpenTimer = onOpenTimer,
                         onOpenSource = onOpenSource,
+                        onAddToPlaylist = onAddToPlaylist,
                         short = short,
                     )
                 }
@@ -204,6 +207,8 @@ internal fun PhonePlayer(
                     PhoneLyricsPage(
                         song = song,
                         favorite = favorite,
+                        addedToPlaylist = addedToPlaylist,
+                        onAddToPlaylist = onAddToPlaylist,
                         lyrics = lyrics,
                         lyricsLoading = lyricsLoading,
                         active = active,
@@ -267,6 +272,7 @@ private fun PhoneTopBar(
     onClose: () -> Unit,
     onOpenSource: () -> Unit,
     onLyricsMode: (Boolean) -> Unit,
+    onAddToPlaylist: () -> Unit,
     idle: IdleState,
     blocked: Boolean,
     alpha: () -> Float,
@@ -281,7 +287,7 @@ private fun PhoneTopBar(
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 SourcePill(song, sourceProvider, sourceDetail, playbackMode, onOpenSource)
             }
-            MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+            MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
         }
     }
 }
@@ -298,6 +304,7 @@ private fun PhoneShortTopBar(
     onLyricsMode: (Boolean) -> Unit,
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
+    onAddToPlaylist: () -> Unit,
     idle: IdleState,
     blocked: Boolean,
     alpha: () -> Float,
@@ -312,7 +319,7 @@ private fun PhoneShortTopBar(
             ToolbarLyricsButton(on = false, onToggle = onLyricsMode)
             ToolbarQueueButton(onOpenQueue)
             ToolbarSleepButton(sleep, onOpenTimer)
-            MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+            MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
         }
     }
 }
@@ -325,7 +332,9 @@ private fun PhoneShortTopBar(
 private fun PhoneMeta(
     song: Song,
     favorite: Boolean,
+    addedToPlaylist: Boolean,
     actions: MusicActions,
+    onAddToPlaylist: () -> Unit,
     idle: IdleState,
     chrome: State<Float>,
     blocked: Boolean,
@@ -373,9 +382,12 @@ private fun PhoneMeta(
                 )
             }
         }
-        // 空闲时收藏和其他控件一起淡出，歌名留着
+        // 空闲时「加到歌单」、收藏和其他控件一起淡出，歌名留着；长按收藏也打开加到歌单面板
         IdleGuard(idle, blocked, Modifier.graphicsLayer { this.alpha = chrome.value }) {
-            FavoriteToggle(song, favorite, actions)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                AddToPlaylistButton(addedToPlaylist, onAddToPlaylist)
+                FavoriteToggle(song, favorite, actions, onLongClick = onAddToPlaylist)
+            }
         }
     }
 }
@@ -518,6 +530,7 @@ private fun PhoneControls(
     onOpenQueue: () -> Unit,
     onOpenTimer: () -> Unit,
     onOpenSource: () -> Unit,
+    onAddToPlaylist: () -> Unit,
     short: Boolean = false,
 ) {
     IdleGuard(idle, blocked, Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha() }) {
@@ -549,7 +562,7 @@ private fun PhoneControls(
                     ToolbarQueueButton(onOpenQueue)
                     ToolbarSleepButton(sleep, onOpenTimer)
                     ToolbarSourceButton(onOpenSource)
-                    MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode)
+                    MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
                 }
             }
         }
@@ -577,7 +590,7 @@ private fun PhoneNotice(notice: String, alpha: () -> Float) {
 }
 
 /**
- * 歌词页：左上角留给缩小成圆的封面（由封面舞台自己画），旁边是歌名、歌手、✦（歌词动画面板）和收藏；
+ * 歌词页：左上角留给缩小成圆的封面（由封面舞台自己画），旁边是歌名、歌手、✦（歌词动画面板）、加到歌单和收藏；
  * 底部只有小号按钮组和“歌词 / 队列”，空闲时底部淡出并拦截点按（全屏歌词不放进度条）。
  * 中间是歌词舞台（[LyricStage]）：铺满整页，垫在顶栏和控件下面，文字排在两者之间的安全区里；
  * 经典模式就是原来的左对齐歌词列表，位置和原来一样（安全区 = 原来列表占的那块）。
@@ -586,6 +599,8 @@ private fun PhoneNotice(notice: String, alpha: () -> Float) {
 private fun PhoneLyricsPage(
     song: Song,
     favorite: Boolean,
+    addedToPlaylist: Boolean,
+    onAddToPlaylist: () -> Unit,
     lyrics: ParsedLyrics,
     lyricsLoading: Boolean,
     active: State<Int>,
@@ -658,8 +673,10 @@ private fun PhoneLyricsPage(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    // 顶栏三个：✦、加到歌单、收藏
                     AnimationSheetButton(hint = !stage.prefs.hintSeen, onClick = stage.onOpenSheet)
-                    FavoriteToggle(song, favorite, actions)
+                    AddToPlaylistButton(addedToPlaylist, onAddToPlaylist)
+                    FavoriteToggle(song, favorite, actions, onLongClick = onAddToPlaylist)
                 }
             },
             {

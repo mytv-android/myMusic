@@ -980,6 +980,12 @@ interface LibraryDao {
     fun entryCounts(): Flow<List<PlaylistEntryCount>>
     @Query("SELECT COUNT(*) FROM playlist_entries")
     suspend fun entryCount(): Int
+    /** 哪些（没删的）歌单里有这几个 key 之一：播放页「加到歌单」按钮和面板的勾选态。 */
+    @Query(
+        "SELECT DISTINCT e.playlist_id FROM playlist_entries e JOIN playlists p ON p.id = e.playlist_id " +
+            "WHERE p.deleted_at IS NULL AND e.song_key IN (:keys)"
+    )
+    fun playlistsWithSongs(keys: List<String>): Flow<List<String>>
     // 必须 upsert 不能 INSERT OR REPLACE：REPLACE 先删旧行再插入，playlist_entries 的
     // ON DELETE CASCADE 会把整份曲目连带删掉（刷新绑定歌单、解除绑定都会把歌曲清空）
     @Upsert suspend fun putPlaylist(playlist: PlaylistEntity)

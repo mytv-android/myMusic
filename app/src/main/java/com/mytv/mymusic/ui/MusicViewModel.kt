@@ -173,6 +173,8 @@ import com.mytv.mymusic.ui.theme.SchemeStyle
 import com.mytv.mymusic.ui.theme.isTelevision
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
@@ -349,6 +351,9 @@ data class MusicUiState(
  * 绑定歌单在当前账号下能不能改。[supported] 为 false 表示平台没有写接口（仍按老行为编辑即解绑）；
  * [writable] 为 null 表示还没判断出来，先按可写处理，真写失败时再提示。
  */
+/** 歌单增删的提示出口：(文字, 是不是失败)。平常就是 [MusicViewModel] 的 message，「加到歌单」面板换成自己收着。 */
+internal typealias EditReport = (text: String, error: Boolean) -> Unit
+
 data class BoundPlaylistAccess(
     val supported: Boolean = false,
     val writable: Boolean? = null,
@@ -2483,84 +2488,94 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun addSongsToPlaylist(playlistId: String, songs: List<Song>) {
         if (songs.isEmpty()) return
-        launchPlaylistEdit {
-            val playlist = libraryDao.playlistOnce(playlistId) ?: return@launchPlaylistEdit
-            if (playlist.deletedAt != null) return@launchPlaylistEdit
-            when (playlistWriteMode(playlist)) {
-                PlaylistWriteMode.Local -> {
-                    addSongsToLocalPlaylist(playlist, songs)
-                    return@launchPlaylistEdit
-                }
-                PlaylistWriteMode.Unknown -> {
-                    message("无法识别绑定的平台：${playlist.linkProvider}", error = true)
-                    return@launchPlaylistEdit
-                }
-                PlaylistWriteMode.Platform -> Unit
-            }
-            if (playlistAccess(playlistId)?.writable == false) {
-                message("这是收藏的歌单，不能修改", error = true)
-                return@launchPlaylistEdit
-            }
-            if (!flushPendingReorder(playlistId)) return@launchPlaylistEdit
-            val entries = libraryDao.entriesOnce(playlistId)
-            val distinct = songs.distinctBy { it.key }
-            val candidates = distinct.filter { song -> entries.none { it.songKey == song.key } }
-            if (candidates.isEmpty()) {
-                message(
-                    if (distinct.size == 1) "这首歌已经在「${playlist.name}」里"
-                    else "所选歌曲都已经在「${playlist.name}」里"
-                )
-                return@launchPlaylistEdit
-            }
-            val provider = playlist.linkProvider
-            val cookie = cookieFor(provider)
-            val resolved = mutableListOf<Song>()
-            for (song in candidates) {
-                val target = resolveForPlaylistWrite(song, provider, cookie) ?: continue
-                if (entries.any { it.songKey == target.key } || resolved.any { it.key == target.key }) continue
-                resolved += target
-            }
-            if (resolved.isEmpty()) {
-                message("这些歌在${providerLabel(provider)}里都没找到", error = true)
-                return@launchPlaylistEdit
-            }
-            val snapshot = PlaylistSnapshot(playlist, entries)
-            writeEntries(
-                playlistId,
-                entries + resolved.mapIndexed { index, song -> entryOf(playlistId, entries.size + index, song) },
-            )
-            AppLog.i("PlaylistWrite", "add start provider=$provider link=${playlist.linkId} songs=${resolved.size}")
-            try {
-                app.repository.addPlaylistTracks(provider, cookie, playlist.linkId, resolved)
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                AppLog.w("PlaylistWrite", "add failed provider=$provider link=${playlist.linkId}: ${error.message}")
-                restoreSnapshot(snapshot)
-                message(writeErrorMessage(playlist, "添加", error), error = true)
-                return@launchPlaylistEdit
-            }
-            AppLog.i("PlaylistWrite", "add ok provider=$provider link=${playlist.linkId} songs=${resolved.size}")
-            commitBoundWrite(playlistId)
-            scheduleBoundReload(playlistId)
-            val skipped = songs.size - resolved.size
-            val text = buildString {
-                append("已加入 ${resolved.size} 首到「${playlist.name}」")
-                if (skipped > 0) append("，$skipped 首没找到或已存在")
-            }
-            addedMessage(text, resolved)
-        }
+        launchPlaylistEdit { addSongsLocked(playlistId, songs, ::message) }
     }
 
-    private suspend fun addSongsToLocalPlaylist(playlist: PlaylistEntity, songs: List<Song>) {
-        unbindIfBound(playlist.id)
+    /**
+     * [addSongsToPlaylist] 的本体，调用方已经拿着 [playlistMutex]。提示交给 [report]：平常就是外壳的 Snackbar，
+     * 「加到歌单」面板换成自己收着（见 [EditSink]）。加进去了返回 true。
+     */
+    private suspend fun addSongsLocked(playlistId: String, songs: List<Song>, report: EditReport): Boolean {
+        val playlist = libraryDao.playlistOnce(playlistId) ?: return false
+        if (playlist.deletedAt != null) return false
+        when (playlistWriteMode(playlist)) {
+            PlaylistWriteMode.Local -> return addSongsToLocalPlaylist(playlist, songs, report)
+            PlaylistWriteMode.Unknown -> {
+                report("无法识别绑定的平台：${playlist.linkProvider}", true)
+                return false
+            }
+            PlaylistWriteMode.Platform -> Unit
+        }
+        if (playlistAccess(playlistId)?.writable == false) {
+            report("这是收藏的歌单，不能修改", true)
+            return false
+        }
+        if (!flushPendingReorder(playlistId)) return false
+        val entries = libraryDao.entriesOnce(playlistId)
+        val distinct = songs.distinctBy { it.key }
+        val candidates = distinct.filter { song -> entries.none { it.songKey == song.key } }
+        val alreadyIn = if (distinct.size == 1) "这首歌已经在「${playlist.name}」里" else "所选歌曲都已经在「${playlist.name}」里"
+        if (candidates.isEmpty()) {
+            report(alreadyIn, false)
+            return false
+        }
+        val provider = playlist.linkProvider
+        val cookie = cookieFor(provider)
+        val resolved = mutableListOf<Song>()
+        var present = 0
+        for (song in candidates) {
+            val target = resolveForPlaylistWrite(song, provider, cookie) ?: continue
+            // 写进去的是平台版本，key 和正在放的这首不一样；记下来，面板的勾和按钮的“已加入”才认得出
+            if (target.key != song.key) rememberPlaylistAlias(song.key, target.key)
+            if (entries.any { it.songKey == target.key } || resolved.any { it.key == target.key }) {
+                present++
+                continue
+            }
+            resolved += target
+        }
+        if (resolved.isEmpty()) {
+            // 平台版本本来就在歌单里，不是“没找到”
+            if (present > 0) report(alreadyIn, false) else report("这些歌在${providerLabel(provider)}里都没找到", true)
+            return false
+        }
+        val snapshot = PlaylistSnapshot(playlist, entries)
+        writeEntries(
+            playlistId,
+            entries + resolved.mapIndexed { index, song -> entryOf(playlistId, entries.size + index, song) },
+        )
+        AppLog.i("PlaylistWrite", "add start provider=$provider link=${playlist.linkId} songs=${resolved.size}")
+        try {
+            app.repository.addPlaylistTracks(provider, cookie, playlist.linkId, resolved)
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            AppLog.w("PlaylistWrite", "add failed provider=$provider link=${playlist.linkId}: ${error.message}")
+            restoreSnapshot(snapshot)
+            report(writeErrorMessage(playlist, "添加", error), true)
+            return false
+        }
+        AppLog.i("PlaylistWrite", "add ok provider=$provider link=${playlist.linkId} songs=${resolved.size}")
+        commitBoundWrite(playlistId)
+        scheduleBoundReload(playlistId)
+        val skipped = songs.size - resolved.size
+        val text = buildString {
+            append("已加入 ${resolved.size} 首到「${playlist.name}」")
+            if (skipped > 0) append("，$skipped 首没找到或已存在")
+        }
+        addedMessage(text, resolved, report)
+        return true
+    }
+
+    private suspend fun addSongsToLocalPlaylist(playlist: PlaylistEntity, songs: List<Song>, report: EditReport): Boolean {
+        unbindIfBound(playlist.id, report)
         val entries = libraryDao.entriesOnce(playlist.id)
         val candidates = songs.distinctBy { it.key }.filter { song -> entries.none { it.songKey == song.key } }
         if (candidates.isEmpty()) {
-            message(
+            report(
                 if (songs.distinctBy { it.key }.size == 1) "这首歌已经在「${playlist.name}」里"
-                else "所选歌曲都已经在「${playlist.name}」里"
+                else "所选歌曲都已经在「${playlist.name}」里",
+                false,
             )
-            return
+            return false
         }
         libraryDao.replaceEntries(
             playlist.id,
@@ -2572,96 +2587,103 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         addedMessage(
             if (skipped > 0) "已加入 ${candidates.size} 首，$skipped 首已存在" else "已把 ${candidates.size} 首加入「${playlist.name}」",
             candidates,
+            report,
         )
+        return true
     }
 
     /** 批量导入到新建歌单（歌单链接导入、多选“新建歌单”都走这里）。 */
     fun addSongsToNewPlaylist(name: String, songs: List<Song>) {
         val value = name.trim()
         if (songs.isEmpty() || value.isBlank()) return
-        launchPlaylistEdit {
-            val now = System.currentTimeMillis()
-            val id = UUID.randomUUID().toString()
-            libraryDao.putPlaylist(
-                PlaylistEntity(id = id, name = value, createdAt = now, updatedAt = now, dirty = true)
-            )
-            libraryDao.replaceEntries(
-                id,
-                songs.distinctBy { it.key }.mapIndexed { index, song ->
-                    PlaylistEntryEntity(id, index, song.key, json.encodeToString(song.forStorage()))
-                },
-            )
-            app.sync.onLocalChange()
-            addedMessage("已创建歌单「$value」，加入 ${songs.size} 首", songs.distinctBy { it.key })
-        }
+        launchPlaylistEdit { createPlaylistLocked(value, songs, ::message) }
+    }
+
+    private suspend fun createPlaylistLocked(name: String, songs: List<Song>, report: EditReport) {
+        val now = System.currentTimeMillis()
+        val id = UUID.randomUUID().toString()
+        libraryDao.putPlaylist(
+            PlaylistEntity(id = id, name = name, createdAt = now, updatedAt = now, dirty = true)
+        )
+        libraryDao.replaceEntries(
+            id,
+            songs.distinctBy { it.key }.mapIndexed { index, song ->
+                PlaylistEntryEntity(id, index, song.key, json.encodeToString(song.forStorage()))
+            },
+        )
+        app.sync.onLocalChange()
+        addedMessage("已创建歌单「$name」，加入 ${songs.size} 首", songs.distinctBy { it.key }, report)
     }
 
     /** 批量移除歌单条目：一次重排，避免逐条删除时位置错位。 */
     fun removePlaylistEntries(playlistId: String, positions: List<Int>) {
         if (positions.isEmpty()) return
-        launchPlaylistEdit {
-            val playlist = libraryDao.playlistOnce(playlistId) ?: return@launchPlaylistEdit
-            val entries = libraryDao.entriesOnce(playlistId)
-            val doomed = positions.toHashSet()
-            val doomedEntries = entries.filter { it.position in doomed }
-            if (doomedEntries.isEmpty()) return@launchPlaylistEdit
-            when (playlistWriteMode(playlist)) {
-                PlaylistWriteMode.Local -> {
-                    removeEntriesLocally(playlistId, doomed)
-                    return@launchPlaylistEdit
-                }
-                PlaylistWriteMode.Unknown -> {
-                    message("无法识别绑定的平台：${playlist.linkProvider}", error = true)
-                    return@launchPlaylistEdit
-                }
-                PlaylistWriteMode.Platform -> Unit
+        launchPlaylistEdit { removeEntriesLocked(playlistId, positions.toHashSet(), ::message) }
+    }
+
+    /** [removePlaylistEntries] 的本体，调用方已经拿着 [playlistMutex]；提示同 [addSongsLocked]。移出了返回 true。 */
+    private suspend fun removeEntriesLocked(playlistId: String, doomed: Set<Int>, report: EditReport): Boolean {
+        val playlist = libraryDao.playlistOnce(playlistId) ?: return false
+        val entries = libraryDao.entriesOnce(playlistId)
+        val doomedEntries = entries.filter { it.position in doomed }
+        if (doomedEntries.isEmpty()) return false
+        when (playlistWriteMode(playlist)) {
+            PlaylistWriteMode.Local -> {
+                removeEntriesLocally(playlistId, doomed, report)
+                return true
             }
-            if (playlistAccess(playlistId)?.writable == false) {
-                message("这是收藏的歌单，不能修改", error = true)
-                return@launchPlaylistEdit
+            PlaylistWriteMode.Unknown -> {
+                report("无法识别绑定的平台：${playlist.linkProvider}", true)
+                return false
             }
-            if (!flushPendingReorder(playlistId)) return@launchPlaylistEdit
-            val snapshot = PlaylistSnapshot(playlist, entries)
-            val kept = entries.filterNot { it.position in doomed }
-                .withIndex()
-                .map { (index, entry) -> entry.copy(position = index) }
-            writeEntries(playlistId, kept)
-            val platformSongs = doomedEntries.mapNotNull(::decodeEntrySong)
-                .filter { it.source == playlist.linkProvider }
-            if (platformSongs.isNotEmpty()) {
-                AppLog.i(
-                    "PlaylistWrite",
-                    "remove start provider=${playlist.linkProvider} link=${playlist.linkId} songs=${platformSongs.size}",
-                )
-                try {
-                    app.repository.removePlaylistTracks(
-                        playlist.linkProvider,
-                        cookieFor(playlist.linkProvider),
-                        playlist.linkId,
-                        platformSongs,
-                    )
-                } catch (error: Exception) {
-                    if (error is CancellationException) throw error
-                    AppLog.w(
-                        "PlaylistWrite",
-                        "remove failed provider=${playlist.linkProvider} link=${playlist.linkId}: ${error.message}",
-                    )
-                    restoreSnapshot(snapshot)
-                    message(writeErrorMessage(playlist, "移除", error), error = true)
-                    return@launchPlaylistEdit
-                }
-                AppLog.i("PlaylistWrite", "remove ok provider=${playlist.linkProvider} link=${playlist.linkId}")
-            }
-            commitBoundWrite(playlistId)
-            scheduleBoundReload(playlistId)
+            PlaylistWriteMode.Platform -> Unit
         }
+        if (playlistAccess(playlistId)?.writable == false) {
+            report("这是收藏的歌单，不能修改", true)
+            return false
+        }
+        if (!flushPendingReorder(playlistId)) return false
+        val snapshot = PlaylistSnapshot(playlist, entries)
+        val kept = entries.filterNot { it.position in doomed }
+            .withIndex()
+            .map { (index, entry) -> entry.copy(position = index) }
+        writeEntries(playlistId, kept)
+        val platformSongs = doomedEntries.mapNotNull(::decodeEntrySong)
+            .filter { it.source == playlist.linkProvider }
+        if (platformSongs.isNotEmpty()) {
+            AppLog.i(
+                "PlaylistWrite",
+                "remove start provider=${playlist.linkProvider} link=${playlist.linkId} songs=${platformSongs.size}",
+            )
+            try {
+                app.repository.removePlaylistTracks(
+                    playlist.linkProvider,
+                    cookieFor(playlist.linkProvider),
+                    playlist.linkId,
+                    platformSongs,
+                )
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                AppLog.w(
+                    "PlaylistWrite",
+                    "remove failed provider=${playlist.linkProvider} link=${playlist.linkId}: ${error.message}",
+                )
+                restoreSnapshot(snapshot)
+                report(writeErrorMessage(playlist, "移除", error), true)
+                return false
+            }
+            AppLog.i("PlaylistWrite", "remove ok provider=${playlist.linkProvider} link=${playlist.linkId}")
+        }
+        commitBoundWrite(playlistId)
+        scheduleBoundReload(playlistId)
+        return true
     }
 
     fun removePlaylistEntry(playlistId: String, position: Int) =
         removePlaylistEntries(playlistId, listOf(position))
 
-    private suspend fun removeEntriesLocally(playlistId: String, positions: Set<Int>) {
-        unbindIfBound(playlistId)
+    private suspend fun removeEntriesLocally(playlistId: String, positions: Set<Int>, report: EditReport) {
+        unbindIfBound(playlistId, report)
         val entries = libraryDao.entriesOnce(playlistId)
         libraryDao.replaceEntries(
             playlistId,
@@ -2671,6 +2693,91 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
         libraryDao.markDirty(playlistId, System.currentTimeMillis())
         app.sync.onLocalChange()
+    }
+
+    // ---------- 播放页「加到歌单」面板 ----------
+
+    /**
+     * 加歌单时解析出来的平台版本：正在放的这首 key → 写进绑定歌单的平台曲目 key。只在进程里记，
+     * 聚合库里没合并过的（靠搜索匹配到的）也能认出“已经加过”。
+     */
+    private val playlistAliases = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+
+    private fun rememberPlaylistAlias(songKey: String, targetKey: String) {
+        playlistAliases.update { it + (songKey to (it[songKey].orEmpty() + targetKey)) }
+    }
+
+    /** 这首歌在歌单里可能用的 key：自己，加上聚合库里合并到同一首的其他平台版本（绑定歌单写回时存的是平台版本）。 */
+    private suspend fun sameSongKeys(song: Song): Set<String> = withContext(Dispatchers.IO) {
+        val siblings = runCatching {
+            val canonical = app.database.aggregate().source(song.key) ?: return@runCatching emptyList()
+            app.database.aggregate().sources(canonical.canonicalId).map { it.sourceKey }
+        }.getOrDefault(emptyList())
+        (siblings + song.key).toSet()
+    }
+
+    /** 这首（含同一首的其他平台版本）在哪些自建歌单里：播放页「加到歌单」按钮的图标和面板的勾都看它。 */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun playlistsContaining(song: Song): Flow<Set<String>> = kotlinx.coroutines.flow.flow {
+        val base = sameSongKeys(song)
+        emitAll(
+            playlistAliases
+                .map { aliases -> base + aliases[song.key].orEmpty() }
+                .distinctUntilChanged()
+                .flatMapLatest { keys -> libraryDao.playlistsWithSongs(keys.toList()) }
+                .map { it.toSet() },
+        )
+    }.distinctUntilChanged()
+
+    /**
+     * 面板里点一下加入这一首。规则和 [addSongsToPlaylist] 一样（绑定且平台可写的写回平台，平台没有写接口的改了就解绑），
+     * 只是提示不走外壳的 Snackbar——面板是单独的窗口，盖着它，看不见也点不到撤销——而是作为结果交回面板显示。
+     * 在 viewModelScope 里跑：面板关了，写平台也照样做完，不会写一半。
+     */
+    fun addSongToPlaylistQuietly(playlistId: String, song: Song): Deferred<PlaylistEditResult> = viewModelScope.async {
+        playlistMutex.withLock {
+            val sink = EditSink()
+            sink.result(addSongsLocked(playlistId, listOf(song), sink))
+        }
+    }
+
+    /** 面板里点一下移出这一首（同一首的其他平台版本也算），结果带上原条目，撤销时按原位置插回。 */
+    fun removeSongFromPlaylistQuietly(playlistId: String, song: Song): Deferred<PlaylistEditResult> = viewModelScope.async {
+        val keys = sameSongKeys(song) + playlistAliases.value[song.key].orEmpty()
+        playlistMutex.withLock {
+            val doomed = libraryDao.entriesOnce(playlistId).filter { it.songKey in keys }
+            if (doomed.isEmpty()) return@withLock PlaylistEditResult(changed = false)
+            val sink = EditSink()
+            val changed = removeEntriesLocked(playlistId, doomed.mapTo(HashSet()) { it.position }, sink)
+            sink.result(changed, removed = if (changed) doomed else emptyList())
+        }
+    }
+
+    /** 面板顶上的「新建歌单」：建好直接把这首放进去，面板不关。 */
+    fun createPlaylistWithSongQuietly(name: String, song: Song): Deferred<PlaylistEditResult> = viewModelScope.async {
+        val value = name.trim()
+        if (value.isBlank()) return@async PlaylistEditResult(changed = false)
+        playlistMutex.withLock {
+            val sink = EditSink()
+            createPlaylistLocked(value, listOf(song), sink)
+            sink.result(true)
+        }
+    }
+
+    /** 面板收提示用：成功的那句面板自己按歌单写，这里只留没改成的原因（失败优先）。 */
+    private class EditSink : EditReport {
+        private var text = ""
+        private var error = false
+
+        override fun invoke(text: String, error: Boolean) {
+            if (error || !this.error) {
+                this.text = text
+                this.error = error
+            }
+        }
+
+        fun result(changed: Boolean, removed: List<PlaylistEntryEntity> = emptyList()) =
+            PlaylistEditResult(changed = changed, text = text, error = error, removed = removed)
     }
 
     fun movePlaylistEntry(playlistId: String, position: Int, delta: Int) {
@@ -3179,7 +3286,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** 绑定歌单的手动编辑和平台刷新会互相覆盖：编辑前先解除绑定，内容变成手动维护的副本。 */
-    private suspend fun unbindIfBound(playlistId: String) {
+    private suspend fun unbindIfBound(playlistId: String, report: EditReport = ::message) {
         val playlist = libraryDao.playlistOnce(playlistId) ?: return
         if (!playlist.bound) return
         // 接下来的编辑会推送；这里先把修改时间记上，解绑和编辑作为同一次修改同步出去
@@ -3193,7 +3300,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 dirty = true,
             )
         )
-        message("已解除绑定，「${playlist.name}」改为手动维护，不再跟随平台更新")
+        report("已解除绑定，「${playlist.name}」改为手动维护，不再跟随平台更新", false)
     }
 
     fun playSavedSongs(records: List<SavedSong>) = viewModelScope.launch {
@@ -6295,9 +6402,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * 加进歌单后的那句提示：里面有只在本机的本地歌（同步连着、设置开着、哪个云端都还没有、也没在排队）时
      * 换成带“上传”的提示，否则照旧。
      */
-    private fun addedMessage(text: String, added: List<Song>) {
+    private fun addedMessage(text: String, added: List<Song>, report: EditReport = ::message) {
         val prompt = uploadPrompt(text, added)
-        if (prompt != null) _events.tryEmit(prompt) else message(text)
+        if (prompt != null) _events.tryEmit(prompt) else report(text, false)
     }
 
     private fun uploadPrompt(text: String, added: List<Song>): UiEvent.UploadPrompt? {

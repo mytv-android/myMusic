@@ -161,6 +161,18 @@ data class LocalPlaylistSummary(
     val bound get() = linkProvider.isNotBlank() && linkId.isNotBlank()
 }
 
+/**
+ * 「加到歌单」面板里点一下（加入、移出、新建并加入）的结果。面板是单独的窗口，外壳的 Snackbar 被它盖着，
+ * 提示由面板自己显示：[changed] 为 false 时 [text] 是原因，[error] 为 true 是失败（登录、收藏的歌单、平台出错）；
+ * [removed] 是移出的原条目，撤销时按原位置插回。
+ */
+data class PlaylistEditResult(
+    val changed: Boolean,
+    val text: String = "",
+    val error: Boolean = false,
+    val removed: List<PlaylistEntryEntity> = emptyList(),
+)
+
 data class LocalPlaylistDetail(
     val playlist: PlaylistEntity,
     val entries: List<PlaylistEntryEntity>,
