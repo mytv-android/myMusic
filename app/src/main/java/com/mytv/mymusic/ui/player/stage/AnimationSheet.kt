@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
@@ -61,6 +62,9 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarData
+import androidx.compose.material3.SnackbarDefaults
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -89,6 +93,7 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -208,8 +213,13 @@ internal fun AnimationSheet(
     var naming by remember { mutableStateOf<PresetNaming?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    // 电视上带撤销的提示条把焦点借到“撤销”上（方向键走不到浮在底部的提示条），收起时焦点放到 Undo.focusAfter 给的地方
+    var undoFocused by remember { mutableStateOf(false) }
+    // 每张模式卡片的焦点请求器：删预设后落在基础模式卡片上，撤销后落回预设卡片
+    val cardFocus = remember { HashMap<String, FocusRequester>() }
+    val focusCard: (String) -> FocusRequester = { id -> cardFocus.getOrPut(id) { FocusRequester() } }
     // 面板是单独的窗口（平板、电视），外壳的提示条会被盖住：提示条放在面板里
-    val toast: (String, (suspend () -> Unit)?) -> Unit = { text, undo ->
+    val toast: (String, Undo?) -> Unit = { text, undo ->
         scope.launch {
             snackbar.currentSnackbarData?.dismiss()
             // 带撤销的留久一点（删预设、忘掉记忆），来得及点
@@ -218,7 +228,17 @@ internal fun AnimationSheet(
                 actionLabel = if (undo != null) "撤销" else null,
                 duration = if (undo != null) SnackbarDuration.Long else SnackbarDuration.Short,
             )
-            if (result == SnackbarResult.ActionPerformed) undo?.invoke()
+            val refocus = undoFocused
+            val undone = result == SnackbarResult.ActionPerformed
+            if (undone) undo?.run?.invoke()
+            val target = undo?.focusAfter(undone)
+            // 用户自己走开了就不动；撤销放回来的东西要等它画出来、能聚焦了才接得住焦点
+            if (refocus && target != null) {
+                repeat(REFOCUS_TRIES) {
+                    delay(REFOCUS_WAIT_MS)
+                    if (runCatching { target.requestFocus(FocusDirection.Enter) }.getOrDefault(false)) return@launch
+                }
+            }
         }
     }
     AdaptiveSheet(
@@ -231,7 +251,7 @@ internal fun AnimationSheet(
         scrimAlpha = if (stageBeside) 0.08f else 0.32f,
     ) {
         val close = LocalSheetClose.current
-        val presetOps = PresetOps(saved, draft, actions, toast) { naming = it }
+        val presetOps = PresetOps(saved, draft, actions, toast, focusCard) { naming = it }
         val save: () -> Unit = save@{
             val current = draft.draft
             if (!canSave(current) || draft.saving) return@save
@@ -267,6 +287,8 @@ internal fun AnimationSheet(
             Column(
                 Modifier
                     .fillMaxWidth()
+                    // 滚动区是一个焦点组：电视上保存条压在它上面时从保存条按 ↑ 进不去，保存条出来时滚动区让到它上面
+                    .padding(bottom = if (tv && dirty) SAVE_BAR_HEIGHT else 0.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp),
             ) {
@@ -325,7 +347,7 @@ internal fun AnimationSheet(
                 // 设置区改哪个：下拉里明确选过的；否则固定时是选中的，自动换时是这首歌正在显示的
                 val target = draft.editTarget
                     ?: if (d.auto == LyricAutoSwitch.Fixed) d.visualizer else songRow?.shownId ?: d.visualizer
-                ModeGrid(cards, d, song, songRow?.shownId, presetMenu = { card -> presetOps.cardMenu(card, target) }) { id ->
+                ModeGrid(cards, d, song, songRow?.shownId, focusCard, presetMenu = { card -> presetOps.cardMenu(card, target) }) { id ->
                     draft.update { p ->
                         when (p.auto) {
                             LyricAutoSwitch.Fixed -> p.copy(visualizer = id)
@@ -386,7 +408,14 @@ internal fun AnimationSheet(
                 onSave = save,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
-            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (dirty) 72.dp else 0.dp))
+            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (dirty) SAVE_BAR_HEIGHT else 0.dp)) { data ->
+                val label = data.visuals.actionLabel
+                if (tv && label != null) {
+                    TvUndoSnackbar(data, label) { undoFocused = it }
+                } else {
+                    Snackbar(data)
+                }
+            }
         }
 
         naming?.let { request ->
@@ -575,14 +604,21 @@ private class PresetMenuItem(val label: String, val icon: ImageVector, val dange
 private class PresetNaming(val title: String, val note: String, val initial: String, val onConfirm: (String) -> Unit)
 
 /**
+ * 提示条上的“撤销”：[run] 是撤销要做的事。电视上焦点借给了“撤销”，提示条收起后放到 [focusAfter] 给的地方
+ * （参数是撤没撤销；给 null 就不动）。
+ */
+private class Undo(val focusAfter: (undone: Boolean) -> FocusRequester?, val run: suspend () -> Unit)
+
+/**
  * 预设的新建、改名、覆盖、删除：都是点了立即写进设置（不等“保存并应用”），草稿里同步做同样的改动，免得保存时又改回去。
- * [ask] 弹起名对话框，[toast] 是面板里的提示条（删除带撤销）。
+ * [ask] 弹起名对话框，[toast] 是面板里的提示条（删除带撤销），[focusCard] 是卡片的焦点请求器（删除后电视上焦点落到哪张卡片）。
  */
 private class PresetOps(
     private val saved: LyricStagePrefs,
     private val draft: AnimationDraftState,
     private val actions: MusicActions,
-    private val toast: (String, (suspend () -> Unit)?) -> Unit,
+    private val toast: (String, Undo?) -> Unit,
+    private val focusCard: (String) -> FocusRequester,
     private val ask: (PresetNaming) -> Unit,
 ) {
     private fun preset(id: String): StagePreset? = draft.draft.presetOf(id) ?: saved.presetOf(id)
@@ -635,10 +671,10 @@ private class PresetOps(
         if (draft.editTarget == id) draft.editTarget = preset.base
         val baseLabel = LyricVisualizers.byId(preset.base).label
         val text = if (count > 0) "已删除「${preset.name}」，用到它的 $count 处改回 $baseLabel" else "已删除「${preset.name}」"
-        toast(text) {
+        toast(text, Undo(focusAfter = { undone -> focusCard(if (undone) id else preset.base) }) {
             actions.setLyricStage { it.withPresetRestored(preset, savedBefore) }
             draft.update { it.withPresetRestored(draftPreset, draftBefore) }
-        }
+        })
     }
 
     /** 预设卡片的长按菜单。“用当前设置覆盖”：设置区正在改同一个模式（或它的预设）就用它的草稿设置，否则用基础模式的。 */
@@ -782,6 +818,7 @@ private fun ModeGrid(
     draft: LyricStagePrefs,
     song: Song?,
     shownId: String?,
+    focusCard: (String) -> FocusRequester,
     presetMenu: (PresetVisualizer) -> List<PresetMenuItem>,
     onClick: (String) -> Unit,
 ) {
@@ -810,6 +847,7 @@ private fun ModeGrid(
                         draft,
                         song,
                         Modifier.weight(1f),
+                        focusCard(card.id),
                         menu = if (card is PresetVisualizer && mode != CardMode.Tempo) ({ presetMenu(card) }) else null,
                     ) { onClick(card.id) }
                 }
@@ -828,6 +866,7 @@ private fun ModeCard(
     prefs: LyricStagePrefs,
     song: Song?,
     modifier: Modifier,
+    focus: FocusRequester,
     menu: (() -> List<PresetMenuItem>)? = null,
     onClick: () -> Unit,
 ) {
@@ -857,7 +896,7 @@ private fun ModeCard(
         else -> Modifier.tvFocusRing(shape).clip(shape).toggleable(value = selected, role = Role.Checkbox, onValueChange = { onClick() })
     }
     Box(modifier) {
-        Column(Modifier.fillMaxWidth().then(interaction).padding(4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.fillMaxWidth().focusRequester(focus).then(interaction).padding(4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -931,6 +970,38 @@ private fun ModeCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * 电视上带撤销的提示条：出现时焦点挪到“撤销”上，收起后由面板把焦点放回去（见 toast）。
+ * 提示条压在滚动区上面，按 ↑ 走不回面板：↑ 就当“不撤销”，提示条收起、焦点回面板。
+ * [onFocused] 报“撤销”是不是还拿着焦点，用户自己走开了就不动焦点。
+ */
+@Composable
+private fun TvUndoSnackbar(data: SnackbarData, label: String, onFocused: (Boolean) -> Unit) {
+    val actionFocus = remember { FocusRequester() }
+    Snackbar(
+        modifier = Modifier.padding(12.dp),
+        action = {
+            TextButton(
+                onClick = { data.performAction() },
+                modifier = Modifier
+                    .focusRequester(actionFocus)
+                    .onFocusChanged { onFocused(it.isFocused) }
+                    .onPreviewKeyEvent { event ->
+                        if (event.key != Key.DirectionUp) return@onPreviewKeyEvent false
+                        if (event.type == KeyEventType.KeyDown) data.dismiss()
+                        true
+                    }
+                    .tvFocusRing(RoundedCornerShape(20.dp)),
+                colors = ButtonDefaults.textButtonColors(contentColor = SnackbarDefaults.actionColor),
+            ) { Text(label) }
+        },
+    ) { Text(data.visuals.message) }
+    LaunchedEffect(data) {
+        delay(50)
+        runCatching { actionFocus.requestFocus() }
     }
 }
 
@@ -1178,24 +1249,27 @@ private fun ModeSettings(
 
 /** 随机换法时最后一行：忘掉每首歌记住的随机结果，点了立刻执行，提示条里能撤销。 */
 @Composable
-private fun ForgetRow(actions: MusicActions, toast: (String, (suspend () -> Unit)?) -> Unit) {
+private fun ForgetRow(actions: MusicActions, toast: (String, Undo?) -> Unit) {
     var version by remember { mutableIntStateOf(0) }
     val count by produceState(-1, version) { value = actions.lyricMemoryModeCount() }
     val scope = rememberCoroutineScope()
+    val rowFocus = remember { FocusRequester() }
     Spacer(Modifier.size(12.dp))
     ListRow(
         title = "忘掉记住的结果",
         index = 0,
         count = 1,
+        modifier = Modifier.focusRequester(rowFocus),
         onClick = if (count > 0) {
             {
                 scope.launch {
                     val modes = actions.forgetLyricModes()
                     version++
-                    toast("已忘掉 ${modes.size} 首的记忆") {
+                    // 撤销后这一行重新能点，焦点回到它上面；不撤销它就点不了了，焦点不管
+                    toast("已忘掉 ${modes.size} 首的记忆", Undo(focusAfter = { undone -> rowFocus.takeIf { undone } }) {
                         actions.restoreLyricModes(modes)
                         version++
-                    }
+                    })
                 }
             }
         } else {
@@ -1546,6 +1620,13 @@ private const val DIFF_LINES = 6
 
 /** 保存后等这首歌换上新模式最多等多久。 */
 private const val SAVE_SETTLE_MS = 1_500L
+
+/** 保存条（含外边距）的高度：提示条浮在它上面，电视上滚动区让出这么多。 */
+private val SAVE_BAR_HEIGHT = 72.dp
+
+/** 提示条收起后把焦点放回去：每隔多久试一次、最多试几次（撤销放回来的卡片、重新能点的行要等一会儿）。 */
+private const val REFOCUS_WAIT_MS = 50L
+private const val REFOCUS_TRIES = 20
 
 /** 电视上滑块左右键一下走多少。 */
 private const val TV_SLIDER_STEP = 0.05f
