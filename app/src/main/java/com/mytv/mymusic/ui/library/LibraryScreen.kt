@@ -1,6 +1,7 @@
 package com.mytv.mymusic.ui.library
 
 import android.content.ActivityNotFoundException
+import android.content.Intent
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -96,6 +97,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -1312,12 +1314,18 @@ internal fun rememberImportLauncher(actions: MusicActions): () -> Unit {
     }
     var phoneUpload by remember { mutableStateOf(false) }
     if (phoneUpload) TvFileUploadHost(actions, onDismiss = { phoneUpload = false })
-    return remember(launcher) {
+    val context = LocalContext.current
+    return remember(launcher, context) {
         {
-            try {
-                launcher.launch(arrayOf("*/*"))
-            } catch (error: ActivityNotFoundException) {
+            // 电视的占位应用也能解析 OPEN_DOCUMENT，launch 不抛异常、只弹「没有应用」，所以先查
+            if (!hasRealActivity(context, Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*"))) {
                 phoneUpload = true
+            } else {
+                try {
+                    launcher.launch(arrayOf("*/*"))
+                } catch (error: ActivityNotFoundException) {
+                    phoneUpload = true
+                }
             }
         }
     }

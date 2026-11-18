@@ -55,6 +55,15 @@
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="application/json" />
         </intent>
+        <!-- 从文件导入、导出歌单「保存到文件」：电视上解析到的常是系统占位应用，查到只有它就改走扫码 -->
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.CREATE_DOCUMENT" />
+            <data android:mimeType="application/json" />
+        </intent>
     </queries>
 
     <!-- 明文流量：酷狗/酷我/QQ/网易/咪咕/5sing 的接口和 CDN 大量只有 http://，且 SodaM

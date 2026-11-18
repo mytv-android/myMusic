@@ -1,7 +1,9 @@
 package com.mytv.mymusic.ui.library
 
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.compose.BackHandler
@@ -276,12 +278,23 @@ private fun ColumnScope.ExportConfirmStep(
     val context = LocalContext.current
     val tv = LocalAppWindow.current.isTv
     val close = LocalSheetClose.current
-    // 电视多半没有能接收文件的应用，没有就不出「分享」
-    val canShare = remember(context) {
-        Intent(Intent.ACTION_SEND).setType(PLAYLIST_FILE_MIME).resolveActivity(context.packageManager) != null
-    }
+    // 电视多半没有能接收文件的应用，没有就不出「分享」；系统占位应用不算
+    val canShare = remember(context) { hasRealActivity(context, Intent(Intent.ACTION_SEND).setType(PLAYLIST_FILE_MIME)) }
+    val canSave = remember(context) { hasRealActivity(context, Intent(Intent.ACTION_CREATE_DOCUMENT).setType(PLAYLIST_FILE_MIME)) }
     val scope = rememberCoroutineScope()
     var exportError by remember { mutableStateOf("") }
+    // 没有系统文件选择器：换成扫码下载
+    val toPhone: (ExportPreview) -> Unit = { current ->
+        scope.launch {
+            try {
+                onNoPicker(actions.exportFile(current))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                exportError = "导出失败：${error.message.orEmpty()}"
+            }
+        }
+    }
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(PLAYLIST_FILE_MIME)) { uri ->
         if (uri != null && preview != null) {
             actions.saveExport(preview, uri)
@@ -368,17 +381,13 @@ private fun ColumnScope.ExportConfirmStep(
             }
             Button(
                 onClick = {
-                    try {
-                        saveLauncher.launch(preview.fileName)
-                    } catch (_: ActivityNotFoundException) {
-                        scope.launch {
-                            try {
-                                onNoPicker(actions.exportFile(preview))
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (error: Exception) {
-                                exportError = "导出失败：${error.message.orEmpty()}"
-                            }
+                    if (!canSave) {
+                        toPhone(preview)
+                    } else {
+                        try {
+                            saveLauncher.launch(preview.fileName)
+                        } catch (_: ActivityNotFoundException) {
+                            toPhone(preview)
                         }
                     }
                 },
@@ -868,6 +877,17 @@ private fun rememberFileTransferSession(
 }
 
 // ======================= 共用小件 =======================
+
+/** Android TV 系统自带的占位应用：文件选择器、分享、邮件这些 intent 都解析得到它，打开只弹一句「没有可以执行此操作的应用」。 */
+private const val TV_STUB_PACKAGE = "com.android.tv.frameworkpackagestubs"
+
+/**
+ * 有没有真能处理 [intent] 的应用。电视上 launch 不会抛 ActivityNotFoundException（解析到占位应用），
+ * 只靠 catch 判断就永远走不到扫码，所以先查一遍、把占位应用去掉。要查的 intent 都在清单的 queries 里。
+ */
+internal fun hasRealActivity(context: Context, intent: Intent): Boolean =
+    context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        .any { it.activityInfo?.packageName != TV_STUB_PACKAGE }
 
 /**
  * 电视上打开面板时焦点落在这里。面板是滑进来的，内容晚几帧才摆好，没接住就下一帧再试；
