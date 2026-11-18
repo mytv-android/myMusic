@@ -39,6 +39,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -120,7 +122,7 @@ fun PlayPauseButton(
 
 /**
  * 连接式按钮组：用于互斥选项（主题、对比度、搜索类型、定时时长）。
- * 选中项变成满圆角，其余保持内侧小圆角。
+ * 选中项变成满圆角，其余保持内侧小圆角。[selectedFocus] 挂在选中的那个按钮上（电视默认焦点落在当前选项上）。
  */
 @Composable
 fun <T> ConnectedToggleGroup(
@@ -130,6 +132,7 @@ fun <T> ConnectedToggleGroup(
     label: (T) -> String,
     modifier: Modifier = Modifier,
     icon: ((T) -> ImageVector?)? = null,
+    selectedFocus: FocusRequester? = null,
 ) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
         options.forEachIndexed { index, option ->
@@ -140,6 +143,7 @@ fun <T> ConnectedToggleGroup(
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
+                    .then(if (checked && selectedFocus != null) Modifier.focusRequester(selectedFocus) else Modifier)
                     .tvFocusRing()
                     .semantics { role = Role.RadioButton },
                 shapes = when (index) {
