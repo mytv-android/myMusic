@@ -163,7 +163,7 @@ internal fun TvSyncSetupContent(
                 }
             }
             infoContent()
-            SyncSetupLocalNetworkHint()
+            LocalNetworkHint()
             InfoNote("网页面板只在本次配置期间开放；离开此页或电视进入后台即关闭。")
         }
 
@@ -357,7 +357,7 @@ private fun rememberTvSetupSession(
 }
 
 @Composable
-private fun currentSyncSetupTheme(): SyncSetupTheme {
+internal fun currentSyncSetupTheme(): SyncSetupTheme {
     val colors = MaterialTheme.colorScheme
     return SyncSetupTheme(
         background = colors.background.cssHex(),
@@ -389,13 +389,13 @@ private fun Color.cssHex(): String = String.format(Locale.ROOT, "#%06X", toArgb(
 private var localNetworkRequested = false
 
 /**
- * 局域网权限提示。Android 17 起没有 ACCESS_LOCAL_NETWORK 时，面板在本机跑得好好地，手机连
+ * 局域网权限提示（同步扫码配置、电视扫码传文件共用）。Android 17 起没有 ACCESS_LOCAL_NETWORK 时，面板在本机跑得好好地，手机连
  * 局域网 IP 却被内核丢包——二维码扫得出来、页面打不开，服务端连异常都不报。
  * 用户已经看得见二维码时申请一次；被拒后说明原因并给系统设置入口（权限属于 NEARBY_DEVICES 组，
  * 被拒后再申请系统也不再弹框）。低版本系统由 INTERNET 隐式放行，不申请也不提示。
  */
 @Composable
-private fun SyncSetupLocalNetworkHint(modifier: Modifier = Modifier) {
+internal fun LocalNetworkHint(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     if (!LocalNetworkAccess.isRequired(context)) return
     var granted by remember { mutableStateOf(LocalNetworkAccess.isGranted(context)) }

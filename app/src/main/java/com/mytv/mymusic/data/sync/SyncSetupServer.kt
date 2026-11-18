@@ -3,17 +3,14 @@ package com.mytv.mymusic.data.sync
 import com.mytv.mymusic.data.webdav.WebDavAccount
 import com.mytv.mymusic.data.webdav.WebDavMessages
 import com.mytv.mymusic.data.webdav.WebDavPaths
-import fi.iki.elonen.NanoHTTPD
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import java.io.IOException
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.NetworkInterface
-import java.security.SecureRandom
 import java.util.Collections
 
 internal const val SYNC_SETUP_SESSION_MILLIS = 10 * 60 * 1000L
@@ -60,7 +57,7 @@ internal class SyncSetupSubmission(
     val webDav: WebDavAccount? = null,
 )
 
-internal data class SyncSetupStarted(val url: String, val expiresAt: Long)
+internal typealias SyncSetupStarted = LanPanelStarted
 
 internal enum class SyncSetupPhase(val wireValue: String) {
     Idle("idle"),
@@ -120,9 +117,8 @@ internal class SyncSetupSession(
     private val onSubmit: (SyncSetupSubmission) -> Unit,
     private val clock: () -> Long = System::currentTimeMillis,
     sessionMillis: Long = SYNC_SETUP_SESSION_MILLIS,
+    val accessToken: String = newPanelToken(),
 ) {
-    val accessToken: String = ByteArray(16).also(SecureRandom()::nextBytes)
-        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
     val expiresAt: Long = clock() + sessionMillis
 
     private var submittedProvider: String? = null
@@ -305,7 +301,7 @@ private fun String.lanPriority(): Int {
  * 枚举网卡取要展示给手机的地址。服务本身监听通配地址（bindHost 为空时 NanoHTTPD 绑
  * 0.0.0.0），所有网卡都进得来，所以这里只决定二维码和页面上写哪个地址。
  */
-private fun findSyncSetupAddress(): InetAddress? = runCatching {
+internal fun findSyncSetupAddress(): InetAddress? = runCatching {
     val interfaces = NetworkInterface.getNetworkInterfaces() ?: return null
     Collections.list(interfaces)
         .filter { it.isUp && !it.isLoopback }
@@ -318,65 +314,44 @@ private fun findSyncSetupAddress(): InetAddress? = runCatching {
 /**
  * 仅在电视连接页运行的局域网 HTTP 面板。
  * 二维码持有随机会话路径；接口只接受同源 JSON POST，不开放令牌读取或任意文件访问。
+ * 会话、来源、过期、安全头这些公共部分在 [LanPanelServer]。
  */
-internal class SyncSetupServer(
-    private val assets: (String) -> ByteArray?,
-    snapshot: () -> SyncSetupSnapshot,
-    onSubmit: (SyncSetupSubmission) -> Unit,
-    private val bindHost: String? = null,
-    clock: () -> Long = System::currentTimeMillis,
-    sessionMillis: Long = SYNC_SETUP_SESSION_MILLIS,
-) : NanoHTTPD(bindHost, 0) {
-    private val snapshot = snapshot
-    private val session = SyncSetupSession(snapshot, onSubmit, clock, sessionMillis)
-    private val sessionPath = "/s/${session.accessToken}/"
+internal class SyncSetupServer private constructor(
+    assets: (String) -> ByteArray?,
+    private val snapshot: () -> SyncSetupSnapshot,
+    private val session: SyncSetupSession,
+    bindHost: String?,
+) : LanPanelServer(bindHost, assets, session.accessToken) {
+    constructor(
+        assets: (String) -> ByteArray?,
+        snapshot: () -> SyncSetupSnapshot,
+        onSubmit: (SyncSetupSubmission) -> Unit,
+        bindHost: String? = null,
+        clock: () -> Long = System::currentTimeMillis,
+        sessionMillis: Long = SYNC_SETUP_SESSION_MILLIS,
+    ) : this(assets, snapshot, SyncSetupSession(snapshot, onSubmit, clock, sessionMillis), bindHost)
+
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun startPanel(): SyncSetupStarted {
-        val advertisedHost = if (bindHost == null) {
-            findSyncSetupAddress()?.hostAddress ?: throw IOException("未找到局域网地址，请连接 Wi-Fi 或有线网络")
-        } else {
-            bindHost
-        }
-        try {
-            start(SOCKET_READ_TIMEOUT, true)
-        } catch (error: Exception) {
-            stop()
-            throw error
-        }
-        return SyncSetupStarted(
-            url = "http://$advertisedHost:$listeningPort$sessionPath",
-            expiresAt = session.expiresAt,
-        )
-    }
+    override val expiresAt: Long get() = session.expiresAt
 
-    override fun serve(session: IHTTPSession): Response {
-        if (!session.isLocalPeer()) {
-            return errorResponse(Response.Status.FORBIDDEN, "仅允许局域网设备访问")
+    override fun isExpired(): Boolean = session.isExpired()
+
+    override fun route(http: IHTTPSession, route: String): Response = when (http.method) {
+        Method.GET -> get(route)
+        Method.POST -> if (route == "api/connect") {
+            connect(http)
+        } else {
+            errorResponse(Response.Status.NOT_FOUND, "接口不存在")
         }
-        if (this.session.isExpired()) {
-            return errorResponse(Response.Status.GONE, "二维码已过期，请扫描电视上的新二维码")
-        }
-        val uri = session.uri.orEmpty()
-        if (!uri.startsWith(sessionPath)) {
-            return errorResponse(Response.Status.NOT_FOUND, "页面不存在")
-        }
-        return when (session.method) {
-            Method.GET -> get(uri.removePrefix(sessionPath))
-            Method.POST -> if (uri.removePrefix(sessionPath) == "api/connect") {
-                connect(session)
-            } else {
-                errorResponse(Response.Status.NOT_FOUND, "接口不存在")
-            }
-            else -> errorResponse(Response.Status.METHOD_NOT_ALLOWED, "不支持此请求方式")
-        }
+        else -> errorResponse(Response.Status.METHOD_NOT_ALLOWED, "不支持此请求方式")
     }
 
     private fun get(route: String): Response = when (route) {
         "", "index.html" -> asset("index.html", "text/html; charset=UTF-8", html = true)
         "setup.css" -> asset("setup.css", "text/css; charset=UTF-8")
         "setup.js" -> asset("setup.js", "application/javascript; charset=UTF-8")
-        "theme.css" -> textResponse(Response.Status.OK, "text/css; charset=UTF-8", themeCss())
+        "theme.css" -> textResponse(Response.Status.OK, "text/css; charset=UTF-8", themeCss(snapshot().theme))
         "api/session" -> jsonResponse(
             Response.Status.OK,
             buildJsonObject {
@@ -389,18 +364,13 @@ internal class SyncSetupServer(
     }
 
     private fun connect(http: IHTTPSession): Response {
-        if (http.header("sec-fetch-site") == "cross-site" || !http.hasSameOrigin()) {
-            return errorResponse(Response.Status.FORBIDDEN, "请从电视提供的配置页面提交")
-        }
-        if (http.header("x-mymusic-setup") != "1" ||
-            http.header("content-type")?.substringBefore(';')?.trim() != "application/json"
-        ) {
-            return errorResponse(Response.Status.BAD_REQUEST, "请使用配置页面中的连接按钮")
-        }
-        val contentLength = http.header("content-length")?.toLongOrNull()
-        if (contentLength == null || contentLength <= 0 || contentLength > MAX_CONNECT_BODY_BYTES) {
-            return errorResponse(Response.Status.BAD_REQUEST, "请求内容为空或过大")
-        }
+        http.checkWrite(
+            customHeader = "x-mymusic-setup",
+            contentType = "application/json",
+            maxBytes = MAX_CONNECT_BODY_BYTES,
+            crossSiteMessage = "请从电视提供的配置页面提交",
+            badRequestMessage = "请使用配置页面中的连接按钮",
+        )?.let { return it }
         val body = mutableMapOf<String, String>()
         try {
             http.parseBody(body)
@@ -449,92 +419,7 @@ internal class SyncSetupServer(
         put("provider", status.provider)
     }
 
-    private fun themeCss(): String {
-        val theme = snapshot().theme
-        val colors = linkedMapOf(
-            "background" to theme.background,
-            "surface" to theme.surface,
-            "surface-container" to theme.surfaceContainer,
-            "surface-container-high" to theme.surfaceContainerHigh,
-            "primary" to theme.primary,
-            "on-primary" to theme.onPrimary,
-            "primary-container" to theme.primaryContainer,
-            "on-primary-container" to theme.onPrimaryContainer,
-            "secondary-container" to theme.secondaryContainer,
-            "on-secondary-container" to theme.onSecondaryContainer,
-            "tertiary-container" to theme.tertiaryContainer,
-            "on-tertiary-container" to theme.onTertiaryContainer,
-            "on-surface" to theme.onSurface,
-            "on-surface-variant" to theme.onSurfaceVariant,
-            "outline" to theme.outline,
-            "outline-variant" to theme.outlineVariant,
-            "error" to theme.error,
-            "on-error" to theme.onError,
-            "error-container" to theme.errorContainer,
-            "on-error-container" to theme.onErrorContainer,
-        )
-        return colors.entries.joinToString("\n", ":root {\n", "\n}\n") { (name, value) ->
-            val safe = value.takeIf { COLOR.matches(it) } ?: "#FF00FF"
-            "  --$name: $safe;"
-        }
-    }
-
-    private fun asset(name: String, mime: String, html: Boolean = false): Response {
-        val bytes = assets(name) ?: return errorResponse(Response.Status.NOT_FOUND, "面板资源未打包")
-        return textResponse(Response.Status.OK, mime, String(bytes, Charsets.UTF_8), html)
-    }
-
-    private fun errorResponse(status: Response.Status, message: String): Response = jsonResponse(
-        status,
-        buildJsonObject { put("error", message) },
-    ).apply {
-        // 早期拒绝可能尚未读取 POST 请求体，不能让它残留在持久连接里污染下一次请求。
-        addHeader("Connection", "close")
-    }
-
-    private fun jsonResponse(status: Response.Status, body: JsonObject): Response = textResponse(
-        status,
-        "application/json; charset=UTF-8",
-        body.toString(),
-    )
-
-    private fun textResponse(
-        status: Response.Status,
-        mime: String,
-        body: String,
-        html: Boolean = false,
-    ): Response = newFixedLengthResponse(status, mime, body).apply {
-        addHeader("Cache-Control", "no-store")
-        addHeader("Pragma", "no-cache")
-        addHeader("Referrer-Policy", "no-referrer")
-        addHeader("X-Content-Type-Options", "nosniff")
-        addHeader("Cross-Origin-Resource-Policy", "same-origin")
-        addHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        if (html) {
-            addHeader(
-                "Content-Security-Policy",
-                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-                    "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
-            )
-        }
-    }
-
-    private fun IHTTPSession.header(name: String): String? = headers.entries
-        .firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
-
-    private fun IHTTPSession.hasSameOrigin(): Boolean {
-        val origin = header("origin") ?: return true
-        val host = header("host") ?: return false
-        return origin.trimEnd('/').equals("http://$host", ignoreCase = true)
-    }
-
-    private fun IHTTPSession.isLocalPeer(): Boolean {
-        val address = runCatching { InetAddress.getByName(remoteIpAddress) }.getOrNull() ?: return false
-        return address.isLoopbackAddress || address.isSiteLocalAddress || address.isLinkLocalAddress
-    }
-
     private companion object {
-        val COLOR = Regex("^#[0-9a-fA-F]{6}$")
         val SETUP_PROVIDERS = setOf("gist", "gitee", WebDavSyncProvider.ID)
     }
 }
