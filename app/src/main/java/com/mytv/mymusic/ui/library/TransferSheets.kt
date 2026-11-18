@@ -70,6 +70,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -577,8 +578,20 @@ private fun ImportListRow(
     val usable = list.importable > 0
     val shape = segmentShape(index, count)
     val checked = choice.include && usable
+    // 「合并到收藏 ▾」在可点的整行里面：方向键的二维搜索跳不进子项，电视上只能靠这里指路——
+    // 行上按下 / 右进下拉，下拉上按上 / 左回到行
+    val rowFocus = remember { FocusRequester() }
+    val pickerFocus = remember { FocusRequester() }
+    val pickable = usable && enabled && checked && targetsFor(plan, list).size > 1
     Row(
         modifier
+            .focusRequester(rowFocus)
+            .focusProperties {
+                if (pickable) {
+                    down = pickerFocus
+                    right = pickerFocus
+                }
+            }
             .fillMaxWidth()
             .tvFocusRing(shape, scale = 1.02f)
             .clip(shape)
@@ -610,7 +623,7 @@ private fun ImportListRow(
             if (!usable) {
                 Text("没有能导入的歌", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                TargetPicker(plan, list, choice.target, enabled = enabled && checked, onTarget = onTarget)
+                TargetPicker(plan, list, choice.target, enabled = enabled && checked, focus = pickerFocus, back = rowFocus, onTarget = onTarget)
             }
             val chips = list.platformCounts.entries.sortedByDescending { it.value }.map { Triple(it.key, it.value, false) } +
                 list.skippedPlatforms.entries.sortedByDescending { it.value }.map { Triple(it.key, it.value, true) }
@@ -634,9 +647,17 @@ private fun ImportListRow(
     }
 }
 
-/** 目标「合并到收藏 ▾」：只有一个可选时不出下拉。电视上它是行里单独一个可聚焦按钮。 */
+/** 目标「合并到收藏 ▾」：只有一个可选时不出下拉。电视上它是行里单独一个可聚焦按钮，[focus] / [back] 见 ImportListRow。 */
 @Composable
-private fun TargetPicker(plan: ImportPlan, list: ImportedList, target: ImportTarget, enabled: Boolean, onTarget: (ImportTarget) -> Unit) {
+private fun TargetPicker(
+    plan: ImportPlan,
+    list: ImportedList,
+    target: ImportTarget,
+    enabled: Boolean,
+    focus: FocusRequester,
+    back: FocusRequester,
+    onTarget: (ImportTarget) -> Unit,
+) {
     val options = targetsFor(plan, list)
     var open by remember { mutableStateOf(false) }
     val label = targetLabel(plan, list, target)
@@ -648,6 +669,11 @@ private fun TargetPicker(plan: ImportPlan, list: ImportedList, target: ImportTar
         Row(
             Modifier
                 .padding(vertical = 2.dp)
+                .focusRequester(focus)
+                .focusProperties {
+                    up = back
+                    left = back
+                }
                 .tvFocusRing(RoundedCornerShape(8.dp))
                 .clip(RoundedCornerShape(8.dp))
                 .clickable(enabled = enabled, onClickLabel = "改导入方式") { open = true }
@@ -709,12 +735,12 @@ internal fun TvFileUploadHost(actions: MusicActions, onDismiss: () -> Unit) {
         val start = receivedAt ?: return@LaunchedEffect
         val transfer = currentActions.transfer
         transfer.first { it !is TransferUi.Idle }
-        server?.setStatus(TransferPhase.Received, "电视已收到，请在电视上确认导入")
+        server?.setStatus(TransferPhase.Received, "在电视上勾选要导入的歌单，再按「导入」")
         transfer.first { it is TransferUi.Idle }
         val imported = currentActions.importDone.value > start
         server?.setStatus(
             if (imported) TransferPhase.Done else TransferPhase.Error,
-            if (imported) "已导入到电视" else "电视上没有导入：取消了，或者文件读不出来（电视上有提示）",
+            if (imported) "歌单已经加到电视上了" else "电视上取消了，或者文件读不出来（电视上有提示）",
         )
         // 网页每 2 秒问一次，留够时间让它看到结果
         delay(6_000)

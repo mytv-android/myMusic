@@ -125,7 +125,7 @@ internal class FileTransferServer(
             when (runCatching { onUpload(bytes, name) }.getOrDefault(UploadResult.Busy)) {
                 UploadResult.Accepted -> {
                     received = true
-                    setStatus(TransferPhase.Received, "电视已收到，请在电视上确认导入")
+                    setStatus(TransferPhase.Received, "在电视上勾选要导入的歌单，再按「导入」")
                 }
                 UploadResult.Busy -> return errorResponse(Response.Status.CONFLICT, "电视正在处理别的文件，请稍后再试")
                 UploadResult.Rejected -> return errorResponse(Response.Status.UNSUPPORTED_MEDIA_TYPE, "不是歌单文件")

@@ -156,6 +156,7 @@
         sent = true;
         setProgress(100);
         sendLabel.textContent = "已发送";
+        fileMeta.textContent = formatSize(file.size);
         showStatus("needs-tv", "已发到电视", "请在电视上确认导入。");
         failedPolls = 0;
         pollTimer = window.setTimeout(poll, 1500);

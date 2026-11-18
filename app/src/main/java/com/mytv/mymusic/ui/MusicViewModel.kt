@@ -6490,7 +6490,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     file
                 }
             }.onSuccess { file ->
-                message("已导出「${preview.title}」· ${file.counts.kept} 首")
+                // 一个歌单写名字，几个歌单写个数（标题「4 个歌单」套上书名号不通）
+                val what = if (preview.lists.size == 1) "「${preview.title}」" else " ${preview.lists.size} 个歌单 "
+                message("已导出$what· ${file.counts.kept} 首")
             }.onFailure { error ->
                 if (error is CancellationException) throw error
                 message("导出失败：${error.message.orEmpty()}", error = true)
