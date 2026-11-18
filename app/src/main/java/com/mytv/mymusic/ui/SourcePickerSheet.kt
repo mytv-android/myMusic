@@ -78,7 +78,7 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
     val lxRecords by LxSources.records.collectAsState()
     val lxAvailable = track.sources.any { source ->
         val key = LxPlatform.sourceKey(source.providerId)
-        lxRecords.any { it.enabled && it.capabilities[key]?.actions?.contains("musicUrl") == true }
+        lxRecords.any { it.enabled && (it.desktop || it.capabilities[key]?.actions?.contains("musicUrl") == true) }
     }
     val providerIds = buildList {
         addAll(state.aggregation.enabledProviders)

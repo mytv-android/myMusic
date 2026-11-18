@@ -121,6 +121,39 @@ internal object LxProtocol {
         )
     }
 
+    /** 桌面版插件没有平台概念：它按自己理解的一组字段去请求（酷我用的 id / name / singer / album）。 */
+    fun desktopMusicItem(song: Song): JsonObject = buildJsonObject {
+        put("id", song.extra["rid"].orEmpty().ifBlank { song.id })
+        put("name", song.name)
+        put("singer", song.artist)
+        put("artist", song.artist)
+        put("album", song.album)
+        put("albumName", song.album)
+        put("source", song.source)
+        put("platform", song.source)
+        put("hash", song.extra["hash"].orEmpty())
+        put("duration", song.duration)
+        put("cover", song.cover)
+        put("img", song.cover)
+        song.extra.forEach { (key, value) -> put(key, value) }
+    }
+
+    /**
+     * 桌面版插件导出的是函数表，没有按平台声明能力。取流脚本一律当作「所有平台都能试」：
+     * 真取不到就按失败回退，不能让它在换源面板里凭空消失。
+     */
+    fun parseDesktopCapabilities(descriptor: String): Map<String, LxCapability> {
+        val root = runCatching { json.parseToJsonElement(descriptor).jsonObject }.getOrNull()
+            ?: throw IllegalArgumentException("桌面版插件没有导出任何函数")
+        val functions = (root["functions"] as? JsonArray).orEmpty().mapNotNull {
+            (it as? JsonPrimitive)?.contentOrNull
+        }
+        require("getMediaSource" in functions) { "桌面版插件没有导出 getMediaSource，手机端目前只支持取流" }
+        return LxPlatform.labels.keys.associateWith {
+            LxCapability(name = "", actions = listOf("musicUrl"), qualities = standardQualities)
+        }
+    }
+
     private fun Song.songMid(source: String): String = when (source) {
         "mg" -> extra["copyright_id"].orEmpty().ifBlank { extra["songmid"].orEmpty() }.ifBlank { id.substringBefore('|') }
         "kg" -> extra["songmid"].orEmpty().ifBlank { extra["album_audio_id"].orEmpty() }.ifBlank { id }

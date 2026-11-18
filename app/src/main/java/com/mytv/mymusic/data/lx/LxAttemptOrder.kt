@@ -15,7 +15,10 @@ internal fun orderedLxAttempts(
             for (song in candidates) {
                 val source = LxPlatform.sourceKey(song.source) ?: continue
                 if (isFailed(song.key, record.id)) continue
-                if (record.capabilities[source]?.actions?.contains("musicUrl") == true) add(record to song)
+                // 桌面版插件没有平台能力表：任何平台的歌都让它试一次
+                if (record.desktop || record.capabilities[source]?.actions?.contains("musicUrl") == true) {
+                    add(record to song)
+                }
             }
         }
     }

@@ -69,7 +69,7 @@ object LxSources : LxPlayback {
     override fun supports(providerId: String): Boolean {
         val source = LxPlatform.sourceKey(providerId) ?: return false
         return store?.records?.value.orEmpty().any {
-            it.enabled && it.capabilities[source]?.actions?.contains("musicUrl") == true
+            it.enabled && (it.desktop || it.capabilities[source]?.actions?.contains("musicUrl") == true)
         }
     }
 
@@ -283,6 +283,13 @@ object LxSources : LxPlayback {
     }
 
     suspend fun resolveFrom(record: LxSourceRecord, song: Song, audioQuality: String = "auto"): LxResolvedStream {
+        if (record.desktop) {
+            val engine = engineFor(record)
+            val url = runCatching { engine.musicUrl(song.source, audioQuality, song) }.getOrElse { error ->
+                throw IllegalStateException("${record.name}：${error.readableMessage()}")
+            }
+            return LxResolvedStream(record, audioQuality, LxProtocol.stream(url, audioQuality, record))
+        }
         val source = LxPlatform.sourceKey(song.source)
             ?: throw IllegalArgumentException("这个平台不能使用落雪音源")
         val capability = record.capabilities[source]
@@ -330,6 +337,7 @@ object LxSources : LxPlayback {
                 author = metadata.author,
                 homepage = metadata.homepage,
                 sourceUrl = sourceUrl,
+                desktop = metadata.desktop,
                 scriptHash = hash,
                 enabled = existing?.enabled ?: true,
                 importedAt = existing?.importedAt ?: now,
@@ -380,8 +388,17 @@ object LxSources : LxPlayback {
     private fun newEngine(record: LxSourceRecord, script: String): LxScriptEngine = LxScriptEngine(
         appContext = appContext ?: throw IllegalStateException("自定义音源尚未初始化"),
         sourceId = record.id,
-        metadata = LxScriptMetadata(record.name, record.description, record.version, record.author, record.homepage),
+        metadata = LxScriptMetadata(
+            record.name,
+            record.description,
+            record.version,
+            record.author,
+            record.homepage,
+            record.desktop,
+        ),
         rawScript = script,
+        desktop = record.desktop,
+        desktopLibraries = { LxDesktopLibraries.ensure(appContext ?: throw IllegalStateException("自定义音源尚未初始化")) },
         client = client,
         onUpdateNotice = { notice ->
             notices.update { current -> current.filterNot { it.sourceId == notice.sourceId } + notice }

@@ -26,6 +26,8 @@ data class LxSourceRecord(
     val importedAt: Long = 0,
     val updatedAt: Long = 0,
     val capabilities: Map<String, LxCapability> = emptyMap(),
+    /** 落雪桌面版（Electron）插件：只取流，没有平台能力表。 */
+    val desktop: Boolean = false,
 )
 
 data class LxScriptMetadata(
@@ -34,6 +36,8 @@ data class LxScriptMetadata(
     val version: String,
     val author: String,
     val homepage: String,
+    /** 落雪桌面版（Electron）插件：CommonJS 模块，只支持取流。 */
+    val desktop: Boolean = false,
 )
 
 data class LxUpdateNotice(
@@ -97,9 +101,7 @@ internal object LxScriptHeaders {
     fun parse(script: String): LxScriptMetadata {
         require(script.isNotBlank()) { "脚本内容为空" }
         require(script.toByteArray(Charsets.UTF_8).size <= MAX_SCRIPT_BYTES) { "脚本超过 2 MB，无法导入" }
-        require(!isDesktopModule(script)) {
-            "这是洛雪桌面版（Electron）插件，用了 require('axios') 这类 Node 模块，手机端跑不了；请换移动版自定义音源脚本"
-        }
+        if (isDesktopModule(script)) return parseDesktop(script)
         val header = script.take(16_384)
         val values = fields.associateWith { field ->
             Regex(
@@ -121,8 +123,28 @@ internal object LxScriptHeaders {
         .take(maxLength)
 
     /** 桌面版插件导出的是 CommonJS 模块，没声明 `globalThis.lx`，还依赖 Node 内置或三方包。 */
-    private fun isDesktopModule(script: String): Boolean =
+    fun isDesktopModule(script: String): Boolean =
         script.contains("module.exports") && (script.contains("require(\"") || script.contains("require('"))
+
+    /**
+     * 桌面版插件没有 `@name` 头（jsnz 那类只有 `platform` / `version` / `author` 字段），
+     * 名字与版本从 exports 里取；取不到就用文件名兜底，不让导入因为缺注解直接失败。
+     */
+    private fun parseDesktop(script: String): LxScriptMetadata {
+        fun field(name: String): String =
+            Regex("""(?m)^\s*$name\s*:\s*["']([^"'\r\n]{1,200})["']""")
+                .find(script)?.groupValues?.get(1)?.trim().orEmpty().clean(120)
+        val name = field("platform").ifBlank { field("name") }
+        require(name.isNotBlank()) { "缺少 @name，也不是能识别的落雪桌面版插件（没有导出 platform 名）" }
+        return LxScriptMetadata(
+            name = name,
+            description = field("description"),
+            version = field("version"),
+            author = field("author"),
+            homepage = field("srcUrl"),
+            desktop = true,
+        )
+    }
 }
 
 internal const val MAX_SCRIPT_BYTES = 2 * 1024 * 1024

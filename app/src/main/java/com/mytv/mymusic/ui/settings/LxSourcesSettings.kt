@@ -49,6 +49,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mytv.mymusic.data.lx.LxDesktopLibraries
 import com.mytv.mymusic.data.lx.LxPlatform
 import com.mytv.mymusic.data.lx.LxSourceRecord
 import com.mytv.mymusic.data.lx.LxSources
@@ -272,6 +273,13 @@ private fun LxSourceDetailSheet(
 ) {
     AdaptiveSheet(onDismiss = onDismiss, title = record.name, subtitle = sourceSubtitle(record)) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+            if (record.desktop) {
+                SettingsNote(
+                    "桌面版插件：只用来取流，脚本自己按歌名 / id 去它指定的地方要链接。" +
+                        "运行必需的 axios、he 从官方 CDN 下载并逐个校验 sha256 后缓存在本机；" +
+                        "脚本本身仍是可执行代码，能访问任意 HTTP 地址，只导入你信任的来源。",
+                )
+            }
             if (record.sourceUrl.isBlank()) {
                 SettingsNote("本地导入的脚本没有下载地址：会连脚本内容一起同步到你连接的 Gist / Gitee / WebDAV；" +
                     "没连同步时它只存在这台设备上，卸载或清数据就没了，需要重新导入。")
@@ -453,7 +461,11 @@ private fun LxImportSheet(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            SettingsNote("只导入信任的脚本。脚本可以访问网络，但不会获得 myMusic 保存的平台 Cookie。验证失败不会保存。")
+            SettingsNote(
+                "只导入信任的脚本。脚本可以访问网络，但不会获得 myMusic 保存的平台 Cookie。验证失败不会保存。" +
+                    "移动版脚本直接运行；桌面版（Electron）插件需要的 " + LxDesktopLibraries.summary() +
+                    " 会从官方 CDN 下载、逐个校验 sha256 后缓存在本机。",
+            )
         }
     }
 }
@@ -461,7 +473,7 @@ private fun LxImportSheet(
 private fun sourceSubtitle(record: LxSourceRecord): String = listOf(
     record.version.takeIf { it.isNotBlank() }?.let { "v$it" }.orEmpty(),
     record.author,
-    if (record.sourceUrl.isBlank()) "本地脚本" else "在线脚本",
+    if (record.desktop) "桌面版插件" else if (record.sourceUrl.isBlank()) "本地脚本" else "在线脚本",
 ).filter { it.isNotBlank() }.joinToString(" · ")
 
 private fun sourceSummary(record: LxSourceRecord): String = listOf(

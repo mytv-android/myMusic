@@ -28,6 +28,9 @@ import kotlinx.serialization.json.put
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 import java.net.URLDecoder
@@ -50,6 +53,10 @@ internal class LxScriptEngine(
     private val rawScript: String,
     private val client: OkHttpClient,
     private val onUpdateNotice: (LxUpdateNotice) -> Unit,
+    /** 桌面版（Electron）插件：走 CommonJS 宿主，只取流。 */
+    private val desktop: Boolean = false,
+    /** 桌面版插件 `require('axios')` 等依赖的源码，由 [LxDesktopLibraries] 取好传给自己。 */
+    private val desktopLibraries: suspend () -> Map<String, String> = { emptyMap() },
     private val initTimeoutMs: Long = 30_000,
     private val requestTimeoutMs: Long = 25_000,
 ) {
@@ -64,6 +71,8 @@ internal class LxScriptEngine(
     private val closing = AtomicBoolean(false)
     @Volatile
     private var interruptHandle = 0L
+    @Volatile
+    private var libraries: Map<String, String> = emptyMap()
 
     val isClosed: Boolean get() = closing.get()
 
@@ -77,6 +86,7 @@ internal class LxScriptEngine(
     }
 
     suspend fun start(): Map<String, LxCapability> {
+        prepareDesktopLibraries()
         handler.post {
             if (closing.get()) {
                 destroyOnThread()
@@ -98,6 +108,7 @@ internal class LxScriptEngine(
 
     suspend fun musicUrl(source: String, quality: String?, song: com.mytv.mymusic.data.Song): String {
         check(initialized.isCompleted && !closing.get()) { "音源脚本尚未就绪" }
+        if (desktop) return desktopMusicUrl(quality, song)
         val requestKey = "my_${UUID.randomUUID()}"
         val result = CompletableDeferred<String>()
         scriptRequests[requestKey] = result
@@ -125,6 +136,179 @@ internal class LxScriptEngine(
         if (Thread.currentThread() == thread) destroyOnThread() else handler.post { destroyOnThread() }
     }
 
+    /** 桌面版插件：只有 getMediaSource，没有平台概念，任何平台的歌都按它自己的 id 去取。 */
+    private suspend fun desktopMusicUrl(quality: String?, song: com.mytv.mymusic.data.Song): String {
+        val requestKey = "my_" + UUID.randomUUID()
+        val result = CompletableDeferred<String>()
+        scriptRequests[requestKey] = result
+        val payload = buildJsonObject {
+            put("musicItem", LxProtocol.desktopMusicItem(song))
+            put("quality", quality.orEmpty())
+        }.toString()
+        handler.post {
+            if (closing.get()) return@post
+            val call = context?.globalObject?.getJSFunction("__lx_desktop_call__")
+            if (call == null) {
+                scriptRequests.remove(requestKey)?.completeExceptionally(IllegalStateException("桌面版宿主未就绪"))
+                return@post
+            }
+            try {
+                call.call(requestKey, "mediaUrl", payload)
+            } catch (error: Throwable) {
+                scriptRequests.remove(requestKey)?.completeExceptionally(error)
+            } finally {
+                call.release()
+            }
+        }
+        val raw = try {
+            withTimeoutOrNull(requestTimeoutMs) { result.await() }
+                ?: run {
+                    close()
+                    throw IllegalStateException("脚本取流超时")
+                }
+        } finally {
+            scriptRequests.remove(requestKey)
+        }
+        // 宿主回的是 {url} 信封，取流层要的是裸地址
+        return runCatching {
+            json.parseToJsonElement(raw).jsonObject["url"]?.jsonPrimitive?.contentOrNull
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: throw IllegalStateException("脚本没有返回播放地址")
+    }
+
+    private fun createDesktopEnvironment(js: QuickJSContext) {
+        val global = js.globalObject
+        global.setProperty("__lx_native_http__", JSCallFunction { args ->
+            val key = args.getOrNull(0) as? String
+            val options = args.getOrNull(1) as? String
+            if (key != null && options != null) startDesktopHttp(key, options)
+            null
+        })
+        global.setProperty("__lx_native_done__", JSCallFunction { args ->
+            val key = args.getOrNull(0) as? String
+            if (key != null) {
+                val error = (args.getOrNull(1) as? String)?.takeIf { it.isNotBlank() }
+                val data = args.getOrNull(2) as? String
+                scriptRequests.remove(key)?.let { pending ->
+                    if (error != null) pending.completeExceptionally(IllegalStateException(error))
+                    else pending.complete(data.orEmpty())
+                }
+            }
+            null
+        })
+        global.setProperty("__lx_native_set_timeout__", JSCallFunction { args ->
+            val id = (args.getOrNull(0) as? Number)?.toInt() ?: return@JSCallFunction null
+            val delay = (args.getOrNull(1) as? Number)?.toLong()?.coerceIn(0, 86_400_000L) ?: 0L
+            handler.postDelayed({ if (!closing.get()) callJs("__lx_desktop_timeout__", id.toString()) }, delay)
+            null
+        })
+        global.setProperty("__lx_uuid__", JSCallFunction { java.util.UUID.randomUUID().toString() })
+        val host = appContext.assets.open("lx/desktop-host.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        js.evaluate(host, "lx-desktop-host.js")
+        // 依赖在宿主就绪之后再注入：宿主接管了 require
+        for ((name, source) in libraries) {
+            val provide = global.getJSFunction("__lx_desktop_provide_library__")
+            try {
+                provide.call(name, source)
+            } finally {
+                provide.release()
+            }
+        }
+        val install = global.getJSFunction("__lx_desktop_install__")
+        val descriptor = try {
+            install.call(desktopScriptJson())
+        } finally {
+            install.release()
+        }
+        initialized.complete(LxProtocol.parseDesktopCapabilities(descriptor as? String ?: "{}"))
+    }
+
+    private fun desktopScriptJson(): String = buildJsonObject {
+        put("name", metadata.name)
+        put("source", rawScript)
+    }.toString()
+
+    /** 桌面版插件的 axios 请求：本体是 OkHttp，响应形状按宿主 adapter 的约定回给脚本。 */
+    private fun startDesktopHttp(key: String, optionsJson: String) {
+        val root = runCatching { json.parseToJsonElement(optionsJson).jsonObject }.getOrNull()
+        if (root == null) {
+            postDesktopHttp(key, null, "请求参数无法解析")
+            return
+        }
+        val url = root["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val method = root["method"]?.jsonPrimitive?.contentOrNull.orEmpty().uppercase().ifBlank { "GET" }
+        val headers = buildMap {
+            (root["headers"] as? JsonObject)?.forEach { (name, value) ->
+                (value as? JsonPrimitive)?.contentOrNull?.let { put(name, it) }
+            }
+        }
+        val body = when (val raw = root["body"]) {
+            null, JsonNull -> null
+            is JsonPrimitive -> raw.content
+            else -> raw.toString()
+        }
+        val timeout = root["timeout"]?.jsonPrimitive?.doubleOrNull?.toLong()?.coerceIn(1_000, 60_000) ?: 20_000L
+        val binary = (root["binary"] as? JsonPrimitive)?.contentOrNull == "true"
+        val request = try {
+            val builder = Request.Builder().url(url)
+            headers.forEach { (name, value) -> builder.header(name, value) }
+            if (headers.keys.none { it.equals("User-Agent", true) }) builder.header("User-Agent", DEFAULT_UA)
+            if (body != null) builder.method(method, body.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            else builder.method(method, null)
+            builder.build()
+        } catch (error: Throwable) {
+            postDesktopHttp(key, null, error.readableMessage())
+            return
+        }
+        val http = client.newBuilder().callTimeout(timeout, TimeUnit.MILLISECONDS).build()
+        http.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                postDesktopHttp(key, null, "网络请求失败：${e.message}")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    runCatching {
+                        val bytes = it.body.byteStream().readLimited(MAX_DESKTOP_RESPONSE_BYTES + 1)
+                        if (bytes.size > MAX_DESKTOP_RESPONSE_BYTES) throw IOException("响应超过 4 MB 限制")
+                        val text = String(bytes, Charsets.UTF_8)
+                        buildJsonObject {
+                            put("status", it.code)
+                            put("statusText", it.message)
+                            put("headers", buildJsonObject {
+                                it.headers.toMultimap().forEach { (name, values) -> put(name, values.joinToString(",")) }
+                            })
+                            if (binary || isBinaryContentType(it.header("Content-Type"))) put("body", "")
+                            else put("body", text)
+                            put("bytes", buildJsonArray { bytes.forEach { byte -> add(byte.toInt()) } })
+                        }.toString()
+                    }.fold(
+                        onSuccess = { postDesktopHttp(key, it, null) },
+                        onFailure = { postDesktopHttp(key, null, it.readableMessage()) },
+                    )
+                }
+            }
+        })
+    }
+
+    private fun isBinaryContentType(type: String?): Boolean {
+        val value = type.orEmpty().lowercase()
+        return value.startsWith("audio/") || value.startsWith("image/") || value.contains("octet-stream")
+    }
+
+    private fun postDesktopHttp(key: String, response: String?, error: String?) {
+        val payload = buildJsonObject {
+            put("requestKey", key)
+            put("error", error?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("response", response?.let { JsonPrimitive(it) } ?: JsonNull)
+        }.toString()
+        handler.post { if (!closing.get()) callJs("__lx_desktop_http_done__", payload) }
+    }
+
+    /** 桌面版依赖要先在协程里取好：createEnvironment 在 HandlerThread 上跑，不能 suspend。 */
+    suspend fun prepareDesktopLibraries() {
+        if (desktop) libraries = desktopLibraries()
+    }
+
     private fun createEnvironment() {
         loadQuickJs()
         val js = QuickJSContext.create()
@@ -132,6 +316,16 @@ internal class LxScriptEngine(
         installInterruptHandler(js)
         js.setMemoryLimit(MEMORY_LIMIT_BYTES)
         js.setMaxStackSize(512 * 1024)
+        if (desktop) {
+            js.setConsole(object : QuickJSContext.Console {
+                override fun log(info: String) { Log.d(TAG, "[${metadata.name}] $info") }
+                override fun info(info: String) { Log.i(TAG, "[${metadata.name}] $info") }
+                override fun warn(info: String) { Log.w(TAG, "[${metadata.name}] $info") }
+                override fun error(info: String) { Log.e(TAG, "[${metadata.name}] $info") }
+            })
+            createDesktopEnvironment(js)
+            return
+        }
         js.setConsole(object : QuickJSContext.Console {
             override fun log(info: String) { Log.d(TAG, "[${metadata.name}] $info") }
             override fun info(info: String) { Log.i(TAG, "[${metadata.name}] $info") }
@@ -371,6 +565,8 @@ internal class LxScriptEngine(
         const val TAG = "LxScriptEngine"
         const val MEMORY_LIMIT_BYTES = 32 * 1024 * 1024
         const val MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+        const val MAX_DESKTOP_RESPONSE_BYTES = 4 * 1024 * 1024
+        const val DEFAULT_UA = "Mozilla/5.0 (Linux; Android 14) myMusic/LXDesktop"
 
         @Volatile
         var loaderReady = false
