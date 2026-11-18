@@ -160,7 +160,9 @@ internal fun rememberLyricDirector(
     // 随机、按速度的结论；null 表示还没定
     var auto by remember(key, prefs.auto) { mutableStateOf<SongDecision?>(null) }
     var measuring by remember(key, prefs.auto) { mutableStateOf(false) }
-    LaunchedEffect(key, prefs.auto, prefs.tempoRules, prefs.randomPool, pinned, director.applyToken) {
+    // 预设删掉、加回来时重新判断（记住的、抽到的可能是它）
+    val presetIds = prefs.presets.map { it.id }
+    LaunchedEffect(key, prefs.auto, prefs.tempoRules, prefs.randomPool, presetIds, pinned, director.applyToken) {
         measuring = false
         val memory = currentActions.lyricMemory(key)
         director.memory = memory

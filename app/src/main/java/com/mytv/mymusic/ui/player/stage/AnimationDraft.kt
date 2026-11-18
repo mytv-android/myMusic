@@ -22,6 +22,7 @@ internal fun draftOf(saved: LyricStagePrefs): LyricStagePrefs = saved.copy(rando
 /**
  * 把草稿那几项拷到已保存的设置上，其余（pins、提示、副行……）保持已保存的：
  * 随机池等于默认池时写回空集（保持“空＝默认”）；不在随机换法、池又被清空了，就保留原来的池。
+ * 预设只拷设置（按 id），预设的增删改名点了就写，不在草稿里；草稿里没有的预设原样保留。
  */
 internal fun LyricStagePrefs.withDraft(draft: LyricStagePrefs): LyricStagePrefs {
     val pool = when {
@@ -36,6 +37,7 @@ internal fun LyricStagePrefs.withDraft(draft: LyricStagePrefs): LyricStagePrefs 
         spectrum = draft.spectrum,
         pluginSettings = draft.pluginSettings,
         randomPool = pool,
+        presets = presets.map { preset -> draft.presets.firstOrNull { it.id == preset.id }?.let { preset.copy(settings = it.settings) } ?: preset },
     )
 }
 
@@ -87,7 +89,8 @@ internal fun animationDiff(saved: LyricStagePrefs, draft: LyricStagePrefs): List
         }
     }
     if (saved.spectrum != draft.spectrum) out += "频谱：${onOff(saved.spectrum)} → ${onOff(draft.spectrum)}"
-    val ids = (saved.pluginSettings.keys + draft.pluginSettings.keys)
+    // 预设只比已经存下来的（刚新建、还没写回来的那一下不算改动）
+    val ids = (saved.pluginSettings.keys + draft.pluginSettings.keys) + saved.presets.map { it.id }
     val ordered = draft.cards().map { it.id }.filter { it in ids } + ids.filter { id -> draft.cards().none { it.id == id } }
     for (id in ordered) {
         val n = settingChanges(saved, draft, id)

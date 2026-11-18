@@ -1,6 +1,12 @@
 package com.mytv.mymusic.ui.player.stage
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import com.mytv.mymusic.data.LyricStagePrefs
+import com.mytv.mymusic.data.StagePreset
 import com.mytv.mymusic.data.TempoRule
 import kotlin.random.Random
 
@@ -12,23 +18,143 @@ import kotlin.random.Random
 /** 卡片 id 的基础模式部分（`rush#k3f9` → `rush`）；不带 `#` 的就是它自己。 */
 internal fun baseIdOf(id: String): String = id.substringBefore('#')
 
-/** 卡片 id 对应的模式；认不出的按经典。 */
-internal fun LyricStagePrefs.modeOf(id: String): LyricVisualizer = LyricVisualizers.byId(id)
+/** 现有的预设（id 带 `#`、base 模式还在）。 */
+internal fun LyricStagePrefs.presetOf(id: String): StagePreset? =
+    if ('#' !in id) null else presets.firstOrNull { it.id == id }?.takeIf { LyricVisualizers.all.any { mode -> mode.id == it.base } }
 
-/** 面板里卡片的顺序：内置模式按 [LyricVisualizer.order]。 */
-internal fun LyricStagePrefs.cards(): List<LyricVisualizer> = LyricVisualizers.all
+/**
+ * 卡片 id 对应的模式：内置模式；现有的预设是 [PresetVisualizer]；删掉的预设退回它的基础模式；认不出的按经典。
+ */
+internal fun LyricStagePrefs.modeOf(id: String): LyricVisualizer {
+    val base = LyricVisualizers.byId(baseIdOf(id))
+    if ('#' !in id || base.id == ClassicVisualizer.id) return base
+    val preset = presetOf(id) ?: return base
+    return PresetVisualizer(base, id, preset.name)
+}
 
-/** 这个 id 是不是一张现有的卡片。 */
-internal fun LyricStagePrefs.isKnown(id: String): Boolean = LyricVisualizers.all.any { it.id == id }
+/** 面板里卡片的顺序：内置模式按 [LyricVisualizer.order]，每个模式后面按创建顺序接它的预设。 */
+internal fun LyricStagePrefs.cards(): List<LyricVisualizer> = LyricVisualizers.all.flatMap { mode ->
+    listOf(mode) + presets.filter { it.base == mode.id && mode.id != ClassicVisualizer.id }.map { PresetVisualizer(mode, it.id, it.name) }
+}
 
-/** 这张卡片存下来的设置（只有改过的项）。 */
-internal fun LyricStagePrefs.settingsFor(id: String): Map<String, String> = pluginSettings[id].orEmpty()
+/** 这个 id 是不是一张现有的卡片（内置模式或现有的预设）。 */
+internal fun LyricStagePrefs.isKnown(id: String): Boolean =
+    if ('#' in id) presetOf(id) != null && baseIdOf(id) != ClassicVisualizer.id else LyricVisualizers.all.any { it.id == id }
 
-/** 写这张卡片的设置：先按模式的设置表清理，清理完是空的（全是默认值）就删掉这一项。 */
+/** 这张卡片存下来的设置（只有改过的项）：预设是它自己的那套，删掉的预设按基础模式的。 */
+internal fun LyricStagePrefs.settingsFor(id: String): Map<String, String> =
+    presetOf(id)?.settings ?: pluginSettings[baseIdOf(id)].orEmpty()
+
+/** 写这张卡片的设置：先按模式的设置表清理；内置模式清理完是空的（全是默认值）就删掉这一项，预设写进它自己。 */
 internal fun LyricStagePrefs.withSettings(id: String, raw: Map<String, String>): LyricStagePrefs {
     val clean = sanitizeSettings(modeOf(id).settings, raw)
-    return copy(pluginSettings = if (clean.isEmpty()) pluginSettings - id else pluginSettings + (id to clean))
+    if (presetOf(id) != null) return copy(presets = presets.map { if (it.id == id) it.copy(settings = clean) else it })
+    val key = baseIdOf(id)
+    return copy(pluginSettings = if (clean.isEmpty()) pluginSettings - key else pluginSettings + (key to clean))
 }
+
+/**
+ * 风格预设当成一个模式：样子、行为全照基础模式 [base]，只有 id 和名字是自己的，设置由宿主按 id 另取（[settingsFor]）。
+ * 成员一个个显式转发（不用 by 委托，@Composable 成员委托编译器处理不好）。相等只看 id：改预设设置时舞台不会再淡入淡出一次。
+ */
+internal class PresetVisualizer(val base: LyricVisualizer, override val id: String, val name: String) : LyricVisualizer {
+    /** 面板里的名字：“Rush · 海盐”；名字本来就以模式名开头（默认的“Rush 1”）时不再重复。 */
+    override val label: String = presetLabel(base.label, name)
+    override val origin: ModOrigin? get() = base.origin
+    override val order: Int get() = base.order
+    override val settings: List<LyricSetting> get() = base.settings
+    override val hiddenSettings: Int get() = base.hiddenSettings
+    override val hostBackground: Boolean get() = base.hostBackground
+    override val hostSubtitles: Boolean get() = base.hostSubtitles
+    override val wantsAudio: Boolean get() = base.wantsAudio
+    override fun wantsAudio(settings: SettingValues): Boolean = base.wantsAudio(settings)
+    override val interactive: Boolean get() = base.interactive
+    override val drawsWithoutLyrics: Boolean get() = base.drawsWithoutLyrics
+    override val minTextHeight: Dp get() = base.minTextHeight
+    override fun subtitleInset(ctx: LyricStageContext, stage: Size, density: Density): Float = base.subtitleInset(ctx, stage, density)
+
+    @Composable
+    override fun Background(ctx: LyricStageContext, modifier: Modifier) = base.Background(ctx, modifier)
+
+    @Composable
+    override fun Stage(ctx: LyricStageContext, modifier: Modifier) = base.Stage(ctx, modifier)
+
+    override fun equals(other: Any?): Boolean = other is PresetVisualizer && other.id == id
+    override fun hashCode(): Int = id.hashCode()
+    override fun toString(): String = "PresetVisualizer($id)"
+}
+
+/** 预设在面板里的名字，见 [PresetVisualizer.label]。 */
+internal fun presetLabel(baseLabel: String, name: String): String =
+    if (name.startsWith(baseLabel)) name else "$baseLabel · $name"
+
+/** 新预设的 id：`base#` 加 4 位小写字母或数字，和 [existing] 都不重复。 */
+internal fun newPresetId(base: String, existing: Collection<String>, random: Random): String {
+    while (true) {
+        val id = base + "#" + String(CharArray(PRESET_ID_LENGTH) { PRESET_ID_CHARS[random.nextInt(PRESET_ID_CHARS.length)] })
+        if (id !in existing) return id
+    }
+}
+
+/** 新预设的默认名：“Rush 1”，编号取没用过的最小的。 */
+internal fun defaultPresetName(baseLabel: String, presets: List<StagePreset>): String {
+    val names = presets.map { it.name }.toSet()
+    var n = 1
+    while ("$baseLabel $n" in names) n++
+    return "$baseLabel $n"
+}
+
+/** 预设名最多几个字。 */
+internal const val PRESET_NAME_MAX = 20
+
+/**
+ * 删掉预设 [id]：用到它的地方（所有歌都用、按速度某一档、某首歌固定、随机池）都改回它的基础模式，随机池去重。
+ * 返回删完的设置和改了几处。记忆里存的不动，读的时候认不出就跳过。
+ */
+internal fun LyricStagePrefs.withoutPreset(id: String): Pair<LyricStagePrefs, Int> {
+    val base = baseIdOf(id)
+    var count = 0
+    val visualizer = if (visualizer == id) base.also { count++ } else visualizer
+    val rules = tempoRules.map { rule -> if (rule.mode == id) rule.copy(mode = base).also { count++ } else rule }
+    val pins = pins.mapValues { (_, mode) -> if (mode == id) base.also { count++ } else mode }
+    val pool = if (id in randomPool) (randomPool - id + base).also { count++ } else randomPool
+    return copy(
+        presets = presets.filter { it.id != id },
+        visualizer = visualizer,
+        tempoRules = rules,
+        pins = pins,
+        randomPool = pool,
+    ) to count
+}
+
+/**
+ * 撤销删除：把 [preset] 放回原来的位置，[before]（删之前的样子）里用到它、现在还停在基础模式上的地方改回它；
+ * 删了以后又改过的地方不动。
+ */
+internal fun LyricStagePrefs.withPresetRestored(preset: StagePreset, before: LyricStagePrefs): LyricStagePrefs {
+    val id = preset.id
+    val base = preset.base
+    if (presets.any { it.id == id }) return this
+    val at = before.presets.indexOfFirst { it.id == id }.let { if (it < 0) presets.size else it.coerceAtMost(presets.size) }
+    val restored = presets.toMutableList().apply { add(at, preset) }
+    val pool = if (id in before.randomPool && base in randomPool) {
+        randomPool + id - (if (base in before.randomPool) emptySet() else setOf(base))
+    } else {
+        randomPool
+    }
+    return copy(
+        presets = restored,
+        visualizer = if (before.visualizer == id && visualizer == base) id else visualizer,
+        tempoRules = tempoRules.mapIndexed { i, rule ->
+            if (before.tempoRules.getOrNull(i)?.mode == id && rule.mode == base) rule.copy(mode = id) else rule
+        },
+        pins = pins.mapValues { (song, mode) -> if (before.pins[song] == id && mode == base) id else mode },
+        randomPool = pool,
+    )
+}
+
+private const val PRESET_ID_LENGTH = 4
+private const val PRESET_ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 /** 默认的随机池：除经典外的全部内置模式。 */
 internal fun defaultPool(): List<String> = LyricVisualizers.all.map { it.id }.filter { it != ClassicVisualizer.id }

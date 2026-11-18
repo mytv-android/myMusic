@@ -124,9 +124,37 @@ data class LyricStagePrefs(
     val randomPool: Set<String> = emptySet(),
     /** 取色面板“最近用过”：`#RRGGBB`，新的在前，最多 [RECENT_COLORS_LIMIT] 个。点了“完成”就写，不进面板草稿。 */
     val recentColors: List<String> = emptyList(),
+    /**
+     * 风格预设：某个模式的一套设置存成的卡片，按创建顺序。卡片 id 是 `base#xxxx`，和内置模式一样能固定、进随机池、
+     * 配给按速度某一档、给某首歌固定；只存在本机。预设的设置在面板草稿里（[StagePreset.settings]），新建、改名、删除点了就写。
+     */
+    val presets: List<StagePreset> = emptyList(),
 )
 
 const val RECENT_COLORS_LIMIT = 8
+
+/** 一个风格预设：[base] 模式的一套设置 [settings]（只存改过的项），面板里叫 [name]。 */
+@Serializable
+data class StagePreset(
+    val id: String,
+    val base: String,
+    val name: String,
+    val settings: Map<String, String> = emptyMap(),
+)
+
+/**
+ * 读预设：丢掉 id 不是 `base#xxxx`、和 base 对不上、base 是经典、名字空着的条目，同一个 id 只留第一个。
+ * base 模式还在不在由界面判断（删掉的模式的预设不显示，也认不出）。
+ */
+internal fun decodePresets(raw: String?): List<StagePreset> {
+    if (raw.isNullOrBlank()) return emptyList()
+    val all = runCatching { presetJson.decodeFromString<List<StagePreset>>(raw) }.getOrDefault(emptyList())
+    return all.filter { preset ->
+        '#' in preset.id && preset.id.substringBefore('#') == preset.base && preset.base != "classic" && preset.name.isNotBlank()
+    }.distinctBy { it.id }
+}
+
+private val presetJson = Json { ignoreUnknownKeys = true }
 
 /** 每首歌记下的随机结果和速度（最近 [LYRIC_MEMORY_LIMIT] 首）。 */
 @Serializable
@@ -294,6 +322,7 @@ class SettingsStore(private val context: Context) {
     private val lyricHintSeenKey = booleanPreferencesKey("lyric_visualizer_hint_seen")
     private val lyricRandomPoolKey = stringPreferencesKey("lyric_random_pool")
     private val lyricRecentColorsKey = stringPreferencesKey("lyric_recent_colors")
+    private val lyricStagePresetsKey = stringPreferencesKey("lyric_stage_presets")
     private val lyricSplitBilingualKey = booleanPreferencesKey("lyric_split_bilingual")
     private val lyricTraditionalKey = booleanPreferencesKey("lyric_traditional")
     private val lyricAutoRomanizeKey = booleanPreferencesKey("lyric_auto_romanize")
@@ -488,6 +517,7 @@ class SettingsStore(private val context: Context) {
         hintSeen = values[lyricHintSeenKey] ?: false,
         randomPool = decodeStringSet(values[lyricRandomPoolKey]),
         recentColors = decodeStringList(values[lyricRecentColorsKey]).take(RECENT_COLORS_LIMIT),
+        presets = decodePresets(values[lyricStagePresetsKey]),
     )
 
     /** 全屏歌词动画的设置：同一次 edit 里读出当前值再写回，连着改几项不会互相覆盖。 */
@@ -503,6 +533,7 @@ class SettingsStore(private val context: Context) {
         it[lyricHintSeenKey] = value.hintSeen
         it[lyricRandomPoolKey] = json.encodeToString(value.randomPool.toList())
         it[lyricRecentColorsKey] = json.encodeToString(value.recentColors.take(RECENT_COLORS_LIMIT))
+        it[lyricStagePresetsKey] = json.encodeToString(value.presets)
     }
 
     suspend fun lyricText(transform: (LyricTextPrefs) -> LyricTextPrefs) = context.dataStore.edit {
