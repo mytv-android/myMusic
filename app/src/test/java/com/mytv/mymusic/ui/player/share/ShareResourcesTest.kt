@@ -11,6 +11,7 @@ import java.nio.ByteBuffer
  * 歌词分享卡片靠的资源，防止以后被误改：
  * - roboto_flex.ttf 要留着 wght / wdth / slnt 三个轴（竖排的斜体、乱排的字宽、粗糙的窄字都靠它），又被削成单轴就全失效；
  *   字体只含拉丁字符，中文走系统回落字体。
+ * - 分享图片放在 cache/share/，FileProvider 要有这个目录；Android 9 及以下存相册要写存储权限（只到 28）。
  */
 class ShareResourcesTest {
 
@@ -30,6 +31,20 @@ class ShareResourcesTest {
         assertTrue("A 要在字体里", font.hasGlyph('A'.code))
         assertTrue("… 要在字体里", font.hasGlyph(0x2026))
         assertFalse("中文不在子集里，走系统回落字体", font.hasGlyph('中'.code))
+    }
+
+    @Test
+    fun fileProviderExposesShareCache() {
+        val paths = locate("src/main/res/xml/file_paths.xml").readText()
+        assertTrue(Regex("""<cache-path\s+name="share"\s+path="share/"\s*/>""").containsMatchIn(paths))
+    }
+
+    @Test
+    fun manifestAsksWriteStorageOnlyUpToAndroid9() {
+        val manifest = locate("src/main/AndroidManifest.xml").readText()
+        val tag = Regex("""<uses-permission\s+android:name="android.permission.WRITE_EXTERNAL_STORAGE"[^>]*>""").find(manifest)?.value
+            ?: throw AssertionError("清单里没有 WRITE_EXTERNAL_STORAGE")
+        assertTrue(tag, Regex("""android:maxSdkVersion\s*=\s*"28"""").containsMatchIn(tag))
     }
 
     private fun assertAxis(axis: Axis, min: Float, default: Float, max: Float) {

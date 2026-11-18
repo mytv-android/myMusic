@@ -214,13 +214,15 @@ These features were written from the mods' public descriptions only; none of the
 - Per-song random animation — lyric-style-switcher 1.2.1 (Huaq520, https://github.com/Huaq520/lyric-style-switcher).
 - Simplified-to-Traditional conversion and romanization use the transliterators built into Android (`android.icu.text.Transliterator`, Android 10+); no dictionary or library is bundled. opencc-traditional-lyrics and bilingual-ruby-lyrics were consulted only for the feature set.
 
-## Rush (full-screen lyric animation "Rush")
+## Rush (full-screen lyric animation "Rush" and lyric share cards)
 
 - Upstream: https://github.com/shub39/Rush
 - Revision checked: 9fa1391c4b4b472f7d03c9bfbd47612330574463 (master on 2026-11-09, app version 7.2.1)
+- Share cards revision checked: 5a952bf6894df97b63819bdb372abad479c503f6 (master on 2026-11-18)
 - Copyright (C) 2026 Shubham Gorai
 - License: GNU General Public License v3.0 or (at your option) any later version
-- Location: `app/src/main/java/com/mytv/mymusic/ui/player/stage/modes/Rush*.kt`
+- Location: `app/src/main/java/com/mytv/mymusic/ui/player/stage/modes/Rush*.kt`,
+  `app/src/main/java/com/mytv/mymusic/ui/player/share/{ShareCards,ShareCardShapes,ShareModel}.kt`
 - Usage: the "Rush" lyric animation is a Kotlin rewrite of Rush's lyrics page:
   the synced lyric list (current line anchored at one third of the viewport,
   0.8 scale and distance blur for other lines, auto-scroll pause after dragging),
@@ -230,6 +232,14 @@ These features were written from the mods' public descriptions only; none of the
   visualizers). Audio input comes from myMusic's own PCM analysis instead of
   android.media.audiofx.Visualizer. No fonts, icons, strings or other assets
   from Rush are bundled.
+- Usage (lyric share cards): the nine share card layouts (Spotify, Rushed,
+  Vertical, Couplet, Album Art, Hypnotic, Quote, Messy, Brat) with their pixel
+  sizes on a 720 px wide card, the mapping of the 21 album art shapes to
+  Material shapes, the card corner / color options and the full-screen 9:16
+  (1080×1920) canvas, the "randomize" action and the Messy card's per-word
+  random parameters, the ScaledToFit preview layout and the order of the share
+  page options. Some of these styles require Rush Pro; myMusic offers all of
+  them for free. No fonts, icons, strings or other assets from Rush are bundled.
 - These files keep the upstream GPL-3.0-or-later header and copyright line and
   carry a notice of the changes made and the date. They are combined with the
   AGPL-3.0 code of myMusic under section 13 of both licenses; the combined

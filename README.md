@@ -134,7 +134,7 @@ myMusic 是面向 Android 6.0 及以上设备的音乐客户端，支持手机�
 
 歌词动画移植自 Folia 的歌词模组，各自的作者和许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md#folia-mods-full-screen-lyric-animations)。
 
-歌词动画「Rush」照 [Rush](https://github.com/shub39/Rush)（GPL-3.0）的歌词页重写，许可说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md#rush-full-screen-lyric-animation-rush)。
+歌词动画「Rush」和歌词分享卡片照 [Rush](https://github.com/shub39/Rush)（GPL-3.0）的歌词页和分享页重写，许可说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md#rush-full-screen-lyric-animation-rush-and-lyric-share-cards)。
 
 **外观**
 
