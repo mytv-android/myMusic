@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -745,80 +746,86 @@ private fun ColumnScope.FileTransferBody(mode: TransferMode, session: FileTransf
     val tv = LocalAppWindow.current.isTv
     val close = LocalSheetClose.current
     val upload = mode is TransferMode.Upload
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .weight(1f, fill = false)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier.size(240.dp).clip(RoundedCornerShape(22.dp)).background(
-                if (session is FileTransferSession.Ready) Color.White else MaterialTheme.colorScheme.surfaceContainerHigh,
-            ),
-            contentAlignment = Alignment.Center,
+    // 电视面板只有 540dp 高、手机横屏也矮：二维码跟着缩（最小 160dp），下面的说明和「关闭」一屏放得下；再矮才滚动
+    BoxWithConstraints(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+        val qrSize = if (constraints.hasBoundedHeight) (maxHeight - QR_RESERVED).coerceIn(160.dp, 240.dp) else 240.dp
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            when (session) {
-                FileTransferSession.Starting -> LoadingIndicator(Modifier.size(56.dp))
-                is FileTransferSession.Ready -> QrCodeImage(
-                    text = session.url,
-                    modifier = Modifier.fillMaxSize().padding(12.dp),
-                    description = if (upload) "扫描后在手机上选歌单文件发给电视" else "扫描后在手机上下载歌单文件",
-                )
-                is FileTransferSession.Error, FileTransferSession.Expired -> Column(
-                    Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        if (session is FileTransferSession.Error) session.message else "已过期",
-                        style = if (session is FileTransferSession.Error) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleLarge,
-                        fontWeight = if (session is FileTransferSession.Error) null else FontWeight.Bold,
-                        color = if (session is FileTransferSession.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            Box(
+                Modifier.size(qrSize).clip(RoundedCornerShape(22.dp)).background(
+                    if (session is FileTransferSession.Ready) Color.White else MaterialTheme.colorScheme.surfaceContainerHigh,
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                when (session) {
+                    FileTransferSession.Starting -> LoadingIndicator(Modifier.size(56.dp))
+                    is FileTransferSession.Ready -> QrCodeImage(
+                        text = session.url,
+                        modifier = Modifier.fillMaxSize().padding(12.dp),
+                        description = if (upload) "扫描后在手机上选歌单文件发给电视" else "扫描后在手机上下载歌单文件",
                     )
-                    Button(
-                        onClick = onRegenerate,
-                        modifier = Modifier
-                            .padding(top = 14.dp)
-                            .sheetDefaultFocus(tv, session)
-                            .tvFocusRing(RoundedCornerShape(24.dp)),
-                    ) { Text("重新生成") }
+                    is FileTransferSession.Error, FileTransferSession.Expired -> Column(
+                        Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            if (session is FileTransferSession.Error) session.message else "已过期",
+                            style = if (session is FileTransferSession.Error) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleLarge,
+                            fontWeight = if (session is FileTransferSession.Error) null else FontWeight.Bold,
+                            color = if (session is FileTransferSession.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                        Button(
+                            onClick = onRegenerate,
+                            modifier = Modifier
+                                .padding(top = 14.dp)
+                                .sheetDefaultFocus(tv, session)
+                                .tvFocusRing(RoundedCornerShape(24.dp)),
+                        ) { Text("重新生成") }
+                    }
                 }
             }
+            Text(
+                if (upload) {
+                    "用手机扫码，在打开的网页里选文件\nmyMusic 歌单（.mymusic.json）或洛雪（.lxmc）"
+                } else {
+                    "用手机扫码，在打开的网页里下载\n${(mode as TransferMode.Download).file.fileName}"
+                },
+                Modifier.fillMaxWidth().padding(top = 14.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            ListRow(
+                title = "手机和电视连同一个网络",
+                index = 0,
+                count = 1,
+                onClick = null,
+                modifier = Modifier.padding(top = 12.dp),
+                icon = Icons.Filled.PhoneAndroid,
+                summary = "网页只在这一页开着时可用，10 分钟后失效",
+            )
+            LocalNetworkHint(Modifier.padding(top = 12.dp))
+            Button(
+                onClick = close,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 14.dp)
+                    .heightIn(min = 48.dp)
+                    .sheetDefaultFocus(tv && session !is FileTransferSession.Expired && session !is FileTransferSession.Error, session is FileTransferSession.Ready)
+                    .tvFocusRing(RoundedCornerShape(24.dp)),
+            ) { Text("关闭") }
         }
-        Text(
-            if (upload) {
-                "用手机扫码，在打开的网页里选文件\nmyMusic 歌单（.mymusic.json）或洛雪（.lxmc）"
-            } else {
-                "用手机扫码，在打开的网页里下载\n${(mode as TransferMode.Download).file.fileName}"
-            },
-            Modifier.fillMaxWidth().padding(top = 14.dp),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-        ListRow(
-            title = "手机和电视连同一个网络",
-            index = 0,
-            count = 1,
-            onClick = null,
-            modifier = Modifier.padding(top = 12.dp),
-            icon = Icons.Filled.PhoneAndroid,
-            summary = "网页只在这一页开着时可用，10 分钟后失效",
-        )
-        LocalNetworkHint(Modifier.padding(top = 12.dp))
-        Button(
-            onClick = close,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 14.dp)
-                .heightIn(min = 48.dp)
-                .sheetDefaultFocus(tv && session !is FileTransferSession.Expired && session !is FileTransferSession.Error, session is FileTransferSession.Ready)
-                .tvFocusRing(RoundedCornerShape(24.dp)),
-        ) { Text("关闭") }
     }
 }
+
+/** 二维码下面那些东西（两行说明、网络提示、「关闭」）大约占的高度。 */
+private val QR_RESERVED = 240.dp
 
 /**
  * 扫码网页的服务：照 [rememberTvSetupSession] 抄的——只在 RESUMED 时开，离开组合、过期、进后台都停；
