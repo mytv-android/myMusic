@@ -106,6 +106,7 @@ import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.PlaylistPickerSheet
 import com.mytv.mymusic.ui.InfoNote
 import com.mytv.mymusic.ui.TrackActionsSheet
+import com.mytv.mymusic.ui.WallPageActions
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.AppLoading
 import com.mytv.mymusic.ui.components.IconTone
@@ -203,8 +204,9 @@ fun LocalPlaylistScreen(
     var deleteOpen by remember { mutableStateOf(false) }
     var addOpen by remember { mutableStateOf(false) }
     var actionEntry by remember { mutableStateOf<Pair<Song, PlaylistEntryEntity>?>(null) }
-    // 海报视图的设置面板由这里持有：电视上墙自己收方向键，顶栏那一排在有选中格时走不到，
-    // 长按格子的单曲操作面板也要能打开它（见下面 TrackActionsSheet 的 onWallSettings）
+    // 电视海报视图里长按 / 菜单键打开时接在单曲操作下面的整页操作；列表视图里为 null
+    var actionPage by remember { mutableStateOf<WallPageActions?>(null) }
+    // 海报视图的设置面板由这里持有：电视上墙外不放按钮，它从单曲面板里的整页操作打开
     var posterSettingsOpen by remember { mutableStateOf(false) }
     val selection = remember { SelectionState() }
     var pickerOpen by remember { mutableStateOf(false) }
@@ -318,7 +320,10 @@ fun LocalPlaylistScreen(
                 val rowMore: (() -> Unit)? = if (picking) {
                     null
                 } else {
-                    { actionEntry = song to entry }
+                    {
+                        actionPage = null
+                        actionEntry = song to entry
+                    }
                 }
                 val rowLongPress: (() -> Unit)? = if (picking) {
                     null
@@ -504,7 +509,10 @@ fun LocalPlaylistScreen(
                 onEdit = { editing = true },
                 onAddTracks = { addOpen = true },
                 readOnly = readOnly,
-                onSongActions = { song, entry -> actionEntry = song to entry },
+                onSongActions = { song, entry, page ->
+                    actionPage = page
+                    actionEntry = song to entry
+                },
                 onBack = onBack,
                 resetKey = playlistId,
                 holdAwake = actionEntry != null || addOpen || renameOpen || deleteOpen || posterSettingsOpen,
@@ -681,8 +689,7 @@ fun LocalPlaylistScreen(
             onOpenAlbum = { actions.openAlbumOf(song) },
             // 本地歌：这台设备没有文件、放的是匹配到的平台版本时，只有这里能换匹配（换好的会同步回有文件的设备）
             onRematch = if (song.source == LOCAL_SOURCE) ({ actionEntry = null; unplayable.rematch = song }) else null,
-            // 电视上海报视图的墙自己收方向键，顶栏那一排在有选中格时走不到；单曲操作面板里也给一个入口
-            onWallSettings = if (posterView && LocalAppWindow.current.isTv) ({ posterSettingsOpen = true }) else null,
+            wallPage = actionPage.takeIf { posterView },
         )
     }
     if (pickerOpen) {
@@ -760,7 +767,7 @@ private fun LocalPlaylistPoster(
     onEdit: () -> Unit,
     onAddTracks: () -> Unit,
     readOnly: Boolean = false,
-    onSongActions: (Song, PlaylistEntryEntity) -> Unit,
+    onSongActions: (Song, PlaylistEntryEntity, WallPageActions?) -> Unit,
     onBack: () -> Unit,
     resetKey: Any?,
     holdAwake: Boolean,
@@ -781,10 +788,10 @@ private fun LocalPlaylistPoster(
             },
             playFrom = { index -> songs.getOrNull(index)?.let { actions.play(it, songs, openPlayer = false) } },
             playNext = { index -> songs.getOrNull(index)?.let(actions::playSongNext) },
-            songActions = { index ->
+            songActions = { index, page ->
                 val song = songs.getOrNull(index)
                 val entry = songEntries.getOrNull(index)
-                if (song != null && entry != null) onSongActions(song, entry)
+                if (song != null && entry != null) onSongActions(song, entry, page)
             },
             showList = { actions.setCollectionView(CollectionView.List) },
             back = onBack,
@@ -795,16 +802,34 @@ private fun LocalPlaylistPoster(
     }
     val providers = state.providers
     val sourceName: (Song) -> String = remember(providers) { { song -> providerName(providers, song.source) } }
-    // 空歌单沿用列表的提示；“添加歌曲”是搜索面板，不用切回列表
-    val message: (@Composable () -> Unit)? = if (!readOnly && detail != null && songs.isEmpty()) ({
-        EmptyState(
-            icon = Icons.Filled.Search,
-            title = "歌单还是空的",
-            message = "点“添加歌曲”搜索歌曲，或在任意歌曲的菜单里选择“加到歌单”。",
-            actionLabel = "添加歌曲",
-            onAction = onAddTracks,
-        )
-    }) else null
+    // 空歌单沿用列表的提示；“添加歌曲”是搜索面板，不用切回列表。
+    // 电视上墙上没有格子可长按，整页操作够不到：旁边再给一个“切回列表视图”（只读的空歌单只有它）
+    val tv = LocalAppWindow.current.isTv
+    val toList: (() -> Unit)? = if (tv) ({ actions.setCollectionView(CollectionView.List) }) else null
+    val message: (@Composable () -> Unit)? = when {
+        detail == null || songs.isNotEmpty() -> null
+        !readOnly -> ({
+            EmptyState(
+                icon = Icons.Filled.Search,
+                title = "歌单还是空的",
+                message = "点“添加歌曲”搜索歌曲，或在任意歌曲的菜单里选择“加到歌单”。",
+                actionLabel = "添加歌曲",
+                onAction = onAddTracks,
+                secondaryLabel = toList?.let { "切回列表视图" },
+                onSecondary = toList,
+            )
+        })
+        toList != null -> ({
+            EmptyState(
+                icon = Icons.Filled.Search,
+                title = "歌单还是空的",
+                message = "这个歌单是空的。",
+                secondaryLabel = "切回列表视图",
+                onSecondary = toList,
+            )
+        })
+        else -> null
+    }
     CollectionPosterView(
         state = state,
         actions = actions,

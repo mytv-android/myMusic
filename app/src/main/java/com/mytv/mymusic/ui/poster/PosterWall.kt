@@ -23,8 +23,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
@@ -89,12 +87,11 @@ internal fun rememberPosterWallState(): PosterWallState = remember { PosterWallS
  * - 只组合视口外扩两个格距内的格子，按 (块, 位) 复用；镜头平移只在摆放阶段读、对齐整像素，格子不重组；
  * - 点格子放大（不是播放），拖动带惯性，长按交给 [onLongPress]；
  * - 电视上墙自己收方向键、自己记焦点（见 WallFocus.kt），OK 放大，焦点在大卡上按 OK 交给 [onGrownConfirm]，
- *   长按 OK / 菜单键交给 [onLongPress]；空闲 6 秒浮层淡出（[PosterWallState.chromeVisible]），30 秒起漂；
+ *   长按 OK / 菜单键交给 [onLongPress]（菜单键 fromMenu 为 true）；空闲 6 秒浮层淡出（[PosterWallState.chromeVisible]），30 秒起漂；
  * - [grownContent] 是大卡内容（GrownPoster），墙负责槽位、圆角裁切、描边、阴影和放大动画，底下垫着小封面；
  *   `settled` 在放大的弹簧落定或 1 秒后为 true；
  * - [insetTop] / [insetBottom] 是浮层占的高度，大卡居中在两者之间；墙自己画背景（surface + 两团主题色光晕 + 暗角）。
  * - [active] 为 false（播放页盖在墙上）时帧循环停下，切歌跟随直接到位；大卡里的动画由页面按它停（GrownPoster 的 settled）；
- * - [chromeAbove] 电视顶部一排浮层的焦点入口：墙上没有选中格时按上键交给它，下键回来由页面调 [PosterWallState.focusFromAbove]；
  * - [resetKey] 换了一份队列（首数一样也算）时变，整面墙重新入场；[currentKey] 正在播放那首的 key，用来分辨队列重排和切歌；
  * - [holdAwake] 墙上开着面板时为 true：空闲计时不走（电视浮层不淡出、不起漂）。
  * - 折叠屏书本 / 桌面姿态（含双屏）：大卡居中到右页 / 上半屏，格距按那一段选（[rememberWallSpec]）；墙上的格子照常跨折痕铺满。
@@ -112,13 +109,12 @@ internal fun PosterWall(
     prefs: PosterPrefs,
     insetTop: Dp,
     insetBottom: Dp,
-    onLongPress: (index: Int) -> Unit,
+    onLongPress: (index: Int, fromMenu: Boolean) -> Unit,
     grownContent: @Composable BoxScope.(index: Int, current: Boolean, settled: Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onGrownConfirm: (index: Int, current: Boolean) -> Unit = { _, _ -> },
     autoFocus: Boolean = true,
     active: Boolean = true,
-    chromeAbove: FocusRequester? = null,
     resetKey: Any? = null,
     currentKey: String? = null,
     holdAwake: Boolean = false,
@@ -152,7 +148,6 @@ internal fun PosterWall(
         insetTop = insetTop.value,
         insetBottom = insetBottom.value,
         active = active,
-        escapeUp = chromeAbove != null,
         resetKey = resetKey,
         currentKey = currentKey,
         holdAwake = holdAwake,
@@ -212,7 +207,6 @@ internal fun PosterWall(
             }
             .focusRequester(state.focusRequester)
             .onFocusChanged { state.onWallFocus(it.isFocused, it.hasFocus) }
-            .focusProperties { if (chromeAbove != null) up = chromeAbove }
             .focusable(),
     ) {
         // 大卡按墙的格距排版：桌面姿态的上半屏用手机档时，大卡也得是手机档的尺寸和字号

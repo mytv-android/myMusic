@@ -84,6 +84,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.semantics.heading
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -453,7 +457,8 @@ fun InfoNote(text: String, tone: String = "neutral") {
 
 /**
  * 空状态：图标放在 MaterialShapes 裁出的装饰形状里（形状只是装饰，不代表内容类型），
- * 标题 + 说明 + 明确的下一步。
+ * 标题 + 说明 + 明确的下一步。[secondaryLabel] 是并排的第二个按钮（电视海报视图的“切回列表视图”），
+ * 电视焦点落在第一个按钮上（只有第二个时落在它上面）。
  */
 @Composable
 fun EmptyState(
@@ -463,9 +468,12 @@ fun EmptyState(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
     focusAction: Boolean = com.mytv.mymusic.ui.components.LocalAppWindow.current.isTv,
+    secondaryLabel: String? = null,
+    onSecondary: (() -> Unit)? = null,
 ) {
     val actionFocus = remember { androidx.compose.ui.focus.FocusRequester() }
-    if (focusAction && actionLabel != null && onAction != null) {
+    val hasPrimary = actionLabel != null && onAction != null
+    if (focusAction && (hasPrimary || (secondaryLabel != null && onSecondary != null))) {
         androidx.compose.runtime.LaunchedEffect(Unit) { runCatching { actionFocus.requestFocus() } }
     }
     Column(
@@ -495,9 +503,28 @@ fun EmptyState(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        if (actionLabel != null && onAction != null) {
-            Button(onClick = onAction, modifier = Modifier.padding(top = 18.dp).heightIn(min = 48.dp).focusRequester(actionFocus).tvFocusRing(RoundedCornerShape(24.dp))) {
-                Text(actionLabel)
+        if ((actionLabel != null && onAction != null) || (secondaryLabel != null && onSecondary != null)) {
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.padding(top = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (actionLabel != null && onAction != null) {
+                    Button(onClick = onAction, modifier = Modifier.heightIn(min = 48.dp).focusRequester(actionFocus).tvFocusRing(RoundedCornerShape(24.dp))) {
+                        Text(actionLabel)
+                    }
+                }
+                if (secondaryLabel != null && onSecondary != null) {
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = onSecondary,
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .then(if (hasPrimary) Modifier else Modifier.focusRequester(actionFocus))
+                            .tvFocusRing(RoundedCornerShape(24.dp)),
+                    ) {
+                        Text(secondaryLabel)
+                    }
+                }
             }
         }
     }
@@ -598,10 +625,28 @@ fun ConfirmDialog(
 }
 
 /**
+ * 电视海报墙的整页操作（播放全部、切回列表视图、海报墙设置……），接在歌曲操作下面成一组。
+ * [title] 是组的小标题“类型 · 标题”，读屏和眼睛都靠它分清哪些是这一首、哪些是整页的。
+ */
+@androidx.compose.runtime.Immutable
+class WallMenu(val title: String, val items: List<WallMenuItem>)
+
+/** 整页操作的一行；[summary] 是第二行（已收藏、已绑定这类状态），没有就空着。 */
+@androidx.compose.runtime.Immutable
+class WallMenuItem(val icon: ImageVector, val label: String, val onClick: () -> Unit, val summary: String = "")
+
+/**
+ * 歌曲操作面板里要不要接整页操作：[menu] 打开面板时才取（墙上的长按回调在页面组合之外设，
+ * 直接存菜单会让页面每次重组都写一遍状态），[fromMenuKey] 是菜单键打开的——面板滚到这一组、焦点落在第一行。
+ */
+@androidx.compose.runtime.Immutable
+class WallPageActions(val menu: () -> WallMenu?, val fromMenuKey: Boolean)
+
+/**
  * 歌曲操作：手机是底部面板，平板是侧边面板，电视是右侧面板。
  * 顶部三个快捷操作（收藏 / 下载 / 加歌单）用大按钮，其余是列表。
- * [onWallLocate] / [onWallSettings] 只在电视的海报墙里传：墙内焦点在墙自己手里，顶栏那一排方向键走不到，
- * 这一排按钮就不画，改成从任意格长按 OK 打开的面板里进。
+ * [wallPage] 只在电视的海报墙里传：墙内焦点在墙自己手里，墙外不放能拿焦点的工具栏，
+ * 整页操作接在歌曲操作下面成一组，从任意格长按 OK 或按菜单键都能进。
  */
 @Composable
 fun TrackActionsSheet(
@@ -615,8 +660,7 @@ fun TrackActionsSheet(
     onRemoveFromPlaylist: (() -> Unit)?,
     onDismiss: () -> Unit,
     onMerge: (() -> Unit)? = null,
-    onWallLocate: (() -> Unit)? = null,
-    onWallSettings: (() -> Unit)? = null,
+    wallPage: WallPageActions? = null,
     /**
      * 本地歌的「换一个匹配」。这台设备没有文件、正在用匹配到的平台版本播放时，这是唯一能改匹配的入口
      * （歌曲信息只在本地音乐页里），选好的匹配记进线索表并同步回有文件的设备。非本地歌为 null。
@@ -634,6 +678,8 @@ fun TrackActionsSheet(
     onRemoveFromHistory: (() -> Unit)? = null,
 ) {
     var showPlaylists by remember { mutableStateOf(false) }
+    // 打开面板那一刻取一次：面板开着时页面状态变了（比如收藏了），关掉再开才换
+    val page = remember(wallPage) { wallPage?.menu?.invoke()?.takeIf { it.items.isNotEmpty() } }
     com.mytv.mymusic.ui.components.AdaptiveSheet(
         onDismiss = onDismiss,
         title = if (showPlaylists) "添加到歌单" else song.title,
@@ -641,6 +687,9 @@ fun TrackActionsSheet(
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             if (!showPlaylists) {
+                // 电视面板只有一屏高，接上整页操作就放不下了，要能滚；上下留一点给焦点框放大
+                val scroll = rememberScrollState()
+                Column(Modifier.fillMaxWidth().verticalScroll(scroll).padding(vertical = 4.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     QuickAction(if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, if (favorite) "已收藏" else "收藏", favorite, Modifier.weight(1f)) {
                         onToggleFavorite()
@@ -671,8 +720,6 @@ fun TrackActionsSheet(
                     onMerge?.let { SheetRow(Icons.AutoMirrored.Filled.CallMerge, "合并到…", false, it) },
                     onRemoveFromPlaylist?.let { SheetRow(Icons.Filled.Delete, "从歌单移除", true, it) },
                     onRemoveFromHistory?.let { SheetRow(Icons.Filled.Delete, "从最近播放删除", true, it) },
-                    onWallLocate?.let { SheetRow(Icons.Filled.MyLocation, "回到正在播放", false, it) },
-                    onWallSettings?.let { SheetRow(Icons.Filled.Tune, "海报墙设置", false, it) },
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     rows.forEachIndexed { index, row ->
@@ -687,6 +734,8 @@ fun TrackActionsSheet(
                             showChevron = false,
                         )
                     }
+                }
+                if (page != null) WallPageGroup(page, scroll, wallPage?.fromMenuKey == true, onDismiss)
                 }
             } else {
                 if (playlists.isEmpty()) {
@@ -712,6 +761,58 @@ fun TrackActionsSheet(
 }
 
 private class SheetRow(val icon: ImageVector, val label: String, val danger: Boolean, val action: () -> Unit)
+
+/**
+ * 歌曲操作下面的整页操作组：小标题 + 一列行。[focusFirst]（菜单键打开）时面板滚到小标题、焦点落在第一行
+ * （电视上焦点行按系统的跟焦规则停在面板约三成高处，小标题就在它上面）。
+ * 面板在电视上是滑进来的，内容晚一帧才摆好，焦点请求要等摆好再发，没接住就下一帧再试。
+ */
+@Composable
+private fun WallPageGroup(menu: WallMenu, scroll: androidx.compose.foundation.ScrollState, focusFirst: Boolean, onDismiss: () -> Unit) {
+    val firstFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    var groupTop by remember { mutableStateOf(-1) }
+    var firstFocused by remember { mutableStateOf(false) }
+    if (focusFirst) {
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            val top = androidx.compose.runtime.snapshotFlow { groupTop }.first { it >= 0 }
+            scroll.scrollTo(top)
+            repeat(5) {
+                androidx.compose.runtime.withFrameNanos { }
+                if (firstFocused) return@LaunchedEffect
+                runCatching { firstFocus.requestFocus() }
+            }
+        }
+    }
+    Text(
+        menu.title,
+        Modifier
+            .onPlaced { groupTop = it.positionInParent().y.toInt() }
+            .padding(start = 4.dp, top = 16.dp, bottom = 8.dp)
+            .semantics { heading() },
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        menu.items.forEachIndexed { index, item ->
+            com.mytv.mymusic.ui.components.ListRow(
+                title = item.label,
+                index = index,
+                count = menu.items.size,
+                onClick = { item.onClick(); onDismiss() },
+                modifier = if (index == 0) {
+                    Modifier.focusRequester(firstFocus).onFocusChanged { firstFocused = it.isFocused }
+                } else {
+                    Modifier
+                },
+                icon = item.icon,
+                summary = item.summary,
+                showChevron = false,
+            )
+        }
+    }
+}
 
 /**
  * 批量加入歌单：列出本地歌单，也可以新建一个并直接加入。

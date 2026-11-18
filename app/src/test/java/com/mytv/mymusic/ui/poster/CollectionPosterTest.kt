@@ -1,5 +1,8 @@
 package com.mytv.mymusic.ui.poster
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Link
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.CollectionKind
 import com.mytv.mymusic.ui.components.DeviceKind
@@ -84,7 +87,7 @@ class CollectionPosterTest {
     @Test
     fun phoneToolbarAtBottomWithNarrowButtons() {
         val c = posterChromeFor(DeviceKind.Phone)
-        assertFalse(c.toolbarOnTop)
+        assertFalse(c.topRow)
         assertTrue(c.showBack)
         assertEquals(40f, c.itemWidth)
         assertEquals(48f, c.itemHeight)
@@ -106,7 +109,7 @@ class CollectionPosterTest {
     @Test
     fun tabletToolbarAtBottomWithFullSizeButtons() {
         val c = posterChromeFor(DeviceKind.Tablet)
-        assertFalse(c.toolbarOnTop)
+        assertFalse(c.topRow)
         assertTrue(c.showBack)
         assertEquals(48f, c.itemWidth)
         assertEquals(64f, c.toolbarHeight)
@@ -115,16 +118,73 @@ class CollectionPosterTest {
     }
 
     @Test
-    fun tvToolbarSharesTopRowAndLeavesBottomToTheCard() {
+    fun tvTopRowHasNoToolbarButKeepsTheCardWhereItWas() {
         val c = posterChromeFor(DeviceKind.Tv)
-        assertTrue(c.toolbarOnTop)
+        assertTrue(c.topRow)
         assertFalse(c.showBack)
-        assertEquals(48f, c.itemWidth)
+        // 工具栏去掉了，顶排还按原来的 56dp 留：墙让出的 80dp 和大卡位置都不变
         assertEquals(56f, c.topRowHeight)
         assertEquals(80f, c.insetTop(0f))
         assertEquals(0f, c.insetBottom(48f))
         // 电视 540dp 高，让出顶排后放得下 451dp 的大卡
         assertTrue(540f - c.insetTop(0f) - c.insetBottom(0f) >= WallMetrics.Tv.grownSize)
+    }
+
+    // ------------------------------------------------------------------ 电视：整页操作接在单曲面板下面
+
+    @Test
+    fun tvPageMenuHasEveryToolbarActionTitledByKindAndName() {
+        val calls = mutableListOf<String>()
+        val extra = PosterExtraAction(Icons.Filled.Link, "绑定到我的歌单", { calls += "extra" }, on = true, stateDescription = "已绑定，平台更新自动同步")
+        val menu = collectionWallMenu(
+            kindLabel = "榜单",
+            title = "热歌榜",
+            playLabel = "播放全部",
+            hasSongs = true,
+            extra = extra,
+            playingHere = true,
+            sourceSettings = { calls += "source" },
+            onPlayAll = { calls += "play" },
+            onShuffle = { calls += "shuffle" },
+            onLocate = { calls += "locate" },
+            onList = { calls += "list" },
+            onSettings = { calls += "settings" },
+        )
+        assertEquals("榜单 · 热歌榜", menu.title)
+        assertEquals(
+            listOf("播放全部", "随机播放", "绑定到我的歌单", "回到正在播放", "换源设置", "切回列表视图", "海报墙设置"),
+            menu.items.map { it.label },
+        )
+        // 已绑定 / 已收藏写在第二行，别的行没有第二行
+        assertEquals("已绑定，平台更新自动同步", menu.items[2].summary)
+        assertTrue(menu.items.filterIndexed { i, _ -> i != 2 }.all { it.summary.isEmpty() })
+        menu.items.forEach { it.onClick() }
+        assertEquals(listOf("play", "shuffle", "extra", "locate", "source", "list", "settings"), calls)
+    }
+
+    @Test
+    fun tvPageMenuDropsWhatCannotApply() {
+        val menu = collectionWallMenu(
+            kindLabel = LOCAL_PLAYLIST_LABEL,
+            title = "",
+            playLabel = "播放全部",
+            hasSongs = false,
+            extra = PosterExtraAction(Icons.Filled.Edit, "编辑歌单", {}),
+            playingHere = false,
+            sourceSettings = null,
+            onPlayAll = {}, onShuffle = {}, onLocate = {}, onList = {}, onSettings = {},
+        )
+        assertEquals("自建歌单 · 详情", menu.title)
+        // 没有歌不给随机，这张没在放不给回到正在播放，不是榜单没有换源设置；没收藏的状态不写第二行
+        assertEquals(listOf("播放全部", "编辑歌单", "切回列表视图", "海报墙设置"), menu.items.map { it.label })
+        assertEquals("", menu.items[1].summary)
+    }
+
+    @Test
+    fun queuePageMenuOffersLocateOnlyWhenCurrentIsInTheQueue() {
+        assertEquals(listOf("回到正在播放", "海报墙设置"), queueWallMenu("播放队列", true, {}, {}).items.map { it.label })
+        assertEquals(listOf("海报墙设置"), queueWallMenu("听歌模式", false, {}, {}).items.map { it.label })
+        assertEquals("播放队列", queueWallMenu("播放队列", true, {}, {}).title)
     }
 
     // ------------------------------------------------------------------ 下一首播放：不在队列里的歌插到哪

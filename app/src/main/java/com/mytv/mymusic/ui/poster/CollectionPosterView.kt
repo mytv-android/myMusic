@@ -3,6 +3,8 @@ package com.mytv.mymusic.ui.poster
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -53,22 +55,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
@@ -78,6 +78,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.material3.ktx.animateColorScheme
 import com.materialkolor.material3.rememberDynamicColorScheme
@@ -85,8 +86,10 @@ import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.CollectionKind
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.WallMenu
+import com.mytv.mymusic.ui.WallMenuItem
+import com.mytv.mymusic.ui.WallPageActions
 import com.mytv.mymusic.ui.adaptive.foldAnchor
-import com.mytv.mymusic.ui.charts.TvDefaultFocus
 import com.mytv.mymusic.ui.components.DeviceKind
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
@@ -97,24 +100,28 @@ import com.mytv.mymusic.ui.player.AmbientClock
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import com.mytv.mymusic.ui.theme.LocalSeedColor
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlin.coroutines.cancellation.CancellationException
-import kotlin.math.max
 
 /**
  * 详情页海报视图里的动作。播放类都不弹出播放页：队列换成这张歌单（和列表里点一行一样），
- * 开始播放的那首留在墙上长成正在播放的大卡。[playFrom] / [playNext] / [songActions] 的参数是这张歌单里的下标。
+ * 开始播放的那首留在墙上长成正在播放的大卡。[playFrom] / [playNext] / [songActions] 的参数是这张歌单里的下标；
+ * [songActions] 的 page 是电视上接在单曲操作下面的整页操作（手机、平板为 null，工具栏点得到）。
  */
 internal class CollectionPosterOps(
     val playAll: () -> Unit,
     val shuffle: () -> Unit,
     val playFrom: (index: Int) -> Unit,
     val playNext: (index: Int) -> Unit,
-    val songActions: (index: Int) -> Unit,
+    val songActions: (index: Int, page: WallPageActions?) -> Unit,
     val showList: () -> Unit,
     val back: () -> Unit,
 )
 
-/** 工具栏“随机”后面那一格：在线歌单是“收藏”（存成本地歌单，[on] 时主色实心），自建歌单是“编辑”（先切回列表）。 */
+/**
+ * 工具栏“随机”后面那一格：在线歌单是“收藏”（存成本地歌单，[on] 时主色实心），自建歌单是“编辑”（先切回列表）。
+ * 电视上它是整页操作里的一行，[on] 时 [stateDescription] 写在第二行。
+ */
 @Immutable
 internal class PosterExtraAction(
     val icon: ImageVector,
@@ -130,17 +137,19 @@ internal class PosterExtraAction(
  * - 墙铺满整页，曲目就是这张歌单，序号是曲目序号；正在放的歌的 key 在这张歌单里就把它放大、跟着切歌走，
  *   不在（这张歌单没在放）就不放大任何格，镜头对准第一块；
  * - 原来的头部收成顶部胶囊（标题 +“歌单 · 网易云 · 30 首”）和底部浮动工具栏（播放全部 / 随机 / 收藏或编辑 / 定位 / 列表 / 设置）；
- *   电视上工具栏挪到顶部和胶囊同一排，底部留给大卡，焦点默认在“播放全部”，方向键下进墙；
+ * - 电视上不放工具栏：墙自己收方向键、而且是无限的，选中格子后上键永远在墙里走，顶上的按钮遥控器选不到。
+ *   顶排和队列海报墙一样只有胶囊、一行按键提示和时钟，底部留给大卡；进页面焦点直接给墙（在放就落在大卡上，
+ *   否则落在离中心最近的格），工具栏那几项接在长按 OK / 菜单键打开的单曲面板下面（[collectionWallMenu]）；
  * - 配色：这张歌单没在放时取歌单封面的种子色，在放时跟着全局（正在播放的封面）走；
  * - 返回：先交给墙（弹回、焦点从卡里交回墙、收起别的大卡、清焦点），墙这层没事可做了才离开页面；
  * - 加载中墙上是同样版式的骨架格（占位格走微光），失败 / 空的时候 [message] 盖在墙中间；
  * - 折叠屏书本 / 双竖：大卡、提示和底部工具栏在右页，胶囊收在左页；桌面 / 双横：大卡和提示在上半屏，工具栏留在下半屏。
  *
- * 多选和自建歌单的编辑只在列表视图里；长按格子、大卡的“更多”只弹单曲操作（[CollectionPosterOps.songActions]）。
+ * 多选和自建歌单的编辑只在列表视图里；长按格子、大卡的“更多”弹单曲操作（[CollectionPosterOps.songActions]）。
  * [resetKey] 换了一张歌单（首数一样也算）时变，整面墙重排、重新入场；[holdAwake] 是页面自己开着的面板（单曲操作等），
  * 开着时浮层不淡出、墙不起漂。
- * 设置面板开着与否由调用方持有（[settingsOpen] / [onSettingsOpenChange]）：电视上墙自己收方向键，顶栏那一排
- * 在有选中格时走不到，长按格子的单曲操作面板也要能打开它（见 SongActionsSheet 的 onWallSettings）。
+ * 设置面板开着与否由调用方持有（[settingsOpen] / [onSettingsOpenChange]）：电视上它从单曲面板里的整页操作打开。
+ * 墙上没有歌（读取失败、空歌单）时电视没有格子可长按，[message] 里要给“切回列表视图”。
  */
 @Composable
 internal fun CollectionPosterView(
@@ -166,7 +175,6 @@ internal fun CollectionPosterView(
     val window = LocalAppWindow.current
     val chrome = posterChromeFor(window.kind)
     val wall = rememberPosterWallState()
-    val playFocus = remember { FocusRequester() }
     val cardFocus = remember { FocusRequester() }
     val currentKey = state.current?.key
     val track = state.currentTrack
@@ -184,7 +192,7 @@ internal fun CollectionPosterView(
     val spec = rememberWallSpec(wall)
     val segment = spec.segment
     // 桌面姿态胶囊挪到下半屏顶上（spec.lowerTop），上半屏顶上只让状态栏，大卡才放得下
-    val lowerTop = spec.lowerTop.takeUnless { chrome.toolbarOnTop }
+    val lowerTop = spec.lowerTop.takeUnless { chrome.topRow }
     val insetTop = if (lowerTop != null) chrome.insetTopWithoutRow(statusTop.value).dp else chrome.insetTop(statusTop.value).dp
     val insetBottom = chrome.insetBottom(overlay.value).dp
     // 进度只交给大卡在绘制阶段读，这里不读值
@@ -198,8 +206,6 @@ internal fun CollectionPosterView(
     )
     val pulseScale: () -> Float = remember(pulse) { { pulse.coverScale } }
 
-    // 电视默认焦点在“播放全部”，和列表视图一致；墙不自己抢焦点（autoFocus = false）
-    TvDefaultFocus(playFocus)
     // 先交给墙（弹回、交回焦点、收起别的大卡、清焦点），墙这层没事可做了才离开页面。
     // 预测性返回：手势过程中整页跟手缩小下移淡出，走到一半可以反悔
     var backProgress by remember { mutableFloatStateOf(0f) }
@@ -215,6 +221,45 @@ internal fun CollectionPosterView(
 
     val tv = window.isTv
     val hasSongs = songs.isNotEmpty()
+    val hasMessage = message != null
+    // 电视进页面焦点直接给墙：等墙按这份歌排好（换歌单时墙在应用阶段重排）再选中一格，在放就是大卡。
+    // 有提示（失败、空）时提示里的按钮自己拿焦点；读取中墙上是占位格，焦点先放在墙上，歌到了再选格
+    if (tv) {
+        LaunchedEffect(wall, hasSongs, hasMessage, resetKey) {
+            when {
+                hasSongs -> {
+                    snapshotFlow { wall.scene != null && wall.viewport != null }.first { it }
+                    withFrameNanos { }
+                    wall.takeFocus()
+                }
+                !hasMessage -> {
+                    withFrameNanos { }
+                    wall.requestWallFocus()
+                }
+            }
+        }
+    }
+    // 整页操作：长按 / 菜单键打开面板时才取，取的是那一刻的状态（这张歌单在不在放、收没收藏）
+    val playingHere = currentIndex >= 0
+    val menuNow = rememberUpdatedState {
+        collectionWallMenu(
+            kindLabel = kindLabel,
+            title = title,
+            playLabel = playLabel,
+            hasSongs = hasSongs,
+            extra = extra,
+            playingHere = playingHere,
+            sourceSettings = sourceSettings,
+            onPlayAll = ops.playAll,
+            onShuffle = ops.shuffle,
+            onLocate = wall::locate,
+            onList = ops.showList,
+            onSettings = { onSettingsOpenChange(true) },
+        )
+    }
+    val page: (fromMenu: Boolean) -> WallPageActions? = remember(tv, menuNow) {
+        { fromMenu -> if (tv) WallPageActions({ menuNow.value() }, fromMenu) else null }
+    }
     val playing = state.playing
     val duration = state.duration
     val lyrics = if (lyricsReady) state.lyrics else ""
@@ -248,7 +293,7 @@ internal fun CollectionPosterView(
                     if (tv) wall.requestWallFocus()
                 },
                 onPlayNext = { ops.playNext(index) },
-                onMore = { ops.songActions(index) },
+                onMore = { ops.songActions(index, page(false)) },
                 focused = wall.grownFocused,
                 primaryFocusRequester = cardFocus,
                 coverPlaceholderKey = wall.grownCoverKey,
@@ -281,16 +326,15 @@ internal fun CollectionPosterView(
                 prefs = state.poster,
                 insetTop = insetTop,
                 insetBottom = insetBottom,
-                onLongPress = ops.songActions,
+                onLongPress = { index, fromMenu -> ops.songActions(index, page(fromMenu)) },
                 grownContent = grown,
                 onGrownConfirm = { _, _ ->
                     // 焦点交进卡里：正在播放的大卡落在播放键上，别的歌落在“播放”上；返回键回到墙上
                     runCatching { cardFocus.requestFocus() }
                 },
+                // 电视的焦点由上面按有没有歌来给
                 autoFocus = false,
                 active = shown,
-                // 电视：墙上没有选中格时上键回到顶排的“播放全部”，顶排按下键由下面的 onPreviewKeyEvent 交回墙
-                chromeAbove = if (tv) playFocus else null,
                 resetKey = resetKey,
                 holdAwake = holdAwake || settingsOpen || state.sourcePickerTrack != null,
             )
@@ -317,11 +361,8 @@ internal fun CollectionPosterView(
                     playLabel = playLabel,
                     canShuffle = hasSongs,
                     extra = extra,
-                    // 榜单的换源设置：电视放在顶排工具栏里（胶囊拿不到焦点），手机、平板放在胶囊右端
-                    sourceSettings = sourceSettings.takeIf { chrome.toolbarOnTop },
                     canLocate = currentIndex >= 0,
                     locateHot = currentIndex >= 0 && !wall.currentGrown,
-                    playFocus = playFocus,
                     onPlayAll = ops.playAll,
                     onShuffle = ops.shuffle,
                     onLocate = wall::locate,
@@ -330,19 +371,13 @@ internal fun CollectionPosterView(
                     modifier = modifier,
                 )
             }
-            if (chrome.toolbarOnTop) {
+            if (chrome.topRow) {
+                // 电视顶排：胶囊 + 按键提示（都拿不到焦点，空闲时一起淡出）+ 时钟，一个按钮都不放
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .padding(start = chrome.side.dp, end = chrome.side.dp, top = statusTop + chrome.top.dp)
-                        .height(chrome.topRowHeight.dp)
-                        // 墙铺满整屏，普通焦点搜索不把它当成“下方”：顶排里按下键直接交回墙。
-                        // 墙上没歌（读取中、失败、空）时不拦，下键按普通规则落到中间提示的按钮上
-                        .onPreviewKeyEvent { e ->
-                            if (e.key != Key.DirectionDown || e.type != KeyEventType.KeyDown || !hasSongs) return@onPreviewKeyEvent false
-                            wall.focusFromAbove()
-                            true
-                        },
+                        .height(chrome.topRowHeight.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(
@@ -350,8 +385,9 @@ internal fun CollectionPosterView(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        Box(Modifier.weight(1f)) { TitlePill(title, subtitle, onBack = null) }
-                        toolbar(Modifier)
+                        TitlePill(title, subtitle, onBack = null, modifier = Modifier.weight(1f, fill = false))
+                        // 墙上没有歌时没有格子可长按，提示不出（提示卡里有“切回列表视图”）
+                        if (hasSongs) TvWallHint(withMenu = true, then = "播放全部、随机、切回列表…")
                     }
                     // 时钟本来就是给空闲时看的，不跟着淡出
                     if (state.tvAmbientClock) {
@@ -416,16 +452,18 @@ private val LoadingFeed = PosterFeed(appending = true)
 private val NoPulse: () -> Float = { 1f }
 
 private const val PILL_HEIGHT = 48f
+private const val TV_TOP_ROW_HEIGHT = 56f
 private const val INSET_GAP = 4f
 
 /**
- * 海报视图浮层按设备的尺寸（dp）。手机、平板：左上胶囊 + 底部居中的浮动工具栏；电视：两者在顶部同一排，底部留给大卡。
+ * 海报视图浮层按设备的尺寸（dp）。手机、平板：左上胶囊 + 底部居中的浮动工具栏；电视（[topRow]）：顶上一排胶囊、
+ * 按键提示和时钟，没有工具栏，底部留给大卡。
  * [side] 浮层离左右边，[top] 顶排离状态栏下沿，[bottom] 底部工具栏离底部浮层（迷你播放器、导航栏），
  * [itemWidth] 工具栏图标钮宽（手机 40，其余 48），钮高都是 48。
  */
 @Immutable
 internal data class PosterChrome(
-    val toolbarOnTop: Boolean,
+    val topRow: Boolean,
     val showBack: Boolean,
     val side: Float,
     val top: Float,
@@ -436,8 +474,8 @@ internal data class PosterChrome(
 ) {
     val toolbarHeight: Float get() = itemHeight + toolbarPadding * 2
 
-    /** 顶排高度：电视上胶囊和工具栏并排、垂直居中，取高的那个。 */
-    val topRowHeight: Float get() = if (toolbarOnTop) max(PILL_HEIGHT, toolbarHeight) else PILL_HEIGHT
+    /** 顶排高度：电视按原来工具栏的 56dp 留，墙让出的高度和大卡位置都不变；手机、平板是胶囊高。 */
+    val topRowHeight: Float get() = if (topRow) TV_TOP_ROW_HEIGHT else PILL_HEIGHT
 
     /** 墙的 insetTop：状态栏 + 顶排 + 4dp。电视 20 + 56 + 4 = 80，451dp 的大卡在 540dp 高里正好放下。 */
     fun insetTop(statusTop: Float): Float = statusTop + top + topRowHeight + INSET_GAP
@@ -445,16 +483,16 @@ internal data class PosterChrome(
     /** 顶排不在顶上时（桌面姿态胶囊挪到下半屏）的 insetTop：只让状态栏 + 4dp。 */
     fun insetTopWithoutRow(statusTop: Float): Float = statusTop + INSET_GAP
 
-    /** 墙的 insetBottom：底部浮层 + 工具栏 + 4dp；电视工具栏在顶上，底下不让。 */
+    /** 墙的 insetBottom：底部浮层 + 工具栏 + 4dp；电视没有工具栏，底下不让。 */
     fun insetBottom(overlayBottom: Float): Float =
-        if (toolbarOnTop) 0f else overlayBottom + bottom + toolbarHeight + INSET_GAP
+        if (topRow) 0f else overlayBottom + bottom + toolbarHeight + INSET_GAP
 }
 
 internal fun posterChromeFor(kind: DeviceKind): PosterChrome = when (kind) {
-    DeviceKind.Phone -> PosterChrome(toolbarOnTop = false, showBack = true, side = 12f, top = 8f, bottom = 12f, itemWidth = 40f, toolbarPadding = 6f)
-    DeviceKind.Tablet -> PosterChrome(toolbarOnTop = false, showBack = true, side = 24f, top = 12f, bottom = 24f, itemWidth = 48f, toolbarPadding = 8f)
+    DeviceKind.Phone -> PosterChrome(topRow = false, showBack = true, side = 12f, top = 8f, bottom = 12f, itemWidth = 40f, toolbarPadding = 6f)
+    DeviceKind.Tablet -> PosterChrome(topRow = false, showBack = true, side = 24f, top = 12f, bottom = 24f, itemWidth = 48f, toolbarPadding = 8f)
     // 电视没有返回钮（遥控器有返回键）；左边是导航栏，左右边距和队列海报墙的顶排一致
-    DeviceKind.Tv -> PosterChrome(toolbarOnTop = true, showBack = false, side = 32f, top = 20f, bottom = 0f, itemWidth = 48f, toolbarPadding = 4f)
+    DeviceKind.Tv -> PosterChrome(topRow = true, showBack = false, side = 32f, top = 20f, bottom = 0f, itemWidth = 48f, toolbarPadding = 4f)
 }
 
 /** 胶囊副标题里的类型名。 */
@@ -588,8 +626,87 @@ private fun TitlePill(
 }
 
 /**
- * M3E 浮动工具栏：48dp 高的“播放全部”主按钮（primary），右边随机 / 收藏或编辑 / 定位 / 列表 / 设置。
- * “定位”在这张歌单没在放时置灰，正在放的那首没放大时高亮（primaryContainer 底）。
+ * 电视海报视图的整页操作，就是手机工具栏上那几项，一项不少；用不上的不出：没有歌不给随机，
+ * 这张歌单没在放不给“回到正在播放”，只有榜单有换源设置。小标题是“类型 · 标题”。
+ */
+internal fun collectionWallMenu(
+    kindLabel: String,
+    title: String,
+    playLabel: String,
+    hasSongs: Boolean,
+    extra: PosterExtraAction?,
+    playingHere: Boolean,
+    sourceSettings: (() -> Unit)?,
+    onPlayAll: () -> Unit,
+    onShuffle: () -> Unit,
+    onLocate: () -> Unit,
+    onList: () -> Unit,
+    onSettings: () -> Unit,
+): WallMenu = WallMenu(
+    title = listOf(kindLabel, title.ifBlank { "详情" }).filter { it.isNotBlank() }.joinToString(" · "),
+    items = listOfNotNull(
+        WallMenuItem(Icons.Filled.PlayArrow, playLabel, onPlayAll),
+        if (hasSongs) WallMenuItem(Icons.Filled.Shuffle, "随机播放", onShuffle) else null,
+        extra?.let { WallMenuItem(it.icon, it.description, it.onClick, summary = if (it.on) it.stateDescription.orEmpty() else "") },
+        if (playingHere) WallMenuItem(Icons.Filled.MyLocation, "回到正在播放", onLocate) else null,
+        sourceSettings?.let { WallMenuItem(Icons.Filled.SwapHoriz, "换源设置", it) },
+        WallMenuItem(Icons.AutoMirrored.Filled.ViewList, "切回列表视图", onList),
+        WallMenuItem(Icons.Filled.Tune, "海报墙设置", onSettings),
+    ),
+)
+
+/**
+ * 电视顶排的按键提示：「长按 OK 或 菜单：…」，36dp 高、黑 38% 底的圆角条，按键名画成描边小键帽。
+ * 纯文字、拿不到焦点，跟胶囊一起淡出；墙外不放按钮（遥控器选不到），靠它告诉用户整页操作在哪。
+ * 读屏整条读一句。
+ */
+@Composable
+internal fun TvWallHint(withMenu: Boolean, then: String, modifier: Modifier = Modifier) {
+    val spoken = if (withMenu) "长按 OK 或菜单：$then" else "长按 OK：$then"
+    Row(
+        modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = 0.38f))
+            .padding(horizontal = 14.dp)
+            .clearAndSetSemantics { contentDescription = spoken },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        HintText("长按")
+        KeyCap("OK")
+        if (withMenu) {
+            HintText("或")
+            KeyCap("菜单")
+        }
+        HintText("：$then")
+    }
+}
+
+@Composable
+private fun HintText(text: String) {
+    Text(text, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, maxLines = 1, softWrap = false)
+}
+
+@Composable
+private fun KeyCap(label: String) {
+    val color = MaterialTheme.colorScheme.onSurface
+    Text(
+        label,
+        Modifier
+            .border(1.5.dp, color, RoundedCornerShape(6.dp))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+        color = color,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.ExtraBold,
+        maxLines = 1,
+        softWrap = false,
+    )
+}
+
+/**
+ * M3E 浮动工具栏（只在手机、平板上）：48dp 高的“播放全部”主按钮（primary），右边随机 / 收藏或编辑 / 定位 / 列表 / 设置。
+ * “定位”在这张歌单没在放时置灰，正在放的那首没放大时高亮（primaryContainer 底）。榜单的换源设置在胶囊右端。
  */
 @Composable
 private fun PosterToolbar(
@@ -597,10 +714,8 @@ private fun PosterToolbar(
     playLabel: String,
     canShuffle: Boolean,
     extra: PosterExtraAction?,
-    sourceSettings: (() -> Unit)?,
     canLocate: Boolean,
     locateHot: Boolean,
-    playFocus: FocusRequester,
     onPlayAll: () -> Unit,
     onShuffle: () -> Unit,
     onLocate: () -> Unit,
@@ -619,7 +734,7 @@ private fun PosterToolbar(
         ),
         contentPadding = PaddingValues(horizontal = chrome.toolbarPadding.dp),
     ) {
-        // 和列表视图一样不置灰（歌还没到时点了不做事），电视的默认焦点才落得上。
+        // 和列表视图一样不置灰（歌还没到时点了不做事）。
         // 360dp 的手机上整条约 328dp，放大字体放不下时主按钮的字省略，图标钮不被挤掉
         Button(
             onClick = onPlayAll,
@@ -627,7 +742,6 @@ private fun PosterToolbar(
             modifier = Modifier
                 .weight(1f, fill = false)
                 .height(height)
-                .focusRequester(playFocus)
                 .tvFocusRing(CircleShape),
             contentPadding = PaddingValues(start = 14.dp, end = 18.dp),
         ) {
@@ -642,7 +756,6 @@ private fun PosterToolbar(
         }
         ToolButton(Icons.Filled.MyLocation, "定位正在播放", onLocate, width, height, enabled = canLocate, selected = locateHot)
         ToolButton(Icons.AutoMirrored.Filled.ViewList, "切回列表视图", onList, width, height)
-        if (sourceSettings != null) ToolButton(Icons.Filled.SwapHoriz, "换源设置", sourceSettings, width, height)
         ToolButton(Icons.Filled.Tune, "海报墙设置", onSettings, width, height)
     }
 }

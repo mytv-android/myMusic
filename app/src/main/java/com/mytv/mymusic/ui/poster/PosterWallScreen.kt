@@ -43,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -66,6 +67,9 @@ import com.mytv.mymusic.ui.ListeningFeedUi
 import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.WallMenu
+import com.mytv.mymusic.ui.WallMenuItem
+import com.mytv.mymusic.ui.WallPageActions
 import com.mytv.mymusic.ui.adaptive.foldAnchor
 import com.mytv.mymusic.ui.charts.SongAction
 import com.mytv.mymusic.ui.charts.SongActionsSheet
@@ -122,6 +126,8 @@ internal fun PosterWallScreen(
     val primaryFocus = remember { FocusRequester() }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var actionSong by remember { mutableStateOf<Song?>(null) }
+    // 菜单键打开的单曲面板：焦点直接落在整页那一组（电视）
+    var actionFromMenu by remember { mutableStateOf(false) }
     val snackbar = LocalAppSnackbar.current
     val scope = rememberCoroutineScope()
     val screenReader = rememberScreenReaderOn()
@@ -213,7 +219,12 @@ internal fun PosterWallScreen(
             prefs = state.poster,
             insetTop = insetTop,
             insetBottom = insetBottom,
-            onLongPress = { index -> songs.getOrNull(index)?.let { actionSong = it } },
+            onLongPress = { index, fromMenu ->
+                songs.getOrNull(index)?.let {
+                    actionFromMenu = fromMenu
+                    actionSong = it
+                }
+            },
             onGrownConfirm = { _, _ ->
                 // 焦点交进卡里：正在播放的卡落在播放键上（再按 OK 播放 / 暂停，左右键到上一首、下一首、打开播放页和进度条），
                 // 别的歌落在“播放”上，再选“播放 / 下一首播放 / 更多”；返回键回到墙上
@@ -252,7 +263,10 @@ internal fun PosterWallScreen(
                             if (tv) wall.requestWallFocus()
                         },
                         onPlayNext = { playNext(index) },
-                        onMore = { actionSong = song },
+                        onMore = {
+                            actionFromMenu = false
+                            actionSong = song
+                        },
                         focused = wall.grownFocused,
                         primaryFocusRequester = primaryFocus,
                         coverPlaceholderKey = wall.grownCoverKey,
@@ -270,7 +284,7 @@ internal fun PosterWallScreen(
                 }
             },
         )
-        val title = feed?.name ?: "播放队列"
+        val title = feed?.name ?: QUEUE_TITLE
         val subtitle = wallSubtitle(feed, songs.size, currentIndex)
         if (tv) {
             TvTopRow(
@@ -300,21 +314,35 @@ internal fun PosterWallScreen(
     if (settingsOpen) {
         PosterSettingsSheet(state.poster, actions::setPosterPrefs) { settingsOpen = false }
     }
+    // 电视上墙里的方向键永远留在墙里，顶栏没有能拿焦点的按钮：回到正在播放、海报墙设置接在长按 OK / 菜单键的面板里
+    val menuNow = rememberUpdatedState {
+        queueWallMenu(feed?.name ?: QUEUE_TITLE, currentIndex >= 0, wall::locate) { settingsOpen = true }
+    }
     actionSong?.let { song ->
+        val wallPage = remember(song, actionFromMenu, tv) { if (tv) WallPageActions({ menuNow.value() }, actionFromMenu) else null }
         SongActionsSheet(
             SongAction(song, songs),
             favorites,
             playlists,
             actions,
             onDismiss = { actionSong = null },
-            // 电视上墙里的方向键永远留在墙里，顶栏没有能拿焦点的按钮：这两个入口只放在长按 OK 的面板里
-            onWallLocate = if (tv) ({ wall.locate() }) else null,
-            onWallSettings = if (tv) ({ settingsOpen = true }) else null,
+            wallPage = wallPage,
         )
     }
 }
 
 private val NoPulse: () -> Float = { 1f }
+
+private const val QUEUE_TITLE = "播放队列"
+
+/** 队列海报墙的整页操作（电视）：正在放的那首在队列里才给“回到正在播放”，再加海报墙设置；小标题是胶囊上的标题。 */
+internal fun queueWallMenu(title: String, playingHere: Boolean, onLocate: () -> Unit, onSettings: () -> Unit): WallMenu = WallMenu(
+    title = title,
+    items = listOfNotNull(
+        if (playingHere) WallMenuItem(Icons.Filled.MyLocation, "回到正在播放", onLocate) else null,
+        WallMenuItem(Icons.Filled.Tune, "海报墙设置", onSettings),
+    ),
+)
 
 /**
  * 胶囊副标题。队列：“30 首 · 正在播放第 3 首”。听歌模式不写总首数（一直在变）：
@@ -450,8 +478,9 @@ private fun TvTopRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 电视没有返回钮（遥控器有返回键）；这一排也不放定位 / 设置
+            // 电视没有返回钮（遥控器有返回键）；这一排也不放定位 / 设置（选不到），只用一行提示告诉用户它们在哪
             WallTitlePill(title, subtitle, onBack = null, Modifier.weight(1f, fill = false))
+            TvWallHint(withMenu = false, then = "回到正在播放、海报墙设置")
             if (screenReader) ListEntry(onOpenQueue)
         }
         if (showClock) {

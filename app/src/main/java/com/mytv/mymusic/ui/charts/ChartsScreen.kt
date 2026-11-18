@@ -971,8 +971,8 @@ internal fun SongActionsSheet(
     playlists: List<LocalPlaylistSummary>,
     actions: MusicActions,
     onDismiss: () -> Unit,
-    onWallLocate: (() -> Unit)? = null,
-    onWallSettings: (() -> Unit)? = null,
+    /** 电视海报墙里长按 / 菜单键打开时，接在歌曲操作下面的整页操作。 */
+    wallPage: com.mytv.mymusic.ui.WallPageActions? = null,
     /** 歌手页里打开时传这位歌手：面板里不再给“查看歌手：他自己”。 */
     currentArtist: String = "",
     /** 专辑页里打开时传这张专辑：面板里不再给“查看专辑”。 */
@@ -991,8 +991,7 @@ internal fun SongActionsSheet(
         },
         onRemoveFromPlaylist = null,
         onDismiss = onDismiss,
-        onWallLocate = onWallLocate,
-        onWallSettings = onWallSettings,
+        wallPage = wallPage,
         onOpenArtist = { name -> actions.openArtistByName(name, target.song) },
         onOpenAlbum = { actions.openAlbumOf(target.song) },
         hideArtist = currentArtist,

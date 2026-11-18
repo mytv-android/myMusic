@@ -390,7 +390,7 @@ private fun SongTile(
                 true
             }
             onLongClick(label = "歌曲操作") {
-                wall.onLongPress(index)
+                wall.onLongPress(index, false)
                 true
             }
         }

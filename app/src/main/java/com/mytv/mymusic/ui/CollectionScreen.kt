@@ -171,8 +171,9 @@ fun CollectionScreen(
     onOpenPlaybackSettings: () -> Unit,
 ) {
     var target by remember { mutableStateOf<SongAction?>(null) }
-    // 海报视图的设置面板由这里持有：电视上墙自己收方向键，顶栏那一排在有选中格时走不到，
-    // 长按格子的单曲操作面板也要能打开它（见下面 SongActionsSheet 的 onWallSettings）
+    // 电视海报视图里长按 / 菜单键打开时接在单曲操作下面的整页操作；列表视图里为 null
+    var targetPage by remember { mutableStateOf<WallPageActions?>(null) }
+    // 海报视图的设置面板由这里持有：电视上墙外不放按钮，它从单曲面板里的整页操作打开
     var posterSettingsOpen by rememberSaveable(collection.kind, collection.id) { mutableStateOf(false) }
     // 歌单的收藏 = 绑定平台歌单（跟随平台更新）；榜单 / 专辑 = 存成本地歌单，同名视为已收藏
     var savedNow by rememberSaveable(collection.kind, collection.id) { mutableStateOf(false) }
@@ -198,7 +199,18 @@ fun CollectionScreen(
         )
     }
     val tint = rememberCoverTint(collection.cover, actions)
-    val onMore: (Song) -> Unit = remember(songs) { { song -> target = SongAction(song, songs) } }
+    val onMore: (Song) -> Unit = remember(songs) {
+        { song ->
+            targetPage = null
+            target = SongAction(song, songs)
+        }
+    }
+    val onPosterMore: (Song, WallPageActions?) -> Unit = remember(songs) {
+        { song, page ->
+            targetPage = page
+            target = SongAction(song, songs)
+        }
+    }
     val selection = remember { SelectionState() }
     var pickerOpen by remember { mutableStateOf(false) }
     SelectionPredictiveBack(selection)
@@ -236,7 +248,7 @@ fun CollectionScreen(
                 ops = ops,
                 actions = actions,
                 onBack = onBack,
-                onMore = onMore,
+                onMore = onPosterMore,
                 holdAwake = target != null || pickerOpen || posterSettingsOpen,
                 settingsOpen = posterSettingsOpen,
                 onSettingsOpenChange = { posterSettingsOpen = it },
@@ -253,8 +265,7 @@ fun CollectionScreen(
             playlists,
             actions,
             onDismiss = { target = null },
-            // 电视上海报视图的墙自己收方向键，顶栏那一排在有选中格时走不到；单曲操作面板里也给一个入口
-            onWallSettings = if (poster && LocalAppWindow.current.isTv) ({ posterSettingsOpen = true }) else null,
+            wallPage = targetPage.takeIf { poster },
             currentAlbum = if (collection.kind == CollectionKind.Album) collection.title else "",
         )
     }
@@ -287,7 +298,7 @@ private fun CollectionPoster(
     ops: CollectionOps,
     actions: MusicActions,
     onBack: () -> Unit,
-    onMore: (Song) -> Unit,
+    onMore: (Song, WallPageActions?) -> Unit,
     holdAwake: Boolean,
     settingsOpen: Boolean,
     onSettingsOpenChange: (Boolean) -> Unit,
@@ -302,7 +313,7 @@ private fun CollectionPoster(
             },
             playFrom = { index -> songs.getOrNull(index)?.let { actions.play(it, songs, openPlayer = false) } },
             playNext = { index -> songs.getOrNull(index)?.let(actions::playSongNext) },
-            songActions = { index -> songs.getOrNull(index)?.let(onMore) },
+            songActions = { index, page -> songs.getOrNull(index)?.let { onMore(it, page) } },
             showList = { actions.setCollectionView(CollectionView.List) },
             back = onBack,
         )
@@ -323,6 +334,9 @@ private fun CollectionPoster(
     val sourceName: (Song) -> String = remember(collection.sourceName, providers) {
         { song -> collection.sourceName.ifBlank { providerName(providers, song.source) } }
     }
+    // 电视上墙上没有歌时没有格子可长按，整页操作够不到：提示里再给一个“切回列表视图”出去
+    val toList: (() -> Unit)? = if (LocalAppWindow.current.isTv) ({ actions.setCollectionView(CollectionView.List) }) else null
+    val toListLabel = toList?.let { "切回列表视图" }
     val message: (@Composable () -> Unit)? = when {
         songs.isNotEmpty() || collection.loading -> null
         collection.error.isNotBlank() -> ({
@@ -330,6 +344,8 @@ private fun CollectionPoster(
                 title = "歌曲没有加载出来",
                 message = listOf(collection.sourceName, collection.error).filter { it.isNotBlank() }.joinToString("："),
                 onRetry = actions::retryCollection,
+                secondaryLabel = toListLabel,
+                onSecondary = toList,
             )
         })
         else -> ({
@@ -339,6 +355,8 @@ private fun CollectionPoster(
                 message = "稍后重试，或换一个来源。",
                 actionLabel = "重试",
                 onAction = actions::retryCollection,
+                secondaryLabel = toListLabel,
+                onSecondary = toList,
             )
         })
     }

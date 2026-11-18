@@ -204,7 +204,7 @@ class PosterWallStateTest {
     fun longPressReportsTheSong() {
         val s = wall(phone(current = 4), phoneView)
         var pressed = -1
-        s.onLongPress = { pressed = it }
+        s.onLongPress = { i, _ -> pressed = i }
         val r = s.scene!!.rectAt(s.scene!!.grown!!)
         assertTrue(s.longPressAt(r.centerX - s.camera.x, r.centerY - s.camera.y))
         assertEquals(4, pressed)
@@ -280,7 +280,11 @@ class PosterWallStateTest {
     fun holdingOkIsALongPressNotAGrow() {
         val s = wall(tv(current = 4, drift = false), tvView)
         var pressed = -1
-        s.onLongPress = { pressed = it }
+        var fromMenu: Boolean? = null
+        s.onLongPress = { i, menu ->
+            pressed = i
+            fromMenu = menu
+        }
         s.onWallFocus(isFocused = true, hasFocus = true)
         s.onKey(WallKey.Right, down = true, repeatCount = 0, longPress = false)
         s.onKey(WallKey.Right, down = true, repeatCount = 0, longPress = false)
@@ -290,6 +294,7 @@ class PosterWallStateTest {
         s.onKey(WallKey.Confirm, down = true, repeatCount = 2, longPress = false)
         s.onKey(WallKey.Confirm, down = false, repeatCount = 0, longPress = false)
         assertEquals(target, pressed)
+        assertEquals(false, fromMenu)
         assertEquals(4, s.grownIndex)
     }
 
@@ -483,26 +488,36 @@ class PosterWallStateTest {
     }
 
     @Test
-    fun upWithoutAFocusedTileLeavesTheWallForTheTopRow() {
-        val s = wall(tv(current = 4, drift = false).copy(escapeUp = true), tvView)
+    fun upWithoutAFocusedTileStaysInTheWall() {
+        val s = wall(tv(current = 4, drift = false), tvView)
         s.onWallFocus(isFocused = true, hasFocus = true)
-        assertFalse(s.onKey(WallKey.Up, down = true, repeatCount = 0, longPress = false))
-        assertNull(s.focus)
-        // 别的方向照常选中一格；选中之后上键在墙里走
-        assertTrue(s.onKey(WallKey.Down, down = true, repeatCount = 0, longPress = false))
-        assertNotNull(s.focus)
+        // 墙外没有能拿焦点的按钮：没有选中格时上键也是先选中离中心最近的那格（大卡）
         assertTrue(s.onKey(WallKey.Up, down = true, repeatCount = 0, longPress = false))
-        // 没开这个出口时上键也只在墙里走
-        val plain = wall(tv(current = 4, drift = false), tvView)
-        plain.onWallFocus(isFocused = true, hasFocus = true)
-        assertTrue(plain.onKey(WallKey.Up, down = true, repeatCount = 0, longPress = false))
+        assertEquals(s.scene!!.grown, s.focus)
     }
 
     @Test
-    fun comingDownFromTheTopRowSelectsTheCard() {
-        val s = wall(tv(current = 4, drift = false).copy(escapeUp = true), tvView)
-        s.focusFromAbove()
+    fun takingFocusOnEntrySelectsTheCard() {
+        val s = wall(tv(current = 4, drift = false), tvView)
+        s.takeFocus()
         assertEquals(s.scene!!.grown, s.focus)
+    }
+
+    @Test
+    fun menuKeyAsksForPageActionsEvenBeforeATileIsSelected() {
+        val s = wall(tv(current = 4, drift = false), tvView)
+        var pressed: Pair<Int, Boolean>? = null
+        s.onLongPress = { i, menu -> pressed = i to menu }
+        s.onWallFocus(isFocused = true, hasFocus = true)
+        assertNull(s.focus)
+        assertTrue(s.onKey(WallKey.Menu, down = true, repeatCount = 0, longPress = false))
+        // 先选中离中心最近的那格，再按菜单键打开（焦点直接落在整页操作上）
+        assertEquals(4 to true, pressed)
+        assertEquals(s.scene!!.grown, s.focus)
+        // 按住不放的重复不再打开第二次
+        pressed = null
+        s.onKey(WallKey.Menu, down = true, repeatCount = 1, longPress = false)
+        assertNull(pressed)
     }
 
     @Test
