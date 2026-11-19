@@ -23,7 +23,7 @@ val userKeystore = project.file(
 val hasReleaseKeystore = userKeystore.exists() || localKeystore.exists()
 
 // 安装包命名：软件名+版本号（与 myDV 一致）
-val appVersionName = "1.0"
+val appVersionName = "1.1"
 
 android {
     namespace = "com.mytv.mymusic"
