@@ -217,3 +217,24 @@ sealed interface TransferUi {
 
     data class Applying(val plan: com.mytv.mymusic.data.transfer.ImportPlan) : TransferUi
 }
+
+/**
+ * 登录成功后问一次「把这些歌单导入成绑定歌单」（设计稿 docs/platform-import.html）。
+ * 列表拿回来才出面板；[songs] 是空表示还没拉、或者这个平台没有歌单。
+ */
+data class PlatformImportUi(
+    val provider: String = "",
+    val providerName: String = "",
+    /** 平台给的全部歌单，按平台返回的顺序。 */
+    val playlists: List<com.mytv.mymusic.data.Playlist> = emptyList(),
+    /** 已经绑过同一平台歌单的远端 id，这些行灰掉。 */
+    val boundIds: Set<String> = emptySet(),
+    /** 同名普通歌单会合并进去的名字。 */
+    val mergeableNames: Set<String> = emptySet(),
+    val loading: Boolean = false,
+    val error: String = "",
+    /** 正在导入第几个 / 共几个；null 表示不在导入。 */
+    val applying: Pair<Int, Int>? = null,
+) {
+    val open get() = provider.isNotBlank()
+}

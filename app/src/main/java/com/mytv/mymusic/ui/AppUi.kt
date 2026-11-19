@@ -338,6 +338,13 @@ class MusicActions(private val model: MusicViewModel) {
     fun startQrLogin(providerId: String, type: String) = model.startQrLogin(providerId, type)
     fun cancelLogin() = model.cancelLogin()
 
+    /** 登录后导入平台歌单（设计稿 docs/platform-import.html）。 */
+    fun openPlatformImport(providerId: String) = model.openPlatformImport(providerId)
+    fun dismissPlatformImport(forever: Boolean = false) = model.dismissPlatformImport(forever)
+    fun applyPlatformImport(ids: List<String>) = model.applyPlatformImport(ids)
+    fun resetPlatformImportPrompt(providerId: String) = model.resetPlatformImportPrompt(providerId)
+    val platformImport: kotlinx.coroutines.flow.StateFlow<PlatformImportUi> get() = model.platformImport
+
     fun syncNow() = model.syncNow()
     fun syncIfStaleOnScreen() = model.syncIfStaleOnScreen()
     /** 打开平台账号页时重新拉一遍各平台的头像、昵称、会员等级。 */

@@ -4,6 +4,7 @@ import com.mytv.mymusic.data.PlaylistEntity
 import com.mytv.mymusic.data.bindingTarget
 import com.mytv.mymusic.data.boundDiff
 import com.mytv.mymusic.data.canReorderBoundPlaylist
+import com.mytv.mymusic.data.platformImportMarks
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -11,6 +12,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BoundPlaylistTest {
+    private fun playlist(id: String, name: String, count: Int) = com.mytv.mymusic.data.Playlist(
+        id = id,
+        name = name,
+        trackCount = count,
+        source = "netease",
+    )
+
     private fun entity(
         id: String,
         name: String,
@@ -98,5 +106,40 @@ class BoundPlaylistTest {
     fun boundWritableProviderFollowsReorderCapability() {
         assertTrue(canReorderBoundPlaylist(bound = true, writeSupported = true, reorderSupported = true))
         assertFalse(canReorderBoundPlaylist(bound = true, writeSupported = true, reorderSupported = false))
+    }
+
+    // ---- 登录后导入平台歌单：哪些行灰掉、哪些会合并 ----
+
+    @Test
+    fun platformImportMarksBoundAndMergeable() {
+        val local = listOf(
+            // 已经绑过这个平台的两张
+            entity("1", "我喜欢的音乐", provider = "netease", remoteId = "n1"),
+            // 同名但没绑的普通歌单：导入时会合并进去
+            entity("2", "通勤"),
+            // 别的平台绑的，同名也不算合并
+            entity("3", "跑步", provider = "qq", remoteId = "q1"),
+            // 删掉的同名歌单不算
+            entity("4", "睡前", deleted = true),
+        )
+        val remote = listOf(
+            playlist("n1", "我喜欢的音乐", 486),
+            playlist("n2", "通勤", 64),
+            playlist("n3", "跑步", 20),
+            playlist("n4", "睡前", 31),
+        )
+        val marks = platformImportMarks("netease", remote, local)
+        assertEquals(setOf("n1"), marks.boundIds)
+        assertEquals(setOf("n2"), marks.mergeableIds)
+    }
+
+    @Test
+    fun platformImportMarksIgnoreOtherProvidersAndMissing() {
+        val local = listOf(entity("1", "歌一", provider = "qq", remoteId = "a"))
+        val remote = listOf(playlist("a", "歌一", 10), playlist("b", "歌二", 5))
+        val marks = platformImportMarks("netease", remote, local)
+        assertTrue(marks.boundIds.isEmpty())
+        assertTrue(marks.mergeableIds.isEmpty())
+        assertTrue(platformImportMarks("netease", emptyList(), local).boundIds.isEmpty())
     }
 }

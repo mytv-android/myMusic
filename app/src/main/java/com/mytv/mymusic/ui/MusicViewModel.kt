@@ -55,6 +55,7 @@ import com.mytv.mymusic.data.native.SodaWelfareInfo
 import com.mytv.mymusic.data.native.SodaProvider
 import com.mytv.mymusic.data.native.SodaWelfare
 import com.mytv.mymusic.data.bindingTarget
+import com.mytv.mymusic.data.platformImportMarks
 import com.mytv.mymusic.data.boundDiff
 import com.mytv.mymusic.data.CollectionView
 import com.mytv.mymusic.data.CoverShapeChoice
@@ -301,6 +302,8 @@ data class MusicUiState(
     val audioQuality: String = AudioQuality.Auto.id,
     val showBottomNav: Boolean = true,
     val cookies: Map<String, String> = emptyMap(),
+    /** 登录后已经不再自动询问「导入歌单」的平台。 */
+    val importPrompted: Set<String> = emptySet(),
     val sodaSignerUrl: String = "",
     val sodaSignerToken: String = "",
     val sodaSignerEnabled: Boolean = true,
@@ -656,6 +659,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             audioQuality = settings.audioQuality,
             showBottomNav = settings.showBottomNav,
             cookies = settings.cookies,
+            importPrompted = settings.importPrompted,
             sodaSignerUrl = settings.sodaSignerUrl,
             sodaSignerToken = settings.sodaSignerToken,
             sodaSignerEnabled = settings.sodaSignerEnabled,
@@ -3145,53 +3149,188 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun bindPlatformPlaylist(name: String, provider: String, remoteId: String, cover: String, songs: List<Song>) {
         if (songs.isEmpty() || remoteId.isBlank()) return
-        launchPlaylistEdit {
-            val now = System.currentTimeMillis()
-            val trimmed = name.trim().ifBlank { "未命名歌单" }
-            val target = bindingTarget(libraryDao.allPlaylistsOnce(), provider, remoteId, trimmed)
-            if (target == null) {
-                val id = UUID.randomUUID().toString()
-                libraryDao.putPlaylist(
-                    PlaylistEntity(
-                        id = id,
-                        name = trimmed,
-                        createdAt = now,
-                        updatedAt = now,
-                        dirty = true,
-                        linkProvider = provider,
-                        linkId = remoteId,
-                        linkCover = cover,
-                        linkSyncedAt = now,
-                    )
+        launchPlaylistEdit { bindPlatformPlaylistNow(name, provider, remoteId, cover, songs) }
+    }
+
+    /** [bindPlatformPlaylist] 的实现；批量导入时在同一个锁里连着调用，免得交错。 */
+    private suspend fun bindPlatformPlaylistNow(
+        name: String,
+        provider: String,
+        remoteId: String,
+        cover: String,
+        songs: List<Song>,
+    ) {
+        val now = System.currentTimeMillis()
+        val trimmed = name.trim().ifBlank { "未命名歌单" }
+        val target = bindingTarget(libraryDao.allPlaylistsOnce(), provider, remoteId, trimmed)
+        if (target == null) {
+            val id = UUID.randomUUID().toString()
+            libraryDao.putPlaylist(
+                PlaylistEntity(
+                    id = id,
+                    name = trimmed,
+                    createdAt = now,
+                    updatedAt = now,
+                    dirty = true,
+                    linkProvider = provider,
+                    linkId = remoteId,
+                    linkCover = cover,
+                    linkSyncedAt = now,
                 )
-                libraryDao.replaceEntries(
-                    id,
-                    songs.distinctBy { it.key }.mapIndexed { index, song ->
-                        PlaylistEntryEntity(id, index, song.key, json.encodeToString(song.forStorage()))
-                    },
+            )
+            libraryDao.replaceEntries(
+                id,
+                songs.distinctBy { it.key }.mapIndexed { index, song ->
+                    PlaylistEntryEntity(id, index, song.key, json.encodeToString(song.forStorage()))
+                },
+            )
+            app.sync.onLocalChange()
+            _boundAccess.update { it - id }
+            message("已绑定「$trimmed」，平台更新会自动同步")
+        } else {
+            libraryDao.putPlaylist(
+                target.copy(
+                    linkProvider = provider,
+                    linkId = remoteId,
+                    linkCover = cover,
+                    linkSyncedAt = now,
                 )
-                app.sync.onLocalChange()
-                _boundAccess.update { it - id }
-                message("已绑定「$trimmed」，平台更新会自动同步")
-            } else {
-                libraryDao.putPlaylist(
-                    target.copy(
-                        linkProvider = provider,
-                        linkId = remoteId,
-                        linkCover = cover,
-                        linkSyncedAt = now,
-                    )
+            )
+            libraryDao.replaceEntries(
+                target.id,
+                songs.distinctBy { it.key }.mapIndexed { index, song ->
+                    PlaylistEntryEntity(target.id, index, song.key, json.encodeToString(song))
+                },
+            )
+            libraryDao.markDirty(target.id, now)
+            app.sync.onLocalChange()
+            _boundAccess.update { it - target.id }
+            message("已绑定「${target.name}」，共 ${songs.size} 首")
+        }
+    }
+
+    // ---------- 登录后导入平台歌单 ----------
+
+    /**
+     * 登录成功（或粘贴了新的非空 Cookie）后拉一次这个平台的私人歌单，有歌单就问要不要导入。
+     *
+     * 只在 Cookie 由空变非空时触发：[previousCookie] 为空才算登录；已经在用的账号、
+     * 退出登录、同步推过来的 Cookie 都不弹。已经问过的平台（[AppSettings.importPrompted]）直接跳过。
+     */
+    private fun maybePromptPlatformImport(providerId: String, previousCookie: String, cookie: String) {
+        if (previousCookie.isNotBlank() || cookie.isBlank()) return
+        if (providerId in settingsState.value.importPrompted) return
+        viewModelScope.launch {
+            val playlists = runCatching { app.repository.userPlaylists(providerId, cookie, 1, 100) }
+                .getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    return@launch
+                }
+                .filter { it.id.isNotBlank() && it.name.isNotBlank() }
+            if (playlists.isEmpty()) return@launch
+            val marks = platformImportMarks(providerId, playlists, libraryDao.allPlaylistsOnce())
+            _platformImport.value = PlatformImportUi(
+                provider = providerId,
+                providerName = providerName(providerId),
+                playlists = playlists,
+                boundIds = marks.boundIds,
+                mergeableNames = marks.mergeableIds,
+            )
+        }
+    }
+
+    /** 平台账号页的「导入歌单…」：随时能再打开，不看「已问过」。 */
+    fun openPlatformImport(providerId: String) {
+        val cookie = cookieFor(providerId)
+        if (cookie.isBlank()) {
+            message("先登录${providerName(providerId)}")
+            return
+        }
+        _platformImport.value = PlatformImportUi(
+            provider = providerId,
+            providerName = providerName(providerId),
+            loading = true,
+        )
+        viewModelScope.launch {
+            val playlists = runCatching { app.repository.userPlaylists(providerId, cookie, 1, 100) }
+                .getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    _platformImport.update { it.copy(loading = false, error = error.message ?: "平台没有响应") }
+                    return@launch
+                }
+                .filter { it.id.isNotBlank() && it.name.isNotBlank() }
+            val marks = platformImportMarks(providerId, playlists, libraryDao.allPlaylistsOnce())
+            _platformImport.update {
+                it.copy(
+                    loading = false,
+                    playlists = playlists,
+                    boundIds = marks.boundIds,
+                    mergeableNames = marks.mergeableIds,
                 )
-                libraryDao.replaceEntries(
-                    target.id,
-                    songs.distinctBy { it.key }.mapIndexed { index, song ->
-                        PlaylistEntryEntity(target.id, index, song.key, json.encodeToString(song))
-                    },
-                )
-                libraryDao.markDirty(target.id, now)
-                app.sync.onLocalChange()
-                _boundAccess.update { it - target.id }
-                message("已绑定「${target.name}」，共 ${songs.size} 首")
+            }
+        }
+    }
+
+    /** 关面板。[forever] 为真即「这个平台不再询问」，之后登录不再自动弹。 */
+    /** 关面板。导入中关掉＝取消剩下的，已经写进去的照留（面板里先问过一句）。 */
+    fun dismissPlatformImport(forever: Boolean = false) {
+        val current = _platformImport.value
+        platformImportJob?.cancel()
+        platformImportJob = null
+        _platformImport.value = PlatformImportUi()
+        if (forever && current.provider.isNotBlank()) {
+            viewModelScope.launch { app.settings.platformImportPrompted(current.provider, true) }
+        }
+    }
+
+    /** 平台账号页里恢复「登录后自动询问」。 */
+    fun resetPlatformImportPrompt(providerId: String) {
+        viewModelScope.launch { app.settings.platformImportPrompted(providerId, false) }
+        message("登录${providerName(providerId)}后会再问一次是否导入歌单")
+    }
+
+    /** 把勾中的平台歌单导入成绑定歌单；每首按平台返回的顺序。 */
+    fun applyPlatformImport(ids: List<String>) {
+        val current = _platformImport.value
+        if (current.provider.isBlank() || ids.isEmpty() || current.applying != null) return
+        val selected = current.playlists.filter { it.id in ids }
+        if (selected.isEmpty()) return
+        _platformImport.update { it.copy(applying = 0 to selected.size) }
+        platformImportJob = viewModelScope.launch {
+            val provider = current.provider
+            val cookie = cookieFor(provider)
+            var imported = 0
+            var songs = 0
+            try {
+                selected.forEachIndexed { index, playlist ->
+                    _platformImport.update { it.copy(applying = index to selected.size) }
+                    val content = runCatching { app.repository.playlistSongs(provider, cookie, playlist.id) }
+                        .getOrElse { error ->
+                            if (error is CancellationException) throw error
+                            emptyList()
+                        }
+                    if (content.isNotEmpty()) {
+                        playlistMutex.withLock {
+                            bindPlatformPlaylistNow(
+                                name = playlist.name.ifBlank { "未命名歌单" },
+                                provider = provider,
+                                remoteId = playlist.id,
+                                cover = playlist.cover,
+                                songs = content,
+                            )
+                        }
+                        imported++
+                        songs += content.size
+                    }
+                }
+            } finally {
+                // 半路关掉也要把已经写进去的算清楚；整条走完则关面板并记下「问过了」
+                platformImportJob = null
+                _platformImport.value = PlatformImportUi()
+                if (imported > 0) message("已导入 $imported 个歌单 · $songs 首")
+                if (imported == selected.size) {
+                    runCatching { app.settings.platformImportPrompted(provider, true) }
+                }
             }
         }
     }
@@ -6015,9 +6154,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         resolver.clearCache()
         searchEngine.clearCache()
+        val previousCookie = settingsState.value.cookies[providerId].orEmpty()
         app.settings.cookie(providerId, cookie)
         app.sync.onLocalChange()
         base.value = base.value.copy(login = null, loginProviderId = "")
+        maybePromptPlatformImport(providerId, previousCookie, cookie)
         // 换了一份 Cookie 就重拉资料；清空 Cookie 时把缓存里那份也丢掉，别留着上一个号的头像
         if (cookie.isBlank()) {
             accountInfoJobs.remove(providerId)?.cancel()
@@ -6162,10 +6303,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     "success" -> if (result.cookie.isNotBlank()) {
                         resolver.clearCache()
                         searchEngine.clearCache()
+                        val previousCookie = settingsState.value.cookies[providerId].orEmpty()
                         app.settings.cookie(providerId, result.cookie)
                         app.sync.onLocalChange()
                         base.value = base.value.copy(login = null, loginStatus = "", loginProviderId = "")
                         message("登录成功")
+                        maybePromptPlatformImport(providerId, previousCookie, result.cookie)
                         return@launch
                     }
                     // 平台自己换了二维码（QQ 官方登录页会刷新），跟着换图，别让用户扫旧的
@@ -6277,6 +6420,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 从文件导入的进度；外壳按它挂导入预览面板。 */
     val transfer: StateFlow<TransferUi> = _transfer.asStateFlow()
+
+    private val _platformImport = MutableStateFlow(PlatformImportUi())
+
+    /** 登录成功后「把这些歌单导入成绑定歌单」的面板；外壳按它挂面板。 */
+    val platformImport: StateFlow<PlatformImportUi> = _platformImport.asStateFlow()
+
+    /** 正在跑的那次批量导入；关面板时取消剩下的。 */
+    private var platformImportJob: Job? = null
 
     /** 导入完成（写了至少一个歌单，或整库备份合并成功）就加一；电视扫码网页据此显示「已导入」。 */
     private val _importDone = MutableStateFlow(0)

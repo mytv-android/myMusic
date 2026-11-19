@@ -19,6 +19,27 @@ fun canReorderBoundPlaylist(bound: Boolean, writeSupported: Boolean, reorderSupp
     !bound || !writeSupported || reorderSupported
 
 /**
+ * 登录后「导入平台歌单」面板要标出来的两类行：已经绑过的（灰掉、不可勾），
+ * 和会合并进同名普通歌单的（[bindingTarget] 的既有行为，面板上写一句提示）。
+ */
+data class PlatformImportMarks(val boundIds: Set<String> = emptySet(), val mergeableIds: Set<String> = emptySet())
+
+fun platformImportMarks(
+    provider: String,
+    remote: List<Playlist>,
+    local: List<PlaylistEntity>,
+): PlatformImportMarks {
+    val live = local.filter { it.deletedAt == null }
+    val boundIds = live.filter { it.bound && it.linkProvider == provider }.map { it.linkId }.toSet()
+    val plainNames = live.filter { it.linkId.isBlank() }.map { it.name }.toSet()
+    val ids = remote.map { it.id }.toSet()
+    return PlatformImportMarks(
+        boundIds = ids.filter { it in boundIds }.toSet(),
+        mergeableIds = remote.filter { it.id !in boundIds && it.name in plainNames }.map { it.id }.toSet(),
+    )
+}
+
+/**
  * 绑定时落到哪个本地歌单：优先找已绑定同一平台歌单的；没有就升级同名的普通歌单
  * （旧版“收藏 = 存成同名本地歌单”留下的副本，点绑定直接变活，不产生重复行）；
  * 都没有返回 null，由调用方新建。

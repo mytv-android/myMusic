@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.QrCode2
@@ -58,6 +59,8 @@ import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -1126,10 +1129,13 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                     index = index,
                     count = providers.size,
                     tv = tv,
+                    promptSuppressed = provider.id in state.importPrompted,
                     onQr = { qrFor = provider },
                     onCookie = { cookieFor = provider },
                     onPassword = { passwordFor = provider },
                     onLogout = { actions.logout(provider.id) },
+                    onImport = { actions.openPlatformImport(provider.id) },
+                    onResetPrompt = { actions.resetPlatformImportPrompt(provider.id) },
                 )
             }
         }
@@ -1228,11 +1234,15 @@ private fun AccountRow(
     index: Int,
     count: Int,
     tv: Boolean,
+    promptSuppressed: Boolean,
     onQr: () -> Unit,
     onCookie: () -> Unit,
     onPassword: () -> Unit,
     onLogout: () -> Unit,
+    onImport: () -> Unit,
+    onResetPrompt: () -> Unit,
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     // 已登录且拿到资料时展示账号卡片：头像、昵称、会员/等级；拿不到资料就保持原来的平台行
     val avatar = profile?.avatar.orEmpty()
     val summary = when {
@@ -1271,8 +1281,39 @@ private fun AccountRow(
         showChevron = false,
         trailing = {
             when {
-                loggedIn -> TextButton(onClick = onLogout, modifier = Modifier.tvFocusRing(CircleShape)) {
-                    Text("退出", Modifier.semantics { contentDescription = "退出${provider.name}" }, color = MaterialTheme.colorScheme.error)
+                loggedIn -> {
+                    TextButton(onClick = onLogout, modifier = Modifier.tvFocusRing(CircleShape)) {
+                        Text("退出", Modifier.semantics { contentDescription = "退出${provider.name}" }, color = MaterialTheme.colorScheme.error)
+                    }
+                    // 登录后引导导入的平台歌单：随时能再打开，也能恢复「登录后自动询问」
+                    Box {
+                        IconButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier.tvFocusRing(CircleShape),
+                        ) {
+                            Icon(
+                                Icons.Filled.MoreVert,
+                                "更多操作：${provider.name}",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("导入我的歌单…") },
+                                onClick = {
+                                    menuOpen = false
+                                    onImport()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (promptSuppressed) "登录后恢复询问导入" else "登录后不再询问导入") },
+                                onClick = {
+                                    menuOpen = false
+                                    onResetPrompt()
+                                },
+                            )
+                        }
+                    }
                 }
                 provider.passwordLogin -> FilledTonalButton(onClick = onPassword, modifier = Modifier.tvFocusRing(CircleShape)) {
                     Text("登录", Modifier.semantics { contentDescription = "登录${provider.name}" })
@@ -1491,6 +1532,13 @@ private fun QrLoginBody(
                 ) { Text("刷新二维码") }
             }
         }
+        Text(
+            "登录后会问一次要不要把这个账号的歌单导入成跟随平台更新的歌单，可以先关掉。",
+            Modifier.padding(top = 12.dp, start = 8.dp, end = 8.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
