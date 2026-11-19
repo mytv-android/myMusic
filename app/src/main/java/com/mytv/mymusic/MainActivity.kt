@@ -2,6 +2,7 @@ package com.mytv.mymusic
 
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
@@ -19,6 +20,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -42,6 +44,14 @@ class MainActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private val fold = MutableStateFlow<Fold?>(null)
 
+    /**
+     * 系统栏图标该不该用浅色（页面是深色的），界面每次组合时更新。系统栏样式不把它抄成定值，每次现读：
+     * enableEdgeToEdge 第一次调用时往 decor 里塞一个隐藏 View，之后每次配置变化（旋转、折叠屏开合、改窗口大小，
+     * activity 自己处理、不重建）都按**第一次**传进去的样式把系统栏重设一遍，后面的调用换不掉它。
+     * 以前第一次传的是跟系统深浅色的默认样式，开着播放页一转屏、一折叠，状态栏图标就变回深色。
+     */
+    private var barsDark = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // ViewModel 是进程级的，activity 退出后它还在：全新启动时收起上次留下的播放页
@@ -51,9 +61,9 @@ class MainActivity : ComponentActivity() {
             // 桌面上有榜单组件时顺带刷一次榜（上次刷新超过半小时才刷）
             ChartWidgetWorker.refreshOnOpen(this)
         }
-        enableEdgeToEdge()
-        // 三键导航下系统会在导航栏铺一层白色遮罩，盖住我们自己的磨砂底栏
-        if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+        // 界面组合出来之前先跟系统深浅色
+        barsDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        applySystemBars()
         // 折叠屏的折痕、双屏的铰链：窗口横跨它时才报，分屏和小窗里是空的
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -91,14 +101,12 @@ class MainActivity : ComponentActivity() {
                 state.appearance.isDark(isSystemInDarkTheme()) ||
                 ((state.playerOpen || state.posterOpen) && state.current != null) ||
                 darkBars.intValue > 0
-            SideEffect(dark) {
-                // Android 6–7 的导航栏图标只能是白色，导航栏颜色固定取 darkScrim；全透明时浅色主题下按键看不见
-                val navDarkScrim = if (android.os.Build.VERSION.SDK_INT < 26) Color.argb(0x80, 0x1b, 0x1b, 0x1b) else Color.TRANSPARENT
-                enableEdgeToEdge(
-                    statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark },
-                    navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, navDarkScrim) { dark },
-                )
-                if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+            // 配置变化后 enableEdgeToEdge 的钩子重设系统栏时会把三键导航的白色遮罩重新打开（见 [barsDark]），
+            // 它在这次组合之前就跑完了：跟着配置再设一次
+            val configuration = LocalConfiguration.current
+            SideEffect(dark, configuration) {
+                barsDark = dark
+                applySystemBars()
             }
             MyMusicTheme(
                 appearance = state.appearance,
@@ -110,6 +118,18 @@ class MainActivity : ComponentActivity() {
                 ) { MyMusicApp(model) }
             }
         }
+    }
+
+    /** 系统栏透明，图标深浅按 [barsDark]。 */
+    private fun applySystemBars() {
+        // Android 6–7 的导航栏图标只能是白色，导航栏颜色固定取 darkScrim；全透明时浅色主题下按键看不见
+        val navDarkScrim = if (android.os.Build.VERSION.SDK_INT < 26) Color.argb(0x80, 0x1b, 0x1b, 0x1b) else Color.TRANSPARENT
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { barsDark },
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, navDarkScrim) { barsDark },
+        )
+        // 三键导航下系统会在导航栏铺一层白色遮罩，盖住我们自己的磨砂底栏
+        if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
     }
 
     override fun onNewIntent(intent: Intent) {
