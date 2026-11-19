@@ -7,6 +7,11 @@ import com.mytv.mymusic.data.QRCheckResult
 import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.QRSession
 import com.mytv.mymusic.data.Song
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -21,26 +26,44 @@ private val BILIBILI_INFO = ProviderInfo(
     download = true,
     parseSong = true,
     searchPlaylist = true,
+    // 音乐分区排行里的合集 / 分P稿就是歌单；没有分类接口，所以只开推荐
+    recommendedPlaylists = true,
     playlistSongs = true,
     parsePlaylist = true,
     qrLogin = true,
 )
 
-private const val BILIBILI_DEFAULT_COOKIE =
-    "buvid3=2E109C72-251F-3827-FA8E-921FA0D7EC5291319infoc; SESSDATA=your_sessdata;"
+/**
+ * 未登录时的匿名 Cookie。只带 buvid3，**不能**带 `SESSDATA=your_sessdata` 这种占位符——
+ * 上游 music-lib 就是这么写的，照抄会让取流接口直接回 412 Precondition Failed：
+ * B 站认得出这是个无效登录态。不带 SESSDATA 时 playurl 正常返回匿名档。
+ */
+private const val BILIBILI_DEFAULT_COOKIE = "buvid3=2E109C72-251F-3827-FA8E-921FA0D7EC5291319infoc"
 
 private const val BILIBILI_SEARCH_API = "https://api.bilibili.com/x/web-interface/search/type"
 private const val BILIBILI_VIEW_API = "https://api.bilibili.com/x/web-interface/view"
 private const val BILIBILI_PAGE_LIST_API = "https://api.bilibili.com/x/player/pagelist"
 private const val BILIBILI_PLAY_URL_API = "https://api.bilibili.com/x/player/playurl"
-private const val BILIBILI_SEASON_API = "https://api.bilibili.com/x/space/ugc/season"
 private const val BILIBILI_NAV_API = "https://api.bilibili.com/x/web-interface/nav"
+/** 音乐分区排行（rid=3）：合集就是这张榜单里的条目，旧的 `x/space/ugc/season` 已经 404。 */
+private const val BILIBILI_MUSIC_RANKING_API = "https://api.bilibili.com/x/web-interface/ranking/v2?rid=3&type=all"
+private const val BILIBILI_SEASON_API =
+    "https://api.bilibili.com/x/polymer/web-space/seasons_archives_list"
+private const val BILIBILI_SEASON_META_API = BILIBILI_SEASON_API
 private const val BILIBILI_QR_GENERATE_API =
     "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 private const val BILIBILI_QR_POLL_API =
     "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
 
-private const val BILIBILI_SEASON_PAGE_SIZE = 30
+/** polymer 的 archives 接口每页最多给这么多条，page_size 传再大也只回 12 条。 */
+private const val BILIBILI_SEASON_PAGE_SIZE = 12
+/** 一次歌单最多取这么多集：合集动辄上千集，每集还要单独问一次 cid，全拉完要几百个请求。 */
+private const val SEASON_SONG_LIMIT = 120
+/** 搜索时顺带展开的分P总数上限：一个多P合集不能把整页搜索结果吃光。 */
+private const val SEARCH_EPISODE_BUDGET = 40
+private const val RECOMMENDED_PLAYLIST_LIMIT = 24
+/** 推荐歌单里只有头部几条补曲目数，后面的省掉一次请求。 */
+private const val RECOMMENDED_PLAYLIST_META_LIMIT = 12
 private const val QR_SESSION_TTL_MS = 3 * 60 * 1000L
 private const val LOGIN_SESSION_TTL_MS = 10 * 60 * 1000L
 
@@ -59,30 +82,34 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
             userAgent = BilibiliCdn.USER_AGENT,
         )
         val response = json.decodeFromString<BilibiliSearchResponse>(body)
+        val items = response.data?.result.orEmpty().filter { it.bvid.isNotBlank() }
+        // 每条流水线的视频详情都要单独问，串行 20 条必然撞上聚合搜索的 6 秒超时
+        val views = coroutineScope {
+            items.map { item ->
+                async(Dispatchers.IO) { runCatching { fetchView(cookie, item.bvid) }.getOrNull() }
+            }.map { it.await() }
+        }
+
         val songs = mutableListOf<Song>()
-        for (item in response.data?.result.orEmpty()) {
-            val rootTitle = cleanTitle(item.title)
-            val view = runCatching { fetchView(cookie, item.bvid) }.getOrNull() ?: continue
+        // 搜索词里的歌手是匹配时唯一可靠的「这歌是谁唱的」，标题拆不出来时用它兜底
+        val keywordArtist = keywordArtist(keyword)
+        items.forEachIndexed { index, item ->
+            val view = views.getOrNull(index) ?: return@forEachIndexed
             val pages = view.pages.orEmpty()
-            if (pages.isEmpty()) continue
+            if (pages.isEmpty()) return@forEachIndexed
 
-            val cover = normalizeCover(item.pic)
+            val rootTitle = cleanTitle(item.title).ifBlank { view.title }
             val page = pages.first()
-            var displayTitle = page.part
-            if (displayTitle.isEmpty()) {
-                displayTitle = rootTitle
-            } else if (displayTitle != rootTitle) {
-                displayTitle = "$rootTitle - $displayTitle"
-            }
-
+            val track = chooseTrack(singlePageTitle(rootTitle, page.part), keyword)
+            val duration = page.duration.takeIf { it > 0 } ?: item.durationSec
             songs += Song(
                 id = "${item.bvid}|${page.cid}",
-                name = displayTitle,
-                artist = item.author,
-                album = item.bvid,
-                duration = page.duration,
+                name = track.title.ifBlank { singlePageTitle(rootTitle, page.part) },
+                artist = track.artist.ifBlank { keywordArtist.orEmpty() },
+                album = view.title.takeIf { pages.size > 1 }.orEmpty(),
+                duration = duration,
                 source = "bilibili",
-                cover = cover,
+                cover = normalizeCover(item.pic),
                 link = "https://www.bilibili.com/video/${item.bvid}?p=1",
                 extra = mapOf(
                     "bvid" to item.bvid,
@@ -91,6 +118,142 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
             )
         }
         return songs
+    }
+
+    override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
+        val body = NativeHttp.get(
+            searchUrl(keyword),
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
+            cookie = effectiveCookie(cookie),
+            userAgent = BilibiliCdn.USER_AGENT,
+        )
+        val response = json.decodeFromString<BilibiliSearchResponse>(body)
+        val items = response.data?.result.orEmpty().filter { it.bvid.isNotBlank() }
+        val views = coroutineScope {
+            items.map { item -> async(Dispatchers.IO) { runCatching { fetchView(cookie, item.bvid) }.getOrNull() } }
+                .map { it.await() }
+        }
+        val seen = mutableSetOf<String>()
+        val playlists = mutableListOf<Playlist>()
+
+        items.forEachIndexed { index, item ->
+            val view = views.getOrNull(index) ?: return@forEachIndexed
+            val cover = normalizeCover(item.pic)
+            val season = view.ugcSeason
+            if (season != null) {
+                val seasonId = season.id
+                val mid = view.owner.mid
+                val key = "season:$seasonId:$mid:${item.bvid}"
+                if (!seen.add(key)) return@forEachIndexed
+
+                var seasonName = season.title
+                if (seasonName.isEmpty()) seasonName = cleanTitle(item.title)
+                var seasonCover = season.cover
+                if (seasonCover.isEmpty()) seasonCover = cover
+
+                val sections = season.sections.orEmpty()
+                // view 里的 sections 只装得下前 100 集，合集多大得以 polymer 的 total 为准
+                var trackCount = countSeasonEpisodes(sections)
+                if (seasonId != 0L && mid != 0L) {
+                    val meta = runCatching { fetchSeasonMeta(cookie, mid, seasonId) }.getOrNull()
+                    if (meta != null) {
+                        if (seasonName.isEmpty() || seasonName == cleanTitle(item.title)) {
+                            seasonName = meta.title.ifBlank { seasonName }
+                        }
+                        if (seasonCover.isEmpty()) seasonCover = meta.cover
+                        if (meta.total > 0) trackCount = meta.total
+                    }
+                }
+
+                playlists += Playlist(
+                    id = key,
+                    name = seasonName,
+                    cover = normalizeCover(seasonCover),
+                    trackCount = trackCount,
+                    playCount = season.stat.view,
+                    creator = view.owner.name,
+                    description = season.intro,
+                    source = "bilibili",
+                    link = "https://www.bilibili.com/video/${item.bvid}",
+                    extra = mapOf(
+                        "season_id" to seasonId.toString(),
+                        "mid" to mid.toString(),
+                        "bvid" to item.bvid,
+                        "type" to "season",
+                    ),
+                )
+                return@forEachIndexed
+            }
+
+            // 分P稿件一律算歌单：单视频条目本身并不是歌单
+            val pages = view.pages.orEmpty()
+            if (pages.size > 1) {
+                val playlistId = "bvid:${item.bvid}"
+                if (!seen.add(playlistId)) return@forEachIndexed
+                playlists += Playlist(
+                    id = playlistId,
+                    name = cleanTitle(item.title).ifBlank { view.title },
+                    cover = cover,
+                    trackCount = pages.size,
+                    creator = view.owner.name,
+                    source = "bilibili",
+                    link = "https://www.bilibili.com/video/${item.bvid}",
+                    extra = mapOf(
+                        "bvid" to item.bvid,
+                        "type" to "multipart",
+                    ),
+                )
+            }
+        }
+        return playlists
+    }
+
+    /**
+     * 推荐歌单：音乐分区的排行稿件里，合集 / 分P稿就是歌单。
+     * 合集的曲目数要单独问一次 archives 接口，只给推荐的头部几条补，控制请求数。
+     */
+    override suspend fun recommendedPlaylists(cookie: String): List<Playlist> {
+        val body = NativeHttp.get(
+            BILIBILI_MUSIC_RANKING_API,
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
+            cookie = effectiveCookie(cookie),
+            userAgent = BilibiliCdn.USER_AGENT,
+        )
+        val entries = json.decodeFromString<BilibiliRankingResponse>(body).data?.list.orEmpty()
+        val playlists = mutableListOf<Playlist>()
+
+        for (entry in entries) {
+            if (playlists.size >= RECOMMENDED_PLAYLIST_LIMIT) break
+            val seasonId = entry.seasonId
+            val mid = entry.owner.mid
+            if (seasonId <= 0L || mid <= 0L) continue
+            val extra = mapOf(
+                "season_id" to seasonId.toString(),
+                "mid" to mid.toString(),
+                "bvid" to entry.bvid,
+                "type" to "season",
+            )
+            val meta = if (playlists.size < RECOMMENDED_PLAYLIST_META_LIMIT) {
+                runCatching { fetchSeasonMeta(cookie, mid, seasonId) }.getOrNull()
+            } else {
+                null
+            }
+            val name = meta?.title?.takeIf { it.isNotBlank() }
+                ?: cleanTitle(entry.title).ifBlank { entry.bvid }
+            playlists += Playlist(
+                id = "season:$seasonId:$mid:${entry.bvid}",
+                name = name,
+                cover = normalizeCover(meta?.cover?.takeIf { it.isNotBlank() } ?: entry.pic),
+                trackCount = meta?.total ?: 0,
+                playCount = entry.stat.view,
+                creator = entry.owner.name,
+                description = meta?.description.orEmpty(),
+                source = "bilibili",
+                link = "https://www.bilibili.com/video/${entry.bvid}",
+                extra = extra,
+            )
+        }
+        return playlists
     }
 
     override suspend fun parseSong(cookie: String, link: String): Song {
@@ -219,81 +382,6 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         return ""
     }
 
-    override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
-        val body = NativeHttp.get(
-            searchUrl(keyword),
-            headers = mapOf("Referer" to BilibiliCdn.REFERER),
-            cookie = effectiveCookie(cookie),
-            userAgent = BilibiliCdn.USER_AGENT,
-        )
-        val response = json.decodeFromString<BilibiliSearchResponse>(body)
-        val seen = mutableSetOf<String>()
-        val playlists = mutableListOf<Playlist>()
-
-        for (item in response.data?.result.orEmpty()) {
-            val view = runCatching { fetchView(cookie, item.bvid) }.getOrNull() ?: continue
-            val cover = normalizeCover(item.pic)
-            val season = view.ugcSeason
-            if (season != null) {
-                val seasonId = season.id
-                val mid = view.owner.mid
-                val key = "season:$seasonId:$mid:${item.bvid}"
-                if (!seen.add(key)) continue
-
-                var seasonName = season.title
-                if (seasonName.isEmpty()) seasonName = cleanTitle(item.title)
-                var seasonCover = season.cover
-                if (seasonCover.isEmpty()) seasonCover = cover
-
-                val sections = season.sections.orEmpty()
-                var trackCount = countSeasonEpisodes(sections)
-                if (trackCount == 0 && seasonId != 0L && mid != 0L) {
-                    val seasonSongs = runCatching { fetchSeasonSongs(cookie, mid, seasonId) }.getOrNull()
-                    if (seasonSongs != null) trackCount = seasonSongs.size
-                }
-
-                playlists += Playlist(
-                    id = key,
-                    name = seasonName,
-                    cover = normalizeCover(seasonCover),
-                    trackCount = trackCount,
-                    playCount = season.stat.view,
-                    creator = view.owner.name,
-                    description = season.intro,
-                    source = "bilibili",
-                    link = "https://www.bilibili.com/video/${item.bvid}",
-                    extra = mapOf(
-                        "season_id" to seasonId.toString(),
-                        "mid" to mid.toString(),
-                        "bvid" to item.bvid,
-                        "type" to "season",
-                    ),
-                )
-                continue
-            }
-
-            val pages = view.pages.orEmpty()
-            if (pages.size > 1) {
-                val playlistId = "bvid:${item.bvid}"
-                if (!seen.add(playlistId)) continue
-                playlists += Playlist(
-                    id = playlistId,
-                    name = cleanTitle(item.title),
-                    cover = cover,
-                    trackCount = pages.size,
-                    creator = view.owner.name,
-                    source = "bilibili",
-                    link = "https://www.bilibili.com/video/${item.bvid}",
-                    extra = mapOf(
-                        "bvid" to item.bvid,
-                        "type" to "multipart",
-                    ),
-                )
-            }
-        }
-        return playlists
-    }
-
     override suspend fun playlistSongs(cookie: String, id: String): List<Song> {
         if (id.startsWith("season:")) {
             val parts = id.split(":")
@@ -342,7 +430,7 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
             if (pageList != null && pageList.isNotEmpty()) pages = pageList
         }
         if (pages.isEmpty()) throw IllegalStateException("no video pages found")
-        return buildSongsFromPages(bvid, rootTitle, view.owner.name, view.pic, pages)
+        return buildSongsFromPages(bvid, rootTitle, view.pic, pages)
     }
 
     override suspend fun parsePlaylist(cookie: String, link: String): CollectionResult {
@@ -416,7 +504,7 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
                         "type" to "multipart",
                     ),
                 )
-                val songs = buildSongsFromPages(bvid, view.title, view.owner.name, view.pic, pages)
+                val songs = buildSongsFromPages(bvid, view.title, view.pic, pages)
                 return CollectionResult(playlist, songs)
             }
 
@@ -434,7 +522,7 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
                         "type" to "single",
                     ),
                 )
-                val songs = buildSongsFromPages(bvid, view.title, view.owner.name, view.pic, pages)
+                val songs = buildSongsFromPages(bvid, view.title, view.pic, pages)
                 return CollectionResult(playlist, songs)
             }
         }
@@ -541,12 +629,12 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         var seasonCover = ""
         var pageNum = 1
 
-        while (true) {
+        while (pageNum <= seasonPageLimit(seasonId, mid)) {
             val data = fetchSeasonPage(cookie, mid, seasonId, pageNum)
-            if (seasonTitle.isEmpty()) seasonTitle = data.season.title
-            if (seasonCover.isEmpty()) seasonCover = data.season.cover
+            if (seasonTitle.isEmpty()) seasonTitle = data.meta?.title.orEmpty()
+            if (seasonCover.isEmpty()) seasonCover = data.meta?.cover.orEmpty()
 
-            val archives = data.archives.orEmpty()
+            val archives = data.episodes
             if (archives.isEmpty()) break
 
             for (archive in archives) {
@@ -570,46 +658,78 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
     private suspend fun fetchSeasonSongs(cookie: String, mid: Long, seasonId: Long): List<Song> {
         if (seasonId == 0L || mid == 0L) throw IllegalArgumentException("invalid season info")
 
-        val songs = mutableListOf<Song>()
+        val season: BilibiliSeasonArchivePage = fetchSeasonArchives(cookie, mid, seasonId)
+        if (season.episodes.isEmpty()) return emptyList()
+        val cids = resolveEpisodeCids(cookie, season.episodes)
+
+        return season.episodes.mapIndexedNotNull { index, episode ->
+            val cid = cids.getOrNull(index) ?: return@mapIndexedNotNull null
+            val cover = episode.cover.ifEmpty { season.cover }
+            val title = BilibiliTitleParser.parse(episode.title, "")
+            Song(
+                id = "${episode.bvid}|$cid",
+                name = title.firstOrNull()?.title?.ifBlank { episode.title } ?: episode.title,
+                artist = title.firstNotNullOfOrNull { it.artist.takeIf(String::isNotBlank) }.orEmpty(),
+                album = season.title,
+                duration = episode.duration,
+                source = "bilibili",
+                cover = normalizeCover(cover),
+                link = "https://www.bilibili.com/video/${episode.bvid}",
+                extra = mapOf(
+                    "bvid" to episode.bvid,
+                    "cid" to cid.toString(),
+                ),
+            )
+        }
+    }
+
+    /** 合集的全部分P连同标题、封面；合集动辄上千集，只翻前面几页。 */
+    private suspend fun fetchSeasonArchives(
+        cookie: String,
+        mid: Long,
+        seasonId: Long,
+    ): BilibiliSeasonArchivePage {
+        val episodes = mutableListOf<BilibiliSeasonArchive>()
+        var title = ""
+        var cover = ""
         var processedArchives = 0
-        var seasonTitle = ""
-        var seasonCover = ""
         var pageNum = 1
-
-        while (true) {
+        while (pageNum <= seasonPageLimit(seasonId, mid)) {
             val data = fetchSeasonPage(cookie, mid, seasonId, pageNum)
-            if (seasonTitle.isEmpty()) seasonTitle = data.season.title
-            if (seasonCover.isEmpty()) seasonCover = data.season.cover
-
-            val archives = data.archives.orEmpty()
+            if (title.isEmpty()) title = data.meta?.title.orEmpty()
+            if (cover.isEmpty()) cover = data.meta?.cover.orEmpty()
+            val archives = data.episodes
             if (archives.isEmpty()) break
-
-            for (archive in archives) {
-                if (archive.cid == 0L) continue
-                var cover = archive.cover
-                if (cover.isEmpty()) cover = seasonCover
-                songs += Song(
-                    id = "${archive.bvid}|${archive.cid}",
-                    name = archive.title,
-                    artist = "",
-                    album = seasonTitle,
-                    duration = archive.duration,
-                    source = "bilibili",
-                    cover = normalizeCover(cover),
-                    link = "https://www.bilibili.com/video/${archive.bvid}",
-                    extra = mapOf(
-                        "bvid" to archive.bvid,
-                        "cid" to archive.cid.toString(),
-                    ),
-                )
-            }
+            archives.filterTo(episodes) { it.bvid.isNotEmpty() }
             processedArchives += archives.size
-
             val total = data.page.total
             if (total == 0 || processedArchives >= total) break
             pageNum++
         }
-        return songs
+        return BilibiliSeasonArchivePage(title = title, cover = cover, episodes = episodes)
+    }
+
+    /** 每集的分P cid：polymer 接口不给，只能逐条问视频详情；并发拉，否则一整个歌单要等几十秒。 */
+    private suspend fun resolveEpisodeCids(
+        cookie: String,
+        episodes: List<BilibiliSeasonArchive>,
+    ): List<Long?> = coroutineScope {
+        val semaphore = Semaphore(6)
+        episodes.map { episode ->
+            async(Dispatchers.IO) {
+                semaphore.withPermit {
+                    episode.cid.takeIf { it != 0L } ?: runCatching {
+                        fetchEpisodeCid(cookie, episode.bvid, episode.page, episode.title)
+                    }.getOrNull()?.takeIf { it != 0L }
+                }
+            }
+        }.map { it.await() }
+    }
+
+    /** 分页上限：合集动辄几百集，全翻完一次歌单要几十个请求，取前 [SEASON_SONG_LIMIT] 首就够。 */
+    private fun seasonPageLimit(seasonId: Long, mid: Long): Int {
+        val size = BILIBILI_SEASON_PAGE_SIZE
+        return maxOf(1, (SEASON_SONG_LIMIT + size - 1) / size)
     }
 
     private suspend fun fetchSeasonPage(
@@ -619,7 +739,7 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         pageNum: Int,
     ): BilibiliSeasonData {
         val url = "$BILIBILI_SEASON_API?mid=$mid&season_id=$seasonId" +
-            "&page_num=$pageNum&page_size=$BILIBILI_SEASON_PAGE_SIZE"
+            "&sort_reverse=false&page_num=$pageNum&page_size=$BILIBILI_SEASON_PAGE_SIZE"
         val body = NativeHttp.get(
             url,
             headers = mapOf("Referer" to BilibiliCdn.REFERER),
@@ -630,7 +750,99 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
         if (response.code != 0) {
             throw IllegalStateException("bilibili season api error: ${response.code}")
         }
-        return response.data ?: BilibiliSeasonData()
+        val data = response.data ?: BilibiliSeasonData()
+        // polymer 接口不返回每集的分P信息，也没有 cid；标题/封面/时长都在 archives 上
+        return data.copy(
+            episodes = data.archives.orEmpty().mapIndexed { index, archive ->
+                BilibiliSeasonArchive(
+                    bvid = archive.bvid,
+                    title = archive.title,
+                    cover = archive.pic,
+                    duration = archive.duration,
+                    page = (pageNum - 1) * BILIBILI_SEASON_PAGE_SIZE + index + 1,
+                )
+            },
+        )
+    }
+
+    /** 合集头部资料（标题、封面、曲目数）：排行里只给了合集 id，曲目数得单独问一次。 */
+    private suspend fun fetchSeasonMeta(cookie: String, mid: Long, seasonId: Long): BilibiliSeasonMeta? {
+        val url = "$BILIBILI_SEASON_META_API?mid=$mid&season_id=$seasonId" +
+            "&sort_reverse=false&page_num=1&page_size=1"
+        val body = NativeHttp.get(
+            url,
+            headers = mapOf("Referer" to BilibiliCdn.REFERER),
+            cookie = effectiveCookie(cookie),
+            userAgent = BilibiliCdn.USER_AGENT,
+        )
+        val response = json.decodeFromString<BilibiliSeasonResponse>(body)
+        if (response.code != 0) return null
+        return response.data?.meta
+    }
+
+    /**
+     * 合集分P的 cid：polymer 的 archives 里没有，得靠视频详情。
+     * 优先按标题在分P里找（合集收录的就是某一个分P），找不到才按合集里的顺序取第 N 个分P。
+     * 都分不出就不放进来——宁可少一首，也不把某一集播成同一稿件的别的分P。
+     */
+    private suspend fun fetchEpisodeCid(
+        cookie: String,
+        bvid: String,
+        page: Int,
+        title: String,
+    ): Long {
+        val pages = fetchPageList(cookie, bvid)
+        if (pages.isEmpty()) return 0L
+        val byTitle = pages.firstOrNull { it.part.isNotEmpty() && sameTitle(it.part, title) }
+        if (byTitle != null) return byTitle.cid
+        return pages.getOrNull(page - 1)?.cid ?: 0L
+    }
+
+    private fun sameTitle(a: String, b: String): Boolean {
+        val left = BilibiliTitleParser.keyOf(a)
+        return left.isNotEmpty() && left == BilibiliTitleParser.keyOf(b)
+    }
+
+    /** 分P的 part 是上传文件名时不能用，退回稿件标题。 */
+    private fun singlePageTitle(rootTitle: String, part: String): String {
+        if (BilibiliTitleParser.isUploadFileName(part)) return rootTitle
+        return part.ifEmpty { rootTitle }
+    }
+
+    /**
+     * 单 P 稿件的曲目信息：稿件标题是 UP 主的宣传文案（「【4K修复】周杰伦 - 晴天MV」），
+     * 直接当歌名列表里很难看，聚合也认不出来，所以按标题拆回歌名 + 歌手。
+     */
+    private fun displayTitle(rootTitle: String, part: String, keyword: String = ""): String {
+        val raw = singlePageTitle(rootTitle, part)
+        return chooseTrack(raw, keyword).title.ifBlank { raw }
+    }
+
+    /**
+     * `晴天-周杰伦` 和 `周杰伦-晴天` 都能拆通，得挑一个：检索词是「歌名 歌手」或只有歌名，
+     * 所以标题和检索词第一个词对得上的那种解读更可能是歌名。
+     */
+    private fun chooseTrack(rawTitle: String, keyword: String): BilibiliTrackTitle {
+        val parsed = BilibiliTitleParser.parse(rawTitle, "")
+        if (parsed.size <= 1) return parsed.firstOrNull() ?: BilibiliTrackTitle(rawTitle, "")
+        val tokens = keyword.trim().split(Regex("""\s+""")).filter { it.isNotBlank() }
+        if (tokens.isEmpty()) return parsed.first()
+        val song = tokens.first()
+        return parsed.firstOrNull { it.title == song }
+            ?: parsed.firstOrNull { it.title.isNotEmpty() && (it.title.contains(song) || song.contains(it.title)) }
+            ?: parsed.first()
+    }
+
+    /**
+     * 匹配换源时检索词就是「歌名 歌手」；这种词搜出来的东西全部由这个歌手相关，
+     * 标题又拆不出歌手时用它兜底。聚合搜索的词只有歌名，这里返回 null。
+     */
+    private fun keywordArtist(keyword: String): String? {
+        val tokens = keyword.trim().split(Regex("""\s+""")).filter { it.isNotBlank() }
+        if (tokens.size < 2) return null
+        val candidate = tokens.last()
+        if (candidate.length > 16 || candidate.any { it.isDigit() }) return null
+        return candidate
     }
 
     private suspend fun fetchAudioUrl(
@@ -786,24 +998,19 @@ class BilibiliProvider : BaseNativeProvider(BILIBILI_INFO) {
     private fun buildSongsFromPages(
         bvid: String,
         rootTitle: String,
-        author: String,
         cover: String,
         pages: List<BilibiliPage>,
     ): List<Song> {
         val normalizedCover = normalizeCover(cover)
         val songs = mutableListOf<Song>()
         pages.forEachIndexed { index, page ->
-            var displayTitle = page.part
-            if (pages.size == 1 && displayTitle.isEmpty()) {
-                displayTitle = rootTitle
-            } else if (displayTitle != rootTitle) {
-                displayTitle = "$rootTitle - $displayTitle"
-            }
+            // 单 P 时 page.part 往往和稿件标题一样，拼起来就成了「晴天 - 晴天」
+            val name = if (pages.size == 1) displayTitle(rootTitle, page.part) else page.part.ifEmpty { rootTitle }
             songs += Song(
                 id = "$bvid|${page.cid}",
-                name = displayTitle,
-                artist = author,
-                album = bvid,
+                name = name,
+                artist = chooseTrack(singlePageTitle(rootTitle, page.part), "").artist,
+                album = rootTitle.takeIf { pages.size > 1 }.orEmpty(),
                 duration = page.duration,
                 source = "bilibili",
                 cover = normalizedCover,
@@ -1015,7 +1222,11 @@ private data class BilibiliSearchItem(
     val title: String = "",
     val author: String = "",
     val pic: String = "",
-)
+    /** 搜索结果自带总时长，形如 `4:30` / `1:02:03` 的字符串；视频详情拿不到时用它。 */
+    val duration: String = "",
+) {
+    val durationSec: Int get() = parseDurationText(duration)
+}
 
 @Serializable
 private data class BilibiliViewResponse(
@@ -1043,6 +1254,7 @@ private data class BilibiliOwner(
 @Serializable
 private data class BilibiliPage(
     val cid: Long = 0,
+    val page: Int = 0,
     val part: String = "",
     val duration: Int = 0,
 )
@@ -1106,9 +1318,31 @@ private data class BilibiliSeasonResponse(
 
 @Serializable
 private data class BilibiliSeasonData(
-    val season: BilibiliSeasonInfo = BilibiliSeasonInfo(),
+    val meta: BilibiliSeasonMeta? = null,
     val page: BilibiliSeasonPage = BilibiliSeasonPage(),
-    val archives: List<BilibiliSeasonArchive>? = null,
+    /** polymer 原始回包：`pic` 字段，没有 cid。 */
+    val archives: List<BilibiliPolymerArchive>? = null,
+    /** [fetchSeasonPage] 归一化之后的分P列表，调用方只认这个。 */
+    val episodes: List<BilibiliSeasonArchive> = emptyList(),
+)
+
+@Serializable
+private data class BilibiliSeasonMeta(
+    @SerialName("season_id") val seasonId: Long = 0,
+    val title: String = "",
+    val cover: String = "",
+    val description: String = "",
+    val total: Int = 0,
+    val mid: Long = 0,
+)
+
+@Serializable
+private data class BilibiliPolymerArchive(
+    val bvid: String = "",
+    val title: String = "",
+    val pic: String = "",
+    val duration: Int = 0,
+    val ctime: Long = 0,
 )
 
 @Serializable
@@ -1131,6 +1365,35 @@ private data class BilibiliSeasonArchive(
     val cover: String = "",
     val duration: Int = 0,
     val cid: Long = 0,
+    /** 在这个合集里的第几 P；polymer 接口不返回 cid，只按它去找分P。 */
+    val page: Int = 0,
+)
+
+private data class BilibiliSeasonArchivePage(
+    val title: String = "",
+    val cover: String = "",
+    val episodes: List<BilibiliSeasonArchive> = emptyList(),
+)
+
+@Serializable
+private data class BilibiliRankingResponse(
+    val code: Int = 0,
+    val data: BilibiliRankingData? = null,
+)
+
+@Serializable
+private data class BilibiliRankingData(
+    val list: List<BilibiliRankingEntry>? = null,
+)
+
+@Serializable
+private data class BilibiliRankingEntry(
+    val bvid: String = "",
+    val title: String = "",
+    val pic: String = "",
+    @SerialName("season_id") val seasonId: Long = 0,
+    val owner: BilibiliOwner = BilibiliOwner(),
+    val stat: BilibiliUgcStat = BilibiliUgcStat(),
 )
 
 @Serializable
