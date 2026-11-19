@@ -102,6 +102,7 @@ import com.mytv.mymusic.data.transfer.PLAYLIST_FILE_MIME
 import com.mytv.mymusic.data.transfer.TransferMode
 import com.mytv.mymusic.data.transfer.TransferPhase
 import com.mytv.mymusic.data.transfer.UploadResult
+import com.mytv.mymusic.data.transfer.importLosesSomething
 import com.mytv.mymusic.data.transfer.importSkippedText
 import com.mytv.mymusic.data.transfer.applySameNameToggle
 import com.mytv.mymusic.data.transfer.defaultChoices
@@ -523,7 +524,7 @@ private fun ColumnScope.ImportPreviewBody(plan: ImportPlan, applying: Boolean, a
         }
         val skippedText = importSkippedText(plan)
         if (skippedText.isNotBlank()) {
-            SectionLabel("导不了的")
+            SectionLabel(if (importLosesSomething(plan)) "导不了的" else "说明")
             Text(
                 skippedText,
                 Modifier.padding(horizontal = 8.dp),

@@ -137,6 +137,7 @@ class ImportPlanTest {
         val text = importSkippedText(plan)
         assertTrue(text, text.contains("咪咕 1 首"))
         assertTrue(text, text.contains("1 首本应用放不了"))
+        assertTrue(importLosesSomething(plan))
     }
 
     @Test
@@ -149,6 +150,16 @@ class ImportPlanTest {
         // 本地没找到
         assertEquals(1, plan.lists.single().skipped[SkipReason.LocalNotFound])
         assertTrue(importSkippedText(plan).contains("1 首没换到"))
+        assertTrue(importLosesSomething(plan))
+    }
+
+    @Test
+    fun miguAllResolvedLosesNothing() {
+        // 只有「咪咕 N 首已在线换取」：标题不能写「导不了的」
+        val plan = lxPlan("part_v2.json")
+        val resolved = plan.copy(lists = plan.lists.map { it.copy(skipped = emptyMap(), miguResolved = it.migu) })
+        assertEquals("咪咕 1 首已在线换取。", importSkippedText(resolved))
+        assertFalse(importLosesSomething(resolved))
     }
 
     @Test

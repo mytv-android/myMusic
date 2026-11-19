@@ -173,6 +173,15 @@ internal fun importSkippedText(plan: ImportPlan): String {
     return if (parts.isEmpty()) "" else parts.joinToString("；") + "。"
 }
 
+/**
+ * 那段话里有没有真的导不进来的。只有「咪咕 N 首已在线换取」时什么都没丢，
+ * 标题写「导不了的」就对不上了，界面改写「说明」。
+ */
+internal fun importLosesSomething(plan: ImportPlan): Boolean {
+    val skipped = plan.lists.sumOf { list -> list.skipped.values.sum() }
+    return skipped > 0 || plan.skippedTemp > 0 || plan.migu > plan.miguResolved
+}
+
 // ---------------- 本地歌查找 ----------------
 
 /** 本机本地音乐里的一首（显示用的 Song + 文件名），按歌名、歌手建索引。 */
