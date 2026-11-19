@@ -21,7 +21,12 @@ private val MUSIC_ID_EXTRA_KEYS = setOf(
 
 internal object LxProtocol {
     private val json = Json { ignoreUnknownKeys = true }
-    private val standardQualities = listOf("128k", "320k", "flac", "flac24bit")
+    /** 官方基础四档 + 脚本圈实际会声明的扩展档：照 lxserver 的做法原样透传，不在这一层裁剪。 */
+    private val standardQualities = listOf(
+        "128k", "320k", "flac", "flac24bit",
+        "32k", "64k", "192k", "256k", "500k", "640k", "sq", "ultra",
+        "hires", "atmos", "atmos_plus", "master",
+    )
     private val standardActions = listOf("musicUrl")
     private val localActions = listOf("musicUrl", "lyric", "pic")
 
@@ -93,7 +98,11 @@ internal object LxProtocol {
             "preview", "standard", "128", "128k", "m500", "pq" -> listOf("128k")
             "high", "320", "320k", "m800", "hq", "exhigh", "highest" -> listOf("320k")
             "lossless", "flac", "f000" -> listOf("flac")
-            "hires", "hi_res", "hi-res", "24bit", "sq", "zq", "zq24" -> listOf("flac24bit")
+            // 扩展档先按脚本声明的原生档位请求，取不到再顺着无损阶梯降，宁可降档也要让这首歌响
+            "hires", "hi_res", "hi-res", "24bit", "sq", "zq", "zq24" -> listOf("hires", "flac24bit", "flac")
+            "ultra", "640", "640k", "ogg", "o801" -> listOf("ultra", "hires", "flac24bit", "flac")
+            "spatial", "sky", "jyeffect", "atmos", "q000", "dolby" -> listOf("atmos", "atmos_plus", "hires", "flac24bit", "flac")
+            "master", "ai00", "zq32", "jymaster" -> listOf("master", "hires", "flac24bit", "flac")
             else -> emptyList()
         }
         return preferred.filter { it in capability.qualities }
@@ -110,7 +119,12 @@ internal object LxProtocol {
                 "128k" -> 128
                 "320k" -> 320
                 "flac", "flac24bit" -> 1411
-                else -> 0
+                // 标称码率，只用于展示：Hi-Res 24bit/96k、母带 24bit/192k、全景声 DD+ JOC
+                "hires" -> 4608
+                "master" -> 9216
+                "atmos", "atmos_plus" -> 768
+                "ultra" -> 640
+                else -> quality.trimEnd('k').toIntOrNull() ?: 0
             },
             level = quality,
             extra = mapOf(

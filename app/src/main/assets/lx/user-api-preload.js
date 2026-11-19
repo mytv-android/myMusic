@@ -1,6 +1,8 @@
 // LX Music mobile custom-source preload, Apache-2.0.
 // Upstream: lyswhut/lx-music-mobile, android/app/src/main/assets/script/user-api-preload.js
-// Vendored unchanged except for this attribution header (2026-11-17).
+// Vendored 2026-11-17; local change (2026-11-19): supportQualitys below accepts extended
+// tiers (hires/atmos/master/...) beyond the official base four so scripts declaring them
+// keep them (lxserver-style pass-through). Everything else is upstream as-is.
 'use strict'
 
 globalThis.lx_setup = (key, id, name, description, version, author, homepage, rawScript) => {
@@ -153,12 +155,20 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
     request: null,
   }
   const allSources = ['kw', 'kg', 'tx', 'wy', 'mg', 'local']
+  // local change: the official build only accepts the base four tiers here, silently dropping
+  // hires/atmos/master and every other extended tier a script declares. We accept the union of
+  // tiers seen in the wild (lxserver-style pass-through); the host layer applies its own filter.
+  const lxSupportQualitys = [
+    '128k', '320k', 'flac', 'flac24bit',
+    '32k', '64k', '192k', '256k', '500k', '640k', 'sq', 'ultra',
+    'hires', 'atmos', 'atmos_plus', 'master',
+  ]
   const supportQualitys = {
-    kw: ['128k', '320k', 'flac', 'flac24bit'],
-    kg: ['128k', '320k', 'flac', 'flac24bit'],
-    tx: ['128k', '320k', 'flac', 'flac24bit'],
-    wy: ['128k', '320k', 'flac', 'flac24bit'],
-    mg: ['128k', '320k', 'flac', 'flac24bit'],
+    kw: lxSupportQualitys,
+    kg: lxSupportQualitys,
+    tx: lxSupportQualitys,
+    wy: lxSupportQualitys,
+    mg: lxSupportQualitys,
     local: [],
   }
   const supportActions = {

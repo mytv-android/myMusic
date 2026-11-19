@@ -497,5 +497,9 @@ private fun sourcePlatforms(record: LxSourceRecord): String = LxPlatform.labels.
 private fun qualityLabel(quality: String): String = when (quality) {
     "flac" -> "FLAC"
     "flac24bit" -> "24bit"
+    "hires" -> "Hi-Res"
+    "atmos" -> "全景声"
+    "atmos_plus" -> "全景声+"
+    "master" -> "母带"
     else -> quality
 }

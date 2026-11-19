@@ -23,8 +23,8 @@ enum class AudioQuality(val id: String) {
     Master("master");
 
     /**
-     * 设置页音质偏好按钮上的短标签。只列常用档：全景声、母带这些档是否可选取决于平台和账号，
-     * 放在这里会让用户选一个大多数平台都给不了的值。
+     * 设置页音质偏好按钮上的短标签。全景声、母带随洛雪源的能力表一起露出：
+     * 锁了档取不到时换源层会退回自动档，不会再整首播不出来。
      */
     val preferenceLabel: String
         get() = when (this) {
@@ -33,6 +33,8 @@ enum class AudioQuality(val id: String) {
             High -> "高品质"
             Lossless -> "无损"
             HiRes -> "Hi-Res"
+            Atmos -> "全景声"
+            Master -> "母带"
             else -> id
         }
 

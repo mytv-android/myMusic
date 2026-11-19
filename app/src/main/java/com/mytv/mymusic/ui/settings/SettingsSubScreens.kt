@@ -536,9 +536,16 @@ private fun StyleChips(label: String, selected: SchemeStyle, onSelect: (SchemeSt
 
 // ======================= 播放与换源 =======================
 
-/** 音质偏好只放常用档；母带、全景声这些档取决于平台和账号，不在这里露出来。 */
-private val QUALITY_PREFERENCE_OPTIONS =
-    listOf(AudioQuality.Auto, AudioQuality.Standard, AudioQuality.High, AudioQuality.Lossless, AudioQuality.HiRes)
+/** 音质偏好：常用档 + 洛雪源普遍声明的全景声/母带；锁了档取不到时换源层会自动退回自动档。 */
+private val QUALITY_PREFERENCE_OPTIONS = listOf(
+    AudioQuality.Auto,
+    AudioQuality.Standard,
+    AudioQuality.High,
+    AudioQuality.Lossless,
+    AudioQuality.HiRes,
+    AudioQuality.Atmos,
+    AudioQuality.Master,
+)
 
 /** 播放与换源：换源模式按钮组、平台顺序入口、匹配选项。 */
 @OptIn(ExperimentalLayoutApi::class)

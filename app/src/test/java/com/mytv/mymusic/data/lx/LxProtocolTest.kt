@@ -10,22 +10,25 @@ import org.junit.Test
 
 class LxProtocolTest {
     @Test
-    fun filtersCapabilitiesLikeMobileRuntime() {
+    fun keepsExtendedQualitiesLikeLxserver() {
         val capabilities = LxProtocol.parseInit(
             """
             {
               "status": true,
               "info": {"sources": {
-                "kw": {"name":"酷我","type":"music","actions":["musicUrl","lyric"],"qualitys":["128k","320k","flac","master"]},
+                "kw": {"name":"酷我","type":"music","actions":["musicUrl","lyric"],"qualitys":["128k","320k","flac","hires","master"]},
+                "tx": {"name":"QQ","type":"music","actions":["musicUrl"],"qualitys":["flac24bit","atmos","atmos_plus","master"]},
                 "local": {"type":"music","actions":["musicUrl","lyric","pic"],"qualitys":[]},
-                "unknown": {"type":"music","actions":["musicUrl"],"qualitys":["320k"]}
+                "unknown": {"type":"music","actions":["musicUrl"],"qualitys":["320k"]},
+                "qs": {"type":"music","actions":["musicUrl"],"qualitys":["32k","flac"]}
               }}
             }
             """.trimIndent(),
         )
-        assertEquals(setOf("kw", "local"), capabilities.keys)
+        assertEquals(setOf("kw", "tx", "local"), capabilities.keys)
         assertEquals(listOf("musicUrl"), capabilities.getValue("kw").actions)
-        assertEquals(listOf("128k", "320k", "flac"), capabilities.getValue("kw").qualities)
+        assertEquals(listOf("128k", "320k", "flac", "hires", "master"), capabilities.getValue("kw").qualities)
+        assertEquals(listOf("flac24bit", "atmos", "atmos_plus", "master"), capabilities.getValue("tx").qualities)
         assertEquals(listOf("musicUrl", "lyric", "pic"), capabilities.getValue("local").actions)
     }
 
@@ -71,6 +74,18 @@ class LxProtocolTest {
     }
 
     @Test
+    fun mapsExtendedPreferencesWithBaseFallback() {
+        val extended = LxCapability(actions = listOf("musicUrl"), qualities = listOf("320k", "flac", "flac24bit", "hires", "atmos", "master"))
+        assertEquals(listOf("hires", "flac24bit", "flac"), LxProtocol.preferredQualities(extended, "hires"))
+        assertEquals(listOf("atmos", "hires", "flac24bit", "flac"), LxProtocol.preferredQualities(extended, "atmos"))
+        assertEquals(listOf("master", "hires", "flac24bit", "flac"), LxProtocol.preferredQualities(extended, "master"))
+        // 只声明基础四档的脚本：扩展偏好降级到无损档，行为与透传前一致
+        val baseOnly = LxCapability(actions = listOf("musicUrl"), qualities = listOf("128k", "320k", "flac", "flac24bit"))
+        assertEquals(listOf("flac24bit", "flac"), LxProtocol.preferredQualities(baseOnly, "hires"))
+        assertEquals(listOf("flac24bit", "flac"), LxProtocol.preferredQualities(baseOnly, "master"))
+    }
+
+    @Test
     fun customStreamCarriesAttribution() {
         val record = LxSourceRecord(id = "lx_test", name = "测试源")
         val stream = LxProtocol.stream("https://cdn.example.com/a.flac?sign=1", "flac", record)
@@ -78,5 +93,14 @@ class LxProtocolTest {
         assertEquals("测试源", stream.extra["lx_source"])
         assertFalse(stream.preview)
         assertTrue(stream.bitrate > 320)
+    }
+
+    @Test
+    fun extendedStreamBitratesAreNominal() {
+        val record = LxSourceRecord(id = "lx_test", name = "测试源")
+        assertEquals(4608, LxProtocol.stream("https://cdn.example.com/a.flac?sign=1", "hires", record).bitrate)
+        assertEquals(9216, LxProtocol.stream("https://cdn.example.com/b.flac?sign=1", "master", record).bitrate)
+        assertEquals(768, LxProtocol.stream("https://cdn.example.com/c.ec3?sign=1", "atmos", record).bitrate)
+        assertEquals(192, LxProtocol.stream("https://cdn.example.com/d.mp3?sign=1", "192k", record).bitrate)
     }
 }
