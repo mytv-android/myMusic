@@ -22,6 +22,7 @@
   const statusCard = document.getElementById("status-card");
   const statusTitle = document.getElementById("status-title");
   const statusDetail = document.getElementById("status-detail");
+  const heroArrow = document.getElementById("hero-arrow");
 
   let maxBytes = 32 * 1024 * 1024;
   let downloadFile = "";
@@ -59,6 +60,7 @@
     fileInput.disabled = true;
     sendButton.disabled = true;
     downloadLink.setAttribute("aria-disabled", "true");
+    if (!downloadPanel.hidden) downloadLabel.textContent = "已失效";
     showStatus("error", "这个页面不能再用了", message);
   }
 
@@ -255,6 +257,8 @@
       if (session.maxBytes > 0) maxBytes = session.maxBytes;
       if (session.mode === "download" && session.download) {
         downloadFile = session.download.name || "";
+        // 头图的箭头朝下：从电视拿下来
+        heroArrow.setAttribute("d", "M16 15v8m0 0-3-3m3 3 3-3");
         title.textContent = "从电视下载歌单文件";
         intro.textContent = "电视导出的 myMusic 歌单文件，存到手机后可以发给别人。";
         document.title = "下载歌单文件 · myMusic TV";

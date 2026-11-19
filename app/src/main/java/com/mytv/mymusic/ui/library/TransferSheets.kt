@@ -894,7 +894,13 @@ private fun rememberFileTransferSession(
             }
             value = FileTransferSession.Ready(started.url, server!!)
             launch {
-                delay((started.expiresAt - System.currentTimeMillis()).coerceAtLeast(0))
+                // 和服务端 isExpired 对同一个墙上时钟；delay 走单调时钟，两个钟对不上时（模拟器上见过开了二十来秒就
+                // 提前「过期」）醒了就再对一次，最多隔 30 秒
+                while (true) {
+                    val left = started.expiresAt - System.currentTimeMillis()
+                    if (left <= 0) break
+                    delay(left.coerceAtMost(EXPIRY_CHECK_MILLIS))
+                }
                 server?.stop()
                 value = FileTransferSession.Expired
             }
@@ -908,6 +914,8 @@ private fun rememberFileTransferSession(
         }
     }.value
 }
+
+private const val EXPIRY_CHECK_MILLIS = 30_000L
 
 // ======================= 共用小件 =======================
 
