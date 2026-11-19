@@ -2004,88 +2004,111 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         if (id.trim().lowercase().startsWith("gcid_")) {
             return fetchSonglistDetail(cookie, id)
         }
-        val body = NativeHttp.get(
-            "http://mobilecdn.kugou.com/api/v3/special/song?specialid=$id&page=1&pagesize=300&version=9108&area_code=1",
-            cookie = cookie,
-            randomIp = true,
-            userAgent = MOBILE_USER_AGENT,
-        )
-        val resp = json.decodeFromString<KugouSpecialSongResponse>(body)
-        val songs = mutableListOf<Song>()
-        for (item in resp.data.info) {
-            val finalHash = firstNonEmpty(
-                item.hash,
-                item.sqFileHash,
-                item.hqFileHash,
-                item.resFileHash,
-                item.transParam.ogg320Hash,
-                item.fileHash,
-                item.transParam.ogg128Hash,
-            )
-            if (!isValidHash(finalHash)) continue
-
-            var name = item.songName
-            var artist = item.singerName
-            if (name.isEmpty() || artist.isEmpty()) {
-                val parts = item.filename.split(" - ")
-                if (parts.size >= 2) {
-                    artist = parts[0].trim()
-                    name = parts.drop(1).joinToString(" - ").trim()
-                } else {
-                    name = item.filename
-                }
-            }
-
-            var cover = ""
-            if (item.transParam.unionCover.isNotEmpty()) {
-                cover = item.transParam.unionCover.replaceFirst("{size}", "240")
-            }
-            var albumName = item.albumName
-            if (albumName.isEmpty()) albumName = item.remark
-
-            var size = item.fileSize
-            when (finalHash) {
-                item.sqFileHash -> if (item.sqFileSize > 0) size = item.sqFileSize
-                item.hqFileHash -> if (item.hqFileSize > 0) size = item.hqFileSize
-                item.resFileHash -> if (item.resFileSize > 0) size = item.resFileSize
-                item.transParam.ogg320Hash -> if (item.transParam.ogg320FileSize > 0) size = item.transParam.ogg320FileSize
-                item.transParam.ogg128Hash -> if (item.transParam.ogg128FileSize > 0) size = item.transParam.ogg128FileSize
-            }
-
-            songs += Song(
-                id = finalHash,
-                name = name,
-                artist = artist,
-                album = albumName,
-                albumId = item.albumId,
-                duration = item.duration,
-                size = size,
-                source = "kugou",
-                cover = cover,
-                link = "https://www.kugou.com/song/#hash=$finalHash",
-                extra = mapOf(
-                    "hash" to finalHash,
-                    "ogg_320_hash" to item.transParam.ogg320Hash,
-                    "ogg_128_hash" to item.transParam.ogg128Hash,
-                    "sq_hash" to item.sqFileHash,
-                    "file_hash" to item.fileHash,
-                    "res_hash" to item.resFileHash,
-                    "mv_hash" to item.mvHash,
-                    "hq_hash" to item.hqFileHash,
-                    "audio_id" to item.audioId.numericString(),
-                    "album_id" to item.albumId,
-                    "privilege" to item.privilege.toString(),
-                ),
-            )
-        }
-
+        val (total, songs) = fetchSpecialSongs(cookie, id)
         val playlist = Playlist(
             id = id,
             source = "kugou",
             link = "https://www.kugou.com/yy/special/single/$id.html",
-            trackCount = songs.size,
+            trackCount = if (total > 0) total else songs.size,
         )
         return playlist to songs
+    }
+
+    /**
+     * 歌单全集：`special/song` 单页最多 500 首，按 total 翻页补齐。
+     * 不按会员状态过滤——歌单里本来有多少就导多少，权限留给播放时按 `isVip` 判断。
+     */
+    private suspend fun fetchSpecialSongs(cookie: String, specialId: String): Pair<Int, List<Song>> {
+        val pageSize = 500
+        var total = 0
+        val items = mutableListOf<KugouSpecialSongItem>()
+        var page = 1
+        while (true) {
+            val body = NativeHttp.get(
+                "http://mobilecdn.kugou.com/api/v3/special/song?specialid=$specialId&page=$page&pagesize=$pageSize&version=9108&area_code=1",
+                cookie = cookie,
+                randomIp = true,
+                userAgent = MOBILE_USER_AGENT,
+            )
+            val resp = json.decodeFromString<KugouSpecialSongResponse>(body)
+            val batch = resp.data.info
+            if (total == 0) total = resp.data.total
+            if (batch.isEmpty()) break
+            items += batch
+            if (batch.size < pageSize) break
+            if (total > 0 && items.size >= total) break
+            page++
+        }
+        val songs = items.mapNotNull { specialItemToSong(it) }
+        return total to songs
+    }
+
+    private fun specialItemToSong(item: KugouSpecialSongItem): Song? {
+        val finalHash = firstNonEmpty(
+            item.hash,
+            item.sqFileHash,
+            item.hqFileHash,
+            item.resFileHash,
+            item.transParam.ogg320Hash,
+            item.fileHash,
+            item.transParam.ogg128Hash,
+        )
+        if (!isValidHash(finalHash)) return null
+
+        var name = item.songName
+        var artist = item.singerName
+        if (name.isEmpty() || artist.isEmpty()) {
+            val parts = item.filename.split(" - ")
+            if (parts.size >= 2) {
+                artist = parts[0].trim()
+                name = parts.drop(1).joinToString(" - ").trim()
+            } else {
+                name = item.filename
+            }
+        }
+
+        var cover = ""
+        if (item.transParam.unionCover.isNotEmpty()) {
+            cover = item.transParam.unionCover.replaceFirst("{size}", "240")
+        }
+        var albumName = item.albumName
+        if (albumName.isEmpty()) albumName = item.remark
+
+        var size = item.fileSize
+        when (finalHash) {
+            item.sqFileHash -> if (item.sqFileSize > 0) size = item.sqFileSize
+            item.hqFileHash -> if (item.hqFileSize > 0) size = item.hqFileSize
+            item.resFileHash -> if (item.resFileSize > 0) size = item.resFileSize
+            item.transParam.ogg320Hash -> if (item.transParam.ogg320FileSize > 0) size = item.transParam.ogg320FileSize
+            item.transParam.ogg128Hash -> if (item.transParam.ogg128FileSize > 0) size = item.transParam.ogg128FileSize
+        }
+
+        return Song(
+            id = finalHash,
+            name = name,
+            artist = artist,
+            album = albumName,
+            albumId = item.albumId,
+            duration = item.duration,
+            size = size,
+            source = "kugou",
+            cover = cover,
+            link = "https://www.kugou.com/song/#hash=$finalHash",
+            extra = mapOf(
+                "hash" to finalHash,
+                "ogg_320_hash" to item.transParam.ogg320Hash,
+                "ogg_128_hash" to item.transParam.ogg128Hash,
+                "sq_hash" to item.sqFileHash,
+                "file_hash" to item.fileHash,
+                "res_hash" to item.resFileHash,
+                "mv_hash" to item.mvHash,
+                "hq_hash" to item.hqFileHash,
+                "audio_id" to item.audioId.numericString(),
+                "album_id" to item.albumId,
+                "privilege" to item.privilege.toString(),
+            ),
+            isVip = item.privilege == 10,
+        )
     }
 
     private suspend fun fetchSonglistDetail(cookie: String, rawId: String): Pair<Playlist, List<Song>> {
@@ -2097,9 +2120,7 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             randomIp = true,
             userAgent = MOBILE_USER_AGENT,
         )
-        val match = KUGOU_SONGLIST_PAYLOAD_REGEX.find(body)
-            ?: throw IllegalStateException("kugou songlist payload not found")
-        val resp = json.decodeFromString<KugouSonglistPayload>(match.groupValues[1])
+        val resp = parseSonglistPayload(body)
 
         val playlistId = resp.encodeGic.ifEmpty { id }
         val playlist = Playlist(
@@ -2114,78 +2135,116 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             link = "https://www.kugou.com/songlist/$playlistId/",
         )
 
-        val isVip = runCatching { isVipAccount(cookie, VipCache()) }.getOrDefault(false)
-        val songs = mutableListOf<Song>()
-        for (item in resp.info.songs) {
-            if (!isVip && item.privilege == 10) continue
-
-            val hashes = pickSonglistHashes(item.hash, item.size, item.bitrate, item.relateGoods)
-            var fileHash = hashes.fileHash
-            var hqHash = hashes.hqHash
-            var sqHash = hashes.sqHash
-            var size = hashes.size
-            var bitrate = hashes.bitrate
-            if (isValidHash(item.fileHash)) fileHash = item.fileHash
-            if (isValidHash(item.hqFileHash)) hqHash = item.hqFileHash
-            if (isValidHash(item.sqFileHash)) sqHash = item.sqFileHash
-
-            val finalHash = firstNonEmpty(
-                item.hash,
-                sqHash,
-                hqHash,
-                item.resFileHash,
-                item.transParam.ogg320Hash,
-                fileHash,
-                item.transParam.ogg128Hash,
-            )
-            if (!isValidHash(finalHash)) continue
-
-            when (finalHash) {
-                sqHash -> Unit
-                hqHash -> Unit
-                item.resFileHash -> if (item.size > 0) size = item.size
-                item.transParam.ogg320Hash -> if (item.transParam.ogg320FileSize > 0) size = item.transParam.ogg320FileSize
-                item.transParam.ogg128Hash -> if (item.transParam.ogg128FileSize > 0) size = item.transParam.ogg128FileSize
-                fileHash, item.hash -> if (item.size > 0) size = item.size
+        // 分享页只内嵌前 10 首，几百首的歌单会只剩几条；补齐靠 specialid 翻页的全量接口。
+        val specialId = resp.info.listInfo.specialid
+        if (specialId > 0) {
+            val (total, full) = fetchSpecialSongs(cookie, specialId.toString())
+            if (full.isNotEmpty()) {
+                val embedded = resp.info.songs.mapNotNull { embedSonglistSong(it) }
+                val merged = mergeSonglistSongs(full, embedded)
+                val count = if (total > 0) total else merged.size
+                return playlist.copy(trackCount = count) to merged
             }
-
-            val duration = normalizeKugouDuration(item.timeLength)
-            if (duration > 0 && size > 0) bitrate = (size * 8 / 1000 / duration).toInt()
-
-            var coverUrl = item.cover
-            if (item.transParam.unionCover.isNotEmpty()) coverUrl = item.transParam.unionCover
-            coverUrl = coverUrl.replaceFirst("{size}", "240")
-
-            songs += Song(
-                id = finalHash,
-                name = pickSonglistSongName(item.name),
-                artist = joinSonglistArtists(item.singerInfo),
-                album = item.albumInfo.name,
-                albumId = item.albumId,
-                duration = duration,
-                size = size,
-                bitrate = bitrate,
-                source = "kugou",
-                cover = coverUrl,
-                link = "https://www.kugou.com/song/#hash=$finalHash",
-                extra = mapOf(
-                    "hash" to finalHash,
-                    "ogg_320_hash" to item.transParam.ogg320Hash,
-                    "ogg_128_hash" to item.transParam.ogg128Hash,
-                    "sq_hash" to sqHash,
-                    "file_hash" to fileHash,
-                    "res_hash" to item.resFileHash,
-                    "mv_hash" to item.mvHash,
-                    "hq_hash" to hqHash,
-                    "audio_id" to item.audioId.numericString(),
-                    "album_id" to item.albumId,
-                    "privilege" to item.privilege.toString(),
-                ),
-            )
         }
+
+        val songs = resp.info.songs.mapNotNull { embedSonglistSong(it) }
 
         val result = if (playlist.trackCount == 0) playlist.copy(trackCount = songs.size) else playlist
         return result to songs
+    }
+
+    internal fun parseSonglistPayload(html: String): KugouSonglistPayload {
+        val match = KUGOU_SONGLIST_PAYLOAD_REGEX.find(html)
+            ?: throw IllegalStateException("kugou songlist payload not found")
+        return json.decodeFromString(match.groupValues[1])
+    }
+
+    /**
+     * 全量接口的条目只有文件名（"歌手 - 歌名"）、没有专辑名；分享页内嵌那几首更全。
+     * 两边 hash 常不是同一个（页面偏 128k、接口偏原文件 hash），按歌名对齐补全，
+     * 其余条目保持全量接口的顺序。
+     */
+    internal fun mergeSonglistSongs(full: List<Song>, embedded: List<Song>): List<Song> {
+        val rich = embedded.groupBy { it.name }.mapValues { it.value.first() }
+        if (rich.isEmpty()) return full
+        return full.map { song ->
+            val extra = rich[song.name]
+            if (extra == null) song else song.copy(
+                artist = song.artist.ifBlank { extra.artist },
+                album = extra.album,
+                albumId = extra.albumId.ifBlank { song.albumId },
+                cover = song.cover.ifBlank { extra.cover },
+                bitrate = song.bitrate.takeIf { it > 0 } ?: extra.bitrate,
+                extra = song.extra + extra.extra.filterKeys { it !in song.extra },
+            )
+        }
+    }
+
+    private fun embedSonglistSong(item: KugouSonglistSong): Song? {
+        val hashes = pickSonglistHashes(item.hash, item.size, item.bitrate, item.relateGoods)
+        var fileHash = hashes.fileHash
+        var hqHash = hashes.hqHash
+        var sqHash = hashes.sqHash
+        var size = hashes.size
+        var bitrate = hashes.bitrate
+        if (isValidHash(item.fileHash)) fileHash = item.fileHash
+        if (isValidHash(item.hqFileHash)) hqHash = item.hqFileHash
+        if (isValidHash(item.sqFileHash)) sqHash = item.sqFileHash
+
+        val finalHash = firstNonEmpty(
+            item.hash,
+            sqHash,
+            hqHash,
+            item.resFileHash,
+            item.transParam.ogg320Hash,
+            fileHash,
+            item.transParam.ogg128Hash,
+        )
+        if (!isValidHash(finalHash)) return null
+
+        when (finalHash) {
+            sqHash -> Unit
+            hqHash -> Unit
+            item.resFileHash -> if (item.size > 0) size = item.size
+            item.transParam.ogg320Hash -> if (item.transParam.ogg320FileSize > 0) size = item.transParam.ogg320FileSize
+            item.transParam.ogg128Hash -> if (item.transParam.ogg128FileSize > 0) size = item.transParam.ogg128FileSize
+            fileHash, item.hash -> if (item.size > 0) size = item.size
+        }
+
+        val duration = normalizeKugouDuration(item.timeLength)
+        if (duration > 0 && size > 0) bitrate = (size * 8 / 1000 / duration).toInt()
+
+        var coverUrl = item.cover
+        if (item.transParam.unionCover.isNotEmpty()) coverUrl = item.transParam.unionCover
+        coverUrl = coverUrl.replaceFirst("{size}", "240")
+
+        return Song(
+            id = finalHash,
+            name = pickSonglistSongName(item.name),
+            artist = joinSonglistArtists(item.singerInfo),
+            album = item.albumInfo.name,
+            albumId = item.albumId,
+            duration = duration,
+            size = size,
+            bitrate = bitrate,
+            source = "kugou",
+            cover = coverUrl,
+            link = "https://www.kugou.com/song/#hash=$finalHash",
+            extra = mapOf(
+                "hash" to finalHash,
+                "ogg_320_hash" to item.transParam.ogg320Hash,
+                "ogg_128_hash" to item.transParam.ogg128Hash,
+                "sq_hash" to sqHash,
+                "file_hash" to fileHash,
+                "res_hash" to item.resFileHash,
+                "mv_hash" to item.mvHash,
+                "hq_hash" to hqHash,
+                "audio_id" to item.audioId.numericString(),
+                "album_id" to item.albumId,
+                "privilege" to item.privilege.toString(),
+            ),
+            isVip = item.privilege == 10,
+        )
     }
 
     private suspend fun fetchCloudlistDetail(cookie: String, listId: String): Pair<Playlist, List<Song>> =
@@ -3579,7 +3638,7 @@ private data class KugouSearchItem(
 )
 
 @Serializable
-private data class KugouTransParam(
+internal data class KugouTransParam(
     @SerialName("union_cover") val unionCover: String = "",
     @SerialName("ogg_320_hash") val ogg320Hash: String = "",
     @SerialName("ogg_128_hash") val ogg128Hash: String = "",
@@ -3591,7 +3650,10 @@ private data class KugouTransParam(
 private data class KugouSpecialSongResponse(val data: KugouSpecialSongData = KugouSpecialSongData())
 
 @Serializable
-private data class KugouSpecialSongData(val info: List<KugouSpecialSongItem> = emptyList())
+private data class KugouSpecialSongData(
+    val total: Int = 0,
+    val info: List<KugouSpecialSongItem> = emptyList(),
+)
 
 @Serializable
 private data class KugouSpecialSongItem(
@@ -3618,29 +3680,31 @@ private data class KugouSpecialSongItem(
 )
 
 @Serializable
-private data class KugouSonglistPayload(
+internal data class KugouSonglistPayload(
     @SerialName("encode_gic") val encodeGic: String = "",
     val info: KugouSonglistInfo = KugouSonglistInfo(),
 )
 
 @Serializable
-private data class KugouSonglistInfo(
+internal data class KugouSonglistInfo(
     @SerialName("listinfo") val listInfo: KugouSonglistListInfo = KugouSonglistListInfo(),
     val songs: List<KugouSonglistSong> = emptyList(),
 )
 
 @Serializable
-private data class KugouSonglistListInfo(
+internal data class KugouSonglistListInfo(
     val name: String = "",
     val pic: String = "",
     val intro: String = "",
     @SerialName("list_create_username") val creator: String = "",
     val count: Int = 0,
     val heat: Int = 0,
+    /** 分享页对应的大歌单 id，用来翻全量歌曲；拿不到时退回页面内嵌的那几首。 */
+    val specialid: Int = 0,
 )
 
 @Serializable
-private data class KugouSonglistSong(
+internal data class KugouSonglistSong(
     val hash: String = "",
     @SerialName("FileHash") val fileHash: String = "",
     @SerialName("SQFileHash") val sqFileHash: String = "",
@@ -3662,7 +3726,7 @@ private data class KugouSonglistSong(
 )
 
 @Serializable
-private data class KugouRelateGood(
+internal data class KugouRelateGood(
     val hash: String = "",
     val bitrate: Int = 0,
     val privilege: Int = 0,
@@ -3670,10 +3734,10 @@ private data class KugouRelateGood(
 )
 
 @Serializable
-private data class KugouSinger(val name: String = "")
+internal data class KugouSinger(val name: String = "")
 
 @Serializable
-private data class KugouAlbumInfo(
+internal data class KugouAlbumInfo(
     val id: JsonElement? = null,
     val name: String = "",
 )
