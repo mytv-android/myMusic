@@ -15,10 +15,10 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
+import java.io.File
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.Base64
-import java.io.File
 
 private val JOOX_INFO = ProviderInfo(
     id = "joox",

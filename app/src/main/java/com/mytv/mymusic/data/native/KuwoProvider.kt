@@ -24,6 +24,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.net.URLEncoder
 import java.nio.charset.Charset
 import java.util.Base64
@@ -31,7 +32,6 @@ import java.util.Locale
 import java.util.zip.InflaterInputStream
 import kotlin.math.roundToLong
 import kotlin.random.Random
-import java.io.File
 
 private val KUWO_INFO = ProviderInfo(
     id = "kuwo",
