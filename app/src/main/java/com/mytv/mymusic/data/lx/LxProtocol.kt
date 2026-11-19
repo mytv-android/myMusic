@@ -21,7 +21,7 @@ private val MUSIC_ID_EXTRA_KEYS = setOf(
 
 internal object LxProtocol {
     private val json = Json { ignoreUnknownKeys = true }
-    /** 官方基础四档 + 脚本圈实际会声明的扩展档：照 lxserver 的做法原样透传，不在这一层裁剪。 */
+    /** 桌面版插件没有能力表，假定它认识这组常见档位；手机版脚本声明的档位不过这张表。 */
     private val standardQualities = listOf(
         "128k", "320k", "flac", "flac24bit",
         "32k", "64k", "192k", "256k", "500k", "640k", "sq", "ultra",
@@ -44,9 +44,8 @@ internal object LxProtocol {
             if (source["type"]?.jsonPrimitive?.contentOrNull != "music") continue
             val allowedActions = if (key == "local") localActions else standardActions
             val actions = source["actions"].stringList().filter { it in allowedActions }.distinct()
-            val qualities = if (key == "local") emptyList() else {
-                source["qualitys"].stringList().filter { it in standardQualities }.distinct()
-            }
+            // 档位不过滤：脚本声明什么就保留什么（lxserver 同款），选档与降档交给 preferredQualities/attemptQualities
+            val qualities = if (key == "local") emptyList() else source["qualitys"].stringList().distinct()
             if (actions.isEmpty()) continue
             result[key] = LxCapability(
                 name = source["name"]?.jsonPrimitive?.contentOrNull.orEmpty(),
@@ -107,6 +106,16 @@ internal object LxProtocol {
         }
         return preferred.filter { it in capability.qualities }
     }
+
+    /**
+     * 单个脚本平台的尝试档位：锁的档位脚本没有就顺着降——偏好链 → 自动档链 → 脚本声明的
+     * 全部档位，一个档都没声明就交 null 让脚本自己挑。宁可降档也要让这首歌响。
+     */
+    fun attemptQualities(capability: LxCapability, requested: String): List<String?> =
+        preferredQualities(capability, requested)
+            .ifEmpty { preferredQualities(capability, "auto") }
+            .ifEmpty { capability.qualities }
+            .ifEmpty { listOf<String?>(null) }
 
     fun stream(url: String, quality: String, record: LxSourceRecord): PlayableStream {
         require(url.length <= 2048 && (url.startsWith("https://") || url.startsWith("http://"))) {

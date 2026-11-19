@@ -16,7 +16,7 @@ class LxProtocolTest {
             {
               "status": true,
               "info": {"sources": {
-                "kw": {"name":"酷我","type":"music","actions":["musicUrl","lyric"],"qualitys":["128k","320k","flac","hires","master"]},
+                "kw": {"name":"酷我","type":"music","actions":["musicUrl","lyric"],"qualitys":["128k","320k","flac","hires","master","hires_plus"]},
                 "tx": {"name":"QQ","type":"music","actions":["musicUrl"],"qualitys":["flac24bit","atmos","atmos_plus","master"]},
                 "local": {"type":"music","actions":["musicUrl","lyric","pic"],"qualitys":[]},
                 "unknown": {"type":"music","actions":["musicUrl"],"qualitys":["320k"]},
@@ -27,7 +27,8 @@ class LxProtocolTest {
         )
         assertEquals(setOf("kw", "tx", "local"), capabilities.keys)
         assertEquals(listOf("musicUrl"), capabilities.getValue("kw").actions)
-        assertEquals(listOf("128k", "320k", "flac", "hires", "master"), capabilities.getValue("kw").qualities)
+        // 档位不过滤：连不认识的 hires_plus 也原样保留，顺序照脚本声明
+        assertEquals(listOf("128k", "320k", "flac", "hires", "master", "hires_plus"), capabilities.getValue("kw").qualities)
         assertEquals(listOf("flac24bit", "atmos", "atmos_plus", "master"), capabilities.getValue("tx").qualities)
         assertEquals(listOf("musicUrl", "lyric", "pic"), capabilities.getValue("local").actions)
     }
@@ -86,6 +87,22 @@ class LxProtocolTest {
         // 只声明 sq 的脚本：HiRes 偏好沿链落到 sq，不再报「不支持请求的音质」
         val sqOnly = LxCapability(actions = listOf("musicUrl"), qualities = listOf("sq"))
         assertEquals(listOf("sq"), LxProtocol.preferredQualities(sqOnly, "hires"))
+    }
+
+    @Test
+    fun attemptQualitiesDegradeThroughAutoAndDeclared() {
+        // 锁的档脚本有：照偏好链取
+        val extended = LxCapability(actions = listOf("musicUrl"), qualities = listOf("320k", "flac", "flac24bit", "hires", "master"))
+        assertEquals(listOf("master", "hires", "flac24bit", "flac"), LxProtocol.attemptQualities(extended, "master"))
+        // 锁的档一个都没有：先退到自动档链
+        val lowOnly = LxCapability(actions = listOf("musicUrl"), qualities = listOf("128k"))
+        assertEquals(listOf("128k"), LxProtocol.attemptQualities(lowOnly, "master"))
+        // 自动档链也没有：退到脚本声明的全部档位（锁母带也照单全收）
+        val exotic = LxCapability(actions = listOf("musicUrl"), qualities = listOf("256k"))
+        assertEquals(listOf("256k"), LxProtocol.attemptQualities(exotic, "master"))
+        assertEquals(listOf("sq"), LxProtocol.attemptQualities(LxCapability(actions = listOf("musicUrl"), qualities = listOf("sq")), "auto"))
+        // 一个档都没声明：交 null 让脚本自己挑
+        assertEquals(listOf<String?>(null), LxProtocol.attemptQualities(LxCapability(actions = listOf("musicUrl")), "high"))
     }
 
     @Test

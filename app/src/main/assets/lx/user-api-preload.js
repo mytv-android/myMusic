@@ -1,8 +1,8 @@
 // LX Music mobile custom-source preload, Apache-2.0.
 // Upstream: lyswhut/lx-music-mobile, android/app/src/main/assets/script/user-api-preload.js
-// Vendored 2026-11-17; local change (2026-11-19): supportQualitys below accepts extended
-// tiers (hires/atmos/master/...) beyond the official base four so scripts declaring them
-// keep them (lxserver-style pass-through). Everything else is upstream as-is.
+// Vendored 2026-11-17; local change (2026-11-19): the inited capability table passes the
+// script's declared qualitys through unfiltered (lxserver-style) instead of cropping them
+// to the officially supported tiers. Everything else is upstream as-is.
 'use strict'
 
 globalThis.lx_setup = (key, id, name, description, version, author, homepage, rawScript) => {
@@ -155,22 +155,6 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
     request: null,
   }
   const allSources = ['kw', 'kg', 'tx', 'wy', 'mg', 'local']
-  // local change: the official build only accepts the base four tiers here, silently dropping
-  // hires/atmos/master and every other extended tier a script declares. We accept the union of
-  // tiers seen in the wild (lxserver-style pass-through); the host layer applies its own filter.
-  const lxSupportQualitys = [
-    '128k', '320k', 'flac', 'flac24bit',
-    '32k', '64k', '192k', '256k', '500k', '640k', 'sq', 'ultra',
-    'hires', 'atmos', 'atmos_plus', 'master',
-  ]
-  const supportQualitys = {
-    kw: lxSupportQualitys,
-    kg: lxSupportQualitys,
-    tx: lxSupportQualitys,
-    wy: lxSupportQualitys,
-    mg: lxSupportQualitys,
-    local: [],
-  }
   const supportActions = {
     kw: ['musicUrl'],
     kg: ['musicUrl'],
@@ -332,12 +316,14 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
       for (const source of allSources) {
         const userSource = info.sources[source]
         if (!userSource || userSource.type !== 'music') continue
-        const qualitys = supportQualitys[source]
         const actions = supportActions[source]
         sourceInfo.sources[source] = {
           type: 'music',
           actions: actions.filter(a => userSource.actions.includes(a)),
-          qualitys: qualitys.filter(q => userSource.qualitys.includes(q)),
+          // local change: qualitys pass through exactly as the script declares them (the
+          // official build filters them against its own supported tiers here); the host
+          // layer picks the tier to request and degrades when it is unavailable.
+          qualitys: Array.isArray(userSource.qualitys) ? userSource.qualitys.slice() : [],
         }
       }
     } catch (error) {

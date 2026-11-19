@@ -295,8 +295,7 @@ object LxSources : LxPlayback {
         val capability = record.capabilities[source]
             ?: throw IllegalArgumentException("${record.name} 不支持 ${LxPlatform.labels[source] ?: song.source}")
         require("musicUrl" in capability.actions) { "${record.name} 没有声明取流能力" }
-        val qualities = if (source == "local") listOf<String?>(null) else LxProtocol.preferredQualities(capability, audioQuality).map { it as String? }
-        require(qualities.isNotEmpty()) { "${record.name} 不支持请求的音质" }
+        val qualities = if (source == "local") listOf<String?>(null) else LxProtocol.attemptQualities(capability, audioQuality)
         val engine = engineFor(record)
         val errors = mutableListOf<String>()
         for (quality in qualities) {
