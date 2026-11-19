@@ -76,10 +76,8 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
     val track = state.sourcePickerTrack ?: return
     val tv = LocalAppWindow.current.isTv
     val lxRecords by LxSources.records.collectAsState()
-    val lxAvailable = track.sources.any { source ->
-        val key = LxPlatform.sourceKey(source.providerId)
-        lxRecords.any { it.enabled && (it.desktop || it.capabilities[key]?.actions?.contains("musicUrl") == true) }
-    }
+    // 只要有启用的脚本就给洛雪留位：轨道缺的平台变体在点了之后按歌曲信息现配（MatchJob 有缓存）
+    val lxAvailable = lxRecords.any { it.enabled }
     val providerIds = buildList {
         addAll(state.aggregation.enabledProviders)
         addAll(track.sources.map { it.providerId })

@@ -4551,6 +4551,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val notice: String = "",
     )
 
+    /** 洛雪要的平台变体轨道里没有时，按歌曲信息逐个平台补配；配不到或超时就用已有的。 */
+    private suspend fun expandTrackForLx(track: CanonicalTrack): CanonicalTrack {
+        val original = track.sources.firstOrNull()?.song ?: return track
+        var current = track
+        withTimeoutOrNull(LX_EXPAND_TIMEOUT_MS) {
+            for (providerId in LX_SCRIPT_PROVIDERS) {
+                if (current.sources.any { it.providerId == providerId }) continue
+                if (!app.repository.supportsCustomSource(providerId)) continue
+                val result = withTimeoutOrNull(AUTO_MATCH_TIMEOUT_MS) {
+                    runCatching { matchJob.matchOne(original, providerId) }.getOrNull()
+                } ?: continue
+                val song = result.song ?: continue
+                current = TrackMatcher.withSource(
+                    current,
+                    TrackSource(providerId, providerName(providerId), song, result.score, result.method),
+                )
+            }
+        }
+        return current
+    }
+
     private suspend fun resolvePlayable(
         track: CanonicalTrack,
         pinnedProvider: String? = null,
@@ -4558,22 +4579,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         forDownload: Boolean = false,
     ): AutoResolution {
         if (track.sources.any { it.providerId == LOCAL_SOURCE }) return resolveLocal(track, excludeProviders)
+        // 洛雪按平台递歌：点了或固定了洛雪，而轨道里缺脚本声明的平台时，先按歌曲信息把变体
+        // 配出来（MatchJob 带 30 天缓存），不然单平台的歌递不进脚本，只会静默回退到原平台
+        val settingsPinned = settingsState.value.aggregation
+            .takeIf { it.playbackMode == PlaybackMode.Pinned }?.pinnedProvider
+        val lxPinned = pinnedProvider == LxPlatform.PROVIDER_ID ||
+            (pinnedProvider == null && settingsPinned == LxPlatform.PROVIDER_ID)
+        val effective = if (lxPinned) expandTrackForLx(track) else track
         // 下载只要整曲：试听片段和无损档位一样会被平台降级，回退时也优先能下整曲的源
         fun policyFor(item: CanonicalTrack) = resolver.buildPolicy(item, pinnedProvider).let {
             if (forDownload) it.copy(allowPreview = false, pinnedProvider = null) else it
         }
         val initial = resolver.resolve(
-            track,
+            effective,
             pinnedProvider,
             excludeProviders,
-            policyFor(track),
+            policyFor(effective),
         )
-        if (initial is Resolution.Ready) return AutoResolution(track, initial, autoMatched = false)
+        if (initial is Resolution.Ready) {
+            val notice = if (lxPinned && initial.source.providerId != LxPlatform.PROVIDER_ID) {
+                "洛雪没有取到这首歌的可用版本，已用${initial.source.providerName}播放"
+            } else ""
+            return AutoResolution(effective, initial, autoMatched = false, notice = notice)
+        }
 
-        val original = track.sources.firstOrNull()?.song
-            ?: return AutoResolution(track, initial, autoMatched = false)
-        val attempted = (track.sources.map { it.providerId } + excludeProviders).toMutableSet()
-        var current = track
+        val original = effective.sources.firstOrNull()?.song
+            ?: return AutoResolution(effective, initial, autoMatched = false)
+        val attempted = (effective.sources.map { it.providerId } + excludeProviders).toMutableSet()
+        var current = effective
         var last = initial
         for (providerId in autoMatchProviders(attempted)) {
             val result = withTimeoutOrNull(AUTO_MATCH_TIMEOUT_MS) {
@@ -6999,6 +7032,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 }
 
 private const val AUTO_MATCH_TIMEOUT_MS = 8_000L
+/** 洛雪补配平台变体的总时限：宁可少配两个平台也别让点击换源卡太久。 */
+private const val LX_EXPAND_TIMEOUT_MS = 20_000L
+/** 洛雪脚本认识的平台（本地除外），补配变体时按这个顺序试。 */
+private val LX_SCRIPT_PROVIDERS = LxPlatform.labels.keys.mapNotNull(LxPlatform::providerId).filter { it != LOCAL_SOURCE }
 private const val MAX_UNPLAYABLE_SKIPS = 10
 
 /** 直播断流重连：一分钟内最多重连两次，再断就停下留提示，免得一直重试。 */
