@@ -501,5 +501,6 @@ private fun qualityLabel(quality: String): String = when (quality) {
     "atmos" -> "全景声"
     "atmos_plus" -> "全景声+"
     "master" -> "母带"
+    "sq" -> "无损"
     else -> quality
 }

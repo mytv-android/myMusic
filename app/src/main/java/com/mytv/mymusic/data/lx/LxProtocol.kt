@@ -99,7 +99,7 @@ internal object LxProtocol {
             "high", "320", "320k", "m800", "hq", "exhigh", "highest" -> listOf("320k")
             "lossless", "flac", "f000" -> listOf("flac")
             // 扩展档先按脚本声明的原生档位请求，取不到再顺着无损阶梯降，宁可降档也要让这首歌响
-            "hires", "hi_res", "hi-res", "24bit", "sq", "zq", "zq24" -> listOf("hires", "flac24bit", "flac")
+            "hires", "hi_res", "hi-res", "24bit", "sq", "zq", "zq24" -> listOf("hires", "flac24bit", "flac", "sq")
             "ultra", "640", "640k", "ogg", "o801" -> listOf("ultra", "hires", "flac24bit", "flac")
             "spatial", "sky", "jyeffect", "atmos", "q000", "dolby" -> listOf("atmos", "atmos_plus", "hires", "flac24bit", "flac")
             "master", "ai00", "zq32", "jymaster" -> listOf("master", "hires", "flac24bit", "flac")

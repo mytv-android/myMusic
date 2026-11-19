@@ -83,6 +83,9 @@ class LxProtocolTest {
         val baseOnly = LxCapability(actions = listOf("musicUrl"), qualities = listOf("128k", "320k", "flac", "flac24bit"))
         assertEquals(listOf("flac24bit", "flac"), LxProtocol.preferredQualities(baseOnly, "hires"))
         assertEquals(listOf("flac24bit", "flac"), LxProtocol.preferredQualities(baseOnly, "master"))
+        // 只声明 sq 的脚本：HiRes 偏好沿链落到 sq，不再报「不支持请求的音质」
+        val sqOnly = LxCapability(actions = listOf("musicUrl"), qualities = listOf("sq"))
+        assertEquals(listOf("sq"), LxProtocol.preferredQualities(sqOnly, "hires"))
     }
 
     @Test
