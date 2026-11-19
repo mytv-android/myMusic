@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -79,11 +80,14 @@ import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import com.mytv.mymusic.data.local.LOCAL_SOURCE
 import com.mytv.mymusic.data.CollectionView
 import com.mytv.mymusic.data.canReorderBoundPlaylist
@@ -474,8 +478,8 @@ fun LocalPlaylistScreen(
             Text("删除歌单", color = MaterialTheme.colorScheme.error)
         }
     }
-    // showEdit：编辑和“更多”放在操作行（嵌在“我的”时没有顶栏）；compact：双栏左栏窄，“添加”只留图标
-    val playActions: @Composable (showEdit: Boolean, compact: Boolean) -> Unit = { showEdit, compact ->
+    // showEdit：编辑和“更多”放在操作行（嵌在“我的”时没有顶栏）
+    val playActions: @Composable (showEdit: Boolean) -> Unit = { showEdit ->
         if (selection.active) {
             SelectionBar(
                 count = selection.selected.size,
@@ -497,7 +501,6 @@ fun LocalPlaylistScreen(
                 onShuffle = { val list = songs.shuffled(); actions.play(list.first(), list) },
                 onAdd = if (readOnly) null else ({ addOpen = true }),
                 menu = if (showEdit) menu else null,
-                compact = compact,
                 playFocus = playFocus,
                 onMultiSelect = if (songs.isNotEmpty() && !readOnly) ({ selection.start() }) else null,
                 // 嵌在“我的”里没有顶栏，入口放操作行；手机和双栏的左栏操作行已经排满，入口在顶栏
@@ -565,7 +568,7 @@ fun LocalPlaylistScreen(
                                 providers = state.providers,
                             )
                             Spacer(Modifier.size(16.dp))
-                            playActions(true, false)
+                            playActions(true)
                             Spacer(Modifier.size(12.dp))
                         }
                     }
@@ -623,7 +626,7 @@ fun LocalPlaylistScreen(
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                    playActions(false, true)
+                                    playActions(false)
                                 }
                             }
                         }
@@ -669,7 +672,7 @@ fun LocalPlaylistScreen(
                                 providers = state.providers,
                             )
                             Spacer(Modifier.size(16.dp))
-                            playActions(false, false)
+                            playActions(false)
                             Spacer(Modifier.size(12.dp))
                         }
                     }
@@ -922,8 +925,12 @@ private fun BoundPlaylistTag(providerId: String, syncedAt: Long, providers: List
 }
 
 /**
- * 播放全部（Split button，展开随机播放）+ 添加 + 多选；嵌在“我的”里再加编辑和更多。
- * [compact]：双栏左栏只有 296～316dp，“添加”只留图标，否则多选按钮会被挤掉。
+ * 播放全部（Split button，展开随机播放）+ 添加 + 多选；嵌在“我的”里再加海报视图、编辑和更多。
+ *
+ * 按实际宽度排：双栏左栏只有 296～316dp、折叠屏展开后“我的”右栏不到 280dp，全摆出来后面的按钮会被挤没
+ * （“更多”里的重命名、导出、删除就进不去了）。先保证播放全部和“更多”，再依次摆添加、多选、海报视图，
+ * 还有地方才把“添加”写全、摆编辑；放不下的进“更多”。没有“更多”（入口在顶栏）时多选和海报视图照摆，
+ * 只把“添加”收成图标。
  */
 @Composable
 private fun PlaylistActionRow(
@@ -933,65 +940,167 @@ private fun PlaylistActionRow(
     onAdd: (() -> Unit)?,
     menu: PlaylistMenu?,
     playFocus: FocusRequester,
-    compact: Boolean = false,
     onMultiSelect: (() -> Unit)? = null,
     onPosterView: (() -> Unit)? = null,
 ) {
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(Modifier.focusRequester(playFocus)) {
-            if (enabled) {
-                PlayAllSplitButton(onPlayAll = onPlayAll, onShuffle = onShuffle)
-            } else if (onAdd != null) {
-                Button(onClick = onAdd, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp))) {
-                    Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("添加歌曲")
+    val density = LocalDensity.current
+    // 播放全部量出来的宽度；第一次摆之前按字号估
+    var playWidth by remember { mutableStateOf(Dp.Unspecified) }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val add = onAdd.takeIf { enabled }
+        val multi = onMultiSelect.takeIf { enabled }
+        val fit = fitActionRow(
+            width = maxWidth,
+            play = if (playWidth.isSpecified) playWidth else 100.dp + 66.dp * density.fontScale,
+            addLabel = 72.dp + 36.dp * density.fontScale,
+            hasMenu = menu != null,
+            add = add != null,
+            multi = multi != null,
+            poster = onPosterView != null,
+            edit = menu?.onEdit != null,
+        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ActionGap)) {
+                Box(
+                    Modifier
+                        .focusRequester(playFocus)
+                        .onSizeChanged { playWidth = with(density) { it.width.toDp() } },
+                ) {
+                    if (enabled) {
+                        PlayAllSplitButton(onPlayAll = onPlayAll, onShuffle = onShuffle)
+                    } else if (onAdd != null) {
+                        Button(onClick = onAdd, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp))) {
+                            Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("添加歌曲")
+                        }
+                    }
+                }
+                if (add != null && fit.add) {
+                    if (fit.addLabel) {
+                        FilledTonalButton(onClick = add, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp))) {
+                            Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("添加")
+                        }
+                    } else {
+                        FilledTonalIconButton(onClick = add, modifier = Modifier.tvFocusRing(CircleShape)) {
+                            Icon(Icons.Filled.Add, contentDescription = "添加歌曲")
+                        }
+                    }
+                }
+                if (multi != null && fit.multi) {
+                    FilledTonalIconButton(onClick = multi, modifier = Modifier.tvFocusRing(CircleShape)) {
+                        Icon(Icons.Filled.DoneAll, contentDescription = "批量选择歌曲")
+                    }
+                }
+                if (onPosterView != null && fit.poster) {
+                    FilledTonalIconButton(onClick = onPosterView, modifier = Modifier.tvFocusRing(CircleShape)) {
+                        Icon(Icons.Filled.GridView, contentDescription = "海报视图")
+                    }
                 }
             }
-        }
-        if (enabled && onAdd != null && compact) {
-            FilledTonalIconButton(onClick = onAdd, modifier = Modifier.tvFocusRing(CircleShape)) {
-                Icon(Icons.Filled.Add, contentDescription = "添加歌曲")
+            if (menu != null) {
+                Spacer(Modifier.weight(1f))
+                val edit = menu.onEdit
+                if (edit != null && fit.edit) {
+                    IconButton(onClick = edit, modifier = Modifier.tvFocusRing(CircleShape)) { Icon(Icons.Filled.Edit, "编辑歌单") }
+                }
+                PlaylistMoreMenu(
+                    menu.copy(onEdit = edit.takeUnless { fit.edit }),
+                    onAdd = add.takeUnless { fit.add },
+                    onMultiSelect = multi.takeUnless { fit.multi },
+                    onPosterView = onPosterView.takeUnless { fit.poster },
+                )
             }
-        } else if (enabled && onAdd != null) {
-            FilledTonalButton(onClick = onAdd, modifier = Modifier.heightIn(min = 48.dp).tvFocusRing(RoundedCornerShape(24.dp))) {
-                Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("添加")
-            }
-        }
-        if (enabled && onMultiSelect != null) {
-            FilledTonalIconButton(onClick = onMultiSelect, modifier = Modifier.tvFocusRing(CircleShape)) {
-                Icon(Icons.Filled.DoneAll, contentDescription = "批量选择歌曲")
-            }
-        }
-        if (onPosterView != null) {
-            FilledTonalIconButton(onClick = onPosterView, modifier = Modifier.tvFocusRing(CircleShape)) {
-                Icon(Icons.Filled.GridView, contentDescription = "海报视图")
-            }
-        }
-        if (menu != null) {
-            Spacer(Modifier.weight(1f))
-            menu.onEdit?.let { edit ->
-                IconButton(onClick = edit, modifier = Modifier.tvFocusRing(CircleShape)) { Icon(Icons.Filled.Edit, "编辑歌单") }
-            }
-            PlaylistMoreMenu(menu)
         }
     }
 }
 
+private val ActionGap = 8.dp
+private val ActionIcon = 48.dp
+
+/** 操作行里哪些按钮摆得下；摆不下的进“更多”。 */
+internal data class ActionRowFit(
+    val add: Boolean,
+    val addLabel: Boolean,
+    val multi: Boolean,
+    val poster: Boolean,
+    val edit: Boolean,
+)
+
+/**
+ * 从 [width] 里先扣掉播放全部和“更多”，再按添加（图标）→ 多选 → 海报视图 → “添加”写全 → 编辑的顺序往里放。
+ * 没有“更多”时添加、多选、海报视图没地方收，照摆。
+ */
+internal fun fitActionRow(
+    width: Dp,
+    play: Dp,
+    addLabel: Dp,
+    hasMenu: Boolean,
+    add: Boolean,
+    multi: Boolean,
+    poster: Boolean,
+    edit: Boolean,
+): ActionRowFit {
+    val slot = ActionIcon + ActionGap
+    var room = width - play
+    if (hasMenu) room -= slot
+    fun take(need: Dp, must: Boolean): Boolean {
+        val ok = must || room >= need
+        if (ok) room -= need
+        return ok
+    }
+    val inlineAdd = add && take(slot, !hasMenu)
+    val inlineMulti = multi && take(slot, !hasMenu)
+    val inlinePoster = poster && take(slot, !hasMenu)
+    val label = inlineAdd && take(addLabel - ActionIcon, false)
+    val inlineEdit = edit && take(slot, false)
+    return ActionRowFit(inlineAdd, label, inlineMulti, inlinePoster, inlineEdit)
+}
+
 @Composable
-private fun PlaylistMoreMenu(menu: PlaylistMenu) {
+private fun PlaylistMoreMenu(
+    menu: PlaylistMenu,
+    onAdd: (() -> Unit)? = null,
+    onMultiSelect: (() -> Unit)? = null,
+    onPosterView: (() -> Unit)? = null,
+) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }, modifier = Modifier.tvFocusRing(CircleShape)) {
             Icon(Icons.Filled.MoreVert, "歌单更多操作")
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, shape = RoundedCornerShape(20.dp)) {
+            // 操作行放不下、收进来的
+            onAdd?.let { add ->
+                DropdownMenuItem(
+                    text = { Text("添加歌曲") },
+                    leadingIcon = { Icon(Icons.Filled.Add, null) },
+                    onClick = { open = false; add() },
+                )
+            }
+            onMultiSelect?.let { multi ->
+                DropdownMenuItem(
+                    text = { Text("批量选择") },
+                    leadingIcon = { Icon(Icons.Filled.DoneAll, null) },
+                    onClick = { open = false; multi() },
+                )
+            }
+            onPosterView?.let { poster ->
+                DropdownMenuItem(
+                    text = { Text("海报视图") },
+                    leadingIcon = { Icon(Icons.Filled.GridView, null) },
+                    onClick = { open = false; poster() },
+                )
+            }
+            menu.onEdit?.let { edit ->
+                DropdownMenuItem(
+                    text = { Text("编辑歌单") },
+                    leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                    onClick = { open = false; edit() },
+                )
+            }
             menu.onSync?.let { sync ->
                 DropdownMenuItem(
                     text = { Text("同步平台歌单") },
