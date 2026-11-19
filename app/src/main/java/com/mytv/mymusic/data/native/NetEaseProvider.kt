@@ -686,11 +686,13 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         val safeLimit = limit.coerceIn(1, 100)
         val accountBody = buildJsonObject { put("csrf_token", "") }
         val accountResponse = weapiPost(USER_ACCOUNT_API, accountBody, cookie)
-        val account = json.parseToJsonElement(accountResponse.body).jsonObject
+        val account = runCatching { json.parseToJsonElement(accountResponse.body).jsonObject }.getOrNull()
+            ?: throw IllegalStateException("网易云没有返回账号资料")
         val accountCode = account.int("code")
-        val profile = account["profile"]?.jsonObject
+        // Cookie 失效时 code 是 301、profile 是 JSON null，按 JsonObject 取会抛序列化库的异常
+        val profile = account["profile"]?.let { if (it is JsonObject) it else null }
         val userId = profile?.long("userId") ?: 0L
-        if (accountCode != 200 || userId == 0L) throw IllegalStateException("netease account api error code: $accountCode")
+        if (accountCode != 200 || userId == 0L) throw IllegalStateException("网易云账号资料读取失败（code $accountCode），Cookie 可能已过期")
 
         val body = buildJsonObject {
             put("uid", userId)

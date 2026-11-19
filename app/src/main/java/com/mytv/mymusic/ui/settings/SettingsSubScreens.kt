@@ -1129,7 +1129,6 @@ fun AccountsSettingsScreen(state: MusicUiState, actions: MusicActions, onBack: (
                     index = index,
                     count = providers.size,
                     tv = tv,
-                    promptSuppressed = provider.id in state.importPrompted,
                     onQr = { qrFor = provider },
                     onCookie = { cookieFor = provider },
                     onPassword = { passwordFor = provider },
@@ -1234,7 +1233,6 @@ private fun AccountRow(
     index: Int,
     count: Int,
     tv: Boolean,
-    promptSuppressed: Boolean,
     onQr: () -> Unit,
     onCookie: () -> Unit,
     onPassword: () -> Unit,
@@ -1285,7 +1283,7 @@ private fun AccountRow(
                     TextButton(onClick = onLogout, modifier = Modifier.tvFocusRing(CircleShape)) {
                         Text("退出", Modifier.semantics { contentDescription = "退出${provider.name}" }, color = MaterialTheme.colorScheme.error)
                     }
-                    // 登录后引导导入的平台歌单：随时能再打开，也能恢复「登录后自动询问」
+                    // 登录后引导导入的平台歌单：随时能再打开
                     Box {
                         IconButton(
                             onClick = { menuOpen = true },
@@ -1306,7 +1304,7 @@ private fun AccountRow(
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text(if (promptSuppressed) "登录后恢复询问导入" else "登录后不再询问导入") },
+                                text = { Text("下次登录再问一次") },
                                 onClick = {
                                     menuOpen = false
                                     onResetPrompt()

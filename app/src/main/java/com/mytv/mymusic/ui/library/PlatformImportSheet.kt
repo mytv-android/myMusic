@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -190,6 +191,7 @@ private fun ColumnScope.PlatformImportBody(state: PlatformImportUi, actions: Mus
                     playlist = playlist,
                     checked = checked,
                     bound = bound,
+                    dimmed = applying != null,
                     merges = playlist.id in state.mergeableNames,
                     provider = state.provider,
                     index = index,
@@ -243,6 +245,8 @@ private fun PlatformImportRow(
     playlist: Playlist,
     checked: Boolean,
     bound: Boolean,
+    /** 导入中整行压暗、不可点。 */
+    dimmed: Boolean,
     merges: Boolean,
     provider: String,
     index: Int,
@@ -256,6 +260,8 @@ private fun PlatformImportRow(
     Row(
         modifier
             .fillMaxWidth()
+            // 已绑定的只是勾不了，字要照常读得清；整屏压暗只在导入中
+            .then(if (dimmed) Modifier.alpha(0.5f) else Modifier)
             .tvFocusRing(shape, scale = 1.02f)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -268,7 +274,7 @@ private fun PlatformImportRow(
         verticalAlignment = Alignment.Top,
     ) {
         Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            Checkbox(checked = on, onCheckedChange = null, enabled = enabled)
+            Checkbox(checked = on, onCheckedChange = null, enabled = enabled && !dimmed)
         }
         Column(Modifier.weight(1f).padding(top = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

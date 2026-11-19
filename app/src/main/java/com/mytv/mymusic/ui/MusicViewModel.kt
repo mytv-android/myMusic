@@ -302,8 +302,6 @@ data class MusicUiState(
     val audioQuality: String = AudioQuality.Auto.id,
     val showBottomNav: Boolean = true,
     val cookies: Map<String, String> = emptyMap(),
-    /** 登录后已经不再自动询问「导入歌单」的平台。 */
-    val importPrompted: Set<String> = emptySet(),
     val sodaSignerUrl: String = "",
     val sodaSignerToken: String = "",
     val sodaSignerEnabled: Boolean = true,
@@ -659,7 +657,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             audioQuality = settings.audioQuality,
             showBottomNav = settings.showBottomNav,
             cookies = settings.cookies,
-            importPrompted = settings.importPrompted,
             sodaSignerUrl = settings.sodaSignerUrl,
             sodaSignerToken = settings.sodaSignerToken,
             sodaSignerEnabled = settings.sodaSignerEnabled,
@@ -3215,11 +3212,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * 登录成功（或粘贴了新的非空 Cookie）后拉一次这个平台的私人歌单，有歌单就问要不要导入。
      *
      * 只在 Cookie 由空变非空时触发：[previousCookie] 为空才算登录；已经在用的账号、
-     * 退出登录、同步推过来的 Cookie 都不弹。已经问过的平台（[AppSettings.importPrompted]）直接跳过。
+     * 退出登录、同步推过来的 Cookie 都不弹；[promptPlatformImportEnabled] 为假的平台也不弹。
      */
     private fun maybePromptPlatformImport(providerId: String, previousCookie: String, cookie: String) {
+        // 只在「从没登录过 → 登录上」时问：退出再登、换账号（Cookie 非空变非空）都不再弹，
+        // 需要的话去平台账号页的 ⋮ 里手动打开
         if (previousCookie.isNotBlank() || cookie.isBlank()) return
-        if (providerId in settingsState.value.importPrompted) return
+        if (promptPlatformImportEnabled[providerId] == false) return
         viewModelScope.launch {
             val playlists = runCatching { app.repository.userPlaylists(providerId, cookie, 1, 100) }
                 .getOrElse { error ->
@@ -3278,15 +3277,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         platformImportJob?.cancel()
         platformImportJob = null
         _platformImport.value = PlatformImportUi()
-        if (forever && current.provider.isNotBlank()) {
-            viewModelScope.launch { app.settings.platformImportPrompted(current.provider, true) }
-        }
+        if (forever && current.provider.isNotBlank()) promptPlatformImportEnabled[current.provider] = false
     }
 
-    /** 平台账号页里恢复「登录后自动询问」。 */
+    /** 平台账号页里重新打开自动询问（只在本进程有效，见 [promptPlatformImportEnabled]）。 */
     fun resetPlatformImportPrompt(providerId: String) {
-        viewModelScope.launch { app.settings.platformImportPrompted(providerId, false) }
-        message("登录${providerName(providerId)}后会再问一次是否导入歌单")
+        promptPlatformImportEnabled[providerId] = true
+        message("下次登录${providerName(providerId)}会再问一次是否导入歌单")
     }
 
     /** 把勾中的平台歌单导入成绑定歌单；每首按平台返回的顺序。 */
@@ -3328,9 +3325,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 platformImportJob = null
                 _platformImport.value = PlatformImportUi()
                 if (imported > 0) message("已导入 $imported 个歌单 · $songs 首")
-                if (imported == selected.size) {
-                    runCatching { app.settings.platformImportPrompted(provider, true) }
-                }
+                if (imported == selected.size) promptPlatformImportEnabled[provider] = false
             }
         }
     }
@@ -6428,6 +6423,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 正在跑的那次批量导入；关面板时取消剩下的。 */
     private var platformImportJob: Job? = null
+
+    /**
+     * 登录后要不要自动问「导入歌单」。只活在本进程：触发条件本身是「这个平台的 Cookie 从空变非空」，
+     * 所以退出再登录不会重复问、换账号也不会问；要再问就在平台账号页的 ⋮ 里打开。
+     */
+    private val promptPlatformImportEnabled = ConcurrentHashMap<String, Boolean>()
 
     /** 导入完成（写了至少一个歌单，或整库备份合并成功）就加一；电视扫码网页据此显示「已导入」。 */
     private val _importDone = MutableStateFlow(0)

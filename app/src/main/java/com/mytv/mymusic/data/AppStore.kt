@@ -250,8 +250,6 @@ class SettingsStore(private val context: Context) {
     private val layoutModeKey = stringPreferencesKey("layout_mode")
     private val cookiesKey = stringPreferencesKey("cookies")
     private val cookieUpdatedAtKey = stringPreferencesKey("cookie_updated_at")
-    /** 登录成功后问过「导入平台歌单」的平台（点了「不再询问」或已经处理过）。 */
-    private val importPromptedKey = stringPreferencesKey("platform_import_prompted")
     private val sodaSignerUrlKey = stringPreferencesKey("soda_signer_url")
     private val sodaSignerTokenKey = stringPreferencesKey("soda_signer_token")
     private val sodaSignerEnabledKey = booleanPreferencesKey("soda_signer_enabled")
@@ -349,9 +347,6 @@ class SettingsStore(private val context: Context) {
             layoutMode = values[layoutModeKey] ?: "Auto",
             cookies = runCatching { json.decodeFromString<Map<String, String>>(values[cookiesKey] ?: "{}") }
                 .getOrDefault(emptyMap()),
-            importPrompted = runCatching {
-                json.decodeFromString<List<String>>(values[importPromptedKey] ?: "[]")
-            }.getOrDefault(emptyList()).toSet(),
             sodaSignerUrl = values[sodaSignerUrlKey] ?: "",
             sodaSignerToken = values[sodaSignerTokenKey] ?: "",
             sodaSignerEnabled = values[sodaSignerEnabledKey] ?: true,
@@ -661,18 +656,6 @@ class SettingsStore(private val context: Context) {
         it[cookieUpdatedAtKey] = json.encodeToString(updatedAt)
     }
 
-    /**
-     * 记下已经问过 / 不再询问导入的平台。[value] 为 false 时清掉（平台账号页里手动恢复自动询问）。
-     * 退出登录不清，重新登录同一个账号也不再弹；换账号时由调用方重置。
-     */
-    suspend fun platformImportPrompted(provider: String, value: Boolean) = context.dataStore.edit {
-        val current = runCatching {
-            json.decodeFromString<List<String>>(it[importPromptedKey] ?: "[]")
-        }.getOrDefault(emptyList()).toMutableSet()
-        if (value) current += provider else current -= provider
-        it[importPromptedKey] = json.encodeToString(current.toList())
-    }
-
     /** 同步读取 Cookie 和修改时间，避免两次 DataStore 读取之间出现不一致。 */
     suspend fun cookieSnapshot(): CookieSnapshot {
         val values = context.dataStore.data.first()
@@ -776,8 +759,6 @@ data class AppSettings(
     /** 界面布局：Auto / Phone / Tablet / Tv。 */
     val layoutMode: String = "Auto",
     val cookies: Map<String, String> = emptyMap(),
-    /** 登录后已经问过「把这些歌单导入成绑定歌单」的平台，不再自动弹面板。 */
-    val importPrompted: Set<String> = emptySet(),
     /**
      * 汽水签名器（sodam / libmssdk 的 /sign 协议）。地址和 Token 留空表示用内置的
      * SodaM 公共签名服务；[sodaSignerEnabled] 关掉后只用公开试听流。
