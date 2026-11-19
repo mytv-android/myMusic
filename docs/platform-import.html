@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>登录后提示导入平台歌单 · UI 设计稿 · myMusic</title>
+<meta name="description" content="扫码/密码登录成功后弹一次「把平台歌单导入成绑定歌单」面板：全选/单选、按平台分组、已有绑定跳过、导入后自动跟随平台更新；手机底部面板、平板右侧浮动面板、手机横屏、折叠屏书本/桌面、电视右侧面板都画了。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Roboto+Flex:opsz,wdth,wght@8..144,100..125,300..900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #f4f1f2; --paper: #ffffff; --ink: #1d1b20; --muted: #6b6772; --line: #e4e0e3;
+  --red: #c8102e; --soft-red: #fbe9ec; --dark: #151318;
+  --body: "Roboto Flex", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  --spring: cubic-bezier(.3,1.35,.4,1);
+  /* 浅色 M3E：BrandSeed #006B5F 经 materialkolor 的浅色方案（和 expressive-redesign / user-feedback 一致） */
+  --md-primary:#206a5f;--md-on-primary:#e2fff8;--md-primary-container:#a9f0e2;--md-on-primary-container:#095c52;
+  --md-secondary:#4b645f;--md-secondary-container:#cde8e1;--md-on-secondary-container:#3e5751;
+  --md-tertiary:#336577;--md-tertiary-container:#afe2f6;--md-on-tertiary-container:#1d5364;
+  --md-error:#ba1a1a;--md-error-container:#ffdad6;--md-on-error-container:#93000a;
+  --md-surface:#f6faf8;--md-surface-container-lowest:#ffffff;--md-surface-container-low:#eef5f2;--md-surface-container:#e7f0ec;
+  --md-surface-container-high:#e1eae7;--md-surface-container-highest:#dae5e1;
+  --md-on-surface:#2a3532;--md-on-surface-variant:#56615e;--md-outline:#727d7a;--md-outline-variant:#a9b4b1;
+  --nm: #e60026; --qq: #31c27c; --kg: #2b7de9;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, h5, p { margin: 0; }
+svg { display: block; }
+button { font-family: inherit; }
+.page-head, main, footer { width: min(1220px, calc(100% - 40px)); margin-inline: auto; }
+.page-head { padding: 62px 0 30px; }
+.doc-label { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .16em; }
+h1 { max-width: 980px; margin-top: 14px; font-size: clamp(38px, 5.6vw, 70px); line-height: 1.08; letter-spacing: -.045em; font-weight: 900; text-wrap: balance; }
+h1 em { font-style: normal; color: var(--red); }
+.lede { max-width: 920px; margin-top: 24px; color: var(--muted); font-size: 17px; line-height: 1.85; }
+.lede strong { color: var(--ink); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.chip2 { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 13px; }
+.chip2 b { color: var(--ink); font-weight: 700; }
+.chip2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+.chip2.ok .dot { background: #1b6b3a; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 22px; }
+nav.toc a { font-size: 13px; color: var(--ink); text-decoration: none; padding: 5px 11px; border-radius: 10px; background: var(--paper); border: 1px solid var(--line); }
+nav.toc a b { color: var(--red); font-family: var(--mono); font-size: 11.5px; margin-right: 5px; }
+section.block { padding: 46px 0; border-top: 1px solid var(--line); }
+.block-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.kicker { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .14em; }
+h2 { font-size: clamp(24px, 3vw, 31px); line-height: 1.25; letter-spacing: -.025em; font-weight: 800; }
+.sub { margin: 10px 0 22px; color: var(--muted); font-size: 14.5px; line-height: 1.8; max-width: 940px; }
+.sub strong { color: var(--ink); font-weight: 700; }
+h3 { margin: 30px 0 12px; font-size: 18px; font-weight: 750; letter-spacing: -.01em; }
+h4 { margin: 22px 0 8px; font-size: 15px; font-weight: 750; }
+p { color: var(--muted); font-size: 14.5px; line-height: 1.85; }
+p strong, li strong { color: var(--ink); font-weight: 700; }
+.quote { margin: 0 0 18px; padding: 12px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; color: var(--muted); font-size: 13.5px; line-height: 1.75; max-width: 940px; }
+.quote::before { content: "用户原话"; display: block; font-size: 11.5px; font-weight: 800; letter-spacing: .12em; color: var(--red); margin-bottom: 2px; }
+table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; font-size: 13.5px; }
+th, td { padding: 11px 14px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+thead th { border-top: 0; background: #faf7f8; color: var(--muted); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+td code, p code, li code, .sub code, figcaption code, .note code { font-family: var(--mono); font-size: 12px; background: #f1edf1; border-radius: 6px; padding: 1px 6px; }
+.scroll { overflow-x: auto; border-radius: 16px; }
+.note { margin-top: 14px; padding: 14px 16px; border-left: 3px solid var(--red); background: #fbf6f7; border-radius: 0 14px 14px 0; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
+.note b { color: var(--ink); }
+.note.plain { border-left-color: #cfcad4; background: #f7f5f7; }
+ul.clean { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; line-height: 1.85; }
+ul.clean b { color: var(--ink); }
+.tag { display: inline-block; font: 700 11px var(--mono); padding: 2px 7px; border-radius: 999px; background: var(--soft-red); color: var(--red); white-space: nowrap; }
+.tag.g { background: #e3f3ea; color: #1b6b3a; } .tag.y { background: #fbf0d9; color: #8a5a00; } .tag.b { background: #e4ecfb; color: #2a4fa0; }
+.phases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
+.phase { padding: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.phase header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.phase h3 { margin: 0; font-size: 15px; }
+.phase ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-top: 20px; }
+.tile { padding: 18px 18px 15px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.tile b { display: block; font-size: 21px; line-height: 1.3; letter-spacing: -.02em; font-weight: 850; }
+.tile span { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.tile small { display: block; margin-top: 10px; font: 11.5px var(--mono); color: #8f8b95; }
+footer { padding: 34px 0 70px; border-top: 1px solid var(--line); color: #8f8b95; font-size: 12.5px; line-height: 1.8; }
+footer b { color: var(--muted); font-weight: 700; }
+
+/* ═════════ 设备帧（1px＝1dp，整体缩放；尺寸照代码）═════════ */
+.devtabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
+.devtabs button { height: 38px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font: 600 13px/1 var(--body); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: border-radius .3s var(--spring); }
+.devtabs button small { font: 500 11px/1 var(--mono); color: var(--muted); }
+.devtabs button.on { background: var(--ink); color: #fff; border-color: var(--ink); border-radius: 19px; }
+.devtabs button.on small { color: #cfcad4; }
+.devpane { display: none; gap: 18px 26px; align-items: flex-start; flex-wrap: wrap; }
+.devpane.on { display: flex; }
+.devpane > figcaption { flex: 1 1 240px; max-width: 430px; }
+.dev { position: relative; flex: none; background: #0b0d0d; box-shadow: 0 30px 70px -36px rgb(0 0 0 / .6); }
+.dev .dscr { position: absolute; transform-origin: 0 0; overflow: hidden; font-family: var(--body); user-select: none; }
+.dev .hinge { position: absolute; pointer-events: none; z-index: 60; }
+.dev .hinge.v { top: 6px; bottom: 6px; width: 12px; margin-left: -6px; background: linear-gradient(90deg, transparent, rgb(0 0 0 / .38) 38%, rgb(255 255 255 / .12) 50%, rgb(0 0 0 / .38) 62%, transparent); }
+.dev .hinge.h { left: 6px; right: 6px; height: 12px; margin-top: -6px; background: linear-gradient(180deg, transparent, rgb(0 0 0 / .38) 38%, rgb(255 255 255 / .12) 50%, rgb(0 0 0 / .38) 62%, transparent); }
+figcaption { color: var(--muted); font-size: 12.5px; line-height: 1.65; max-width: 420px; }
+figcaption b { color: var(--ink); }
+figcaption > b:first-child { display: block; font-size: 13.5px; margin-bottom: 2px; }
+@media (max-width: 1000px) { .devpane.on { overflow-x: auto; padding-bottom: 40px; } }
+
+/* ═════════ 手机帧（AdaptiveSheet 各形态）═════════ */
+.pl { background: var(--pl-surface); color: var(--pl-on-surface); }
+.dscr { font-size: 13px; }
+.dstat { position: absolute; left: 0; right: 0; top: 0; height: 30px; display: flex; justify-content: space-between; align-items: center; padding: 0 26px; font: 600 12px/1 var(--body); color: inherit; opacity: .8; }
+.navpill { position: absolute; left: 50%; bottom: 8px; width: 108px; height: 4px; margin-left: -54px; border-radius: 2px; background: rgb(0 0 0 / .3); }
+.scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .32); }
+.ico { width: 22px; height: 22px; fill: currentColor; flex: none; }
+.ico.s18 { width: 18px; height: 18px; } .ico.s16 { width: 16px; height: 16px; }
+.ib { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: inherit; flex: none; border: 0; background: transparent; padding: 0; }
+.ib.small { width: 32px; height: 32px; }
+
+/* 手机：ModalBottomSheet（28dp 顶圆角、surfaceContainerLow） */
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; top: 64px; background: var(--md-surface-container-low); color: var(--md-on-surface); border-radius: 28px 28px 0 0; display: flex; flex-direction: column; overflow: hidden; }
+.grab { width: 32px; height: 4px; border-radius: 2px; background: var(--md-on-surface-variant); opacity: .45; margin: 12px auto 0; flex: none; }
+.sh-head { padding: 6px 24px 6px; flex: none; display: flex; align-items: flex-start; gap: 8px; }
+.sh-head .tt { flex: 1; min-width: 0; }
+.sh-head h5 { font-size: 22px; font-weight: 600; line-height: 28px; letter-spacing: -.01em; }
+.sh-head p { margin-top: 2px; font-size: 14px; line-height: 1.5; color: var(--md-on-surface-variant); }
+.sh-body { overflow: hidden; padding: 4px 16px 12px; flex: 1; }
+.sh-foot { flex: none; padding: 8px 16px 34px; display: flex; flex-direction: column; gap: 8px; background: var(--md-surface-container-low); }
+
+/* 说明条（面板顶部）、分组标签、连接式按钮组 */
+.note2 { display: flex; gap: 10px; padding: 12px 14px; border-radius: 14px; background: var(--md-surface-container-high); color: var(--md-on-surface-variant); font-size: 12.5px; line-height: 1.6; }
+.note2 svg { width: 18px; height: 18px; fill: var(--md-primary); flex: none; margin-top: 1px; }
+.note2 b { color: var(--md-on-surface); }
+.lbl { font-size: 15px; font-weight: 700; padding: 16px 4px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--md-on-surface); }
+.lbl small { font-size: 13px; font-weight: 500; color: var(--md-on-surface-variant); }
+.txtbtn { border: 0; background: none; color: var(--md-primary); font: 600 14px/1 var(--body); height: 40px; padding: 0 10px; border-radius: 20px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+
+/* 歌单行：照 ImportListRow —— 勾选框 + 名字 + 首数 + 下面一行目标/平台小块；整行可点 */
+.plrow { display: flex; align-items: flex-start; gap: 0; padding: 6px 12px 10px 4px; border-radius: 4px; background: var(--md-surface-container); margin-top: 2px; }
+.plrow.first { border-top-left-radius: 16px; border-top-right-radius: 16px; }
+.plrow.last { border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; }
+.plrow.off { opacity: .5; }
+.cbx { width: 48px; height: 48px; display: grid; place-items: center; flex: none; }
+.cbx i { width: 22px; height: 22px; border-radius: 7px; box-shadow: inset 0 0 0 2px var(--md-outline); display: grid; place-items: center; }
+.cbx i svg { width: 18px; height: 18px; fill: var(--md-on-primary); display: none; }
+.cbx.on i { background: var(--md-primary); box-shadow: none; } .cbx.on i svg { display: block; }
+.plrow .main { flex: 1; min-width: 0; padding-top: 12px; }
+.plrow .nm { display: flex; align-items: baseline; gap: 6px; }
+.plrow .nm b { font-size: 16px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plrow .nm small { font-size: 14px; color: var(--md-on-surface-variant); flex: none; }
+.plrow .nm .lk { flex: none; margin-left: auto; }
+.plrow .sub2 { font-size: 13.5px; line-height: 1.45; color: var(--md-on-surface-variant); margin-top: 1px; }
+.pchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.pchip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px 0 5px; border-radius: 8px; font-size: 12px; font-weight: 600; background: var(--md-surface-container-highest); color: var(--md-on-surface-variant); }
+.pchip i { width: 16px; height: 16px; border-radius: 5px; display: grid; place-items: center; font: 800 9px/1 var(--body); color: #fff; font-style: normal; }
+.pchip i.nm { background: var(--nm); } .pchip i.qq { background: var(--qq); } .pchip i.kg { background: var(--kg); }
+.pchip.skip { text-decoration: line-through; opacity: .7; }
+/* 横屏面板只有 336dp 高：行压成一行名字 + 首数，不画平台小块和说明 */
+.plrow.tight { align-items: center; padding: 0 12px 0 4px; min-height: 56px; }
+.plrow.tight .main { padding-top: 0; }
+.plrow.tight .sub2, .plrow.tight .pchips { display: none; }
+
+/* 状态标签（照 LibraryScreen.Tag） */
+.tag2 { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 8px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.tag2 svg { width: 14px; height: 14px; fill: currentColor; }
+.tag2.pri { background: var(--md-primary-container); color: var(--md-on-primary-container); }
+.tag2.sec { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.tag2.ter { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+.tag2.err { background: var(--md-error-container); color: var(--md-on-error-container); }
+.tag2.pal { background: var(--md-surface-container-highest); color: var(--md-on-surface-variant); }
+
+/* 按钮 */
+.btn-f { height: 52px; border: 0; border-radius: 26px; background: var(--md-primary); color: var(--md-on-primary); font: 600 15px/1 var(--body); display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+.btn-f:disabled, .btn-f.off { background: var(--md-surface-container-highest); color: var(--md-on-surface-variant); opacity: .65; }
+.btn-t { height: 44px; border: 0; border-radius: 22px; background: var(--md-secondary-container); color: var(--md-on-secondary-container); font: 600 14px/1 var(--body); display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 18px; }
+
+/* 登录面板：二维码（浅底深码） */
+.qrbox { width: 200px; height: 200px; border-radius: 24px; background: #fff; padding: 10px; }
+.qr { width: 180px; height: 180px; background:
+  repeating-conic-gradient(#111 0 25%, #fff 0 50%) 0 0/16px 16px; border-radius: 6px; opacity: .92; }
+.chips-r { display: flex; justify-content: center; gap: 8px; }
+.chip { height: 32px; padding: 0 14px; border-radius: 16px; display: inline-flex; align-items: center; gap: 6px; font: 600 13px/1 var(--body); background: var(--md-surface-container); color: var(--md-on-surface-variant); }
+.chip.on { background: var(--md-primary); color: var(--md-on-primary); }
+.chip svg { width: 16px; height: 16px; fill: currentColor; }
+
+/* 库页背景（新面板后面露出的歌单列表） */
+.lbg { position: absolute; inset: 0; background: var(--md-surface); color: var(--md-on-surface); }
+.lbar { position: absolute; left: 0; right: 0; top: 30px; height: 64px; display: flex; align-items: center; padding: 0 4px; gap: 4px; }
+.lbar .ttl { font-size: 22px; font-weight: 700; padding-left: 12px; }
+.lmini { position: absolute; left: 10px; right: 10px; bottom: 92px; height: 64px; border-radius: 22px; display: flex; align-items: center; gap: 12px; padding: 0 6px 0 8px; background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.lmini .cv { width: 46px; height: 46px; border-radius: 14px; background: linear-gradient(135deg,#2f7d70,#9fd8c9); }
+.lmini .tx { flex: 1; } .lmini .tx b { display: block; font-size: 15px; } .lmini .tx small { font-size: 12.5px; opacity: .75; }
+.lmini .pp { width: 44px; height: 44px; border-radius: 50%; background: var(--md-primary-container); color: var(--md-on-primary-container); display: grid; place-items: center; }
+
+/* snackbar / 提示条 */
+.snack { position: absolute; left: 12px; right: 12px; bottom: 96px; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 4px 6px 4px 16px; border-radius: 12px; background: #2f3331; color: #eef1ef; font-size: 14px; }
+.snack span { flex: 1; } .snack button { border: 0; background: none; color: #8fd5c6; font: 700 14px/1 var(--body); height: 40px; padding: 0 12px; }
+
+/* 条款 / 说明小字 */
+.fine { font-size: 12.5px; line-height: 1.6; color: var(--md-on-surface-variant); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4a5 5 0 0 0 0-10z"/></symbol>
+<symbol id="i-clouddone" viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM10 17l-3.5-3.5 1.41-1.41L10 14.17 15.18 9l1.41 1.41L10 17z"/></symbol>
+<symbol id="i-cloudoff" viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4c-1.48 0-2.85.43-4.01 1.17l1.46 1.46a5.497 5.497 0 0 1 8.05 4.87v.5H19c1.66 0 3 1.34 3 3 0 1.13-.64 2.11-1.56 2.62l1.45 1.45C23.16 18.16 24 16.68 24 15c0-2.64-2.05-4.78-4.65-4.96zM3 5.27l2.75 2.74C2.56 8.15 0 10.77 0 14c0 3.31 2.69 6 6 6h11.73l2 2L21 20.73 4.27 4 3 5.27zM7.73 10l8 8H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h1.73z"/></symbol>
+<symbol id="i-library" viewBox="0 0 24 24"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 5h-3v5.5a2.5 2.5 0 1 1-1-2V5h4v2zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6z"/></symbol>
+<symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></symbol>
+<symbol id="i-add" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></symbol>
+<symbol id="i-addto" viewBox="0 0 24 24"><path d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z"/></symbol>
+<symbol id="i-history" viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></symbol>
+<symbol id="i-queue" viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18A3 3 0 1 0 19 17V8h3V6h-5z"/></symbol>
+<symbol id="i-delete" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></symbol>
+<symbol id="i-checkcircle" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></symbol>
+</svg>
+
+<header class="page-head">
+  <div class="doc-label">UI 设计稿 · 2026-11-19</div>
+  <h1>登录成功后，把<em>平台歌单</em>导入成绑定歌单</h1>
+  <p class="lede">
+    平台账号登录成功后<strong>弹一次</strong>「导入你的歌单」面板：按平台分组、全选/单选、已经绑定的自动跳过、导入后就是<strong>跟随平台更新</strong>的绑定歌单（现在绑定歌单的刷新、写回、同步都已经做好了）。只弹一次，之后在「平台账号」页每一行右侧的 ⋮ 里还能再打开；不再询问这个平台可以关。
+  </p>
+  <div class="chips">
+    <span class="chip2"><span class="dot"></span><b>登录后响应式弹出</b>只在这个平台第一次登录时问一次</span>
+    <span class="chip2"><span class="dot"></span><b>全部走绑定</b>导入 = <code>bindPlatformPlaylist</code>，不是死拷贝</span>
+    <span class="chip2 ok"><span class="dot"></span><b>已有绑定跳过</b>不会出现重复行</span>
+    <span class="chip2"><span class="dot"></span><b>4 台设备 7 帧</b>手机 / 平板 / 横屏 / 折叠屏 2 / 电视</span>
+  </div>
+  <nav class="toc">
+    <a href="#goal"><b>01</b>要解决什么</a>
+    <a href="#flow"><b>02</b>什么时候弹</a>
+    <a href="#screens"><b>03</b>界面（全设备）</a>
+    <a href="#edge"><b>04</b>边界与文案</a>
+    <a href="#code"><b>05</b>代码落点</a>
+  </nav>
+</header>
+
+<main>
+<section class="block" id="goal">
+  <div class="block-head"><span class="kicker">01 · 要解决什么</span><h2>登录之后，顺手把已有的歌单拿过来</h2></div>
+  <p class="sub">issue 里问的是「既然已经可以登录平台账号，是不是可以直接同步平台歌单」。直接改成「登录即全量同步」太重且不可逆，<strong>先做一步：登录成功后问一次要不要把平台歌单导入</strong>。导入的每一条都走已有的绑定流程，所以之后平台那边增删歌、这里会自动跟上。</p>
+  <div class="quote">链接导入歌单后歌曲不完整，整个歌单有几百首歌导入后只有三首。另外既然已经可以登录平台账号，是不是可以直接同步平台歌单。 —— <code>mytv-android/myMusic#21</code></div>
+  <div class="tiles">
+    <div class="tile"><b>弹一次，不打扰</b><span>只在<strong>这个平台第一次登录成功</strong>时弹；关掉、点「以后再说」或者「不再询问这个平台」之后不再自动弹。</span><small>settings: promptImported[providerId]</small></div>
+    <div class="tile"><b>导入 = 绑定</b><span>每一条都落到已有的 <code>bindPlatformPlaylist</code>：平台更新自动同步、能写回、会跟着同步走。</span><small>MusicViewModel.bindPlatformPlaylist</small></div>
+    <div class="tile"><b>已有的不重复</b><span>已经绑过同一平台歌单的直接跳过并标「已绑定」；同名普通歌单会被<strong>升级</strong>成绑定（<code>bindingTarget</code> 的既有行为）。</span><small>data/BoundPlaylists.kt</small></div>
+  </div>
+</section>
+
+<section class="block" id="flow">
+  <div class="block-head"><span class="kicker">02 · 什么时候弹</span><h2>登录成功 → 拉一次列表 → 有东西才弹</h2></div>
+  <p class="sub">扫码和密码两条登录路径最终都落在 <code>MusicViewModel</code> 里写 Cookie 的地方（<code>startQrLogin</code> 的 <code>success</code> 分支、<code>saveCookie</code>）。在这里判断「换成了一份新的非空 Cookie」再触发，避免退出登录、粘贴旧 Cookie 也弹。</p>
+  <table>
+    <thead><tr><th>时刻</th><th>做什么</th><th>弹不弹</th></tr></thead>
+    <tbody>
+      <tr><td>扫码 / 密码登录成功</td><td>写 Cookie，一次 <code>userPlaylists(provider, cookie, 1, 100)</code></td><td><span class="tag g">弹</span> 前提：列表非空、这个平台没被关掉</td></tr>
+      <tr><td>用户粘贴了 Cookie</td><td>同上（Cookie 确实变了才算）</td><td><span class="tag g">弹</span> 同一条规则，手动粘贴不排除</td></tr>
+      <tr><td>退出登录</td><td>写空 Cookie</td><td><span class="tag">不弹</span></td></tr>
+      <tr><td>登录成功但拿不到歌单</td><td>接口报错 / 空列表（新账号、平台不支持）</td><td><span class="tag">不弹</span> 静默，别用基础错误打断用户</td></tr>
+      <tr><td>这个平台以前点过「不再询问」</td><td>—</td><td><span class="tag">不弹</span></td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>为什么不在登录面板里直接嵌「导入」：</b>扫码面板的宽度是按二维码定的（手机 220dp），塞不下 100 条歌单；登录和导入是两个决定，分开弹用户能先关掉导入、继续用应用。列表要拉一次网络，<b>在面板里等会让「登录成功」的反馈变慢</b>。</div>
+</section>
+
+<section class="block" id="screens">
+  <div class="block-head"><span class="kicker">03 · 界面</span><h2>一个面板，全设备共用一个 <code>AdaptiveSheet</code></h2></div>
+  <p class="sub">沿用<strong>现在在用的</strong>组件，不新造样式：外壳是 <code>AdaptiveSheet</code>（手机底部面板 / 平板右侧 400dp 浮动面板 / 折叠屏书本只占右页 / 电视右侧 360dp 整高）；列表行照「从文件导入」的 <code>ImportListRow</code>（勾选框 + 名字 + 首数 + 平台小块）；顶部是全选切换 <code>ConnectedToggleGroup</code>；底部主按钮 <code>Button</code> 26dp 圆角；歌单行右侧的「已绑定」用 <code>Tag</code>。</p>
+  <div id="dvImport"></div>
+</section>
+
+<section class="block" id="edge">
+  <div class="block-head"><span class="kicker">04 · 边界与文案</span><h2>哪些情况要提前说清楚</h2></div>
+  <table>
+    <thead><tr><th>情况</th><th>界面怎么表现</th><th>导入后</th></tr></thead>
+    <tbody>
+      <tr><td>歌单已经绑过</td><td>行灰掉、勾选框不可点，右侧 <span class="tag2 sec" style="vertical-align:middle"><svg viewBox="0 0 24 24"><use href="#i-check"/></svg>已绑定</span></td><td>不动</td></tr>
+      <tr><td>同名普通歌单已存在</td><td>行下面写「会合并进同名歌单」</td><td><code>bindingTarget</code> 升级成绑定，内容以平台为准</td></tr>
+      <tr><td>平台不给私人歌单（Apple / 部分源）</td><td>这条平台不出现，不出空分组</td><td>—</td></tr>
+      <tr><td>拉列表失败 / 超时</td><td>不弹；在平台账号行 ⋮ 里仍可手动打开，面板内出重试</td><td>—</td></tr>
+      <tr><td>一次导入很多（上百首）</td><td>按钮变成「正在导入 3/12…」；面板不关</td><td>全部完成出一条「已导入 12 个歌单 · 803 首」</td></tr>
+      <tr><td>导入中按返回</td><td>照 <code>SheetDismissGuard</code> 拦：问「导入还在进行，确定离开？」</td><td>已完成的保留，剩下的取消</td></tr>
+    </tbody>
+  </table>
+  <h3>文案</h3>
+  <table>
+    <thead><tr><th>位置</th><th>文字</th></tr></thead>
+    <tbody>
+      <tr><td>标题</td><td>导入你的歌单</td></tr>
+      <tr><td>副标题</td><td>已登录<strong>{平台名}</strong> · 选中的会变成跟随平台更新的歌单</td></tr>
+      <tr><td>顶部说明</td><td>按平台顺序列出，勾上的导入后是绑定歌单：平台那边增删歌，这里会自动跟上。已经绑过的会跳过。</td></tr>
+      <tr><td>主按钮</td><td>导入 {n} 个歌单 · {m} 首 / 正在导入 3/12… / 没有勾选歌单</td></tr>
+      <tr><td>底部文字按钮</td><td>以后再说（左） · 这个平台不再询问（右，<code>TextButton</code>）</td></tr>
+      <tr><td>完成提示</td><td>已导入 12 个歌单 · 803 首</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block" id="code">
+  <div class="block-head"><span class="kicker">05 · 代码落点</span><h2>大部分是复用，新增的只有「触发」和「这个面板」</h2></div>
+  <table>
+    <thead><tr><th>文件</th><th>改动</th></tr></thead>
+    <tbody>
+      <tr><td><code>MusicViewModel.kt</code></td><td>登录成功 / <code>saveCookie</code> 后：Cookie 由空变非空 → <code>userPlaylists</code> 拉一次 → 置 <code>importCandidates</code> 状态；新增 <code>importFromPlatform(provider, ids)</code>（内部循环 <code>bindPlatformPlaylist</code>）、<code>dismissImportPrompt(provider, forever)</code>。</td></tr>
+      <tr><td><code>AppStore.kt</code></td><td>新增 <code>settings.platformImportPrompted(providerId): Boolean</code> / <code>setPlatformImportPrompted</code>，按账号保存，换账号重置。</td></tr>
+      <tr><td><code>ui/AppUi.kt</code> + <code>MusicActions</code></td><td>面板入口 <code>openPlatformImport(provider)</code>；面板状态放进 <code>MusicUiState</code>（和 <code>TransferUi</code> 一样是 sealed/可空对象）。</td></tr>
+      <tr><td>新文件 <code>ui/library/PlatformImportSheet.kt</code></td><td>照 <code>ImportPreviewSheet</code>：<code>AdaptiveSheet</code> + 勾选行；<code>playlistSongs(provider, playlist.id)</code> 拿首数校验（和链接导入一致，显式翻页）。</td></tr>
+      <tr><td><code>SettingsSubScreens.kt</code>（平台账号）</td><td>每行右侧加 ⋮ →「导入歌单…」，随时能再打开；不再询问的开关也在同一处恢复。</td></tr>
+    </tbody>
+  </table>
+  <div class="note plain"><b>不做的：</b>不做「登录即全量静默同步」——几百首一次性写进本地、还会影响同步增量的体积；也不要自动建文件夹/分组。要的话以后在这个面板上加一个「全部勾选」就够了（现在已经有了）。</div>
+</section>
+</main>
+
+<footer>
+  <b>myMusic · 登录后提示导入平台歌单</b> · 设计稿 2026-11-19 · 组件全部照 <code>AdaptiveSheet</code>、<code>ImportListRow</code>、<code>ConnectedToggleGroup</code>、<code>Tag</code> 的实际样式画，尺寸按 dp 原尺寸排版后整体缩放。
+</footer>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const ico = (id, cls = '') => `<svg class="ico ${cls}"><use href="#i-${id}"/></svg>`;
+
+/* ---------- 设备帧：尺寸照 AdaptiveSheet / Window.kt 的实际值（1px＝1dp） ---------- */
+const DEV = {
+  phone: { w: 360,  h: 780, k: .95, bz: 10, r: 43, size: '360×780 · 手机' },
+  tab:   { w: 1280, h: 800, k: .7,  bz: 14, r: 34, size: '1280×800 · 平板' },
+  land:  { w: 800,  h: 360, k: 1,   bz: 10, r: 42, size: '800×360 · 手机横屏' },
+  book:  { w: 841,  h: 701, k: .8,  bz: 12, r: 30, hinge: 'v', size: '841×701 · 折叠屏书本' },
+  table: { w: 701,  h: 841, k: .66, bz: 12, r: 30, hinge: 'h', size: '701×841 · 折叠屏桌面' },
+  tv:    { w: 960,  h: 540, k: .92, bz: 10, r: 6,  size: '960×540 · 电视' },
+};
+function devFrame(kind, inner, theme = 'lt') {
+  const d = DEV[kind];
+  return `<div class="dev ${kind}" style="width:${Math.round(d.w*d.k + 2*d.bz)}px;height:${Math.round(d.h*d.k + 2*d.bz)}px;border-radius:${d.r}px">
+    <div class="dscr ${theme}" style="left:${d.bz}px;top:${d.bz}px;width:${d.w}px;height:${d.h}px;transform:scale(${d.k});border-radius:${((d.r-d.bz)/d.k).toFixed(1)}px;background:var(--md-surface);color:var(--md-on-surface)">${inner}</div>
+    ${d.hinge ? `<div class="hinge ${d.hinge}" style="${d.hinge==='v' ? `left:${d.bz+d.w*d.k/2}px` : `top:${d.bz+d.h*d.k/2}px`}"></div>` : ''}
+  </div>`;
+}
+function devBlock(sel, panes) {
+  const host = $(sel);
+  host.innerHTML = `<div class="devtabs">${panes.map((p,i)=>`<button data-i="${i}" class="${i?'':'on'}">${p.tab}<small>${DEV[p.kind].size}</small></button>`).join('')}</div>` +
+    panes.map((p,i)=>`<div class="devpane ${i?'':'on'}" data-i="${i}">${devFrame(p.kind, p.html)}<figcaption><b>${p.title}</b>${p.cap}</figcaption></div>`).join('');
+  $('.devtabs', host).onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    $$('.devtabs button', host).forEach(x => x.classList.toggle('on', x === b));
+    $$('.devpane', host).forEach(x => x.classList.toggle('on', x.dataset.i === b.dataset.i));
+  };
+}
+
+/* ---------- 公用片段 ---------- */
+const dstat = (c='') => `<div class="dstat" style="${c}"><span>22:48</span><span>▮▮▮ 76%</span></div>`;
+
+const CATALOG = [
+  { name: '我喜欢的音乐', count: 486, provider: 'netease', tag: '已绑定', notes: '平台那边增删歌会自动跟上' },
+  { name: '通勤', count: 64, provider: 'netease', tag: '', notes: '会合并进同名歌单' },
+  { name: '睡前', count: 31, provider: 'netease', tag: '', notes: '' },
+  { name: '2026 年度歌单', count: 100, provider: 'netease', tag: '', notes: '' },
+];
+
+function plRow(l, i = 0, tight = false) {
+  const bound = l.tag === '已绑定';
+  const on = !bound && i !== 2;
+  const cls = ['plrow', tight ? 'tight' : '', i === 0 ? 'first' : '', i === CATALOG.length-1 ? 'last' : '', bound ? 'off' : ''].filter(Boolean).join(' ');
+  const chips = l.notes ? `<div class="pchips"><span class="pchip"><i class="nm">网</i>网易云</span></div>` : '';
+  return `<div class="${cls}">
+    <div class="cbx ${on?'on':''}"><i>${ico('check')}</i></div>
+    <div class="main">
+      <div class="nm"><b>${l.name}</b><small>${l.count} 首</small>${bound ? `<span class="lk tag2 sec"><svg viewBox="0 0 24 24"><use href="#i-check"/></svg>已绑定</span>` : ''}</div>
+      <div class="sub2">${l.notes || (bound ? '已经在这里了，不会重复导入' : '导入后跟随平台更新')}</div>
+      ${chips}
+    </div>
+  </div>`;
+}
+
+function importPanelBody(selCount = '4 个歌单 · 581 首', allOn = true) {
+  const n = CATALOG.filter(l => l.tag !== '已绑定').length;
+  return `<div class="note2">${ico('info','s18')}<span>勾上的会变成<strong>跟随平台更新的歌单</strong>：平台那边增删歌，这里会自动跟上。已经绑过的会跳过。</span></div>
+    <div class="lbl"><span>网易云音乐 <small>${CATALOG.length} 个歌单</small></span>
+      <button class="txtbtn">${allOn ? '全不选' : '全选'}</button></div>
+    ${CATALOG.map((l,i)=>plRow(l,i)).join('')}`;
+}
+
+const sheetFoot = (label) => `<div class="sh-foot">
+  <button class="btn-f">${label}</button>
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <button class="txtbtn">以后再说</button>
+    <button class="txtbtn">这个平台不再询问</button>
+  </div>
+</div>`;
+
+/* 库页背景：面板后面露出来的部分（照 LibraryScreen 手机版） */
+function libBg() {
+  return `${dstat()}<div class="lbg"><div class="lbar"><span class="ttl">音乐库</span><span style="flex:1"></span>${ico('more')}</div>
+    <div style="padding:97px 16px 0">
+      ${[['我喜欢的音乐','486 首 · 已绑定网易云音乐','#c2413b','#f7c6b8'],['通勤','64 首 · 已同步','#2f7d70','#9fd8c9'],['睡前','31 首 · 仅本机','#5b6f9e','#c3cde8'],['2026 年度歌单','100 首 · 已同步','#8d5f79','#e9c8d8']].map(([t,s,a,b])=>`
+        <div style="display:flex;align-items:center;gap:14px;height:64px;padding:0 12px;background:var(--md-surface-container-low);border-radius:4px;margin-bottom:2px">
+          <span style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,${a},${b});flex:none"></span>
+          <span style="flex:1;min-width:0"><b style="display:block;font-size:16px;font-weight:500">${t}</b><small style="font-size:14px;color:var(--md-on-surface-variant)">${s}</small></span>
+          ${ico('more')}
+        </div>`).join('')}
+    </div>
+    <div class="lmini"><span class="cv"></span><div class="tx"><b>我先这么说</b><small>椎名林檎</small></div><span class="pp">${ico('pause')}</span></div>
+  </div>`;
+}
+
+/* ---------- ① 手机：登录成功 → 导入面板 ---------- */
+const PHONE_SHEET = `<div class="lbg">${libBg()}</div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sh-head">
+      <div class="tt"><h5>导入你的歌单</h5><p>已登录网易云音乐 · 选中的会变成跟随平台更新的歌单</p></div>
+      ${ico('close')}
+    </div>
+    <div class="sh-body">${importPanelBody()}</div>
+    ${sheetFoot('导入 3 个歌单 · 195 首')}
+    <div class="navpill"></div>
+  </div>`;
+
+/* ② 导入中 */
+const PHONE_BUSY = `<div class="lbg">${libBg()}</div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sh-head">
+      <div class="tt"><h5>导入你的歌单</h5><p>已登录网易云音乐 · 选中的会变成跟随平台更新的歌单</p></div>
+    </div>
+    <div class="sh-body">${importPanelBody('', true)}</div>
+    <div class="sh-foot">
+      <button class="btn-f off">正在导入 2/3…</button>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span class="fine" style="padding-left:8px">导入完可以继续用，不影响播放</span>
+        <button class="txtbtn">取消</button>
+      </div>
+    </div>
+    <div class="navpill"></div>
+  </div>`;
+
+/* ③ 手机：登录面板本身（新面板在它之后弹，这里画出「登录成功」的反馈点） */
+function loginSheet() {
+  return `<div class="lbg">${libBg()}</div><div class="scrim"></div>
+  <div class="sheet" style="top:92px">
+    <div class="grab"></div>
+    <div class="sh-head"><div class="tt"><h5>扫码登录网易云音乐</h5><p>用网易云音乐 App 扫描二维码，并在手机上确认登录</p></div>${ico('close')}</div>
+    <div class="sh-body" style="display:flex;flex-direction:column;align-items:center;gap:14px">
+      <div class="qrbox"><div class="qr"></div></div>
+      <div class="fine" style="text-align:center;max-width:260px">扫码成功后会弹「导入你的歌单」，把账号里的歌单一次拿过来；也可以先关掉。</div>
+    </div>
+    <div class="navpill"></div>
+  </div>`;
+}
+
+/* ④ 平板：右侧 400dp 浮动面板（AdaptiveSheet 平板形态，四周 12dp） */
+function tabletFrame() {
+  return `${dstat()}
+    <div class="lbg">
+      <div class="lbar"><span class="ttl">音乐库</span><span style="flex:1"></span>${ico('more')}</div>
+      <div style="position:absolute;left:0;top:94px;bottom:0;width:840px;padding:0 24px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        ${[['我喜欢的音乐','486 首 · 已绑定网易云音乐','#c2413b','#f7c6b8'],['通勤','64 首 · 已同步','#2f7d70','#9fd8c9'],['睡前','31 首 · 仅本机','#5b6f9e','#c3cde8'],['2026 年度歌单','100 首 · 已同步','#8d5f79','#e9c8d8']].map(([t,s,a,b])=>`
+          <div style="display:flex;align-items:center;gap:16px;height:84px;padding:0 16px;background:var(--md-surface-container-low);border-radius:16px">
+            <span style="width:60px;height:60px;border-radius:16px;background:linear-gradient(135deg,${a},${b});flex:none"></span>
+            <span style="flex:1"><b style="display:block;font-size:17px;font-weight:600">${t}</b><small style="font-size:14px;color:var(--md-on-surface-variant)">${s}</small></span>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="scrim"></div>
+    <div style="position:absolute;right:12px;top:12px;bottom:12px;width:400px;border-radius:28px;background:var(--md-surface-container-low);box-shadow:0 18px 40px -18px rgb(0 0 0/.35);display:flex;flex-direction:column;overflow:hidden">
+      <div class="sh-head" style="padding-top:20px">
+        <div class="tt"><h5>导入你的歌单</h5><p>已登录网易云音乐 · 选中的会变成跟随平台更新的歌单</p></div>
+        ${ico('close')}
+      </div>
+      <div class="sh-body" style="flex:1">${importPanelBody()}</div>
+      ${sheetFoot('导入 3 个歌单 · 195 首')}
+    </div>`;
+}
+
+/* ⑤ 手机横屏：宽度 800 → 按平板处理，面板同样是右侧 400dp 浮动，高 336 */
+function landFrame() {
+  return `${dstat()}
+    <div class="lbg">
+      <div class="lbar"><span class="ttl">音乐库</span><span style="flex:1"></span>${ico('more')}</div>
+      <div style="position:absolute;left:16px;top:80px;right:440px;display:flex;flex-direction:column;gap:2px">
+        ${[['我喜欢的音乐','486 首'],['通勤','64 首'],['睡前','31 首']].map(([t,s])=>`
+          <div style="display:flex;align-items:center;gap:12px;height:56px;padding:0 12px;background:var(--md-surface-container-low);border-radius:4px">
+            <span style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#2f7d70,#9fd8c9);flex:none"></span>
+            <span style="flex:1"><b style="display:block;font-size:15px;font-weight:500">${t}</b><small style="font-size:13px;color:var(--md-on-surface-variant)">${s}</small></span>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="scrim"></div>
+    <div style="position:absolute;right:12px;top:12px;bottom:12px;width:400px;border-radius:28px;background:var(--md-surface-container-low);display:flex;flex-direction:column;overflow:hidden">
+      <div class="sh-head" style="padding-top:14px;padding-bottom:2px">
+        <div class="tt"><h5 style="font-size:19px">导入你的歌单</h5><p style="font-size:12.5px">已登录网易云音乐 · 勾上的跟随平台更新，已绑过的跳过</p></div>
+        ${ico('close')}
+      </div>
+      <div class="sh-body" style="flex:1;overflow:hidden;padding-top:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;height:30px;font-size:13px;font-weight:700;color:var(--md-on-surface-variant)">
+          <span>网易云音乐 · 4 个歌单</span><button class="txtbtn" style="height:30px;font-size:13px">全不选</button>
+        </div>
+        ${CATALOG.slice(0,3).map((l,i)=>plRow(l,i,true)).join('')}
+      </div>
+      <div class="sh-foot" style="padding:6px 16px 12px;gap:2px">
+        <button class="btn-f" style="height:44px;font-size:14px">导入 3 个歌单 · 195 首</button>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <button class="txtbtn" style="height:32px;font-size:13px">以后再说</button>
+          <button class="txtbtn" style="height:32px;font-size:13px">不再询问</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ⑥ 折叠屏书本：面板只占右页（foldSide = End），左页照常是列表 */
+function bookFrame() {
+  return `${dstat()}
+    <div class="lbg">
+      <div class="lbar"><span class="ttl" style="font-size:18px">音乐库</span></div>
+      <div style="position:absolute;left:0;top:94px;width:420px;padding:0 16px;display:flex;flex-direction:column;gap:2px">
+        ${[['我喜欢的音乐','486 首 · 已绑定'],['通勤','64 首 · 已同步'],['睡前','31 首 · 仅本机'],['2026 年度歌单','100 首 · 已同步']].map(([t,s])=>`
+          <div style="display:flex;align-items:center;gap:14px;height:64px;padding:0 12px;background:var(--md-surface-container-low);border-radius:4px">
+            <span style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#2f7d70,#9fd8c9);flex:none"></span>
+            <span style="flex:1"><b style="display:block;font-size:16px;font-weight:500">${t}</b><small style="font-size:13.5px;color:var(--md-on-surface-variant)">${s}</small></span>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div style="position:absolute;inset:0;background:rgb(0 0 0/.32)"></div>
+    <div style="position:absolute;left:430px;right:12px;top:12px;bottom:12px;border-radius:28px;background:var(--md-surface-container-low);display:flex;flex-direction:column;overflow:hidden">
+      <div class="sh-head" style="padding-top:18px">
+        <div class="tt"><h5>导入你的歌单</h5><p>已登录网易云音乐</p></div>
+        ${ico('close')}
+      </div>
+      <div class="sh-body" style="flex:1">${importPanelBody()}</div>
+      ${sheetFoot('导入 3 个歌单 · 195 首')}
+    </div>`;
+}
+
+/* ⑦ 折叠屏桌面姿态：铰链横着，面板只放上屏 */
+function tableFrame() {
+  return `${dstat()}
+    <div class="lbg">
+      <div class="lbar"><span class="ttl">音乐库</span></div>
+      <div style="position:absolute;left:16px;top:94px;width:340px;display:flex;flex-direction:column;gap:2px">
+        ${[['我喜欢的音乐','486 首'],['通勤','64 首'],['睡前','31 首']].map(([t,s])=>`
+          <div style="display:flex;align-items:center;gap:12px;height:60px;padding:0 12px;background:var(--md-surface-container-low);border-radius:4px">
+            <span style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#5b6f9e,#c3cde8);flex:none"></span>
+            <span style="flex:1"><b style="display:block;font-size:15px;font-weight:500">${t}</b><small style="font-size:13px;color:var(--md-on-surface-variant)">${s}</small></span>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div style="position:absolute;left:0;right:0;top:0;height:424px;background:rgb(0 0 0/.32)"></div>
+    <div style="position:absolute;left:0;right:0;top:424px;bottom:0;display:flex;align-items:center;justify-content:center;color:var(--md-on-surface-variant);font-size:13px">
+      下屏不参与：面板与遮罩只在上屏，铰链以下是原来的内容
+    </div>
+    <div style="position:absolute;right:12px;top:12px;width:400px;height:400px;border-radius:28px;background:var(--md-surface-container-low);display:flex;flex-direction:column;overflow:hidden">
+      <div class="sh-head" style="padding-top:14px;padding-bottom:2px">
+        <div class="tt"><h5 style="font-size:19px">导入你的歌单</h5><p style="font-size:12.5px">已登录网易云音乐 · 已绑过的跳过</p></div>
+        ${ico('close')}
+      </div>
+      <div class="sh-body" style="flex:1;overflow:hidden;padding-top:0">
+        ${CATALOG.slice(0,3).map((l,i)=>plRow(l,i,true)).join('')}
+      </div>
+      <div class="sh-foot" style="padding:6px 16px 12px;gap:2px">
+        <button class="btn-f" style="height:44px;font-size:14px">导入 3 个歌单 · 195 首</button>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <button class="txtbtn" style="height:32px;font-size:13px">以后再说</button>
+          <button class="txtbtn" style="height:32px;font-size:13px">不再询问</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ⑧ 电视：右侧 360dp 整高面板，左侧 28dp 圆角；焦点在主按钮 */
+function tvFrame() {
+  return `${dstat('opacity:.55')}
+    <div class="lbg">
+      <div style="padding:76px 96px 0;display:grid;grid-template-columns:1fr 1fr;gap:20px;width:600px">
+        ${[['我喜欢的音乐','486 首'],['通勤','64 首'],['睡前','31 首'],['2026 年度歌单','100 首']].map(([t,s])=>`
+          <div style="display:flex;align-items:center;gap:16px;height:88px;padding:0 20px;background:var(--md-surface-container-low);border-radius:18px">
+            <span style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#2f7d70,#9fd8c9);flex:none"></span>
+            <span style="flex:1"><b style="display:block;font-size:19px;font-weight:600">${t}</b><small style="font-size:15px;color:var(--md-on-surface-variant)">${s}</small></span>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="scrim"></div>
+    <div style="position:absolute;right:0;top:0;bottom:0;width:360px;border-radius:28px 0 0 28px;background:var(--md-surface-container);display:flex;flex-direction:column;overflow:hidden">
+      <div class="sh-head" style="padding-top:34px;padding-left:24px">
+        <div class="tt"><h5 style="font-size:24px">导入你的歌单</h5><p>已登录网易云音乐</p></div>
+      </div>
+      <div class="sh-body" style="flex:1;padding:4px 16px">
+        <div class="note2">${ico('info','s18')}<span>勾上的会变成<strong>跟随平台更新的歌单</strong>。</span></div>
+        <div class="lbl" style="padding-top:10px"><span>网易云音乐 <small>4 个歌单</small></span></div>
+        ${CATALOG.slice(0,2).map((l,i)=>plRow(l,i)).join('')}
+      </div>
+      <div class="sh-foot" style="padding:8px 16px 20px">
+        <button class="btn-f" style="box-shadow:inset 0 0 0 3px var(--md-primary);outline:3px solid rgba(32,106,95,.35)">导入 3 个歌单 · 195 首</button>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <button class="txtbtn">以后再说</button>
+        </div>
+        <div class="fine" style="text-align:center">遥控器：↑↓ 选歌单，确认键勾选，→ 到主按钮</div>
+      </div>
+    </div>`;
+}
+
+devBlock('#dvImport', [
+  { kind: 'phone', tab: '手机', title: '① 登录成功 → 导入面板（手机）',
+    html: PHONE_SHEET,
+    cap: '扫码 / 密码登录成功后，BottomSheet 从底部升起：标题「导入你的歌单」，副标题说明已登录哪个平台和「选中的会变成跟随平台更新的歌单」；顶部一条说明，按平台分组，勾选框行照「从文件导入」的 <code>ImportListRow</code>（名字 + 首数 + 平台小块），右侧「已绑定」的灰掉且不可点。底部主按钮写清数量和总首数；下面两个文字按钮：「以后再说」「这个平台不再询问」。' },
+  { kind: 'phone', tab: '手机 · 导入中', title: '② 导入中',
+    html: PHONE_BUSY,
+    cap: '<b>导入期间面板不关</b>，主按钮变成「正在导入 2/3…」，其余行锁住。导入完出一条「已导入 3 个歌单 · 195 首」并关闭。按返回键走 <code>SheetDismissGuard</code>：问「导入还在进行，确定离开？」，离开时已完成的保留、剩下的取消。' },
+  { kind: 'phone', tab: '手机 · 登录面板', title: '③ 登录面板（新面板之前的一步）',
+    html: loginSheet(),
+    cap: '这里不改，只加一句话说明「登录后会弹导入你的歌单」。用户扫完码 <b>先看到登录成功</b>，导入面板再升起；列表还没拉回来时什么都不弹。' },
+  { kind: 'tab', tab: '平板', title: '④ 平板 1280×800',
+    html: tabletFrame(),
+    cap: '<code>AdaptiveSheet</code> 平板形态：右侧 400dp 浮动面板、四周留 12dp、28dp 圆角。面板后面仍能看到歌单列表（<code>scrimAlpha</code> 默认值），列表本身不动。接电视 / 平板都走同一份面板内容，往上滚即可。' },
+  { kind: 'land', tab: '手机横屏', title: '⑤ 手机横屏 800×360',
+    html: landFrame(),
+    cap: '宽度 800dp 被 <code>rememberAppWindow</code> 算成平板，右侧 400dp 浮动面板、高 336dp。内容比手机少一行说明，靠上下滚；面板占一半宽，左边仍能看出是「音乐库」。' },
+  { kind: 'book', tab: '折叠屏 · 书本', title: '⑥ 折叠屏书本 841×701',
+    html: bookFrame(),
+    cap: '书本姿态下 <code>AdaptiveSheet</code> 默认放右页（<code>foldSide = End</code>，只有动画面板改成左页）；面板宽 ≤400dp，不跨折痕。左页照常是音乐库列表。' },
+  { kind: 'table', tab: '折叠屏 · 桌面', title: '⑦ 折叠屏桌面 701×841',
+    html: tableFrame(),
+    cap: '桌面姿态铰链横着，<b>面板只放下屏之上</b>：<code>AdaptiveSheet</code> 的 <code>topScreen</code> 分支把面板高度限到铰链，右对齐、整高只到上半部分。' },
+  { kind: 'tv', tab: '电视', title: '⑧ 电视 960×540',
+    html: tvFrame(),
+    cap: '电视形态：右侧 360dp 整高、左 28dp 圆角；左侧列表还在，只是被遮罩压暗。焦点（主色 3dp 描边 + 1.04 放大）默认落在主按钮上；↑↓ 在行间走，确认键勾选，→ 回到主按钮。返回键关闭，等同于「以后再说」。' },
+]);
+</script>
+</body>
+</html>
