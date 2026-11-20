@@ -460,10 +460,11 @@ fun LyricsList(
     val lines = remember(lyrics) { lyrics.displayLines() }
     val lyricKeys = remember(lines) { distinctKeys(lines) { it.timeMs.toString() } }
     val typography = MaterialTheme.typography.titleLarge
+    val lyricFont = LocalLyricFont.current
     // 所有行都按当前行放大后的字号排版：当前行图层不缩放，字是原大栅格化的；其他行缩小显示。
     // 非当前行一直带着缩放、换行时还要连续缩放，Animated 让字形不按像素取整，缩放过程中字不抖
-    val style = remember(typography, layoutSp) {
-        typography.copy(
+    val style = remember(typography, layoutSp, lyricFont) {
+        typography.withLyricFont(lyricFont?.family).copy(
             fontSize = layoutSp.sp,
             lineHeight = (layoutSp * LyricLineHeight).sp,
             textMotion = TextMotion.Animated,

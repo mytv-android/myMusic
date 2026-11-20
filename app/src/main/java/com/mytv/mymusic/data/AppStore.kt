@@ -104,6 +104,12 @@ data class LyricTextPrefs(
     val autoRomanize: Boolean = false,
 )
 
+/** 播放页歌词字体：第一字体缺字时用第二字体，再用系统字体。名称只用于界面显示。 */
+data class LyricFontPrefs(
+    val primaryName: String = "",
+    val fallbackName: String = "",
+)
+
 /**
  * 全屏歌词动画（设置 › 播放页 › 歌词动画，和全屏歌词页右上角 ✦ 打开的面板是同一份）。
  * [pluginSettings] 是“模式 id → { 设置键: 值 }”，只存改过的项，读的时候按模式的设置表合并默认值、夹紧。
@@ -286,6 +292,8 @@ class SettingsStore(private val context: Context) {
     private val lyriconSubscriberEnabledKey = booleanPreferencesKey("lyricon_subscriber_enabled")
     /** Apple Music 匿名歌词走第三方中转（zarz / paxsenix / AMLL）的总开关。 */
     private val thirdPartyLyricsKey = booleanPreferencesKey("third_party_lyrics")
+    /** 原平台无词或缺封面时，查询 LRCLIB / Apple 公开搜索。 */
+    private val metadataFallbackKey = booleanPreferencesKey("metadata_fallback")
     private val rhythmIntensityKey = stringPreferencesKey("rhythm_intensity")
     private val coverShapeKey = stringPreferencesKey("cover_shape")
     private val tvAmbientClockKey = booleanPreferencesKey("tv_ambient_clock")
@@ -330,6 +338,8 @@ class SettingsStore(private val context: Context) {
     private val lyricSplitBilingualKey = booleanPreferencesKey("lyric_split_bilingual")
     private val lyricTraditionalKey = booleanPreferencesKey("lyric_traditional")
     private val lyricAutoRomanizeKey = booleanPreferencesKey("lyric_auto_romanize")
+    private val lyricFontPrimaryKey = stringPreferencesKey("lyric_font_primary")
+    private val lyricFontFallbackKey = stringPreferencesKey("lyric_font_fallback")
     /** 更新走哪条 GitHub 镜像线路；见 [GithubMirror]。 */
     private val githubMirrorKey = stringPreferencesKey("github_mirror")
 
@@ -351,6 +361,7 @@ class SettingsStore(private val context: Context) {
             sodaSignerToken = values[sodaSignerTokenKey] ?: "",
             sodaSignerEnabled = values[sodaSignerEnabledKey] ?: true,
             thirdPartyLyrics = values[thirdPartyLyricsKey] ?: true,
+            metadataFallback = values[metadataFallbackKey] ?: true,
             aggregation = runCatching {
                 json.decodeFromString<AggregationSettings>(values[aggregationKey] ?: "")
             }.getOrDefault(AggregationSettings()),
@@ -384,6 +395,10 @@ class SettingsStore(private val context: Context) {
             kugouWelfareAuto = values[kugouWelfareAutoKey] ?: true,
             kugouWelfareLastClaimDate = values[kugouWelfareLastDateKey] ?: "",
             lyricStage = lyricStagePrefs(values),
+            lyricFonts = LyricFontPrefs(
+                primaryName = values[lyricFontPrimaryKey] ?: "",
+                fallbackName = values[lyricFontFallbackKey] ?: "",
+            ),
             lyricText = LyricTextPrefs(
                 splitBilingual = values[lyricSplitBilingualKey] ?: false,
                 traditional = values[lyricTraditionalKey] ?: false,
@@ -560,6 +575,11 @@ class SettingsStore(private val context: Context) {
         it[lyricStagePresetsKey] = json.encodeToString(value.presets)
     }
 
+    suspend fun lyricFonts(primaryName: String? = null, fallbackName: String? = null) = context.dataStore.edit {
+        primaryName?.let { name -> it[lyricFontPrimaryKey] = name }
+        fallbackName?.let { name -> it[lyricFontFallbackKey] = name }
+    }
+
     suspend fun lyricText(transform: (LyricTextPrefs) -> LyricTextPrefs) = context.dataStore.edit {
         val current = LyricTextPrefs(
             splitBilingual = it[lyricSplitBilingualKey] ?: false,
@@ -641,6 +661,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun thirdPartyLyrics(enabled: Boolean) = context.dataStore.edit {
         it[thirdPartyLyricsKey] = enabled
+    }
+
+    suspend fun metadataFallback(enabled: Boolean) = context.dataStore.edit {
+        it[metadataFallbackKey] = enabled
     }
 
     suspend fun cookie(provider: String, cookie: String) = context.dataStore.edit {
@@ -771,6 +795,8 @@ data class AppSettings(
      * 关掉后 Apple 歌词只试 Apple 自己的接口，匿名用户等于没有歌词。
      */
     val thirdPartyLyrics: Boolean = true,
+    /** 原平台无词或缺封面时，用公共歌词库和公开封面搜索补全。 */
+    val metadataFallback: Boolean = true,
     val aggregation: AggregationSettings = AggregationSettings(),
     /** 设置 › 本地音乐（扫描范围、匹配、播放兜底）。 */
     val localMusic: LocalMusicSettings = LocalMusicSettings(),
@@ -826,6 +852,7 @@ data class AppSettings(
     val kugouWelfareLastClaimDate: String = "",
     /** 全屏歌词动画。 */
     val lyricStage: LyricStagePrefs = LyricStagePrefs(),
+    val lyricFonts: LyricFontPrefs = LyricFontPrefs(),
     /** 歌词文字变换（拆单行双语、简转繁、补罗马音）。 */
     val lyricText: LyricTextPrefs = LyricTextPrefs(),
     val equalizer: EqualizerSettings = EqualizerSettings(),

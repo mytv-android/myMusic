@@ -20,6 +20,7 @@ import com.mytv.mymusic.ui.player.stage.ModOrigin
 import com.mytv.mymusic.ui.player.stage.StageChar
 import com.mytv.mymusic.ui.player.stage.charTimings
 import com.mytv.mymusic.ui.player.stage.fitText
+import com.mytv.mymusic.ui.player.withLyricFont
 
 /**
  * 虹光（Folia 官方样例 sample-aurora-visualizer 1.0.1，AGPL-3.0）：只显示当前句、居中；
@@ -48,7 +49,7 @@ object AuroraVisualizer : LyricVisualizer {
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 0.04.em,
                     lineHeight = 1.35.em,
-                )
+                ).withLyricFont(ctx.font?.family)
                 val padX = safe.width * 0.08f
                 val glyphs = ArrayList<AuroraGlyph>()
                 var blockTop = 0f

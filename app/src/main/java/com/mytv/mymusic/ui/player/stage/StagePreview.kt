@@ -58,7 +58,8 @@ internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStageP
         }
         val insets = remember { StageInsets() }
         val raw = prefs.settingsFor(mode.id)
-        val ctx = remember(mode, song, colors, raw, prefs.subline, textSp) {
+        val font = com.mytv.mymusic.ui.player.LocalLyricFont.current
+        val ctx = remember(mode, song, colors, raw, prefs.subline, textSp, font) {
             // 能拖动的列表类模式（Rush）在缩略图里看得到上下句，多给一句“上一句”；其它模式的缩略图照旧只有两句
             val lines = if (mode.interactive) SAMPLE_LIST_LINES else SAMPLE_LINES
             val current = if (mode.interactive) 1 else 0
@@ -75,6 +76,7 @@ internal fun StagePreview(mode: LyricVisualizer, song: Song?, prefs: LyricStageP
                 settings = SettingValues(mode.settings, raw),
                 audio = null,
                 subline = prefs.subline,
+                font = font,
             )
         }
         Box(
@@ -139,21 +141,23 @@ private fun PreviewBackdrop(colors: StageColors) {
 @Composable
 private fun ClassicPreview(scale: Float) {
     val on = MaterialTheme.colorScheme.onSurface
+    val family = com.mytv.mymusic.ui.player.LocalLyricFont.current?.family
     Column(
         Modifier.fillMaxSize().padding(horizontal = 10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
     ) {
-        Text(SAMPLE_PREVIOUS, color = on.copy(alpha = 0.45f), fontSize = 10.sp * scale, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(SAMPLE_PREVIOUS, color = on.copy(alpha = 0.45f), fontFamily = family, fontSize = 10.sp * scale, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(
             SAMPLE_LINES[0].text,
             color = on,
+            fontFamily = family,
             fontSize = 14.sp * scale,
             lineHeight = 18.sp * scale,
             fontWeight = FontWeight.Bold,
             maxLines = 2,
             textAlign = TextAlign.Start,
         )
-        Text(SAMPLE_LINES[1].text, color = on.copy(alpha = 0.45f), fontSize = 10.sp * scale, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(SAMPLE_LINES[1].text, color = on.copy(alpha = 0.45f), fontFamily = family, fontSize = 10.sp * scale, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

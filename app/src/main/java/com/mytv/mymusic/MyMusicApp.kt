@@ -123,6 +123,8 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        // 先于仓库、数据库和后台组件安装；写报告失败也会交还 Android 原 handler。
+        CrashReporter.install(this)
         LxSources.attach(this)
         AppleTokenCache.attach(this)
         val backgroundWork = BackgroundWork.available(this)

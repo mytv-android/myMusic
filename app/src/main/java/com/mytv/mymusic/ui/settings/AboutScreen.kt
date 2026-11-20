@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Group
@@ -41,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,15 +56,19 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.R
+import com.mytv.mymusic.CrashReport
+import com.mytv.mymusic.CrashReporter
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
 import com.mytv.mymusic.data.update.formatSize
+import com.mytv.mymusic.ui.CrashReportDialog
 import com.mytv.mymusic.ui.ErrorBlock
 import com.mytv.mymusic.ui.InfoNote
 import com.mytv.mymusic.ui.MusicActions
@@ -75,6 +81,8 @@ import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.SegmentedGroup
 import com.mytv.mymusic.ui.components.tvFocusRing
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -101,8 +109,16 @@ fun AboutScreen(
     val clipboard = LocalClipboard.current
     val snackbar = LocalAppSnackbar.current
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var checking by remember { mutableStateOf(false) }
     var showMirrorPicker by remember { mutableStateOf(false) }
+    var crashReport by remember { mutableStateOf<CrashReport?>(null) }
+    var crashReportLoaded by remember { mutableStateOf(false) }
+    var showCrashReport by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        crashReport = withContext(Dispatchers.IO) { CrashReporter.read(context) }
+        crashReportLoaded = true
+    }
     val info = update.info
     val showCard = info != null
     val isChecking = checking || update.phase == UpdatePhase.Checking
@@ -149,7 +165,7 @@ fun AboutScreen(
                 ListRow(
                     title = "检查更新",
                     index = 0,
-                    count = 8,
+                    count = 9,
                     onClick = ::check,
                     icon = Icons.Filled.Refresh,
                     summary = checkSummary,
@@ -161,9 +177,26 @@ fun AboutScreen(
                     },
                 )
                 ListRow(
-                    title = "GitHub 镜像源",
+                    title = "问题反馈",
                     index = 1,
-                    count = 8,
+                    count = 9,
+                    onClick = {
+                        if (crashReportLoaded) {
+                            if (crashReport != null) showCrashReport = true
+                            else openUri(CrashReporter.issueUrl(context))
+                        }
+                    },
+                    icon = Icons.Filled.BugReport,
+                    summary = when {
+                        !crashReportLoaded -> "正在检查本机崩溃报告…"
+                        crashReport != null -> "有一份异常退出报告，可查看、复制或删除"
+                        else -> "前往 GitHub Issues，附简短设备与版本信息"
+                    },
+                )
+                ListRow(
+                    title = "GitHub 镜像源",
+                    index = 2,
+                    count = 9,
                     onClick = { showMirrorPicker = true },
                     icon = Icons.Filled.CloudDownload,
                     summary = when (state.githubMirror) {
@@ -174,24 +207,24 @@ fun AboutScreen(
                 )
                 ListRow(
                     title = "隐私说明",
-                    index = 2,
-                    count = 8,
+                    index = 3,
+                    count = 9,
                     onClick = onPrivacy,
                     icon = Icons.Filled.PrivacyTip,
                     summary = "哪些数据留在本机，哪些会离开",
                 )
                 ListRow(
                     title = "开源许可",
-                    index = 3,
-                    count = 8,
+                    index = 4,
+                    count = 9,
                     onClick = onLicenses,
                     icon = Icons.Filled.Code,
                     summary = "AGPL-3.0 · music-lib、Folia 模组、Rush 与第三方依赖",
                 )
                 ListRow(
                     title = "项目主页",
-                    index = 4,
-                    count = 8,
+                    index = 5,
+                    count = 9,
                     onClick = { openUri(PROJECT_URL) },
                     icon = Icons.AutoMirrored.Filled.OpenInNew,
                     summary = "github.com/mytv-android/myMusic",
@@ -199,8 +232,8 @@ fun AboutScreen(
                 )
                 ListRow(
                     title = "Telegram 群组",
-                    index = 5,
-                    count = 8,
+                    index = 6,
+                    count = 9,
                     onClick = { openUri(TELEGRAM_URL) },
                     icon = Icons.Filled.Group,
                     summary = "t.me/mytv_android_channel",
@@ -208,8 +241,8 @@ fun AboutScreen(
                 )
                 ListRow(
                     title = "复制诊断信息",
-                    index = 6,
-                    count = 8,
+                    index = 7,
+                    count = 9,
                     onClick = {
                         scope.launch {
                             clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("myMusic 诊断信息", actions.diagnostics())))
@@ -223,8 +256,8 @@ fun AboutScreen(
                 )
                 ListRow(
                     title = "导出日志文件",
-                    index = 7,
-                    count = 8,
+                    index = 8,
+                    count = 9,
                     onClick = {
                         scope.launch { snackbar.showSnackbar(actions.exportLog()) }
                     },
@@ -269,6 +302,22 @@ fun AboutScreen(
                 scope.launch { actions.setGithubMirror(it) }
             },
             onDismiss = { showMirrorPicker = false },
+        )
+    }
+    crashReport?.takeIf { showCrashReport }?.let { report ->
+        CrashReportDialog(
+            report = report,
+            onDismiss = { showCrashReport = false },
+            onDelete = {
+                scope.launch {
+                    val deleted = withContext(Dispatchers.IO) { CrashReporter.delete(context) }
+                    if (deleted) {
+                        crashReport = null
+                        showCrashReport = false
+                    }
+                    snackbar.showSnackbar(if (deleted) "崩溃报告已删除" else "删除失败，请重试")
+                }
+            },
         )
     }
 }

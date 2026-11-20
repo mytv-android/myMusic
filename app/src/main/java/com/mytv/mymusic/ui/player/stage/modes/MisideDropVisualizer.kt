@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.mytv.mymusic.ui.player.stage.LyricSetting
+import com.mytv.mymusic.ui.player.withLyricFont
 import com.mytv.mymusic.ui.player.stage.LyricStageContext
 import com.mytv.mymusic.ui.player.stage.LyricVisualizer
 import com.mytv.mymusic.ui.player.stage.ModOrigin
@@ -94,7 +95,7 @@ object MisideDropVisualizer : LyricVisualizer {
             modifier.drawWithCache {
                 val safe = ctx.display.safeRect(size)
                 val unit = ctx.display.textSp.sp.toPx() / MISIDE_BASE_FONT
-                val style = misideStyle(ctx.display.textSp * cfg.fontSize / MISIDE_BASE_FONT)
+                val style = misideStyle(ctx.display.textSp * cfg.fontSize / MISIDE_BASE_FONT).withLyricFont(ctx.font?.family)
                 val groundY = safe.top + safe.height * MISIDE_GROUND_RATIO
                 val line = ctx.currentLine?.takeIf { it.text.isNotBlank() }?.let { layoutMisideLine(measurer, it, style, safe) }
                 val ink = MisideInk(ctx.colors.text, unit, cfg.glowBoost)

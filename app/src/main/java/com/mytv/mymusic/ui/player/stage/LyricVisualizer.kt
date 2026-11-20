@@ -739,6 +739,7 @@ class LyricStageContext internal constructor(
     val subline: LyricSubline,
     /** 跳到某个时间（毫秒）播放；只给 [LyricVisualizer.interactive] 的模式用，缩略图里什么都不做。 */
     val seek: (Long) -> Unit = {},
+    internal val font: com.mytv.mymusic.ui.player.LyricFontRuntime? = null,
 ) {
     /** 当前句（句间为 null）。组合阶段读会随换句重组。 */
     val currentLine: StageLine? get() = lines.getOrNull(lineIndex.value)

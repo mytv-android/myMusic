@@ -117,7 +117,7 @@ object CineramaVisualizer : LyricVisualizer {
                     subtitleBand = subtitleBand,
                 )
                 val still = display.reduceMotion
-                val scene = CineramaScene(program, measurer, ctx.colors, config, geometry, still, display.countScale, ctx.subline, this)
+                val scene = CineramaScene(program, measurer, ctx.colors, config, geometry, still, display.countScale, ctx.subline, this, ctx.font)
                 onDrawBehind {
                     scene.drawChrome(this)
                     if (program.plans.isEmpty()) return@onDrawBehind

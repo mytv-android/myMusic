@@ -62,9 +62,11 @@ import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.text.style.TextOverflow
 import com.mytv.mymusic.ui.artist.splitArtistNames
+import com.mytv.mymusic.ui.charts.CommentsSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -620,6 +622,8 @@ internal fun MoreMenu(
     onAddToPlaylist: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
+    var commentsOpen by remember(song.key) { mutableStateOf(false) }
+    if (commentsOpen) CommentsSheet(song, actions, onDismiss = { commentsOpen = false })
     Box {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, "更多", tint = MaterialTheme.colorScheme.onSurface) }
         DropdownMenu(open, onDismissRequest = { open = false }, shape = RoundedCornerShape(20.dp)) {
@@ -627,6 +631,13 @@ internal fun MoreMenu(
             // 收起播放页，露出队列海报墙
             DropdownMenuItem(text = { Text("海报墙") }, leadingIcon = { Icon(Icons.Filled.GridView, null) }, onClick = { open = false; actions.openPosterWall() })
             DropdownMenuItem(text = { Text("选择音源") }, leadingIcon = { Icon(Icons.Filled.SwapHoriz, null) }, onClick = { open = false; onOpenSource() })
+            if (!song.isLive && actions.supportsComments(song)) {
+                DropdownMenuItem(
+                    text = { Text("查看评论") },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Comment, null) },
+                    onClick = { open = false; commentsOpen = true },
+                )
+            }
             // 和歌名行的「加到歌单」按钮是同一个面板；控件淡出、矮窗口里也总能在这里找到
             DropdownMenuItem(
                 text = { Text("加到歌单…") },

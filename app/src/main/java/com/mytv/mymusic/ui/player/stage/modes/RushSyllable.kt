@@ -212,7 +212,7 @@ internal class RushStyles(
      * 中日韩字用系统默认字体：主题的 Roboto Flex 只含拉丁字，汉字回退到系统字体时按 400 字重取、粗体不生效；
      * 系统默认字体要粗体时回退字体会合成加粗，Rush 的粗体大字才出得来。
      */
-    private val cjk = base.copy(fontFamily = FontFamily.Default)
+    private val cjk = base.copy(fontFamily = base.fontFamily ?: FontFamily.Default)
 
     /** 唱过的那层：开了逐字粗细的拉丁词按时长定字重，其余用粗体。 */
     fun top(token: RushToken): TextStyle = when {

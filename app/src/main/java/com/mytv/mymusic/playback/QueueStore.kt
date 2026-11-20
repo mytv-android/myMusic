@@ -20,6 +20,16 @@ private const val END_SLACK_MS = 1_000L
 data class SavedQueue(
     val songs: List<Song> = emptyList(),
     val savedAt: Long = 0L,
+    /** 队列来自哪张歌单；空表示搜索、单首播放或旧版本快照。 */
+    val origin: PlaybackOrigin? = null,
+)
+
+/** 当前队列的来源。[kind] 为 collection（平台详情）或 local（自建歌单），[key] 是对应页面 key / 歌单 id。 */
+@Serializable
+data class PlaybackOrigin(
+    val kind: String = "",
+    val key: String = "",
+    val title: String = "",
 )
 
 /** 落盘的播放位置：第几首、听到哪儿、那首的封面形状。和队列分开存，播放中每隔一阵写一次也只有几十个字节。 */
@@ -37,7 +47,7 @@ data class SavedCursor(
 }
 
 /** 一次能续播的快照：队列和位置对得上才算数。 */
-data class SavedPlayback(val songs: List<Song>, val cursor: SavedCursor) {
+data class SavedPlayback(val songs: List<Song>, val cursor: SavedCursor, val origin: PlaybackOrigin? = null) {
     val index: Int get() = cursor.index.coerceIn(0, songs.lastIndex)
     val current: Song get() = songs[index]
 }
@@ -70,15 +80,15 @@ class QueueStore(context: Context) {
         val fixed = if (index >= 0) cursor.copy(index = index) else SavedCursor(key = queue.songs.first().key)
         // 上次整个队列放完停在最后一首的末尾：从这首开头接上，和播放器放完后再按播放一样
         val ended = fixed.durationMs > 0 && fixed.positionMs >= fixed.durationMs - END_SLACK_MS
-        SavedPlayback(queue.songs, if (ended) fixed.copy(positionMs = 0L) else fixed)
+        SavedPlayback(queue.songs, if (ended) fixed.copy(positionMs = 0L) else fixed, queue.origin)
     }
 
-    suspend fun saveQueue(songs: List<Song>) = withContext(Dispatchers.IO) {
+    suspend fun saveQueue(songs: List<Song>, origin: PlaybackOrigin? = null) = withContext(Dispatchers.IO) {
         if (songs.isEmpty()) {
             clear()
             return@withContext
         }
-        val text = json.encodeToString(SavedQueue(songs.map(::forDisk), System.currentTimeMillis()))
+        val text = json.encodeToString(SavedQueue(songs.map(::forDisk), System.currentTimeMillis(), origin))
         lock.withLock { write(queueFile, text) }
     }
 

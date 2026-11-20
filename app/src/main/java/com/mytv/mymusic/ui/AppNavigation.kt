@@ -55,6 +55,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -74,7 +75,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.mytv.mymusic.CrashReport
+import com.mytv.mymusic.CrashReporter
 import com.mytv.mymusic.data.Song
 import kotlin.coroutines.cancellation.CancellationException
 import com.mytv.mymusic.data.TopList
@@ -100,6 +105,9 @@ import com.mytv.mymusic.ui.components.PageChromeScheme
 import com.mytv.mymusic.ui.components.rememberAppWindow
 import com.mytv.mymusic.ui.library.libraryRoutes
 import com.mytv.mymusic.ui.player.LocalPlayerBottomChrome
+import com.mytv.mymusic.ui.player.LocalLyricFont
+import com.mytv.mymusic.ui.player.LyricFonts
+import com.mytv.mymusic.ui.player.LyricFontRuntime
 import com.mytv.mymusic.ui.player.PlayerBottomChrome
 import com.mytv.mymusic.ui.player.PlayerScreen
 import com.mytv.mymusic.ui.player.QueueSheet
@@ -165,6 +173,12 @@ fun MyMusicApp(model: MusicViewModel) {
     val updateProgress = model.updateState.collectAsState()
     val transfer by model.transfer.collectAsState()
     val platformImport by model.platformImport.collectAsState()
+    val context = LocalContext.current
+    // 冷启动异步取一次并写“已提示”标记；报告保留在本机，关于页仍可查看。
+    var startupCrash by remember { mutableStateOf<CrashReport?>(null) }
+    LaunchedEffect(context) {
+        startupCrash = withContext(Dispatchers.IO) { CrashReporter.consumePending(context) }
+    }
 
     val actions = remember(model) { MusicActions(model) }
     val snackbar = remember { SnackbarHostState() }
@@ -293,6 +307,7 @@ fun MyMusicApp(model: MusicViewModel) {
             when (event) {
                 // 详情页按 key 入栈：专辑页里点“更多专辑”、歌手页点专辑都是压一层，返回回到上一层
                 is UiEvent.OpenCollection -> nav.openDetail(COLLECTION_ROUTE, event.key)
+                is UiEvent.OpenLocalPlaylist -> nav.navigate("localPlaylist/${event.id}") { launchSingleTop = true }
                 is UiEvent.OpenArtist -> nav.openDetail(com.mytv.mymusic.ui.artist.ARTIST_ROUTE, event.key)
                 // showSnackbar 会挂起到提示消失，放在 collect 里会把后面的跳转事件卡住几秒
                 is UiEvent.Message -> launch { snackbar.showSnackbar(event.text) }
@@ -360,9 +375,13 @@ fun MyMusicApp(model: MusicViewModel) {
     val playerComposed = remember { mutableStateOf(false) }
     val enterSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     val exitSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    val lyricFont by produceState<LyricFontRuntime?>(null, state.lyricFonts) {
+        value = withContext(Dispatchers.IO) { LyricFonts.resolve(context, state.lyricFonts) }
+    }
 
     CompositionLocalProvider(
         LocalAppWindow provides window,
+        LocalLyricFont provides lyricFont,
         LocalHazeState provides hazeState,
         LocalAppSnackbar provides snackbar,
         // 电视不滑：不给环境，整套滑动代码不进组合
@@ -566,6 +585,9 @@ fun MyMusicApp(model: MusicViewModel) {
             progress = { updateProgress.value.progress },
             bottomPadding = pillBottom,
         )
+        startupCrash?.let { report ->
+            CrashReportDialog(report = report, onDismiss = { startupCrash = null })
+        }
     }
 }
 

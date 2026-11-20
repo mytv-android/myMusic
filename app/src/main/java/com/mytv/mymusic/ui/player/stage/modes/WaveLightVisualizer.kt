@@ -146,7 +146,7 @@ object WaveLightVisualizer : LyricVisualizer {
     override fun Stage(ctx: LyricStageContext, modifier: Modifier) {
         val palette = rememberWavePalette(ctx)
         val measurer = rememberTextMeasurer(cacheSize = 0)
-        val family = MaterialTheme.typography.bodyLarge.fontFamily
+        val family = ctx.font?.family ?: MaterialTheme.typography.bodyLarge.fontFamily
         val keywordOn = ctx.settings.toggle("keyword")
         val hold = remember(ctx.lines) { WaveHold() }
         val shown = hold.resolve(ctx.lines, ctx.lineIndex.value)

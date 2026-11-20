@@ -86,6 +86,7 @@ import com.mytv.mymusic.data.PosterPrefs
 import com.mytv.mymusic.data.LyricMemoryEntry
 import com.mytv.mymusic.data.LyricStagePrefs
 import com.mytv.mymusic.data.LyricTextPrefs
+import com.mytv.mymusic.data.LyricFontPrefs
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.playreport.PlayEndReason
 import com.mytv.mymusic.data.playreport.PlayFrame
@@ -98,6 +99,9 @@ import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.local.LOCAL_SOURCE
 import com.mytv.mymusic.data.local.LocalLibrary
+import com.mytv.mymusic.data.metadata.CommunityMetadata
+import com.mytv.mymusic.ui.player.LyricFonts
+import com.mytv.mymusic.ui.player.LYRIC_FONT_PRIMARY
 import com.mytv.mymusic.data.local.LocalPlayable
 import com.mytv.mymusic.data.local.forStorage
 import com.mytv.mymusic.data.lx.LxPlatform
@@ -128,6 +132,7 @@ import com.mytv.mymusic.playback.CrossfadeHandoff
 import com.mytv.mymusic.playback.MEDIA_EXTRA_DURATION_MS
 import com.mytv.mymusic.playback.NowPlayingShape
 import com.mytv.mymusic.playback.PlaybackService
+import com.mytv.mymusic.playback.PlaybackOrigin
 import com.mytv.mymusic.playback.SavedCursor
 import com.mytv.mymusic.playback.SavedPlayback
 import com.mytv.mymusic.playback.VolumeNormalization
@@ -256,6 +261,8 @@ data class MusicUiState(
     val lyriconSubscriberEnabled: Boolean = false,
     /** Apple Music 匿名歌词是否走第三方中转；见 [setThirdPartyLyrics]。 */
     val thirdPartyLyrics: Boolean = true,
+    /** 公共歌词 / 封面补全总开关，见 CommunityMetadata。 */
+    val metadataFallback: Boolean = true,
     val rhythmIntensity: RhythmIntensity = RhythmIntensity.Standard,
     val coverShape: CoverShapeChoice = CoverShapeChoice.Random,
     val tvAmbientClock: Boolean = true,
@@ -275,6 +282,7 @@ data class MusicUiState(
     val lyricStage: LyricStagePrefs = LyricStagePrefs(),
     /** 歌词文字变换（拆单行双语、简转繁、补罗马音）。 */
     val lyricText: LyricTextPrefs = LyricTextPrefs(),
+    val lyricFonts: LyricFontPrefs = LyricFontPrefs(),
     val collectionView: CollectionView = CollectionView.List,
     val miniPlayerTarget: MiniPlayerTarget = MiniPlayerTarget.Player,
     /** 播放上报总开关；关掉后不再把播放记录回传给任何平台。 */
@@ -320,6 +328,11 @@ data class MusicUiState(
     val canonicalQueue: List<CanonicalTrack> = emptyList(),
     /** 换上一份新队列（play 起播）时加一；队列内挪位、解析地址、听歌模式续一批都不变。海报墙按它重新入场。 */
     val queueId: Int = 0,
+    /** 这份播放队列来自哪张歌单；随 QueueStore 一起落盘。 */
+    val playbackOrigin: PlaybackOrigin? = null,
+    /** 打开来源歌单后要定位的歌曲；requestId 让连续两次定位同一首也能触发滚动。 */
+    val locateSongKey: String = "",
+    val locateRequestId: Long = 0,
     val lyrics: String = "",
     /** [lyrics] 是哪首歌（Song.key）的；切歌后新歌词取回来之前还是上一首的，和 current 对不上就是还在取。 */
     val lyricsKey: String = "",
@@ -624,6 +637,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             lyriconProviderEnabled = settings.lyriconProviderEnabled,
             lyriconSubscriberEnabled = settings.lyriconSubscriberEnabled,
             thirdPartyLyrics = settings.thirdPartyLyrics,
+            metadataFallback = settings.metadataFallback,
             rhythmIntensity = settings.rhythmIntensity,
             coverShape = settings.coverShape,
             tvAmbientClock = settings.tvAmbientClock,
@@ -637,6 +651,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             share = settings.share,
             lyricStage = settings.lyricStage,
             lyricText = settings.lyricText,
+            lyricFonts = settings.lyricFonts,
             collectionView = settings.collectionView,
             miniPlayerTarget = settings.miniPlayerTarget,
             playReportEnabled = settings.playReportEnabled,
@@ -1792,7 +1807,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     message(it.message ?: "榜单读取失败", error = true)
                     return@launch
                 }
-            if (songs.isEmpty()) message("这个榜单暂时没有歌曲", error = true) else play(songs.first(), songs)
+            if (songs.isEmpty()) {
+                message("这个榜单暂时没有歌曲", error = true)
+            } else {
+                play(songs.first(), songs, origin = PlaybackOrigin("collection", collectionKey(CollectionKind.Chart, source, chart.id), chart.name))
+            }
         }
     }
 
@@ -1809,7 +1828,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 message(it.message ?: "歌单读取失败", error = true)
                 return@launch
             }
-            if (songs.isEmpty()) message("这个歌单暂时没有歌曲", error = true) else play(songs.first(), songs)
+            if (songs.isEmpty()) {
+                message("这个歌单暂时没有歌曲", error = true)
+            } else {
+                val kind = if (album) CollectionKind.Album else CollectionKind.Playlist
+                play(songs.first(), songs, origin = PlaybackOrigin("collection", collectionKey(kind, source, playlist.id), playlist.name))
+            }
         }
     }
 
@@ -3641,10 +3665,28 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     // ---------- playback ----------
 
     /** [openPlayer] 为 false 时只换队列开播，不弹出播放页（详情页海报视图）；平时按 [autoOpenPlayer]。 */
-    fun play(song: Song, queue: List<Song> = listOf(song), openPlayer: Boolean = true) {
+    fun play(
+        song: Song,
+        queue: List<Song> = listOf(song),
+        openPlayer: Boolean = true,
+        origin: PlaybackOrigin? = originForQueue(queue),
+    ) {
         val (selected, ordered) = newQueue(song, queue)
-        playTrack(selected, ordered, openPlayer = openPlayer)
+        playTrack(selected, ordered, openPlayer = openPlayer, playbackOrigin = origin)
     }
+
+    /** 当前详情页里的列表（含筛选后的子集）开播时，记住它属于哪张平台歌单。 */
+    private fun originForQueue(queue: List<Song>): PlaybackOrigin? {
+        val page = _collection.value
+        if (page.key.isBlank() || queue.isEmpty() || page.songs.isEmpty()) return null
+        val keys = page.songs.mapTo(HashSet()) { it.key }
+        if (!queue.all { it.key in keys }) return null
+        return PlaybackOrigin("collection", page.key, page.title)
+    }
+
+    /** 自建歌单详情开播；[queue] 可以是筛选后的结果，定位仍在完整歌单里找当前歌。 */
+    fun playLocalPlaylist(song: Song, queue: List<Song>, playlistId: String, title: String, openPlayer: Boolean = true) =
+        play(song, queue, openPlayer, PlaybackOrigin("local", playlistId, title))
 
     /** 和 [play] 一样，但等到装进播放器（或失败）才返回；组件后台起播用。[feed] 是这份队列所属的听歌模式。 */
     private suspend fun playNow(song: Song, queue: List<Song>, openPlayer: Boolean, feed: ActiveFeed? = null): Boolean {
@@ -3676,8 +3718,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         queue: List<CanonicalTrack> = listOf(track),
         pinnedProvider: String? = null,
         openPlayer: Boolean = true,
+        playbackOrigin: PlaybackOrigin? = null,
     ) {
-        viewModelScope.launch { startTrack(track, queue, pinnedProvider, openPlayer) }
+        viewModelScope.launch { startTrack(track, queue, pinnedProvider, openPlayer, playbackOrigin) }
     }
 
     /** 解析 [track] 并把整份队列装进播放器开播；装上了返回 true。 */
@@ -3686,6 +3729,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         queue: List<CanonicalTrack>,
         pinnedProvider: String?,
         openPlayer: Boolean,
+        origin: PlaybackOrigin? = null,
     ): Boolean {
         val player = awaitController()
         if (player == null) {
@@ -3749,6 +3793,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             queue = queueSongs,
             canonicalQueue = canonicalQueue,
             queueId = requestId,
+            playbackOrigin = origin,
             current = resolvedSong,
             currentTrack = playableTrack,
             currentSource = source,
@@ -4064,40 +4109,41 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 迷你播放器右滑到底：回到当前队列所属歌单，并让详情页滚到正在播放的歌。 */
+    fun openPlaybackOrigin() {
+        val state = base.value
+        val origin = state.playbackOrigin
+        val song = state.current
+        if (origin == null || origin.key.isBlank() || song == null) {
+            message("当前队列不是从歌单开播的")
+            return
+        }
+        base.value = state.copy(
+            playerOpen = false,
+            posterOpen = false,
+            locateSongKey = song.key,
+            locateRequestId = state.locateRequestId + 1,
+        )
+        when (origin.kind) {
+            "collection" -> {
+                activateCollection(origin.key)
+                _events.tryEmit(UiEvent.OpenCollection(origin.title, origin.key))
+            }
+            "local" -> _events.tryEmit(UiEvent.OpenLocalPlaylist(origin.key))
+            else -> message("找不到这张歌单")
+        }
+    }
+
+    fun consumePlaybackLocate() {
+        if (base.value.locateSongKey.isNotEmpty()) base.value = base.value.copy(locateSongKey = "")
+    }
+
     fun clearError() {
         base.value = base.value.copy(error = "")
     }
 
     fun clearNotice() {
         base.value = base.value.copy(playbackNotice = "", deepLink = "")
-    }
-
-    /**
-     * 收藏到平台账号（汽水的「我喜欢的音乐」）。和本机收藏是两件事：这个写去平台，
-     * 换设备也在。平台没实现、没登录、接口报错都转成一条提示，不让界面崩。
-     */
-    fun collectOnPlatform(song: Song) {
-        val provider = song.source
-        if (provider.isBlank() || !app.repository.supportsCollect(provider)) {
-            base.value = base.value.copy(playbackNotice = "${providerName(provider)}暂不支持收藏到账号")
-            return
-        }
-        val cookie = cookieFor(provider)
-        if (cookie.isBlank()) {
-            base.value = base.value.copy(playbackNotice = "请先登录${providerName(provider)}再收藏")
-            return
-        }
-        viewModelScope.launch {
-            val message = try {
-                app.repository.collectTrack(provider, cookie, song)
-                "已收藏《${song.title}》到${providerName(provider)}账号"
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                error.message ?: "收藏失败"
-            }
-            base.value = base.value.copy(playbackNotice = message)
-        }
     }
 
     // ---------- 听歌识曲 ----------
@@ -4441,18 +4487,89 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // 快速切歌时上一首的请求可能比新歌晚返回，只保留最新一次
         lyricsJob?.cancel()
         lyricsJob = viewModelScope.launch {
-            val lyrics = runCatching {
+            val nativeLyrics = try {
                 // 本地歌：同名 .lrc 或匹配到的平台的歌词，由本地音乐库决定用哪份
                 if (song.source == LOCAL_SOURCE) {
                     app.localLibrary.lyrics(song, settingsState.value.cookies)
                 } else {
                     app.repository.lyrics(song, cookieFor(song.source))
                 }
-            }.getOrDefault("")
-            // runCatching 会吞掉取消异常，被取消的旧请求在这里停下，不再写回
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                ""
+            }
+            val needCover = song.cover.isBlank()
+            val fallback = if (settingsState.value.metadataFallback && (nativeLyrics.isBlank() || needCover)) {
+                CommunityMetadata.fetch(song, needLyrics = nativeLyrics.isBlank(), needCover = needCover)
+            } else {
+                null
+            }
             if (!isActive) return@launch
             // 请求完成后再读 base：先取 base.value 再挂起会把请求期间更新的当前歌曲、播放状态写回旧值
-            base.value = base.value.copy(lyrics = lyrics, lyricsKey = song.key)
+            val state = base.value
+            val currentSong = state.current ?: return@launch
+            if (currentSong.key != song.key) return@launch
+            val cover = fallback?.cover.orEmpty()
+            val current = if (cover.isNotBlank()) currentSong.copy(cover = cover) else currentSong
+            val currentSource = state.currentSource?.let { source ->
+                if (cover.isNotBlank() && source.song.key == song.key) source.copy(song = source.song.copy(cover = cover)) else source
+            }
+            val currentTrack = state.currentTrack?.let { track ->
+                if (cover.isNotBlank()) track.copy(cover = cover) else track
+            }
+            base.value = state.copy(
+                current = current,
+                currentSource = currentSource,
+                currentTrack = currentTrack,
+                queue = if (cover.isBlank()) state.queue else state.queue.map { if (it.key == song.key) it.copy(cover = cover) else it },
+                lyrics = nativeLyrics.ifBlank { fallback?.lyrics.orEmpty() },
+                lyricsKey = song.key,
+            )
+        }
+    }
+
+    /** 评论始终落到实际平台曲目上；本地歌先取用户已经选好的平台匹配。 */
+    private fun commentTarget(song: Song): Song? = if (song.source == LOCAL_SOURCE) {
+        app.localLibrary.index.value.matchOf(song.id)
+    } else {
+        song
+    }
+
+    fun supportsComments(song: Song): Boolean =
+        commentTarget(song)?.let { app.repository.supportsComments(it.source) } == true
+
+    suspend fun songComments(song: Song, page: Int, limit: Int = 20): com.mytv.mymusic.data.SongCommentPage {
+        val target = commentTarget(song)
+            ?: throw UnsupportedOperationException("本地歌还没有匹配平台版本，先在歌曲信息里选择匹配")
+        return app.repository.comments(target, cookieFor(target.source), page, limit)
+    }
+
+    /**
+     * 收藏到平台账号（汽水的「我喜欢的音乐」）。和本机收藏是两件事：这个写去平台，
+     * 换设备也在。平台没实现、没登录、接口报错都转成一条提示，不让界面崩。
+     */
+    fun collectOnPlatform(song: Song) {
+        val provider = song.source
+        if (provider.isBlank() || !app.repository.supportsCollect(provider)) {
+            base.value = base.value.copy(playbackNotice = "${providerName(provider)}暂不支持收藏到账号")
+            return
+        }
+        val cookie = cookieFor(provider)
+        if (cookie.isBlank()) {
+            base.value = base.value.copy(playbackNotice = "请先登录${providerName(provider)}再收藏")
+            return
+        }
+        viewModelScope.launch {
+            val message = try {
+                app.repository.collectTrack(provider, cookie, song)
+                "已收藏《${song.title}》到${providerName(provider)}账号"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                error.message ?: "收藏失败"
+            }
+            base.value = base.value.copy(playbackNotice = message)
         }
     }
 
@@ -5652,6 +5769,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         dormant = SavedPlayback(
             songs = state.queue,
             cursor = SavedCursor(current.key, at.coerceAtLeast(0), positionMs.coerceAtLeast(0), state.duration, shape),
+            origin = state.playbackOrigin,
         )
         base.update { it.copy(playing = false) }
         anchor.value = PositionAnchor(current.key, positionMs.coerceAtLeast(0), SystemClock.elapsedRealtime())
@@ -5683,6 +5801,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 queue = saved.songs,
                 canonicalQueue = tracks,
                 queueId = it.queueId + 1,
+                playbackOrigin = saved.origin,
                 current = current,
                 currentTrack = track,
                 currentSource = track?.sources?.find { source -> source.song.key == current.key },
@@ -5702,11 +5821,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (persistenceStarted) return
         persistenceStarted = true
         viewModelScope.launch {
-            base.map { it.queue }
-                .distinctUntilChanged { old, new -> old === new }
+            base.map { it.queue to it.playbackOrigin }
+                .distinctUntilChanged { old, new -> old.first === new.first && old.second == new.second }
                 .debounce(QUEUE_SAVE_DEBOUNCE_MS)
-                .collect { queue ->
-                    app.queueStore.saveQueue(queue)
+                .collect { (queue, origin) ->
+                    app.queueStore.saveQueue(queue, origin)
                     if (queue.isNotEmpty()) persistCursor()
                 }
         }
@@ -6297,6 +6416,31 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         app.settings.thirdPartyLyrics(enabled)
         AppleLyricsConfig.configure(enabled)
         message(if (enabled) "已开启 Apple Music 歌词中转" else "已关闭 Apple Music 歌词中转")
+    }
+
+    fun setMetadataFallback(enabled: Boolean) = viewModelScope.launch {
+        app.settings.metadataFallback(enabled)
+        message(if (enabled) "已开启公共歌词与封面补全" else "已关闭公共歌词与封面补全")
+    }
+
+    fun importLyricFont(slot: Int, uri: Uri) = viewModelScope.launch {
+        try {
+            val name = withContext(Dispatchers.IO) { LyricFonts.import(app, slot, uri) }
+            if (slot == LYRIC_FONT_PRIMARY) app.settings.lyricFonts(primaryName = name)
+            else app.settings.lyricFonts(fallbackName = name)
+            message(if (slot == LYRIC_FONT_PRIMARY) "已导入首选歌词字体：$name" else "已导入回退歌词字体：$name")
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            message(error.message ?: "字体导入失败")
+        }
+    }
+
+    fun clearLyricFont(slot: Int) = viewModelScope.launch {
+        withContext(Dispatchers.IO) { LyricFonts.clear(app, slot) }
+        if (slot == LYRIC_FONT_PRIMARY) app.settings.lyricFonts(primaryName = "")
+        else app.settings.lyricFonts(fallbackName = "")
+        message(if (slot == LYRIC_FONT_PRIMARY) "已恢复系统首选字体" else "已移除回退字体")
     }
 
     /** 播放上报总开关。关掉时丢掉还没发完的半条记录，不补报。 */

@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
@@ -184,6 +185,8 @@ class MusicActions(private val model: MusicViewModel) {
 
     /** [openPlayer] 为 false 时不弹出播放页（详情页海报视图里的播放全部 / 随机 / 大卡上的“播放”）。 */
     fun play(song: Song, queue: List<Song>, openPlayer: Boolean = true) = model.play(song, queue, openPlayer)
+    fun playLocalPlaylist(song: Song, queue: List<Song>, playlistId: String, title: String, openPlayer: Boolean = true) =
+        model.playLocalPlaylist(song, queue, playlistId, title, openPlayer)
     fun playSavedSongs(records: List<com.mytv.mymusic.data.SavedSong>) = model.playSavedSongs(records)
     fun playTrack(track: CanonicalTrack, queue: List<CanonicalTrack>) = model.playTrack(track, queue)
     fun transport(action: String) = model.transport(action)
@@ -196,6 +199,8 @@ class MusicActions(private val model: MusicViewModel) {
     fun closePosterWall() = model.closePosterWall()
     /** 迷你播放器等“正在播放”入口的点按：按设置打开播放页或海报墙。写着“打开播放页 / 全屏播放”的按钮仍用 [openPlayer]。 */
     fun openNowPlaying() = model.openNowPlaying()
+    fun openPlaybackOrigin() = model.openPlaybackOrigin()
+    fun consumePlaybackLocate() = model.consumePlaybackLocate()
     fun playQueueIndex(index: Int) = model.playQueueIndex(index)
     fun moveQueueItemNext(index: Int) = model.moveQueueItemNext(index)
     /** 任意一首（不一定在队列里）的“下一首播放”，详情页海报视图的大卡用。 */
@@ -213,6 +218,8 @@ class MusicActions(private val model: MusicViewModel) {
     /** 收藏到平台账号（汽水的「我喜欢的音乐」）；平台没实现或没登录时由界面提示。 */
     fun collectOnPlatform(song: Song) = model.collectOnPlatform(song)
     fun openDeepLink() = model.openDeepLink()
+    fun supportsComments(song: Song): Boolean = model.supportsComments(song)
+    suspend fun comments(song: Song, page: Int, limit: Int = 20) = model.songComments(song, page, limit)
     fun clearError() = model.clearError()
     fun clearNotice() = model.clearNotice()
 
@@ -331,6 +338,9 @@ class MusicActions(private val model: MusicViewModel) {
 
     /** Apple Music 匿名歌词中转总开关，见 MusicViewModel.setThirdPartyLyrics。 */
     fun setThirdPartyLyrics(value: Boolean) = model.setThirdPartyLyrics(value)
+    fun setMetadataFallback(value: Boolean) = model.setMetadataFallback(value)
+    fun importLyricFont(slot: Int, uri: Uri) = model.importLyricFont(slot, uri)
+    fun clearLyricFont(slot: Int) = model.clearLyricFont(slot)
 
     /** 播放上报总开关：是否把播放记录回传给平台（见 PlayReporter）。 */
     fun setPlayReportEnabled(value: Boolean) = model.setPlayReportEnabled(value)
@@ -713,6 +723,8 @@ fun TrackActionsSheet(
      * （歌曲信息只在本地音乐页里），选好的匹配记进线索表并同步回有文件的设备。非本地歌为 null。
      */
     onRematch: (() -> Unit)? = null,
+    /** 在当前面板里切到评论，不关闭外层歌曲操作。 */
+    onOpenComments: (() -> Unit)? = null,
     /** “查看歌手：某某”，每位歌手一行（最多 3 位）；参数是点的那位歌手名。 */
     onOpenArtist: ((String) -> Unit)? = null,
     /** “查看专辑：某某”。歌曲没有专辑名时不显示。 */
@@ -756,7 +768,7 @@ fun TrackActionsSheet(
                     com.mytv.mymusic.ui.artist.splitArtistNames(song.artist)
                         .filter { hiddenArtist.isEmpty() || com.mytv.mymusic.aggregate.TrackNormalizer.keyOf(it) != hiddenArtist }
                         .take(3)
-                        .map { name -> SheetRow(Icons.Filled.Person, "查看歌手：$name", false) { onOpenArtist(name) } }
+                        .map { name -> SheetRow(Icons.Filled.Person, "查看歌手：$name", false, action = { onOpenArtist(name) }) }
                 }
                 val albumRow = onOpenAlbum?.takeIf {
                     browsable && song.album.isNotBlank() &&
@@ -767,6 +779,7 @@ fun TrackActionsSheet(
                     onCollect?.let { SheetRow(Icons.Filled.FavoriteBorder, "收藏到账号", false, it) },
                     onRematch?.let { SheetRow(Icons.Filled.FindReplace, "换一个匹配", false, it) },
                     onOpenSource?.let { SheetRow(Icons.Filled.SwapHoriz, "选择音源 / 查看其他版本", false, it) },
+                    onOpenComments?.let { SheetRow(Icons.AutoMirrored.Filled.Comment, "查看评论", false, keepOpen = true, action = it) },
                     onMerge?.let { SheetRow(Icons.AutoMirrored.Filled.CallMerge, "合并到…", false, it) },
                     onRemoveFromPlaylist?.let { SheetRow(Icons.Filled.Delete, "从歌单移除", true, it) },
                     onRemoveFromHistory?.let { SheetRow(Icons.Filled.Delete, "从最近播放删除", true, it) },
@@ -777,7 +790,7 @@ fun TrackActionsSheet(
                             title = row.label,
                             index = index,
                             count = rows.size,
-                            onClick = { row.action(); onDismiss() },
+                            onClick = { row.action(); if (!row.keepOpen) onDismiss() },
                             icon = row.icon,
                             iconTone = if (row.danger) com.mytv.mymusic.ui.components.IconTone.Error else com.mytv.mymusic.ui.components.IconTone.Secondary,
                             danger = row.danger,
@@ -810,7 +823,13 @@ fun TrackActionsSheet(
     }
 }
 
-private class SheetRow(val icon: ImageVector, val label: String, val danger: Boolean, val action: () -> Unit)
+private class SheetRow(
+    val icon: ImageVector,
+    val label: String,
+    val danger: Boolean,
+    val action: () -> Unit,
+    val keepOpen: Boolean = false,
+)
 
 /**
  * 歌曲操作下面的整页操作组：小标题 + 一列行。[focusFirst]（菜单键打开）时面板滚到小标题、焦点落在第一行

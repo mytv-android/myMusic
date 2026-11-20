@@ -65,6 +65,7 @@ private val NETEASE_INFO = ProviderInfo(
     hotSongs = true,
     listeningModes = true,
     playlistWrite = true,
+    comments = true,
 )
 
 /** 分享文本里的链接；取到后去掉紧跟在链接后的中文/英文标点。 */
@@ -282,6 +283,9 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         if (translated.isNotBlank()) return translated
         throw IllegalStateException("lyric is empty or not found")
     }
+
+    override suspend fun comments(cookie: String, song: Song, page: Int, limit: Int) =
+        neteaseSongComments(cookie, song, page, limit)
 
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
         val response = cloudSearch(cookie, keyword, 1000, 10)

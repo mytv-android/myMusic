@@ -1,7 +1,5 @@
 package com.mytv.mymusic.ui.player.stage.modes
 
-import android.graphics.Typeface
-import android.os.Build
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mytv.mymusic.data.LyricSubline
 import com.mytv.mymusic.ui.player.stage.LyricSetting
+import com.mytv.mymusic.ui.player.LyricFontRuntime
+import com.mytv.mymusic.ui.player.styledLyricTypeface
 import com.mytv.mymusic.ui.player.stage.LyricStageContext
 import com.mytv.mymusic.ui.player.stage.LyricVisualizer
 import com.mytv.mymusic.ui.player.stage.ModOrigin
@@ -122,8 +122,8 @@ object JumpVisualizer : LyricVisualizer {
             )
         }
         val showTranslation = remember(settings) { settings.toggle("translationMode") }
-        val paints = remember { JumpPaints() }
-        val course = remember(ctx.lines, config) { jumpBuildCourse(ctx.lines, config, paints::span, ::jumpWordSegments) }
+        val paints = remember(ctx.font) { JumpPaints(ctx.font) }
+        val course = remember(ctx.lines, config, paints) { jumpBuildCourse(ctx.lines, config, paints::span, ::jumpWordSegments) }
         val ink = remember(ctx.colors) { JumpInk(ctx.colors) }
         val translations = remember(ctx.lines, ctx.subline, course, showTranslation) {
             if (showTranslation) JumpTranslations(ctx.lines, ctx.subline, course) else null
@@ -171,17 +171,17 @@ private const val JUMP_GLOW = 0.28f
 private val JUMP_SHADOW_INK = Color(6, 10, 22)
 
 /** 原生画笔：柱上的字（600 字重）、量字宽（128 像素）、译文（500 字重）。 */
-private class JumpPaints {
+private class JumpPaints(font: LyricFontRuntime?) {
     val label = NativePaint(NativePaint.ANTI_ALIAS_FLAG or NativePaint.SUBPIXEL_TEXT_FLAG).apply {
-        typeface = jumpTypeface(600)
+        typeface = styledLyricTypeface(font, 600)
         textAlign = NativePaint.Align.CENTER
     }
     private val measure = NativePaint(NativePaint.ANTI_ALIAS_FLAG or NativePaint.SUBPIXEL_TEXT_FLAG).apply {
-        typeface = jumpTypeface(600)
+        typeface = styledLyricTypeface(font, 600)
         textSize = MEASURE_PX
     }
     val translation = NativePaint(NativePaint.ANTI_ALIAS_FLAG or NativePaint.SUBPIXEL_TEXT_FLAG).apply {
-        typeface = jumpTypeface(500)
+        typeface = styledLyricTypeface(font, 500)
         textAlign = NativePaint.Align.CENTER
     }
     val metrics = NativePaint.FontMetrics()
@@ -195,12 +195,6 @@ private class JumpPaints {
     private companion object {
         const val MEASURE_PX = 128f
     }
-}
-
-private fun jumpTypeface(weight: Int): Typeface = when {
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> Typeface.create(Typeface.DEFAULT, weight, false)
-    weight >= 600 -> Typeface.DEFAULT_BOLD
-    else -> Typeface.DEFAULT
 }
 
 /** 配色（原版 jumpPalette）：字和译文用正文色，小人、光晕、波纹用主题色，柱面是中间色，棱线是正文色与主题色各半。 */

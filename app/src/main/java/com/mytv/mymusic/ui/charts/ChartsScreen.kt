@@ -981,6 +981,11 @@ internal fun SongActionsSheet(
     /** 专辑页里打开时传这张专辑：面板里不再给“查看专辑”。 */
     currentAlbum: String = "",
 ) {
+    var commentsOpen by remember(target.song.key) { mutableStateOf(false) }
+    if (commentsOpen) {
+        CommentsSheet(target.song, actions, onDismiss = { commentsOpen = false })
+        return
+    }
     TrackActionsSheet(
         song = target.song,
         favorite = favorites.any { it.key == target.song.key },
@@ -993,6 +998,7 @@ internal fun SongActionsSheet(
             actions.openSourceForSong(target.song, target.queue)
         },
         onRemoveFromPlaylist = null,
+        onOpenComments = if (actions.supportsComments(target.song)) ({ commentsOpen = true }) else null,
         onDismiss = onDismiss,
         wallPage = wallPage,
         onOpenArtist = { name -> actions.openArtistByName(name, target.song) },

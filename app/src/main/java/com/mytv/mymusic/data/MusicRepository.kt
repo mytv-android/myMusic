@@ -58,6 +58,12 @@ open class MusicRepository(
     suspend fun lyrics(song: Song, cookie: String): String =
         requireProvider(song.source).lyrics(cookie, song)
 
+    fun supportsComments(provider: String): Boolean =
+        NativeProviders.get(provider)?.info?.comments == true
+
+    suspend fun comments(song: Song, cookie: String, page: Int, limit: Int) =
+        requireProvider(song.source).comments(cookie, song, page, limit)
+
     suspend fun searchPlaylists(provider: String, cookie: String, keyword: String): List<Playlist> =
         requireProvider(provider).searchPlaylists(cookie, keyword)
 

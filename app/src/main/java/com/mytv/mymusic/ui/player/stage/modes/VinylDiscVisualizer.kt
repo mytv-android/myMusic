@@ -270,7 +270,7 @@ private fun DiscLabel(ctx: LyricStageContext, config: VinylConfig) {
     val cover = ctx.song.cover
     var failed by remember(cover) { mutableStateOf(false) }
     val measurer = rememberTextMeasurer(cacheSize = 2)
-    val family = MaterialTheme.typography.bodyLarge.fontFamily
+    val family = ctx.font?.family ?: MaterialTheme.typography.bodyLarge.fontFamily
     Box(
         Modifier
             .layout { measurable, constraints ->
@@ -517,7 +517,7 @@ private class VinylPiece(val layout: TextLayoutResult, val at: Offset, val word:
 @Composable
 private fun VinylLyrics(ctx: LyricStageContext, config: VinylConfig, sung: Color) {
     val measurer = rememberTextMeasurer(cacheSize = 0)
-    val family = MaterialTheme.typography.bodyLarge.fontFamily
+    val family = ctx.font?.family ?: MaterialTheme.typography.bodyLarge.fontFamily
     val usable = remember(ctx.lines, ctx.song) { vinylUsable(ctx.lines, ctx.song.name, ctx.song.artist) }
     val hold = remember(ctx.lines) { VinylHold() }
     val shown = hold.resolve(usable, ctx.lineIndex.value)

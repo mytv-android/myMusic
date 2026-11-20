@@ -426,16 +426,16 @@ private fun PhoneLyricsPreview(
             val index = active.value
             val line = lyrics.lines.getOrNull(index) ?: return@Box
             if (short) {
-                CurrentLyric(line, position, playing, MaterialTheme.typography.bodyLarge.merge(ShortPreviewStyle))
+                CurrentLyric(line, position, playing, previewLyricStyle(ShortPreviewStyle))
                 return@Box
             }
             val next = lyrics.lines.getOrNull(index + 1)?.text.orEmpty()
             Column {
-                CurrentLyric(line, position, playing && awake, MaterialTheme.typography.bodyLarge.merge(PreviewCurrentStyle))
+                CurrentLyric(line, position, playing && awake, previewLyricStyle(PreviewCurrentStyle))
                 if (next.isNotBlank()) {
                     Text(
                         next,
-                        style = MaterialTheme.typography.bodyLarge.merge(PreviewNextStyle),
+                        style = previewLyricStyle(PreviewNextStyle),
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -462,14 +462,14 @@ private fun PhoneIdleLyrics(
         val index = active.value
         val line = lyrics.lines.getOrNull(index) ?: return@Box
         val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f)
-        val next = MaterialTheme.typography.bodyLarge.merge(IdleNextStyle)
+        val next = previewLyricStyle(IdleNextStyle)
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            CurrentLyric(line, position, playing, MaterialTheme.typography.bodyLarge.merge(IdleCurrentStyle))
+            CurrentLyric(line, position, playing, previewLyricStyle(IdleCurrentStyle))
             // 外语歌的翻译跟着当前行；这一页只露三行，后两行不挤翻译
             if (line.translation.isNotBlank()) {
                 Text(
                     line.translation,
-                    style = MaterialTheme.typography.bodyLarge.merge(IdleTranslationStyle),
+                    style = previewLyricStyle(IdleTranslationStyle),
                     color = dim.copy(alpha = dim.alpha * 0.85f),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -991,6 +991,10 @@ private const val PHONE_STAGE_SP = 30f
 /** 矮窗口：封面旁那一行歌词最多折成两行的高度；控件区（进度 + 8dp + 56dp 小号按钮组）的估计高度。 */
 private val ShortPreviewHeight = 48.dp
 private val ShortControlsEstimate = 112.dp
+
+@Composable
+private fun previewLyricStyle(style: TextStyle): TextStyle =
+    MaterialTheme.typography.bodyLarge.merge(style).withLyricFont(LocalLyricFont.current?.family)
 
 private val PreviewCurrentStyle = TextStyle(fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold)
 private val ShortPreviewStyle = TextStyle(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold)

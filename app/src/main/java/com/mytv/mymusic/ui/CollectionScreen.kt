@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -55,6 +57,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -97,7 +100,9 @@ import com.mytv.mymusic.ui.charts.SongAction
 import com.mytv.mymusic.ui.charts.SongActionsSheet
 import com.mytv.mymusic.ui.charts.TvDefaultFocus
 import com.mytv.mymusic.ui.charts.rememberCoverTint
+import com.mytv.mymusic.ui.components.CollectionSearchField
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.components.filterCollectionSongs
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.PlatformBadge
 import com.mytv.mymusic.ui.components.PlayAllSplitButton
@@ -181,14 +186,18 @@ fun CollectionScreen(
     val saved = remember(collection, playlists, savedNow) {
         collectionSaved(collection.kind, collection.id, collection.source, collection.title, playlists, savedNow)
     }
-    val songs = collection.songs
+    val allSongs = collection.songs
+    var searchOpen by rememberSaveable(collection.key) { mutableStateOf(false) }
+    var searchQuery by rememberSaveable(collection.key) { mutableStateOf("") }
+    val songs = remember(allSongs, searchQuery) { filterCollectionSongs(allSongs, searchQuery) }
+    val shownCollection = remember(collection, songs) { collection.copy(songs = songs) }
     val settingsTarget = rememberUpdatedState(onOpenPlaybackSettings)
     val openPlaybackSettings: () -> Unit = remember { { settingsTarget.value() } }
-    val ops = remember(actions, songs, collection.id, collection.kind, openPlaybackSettings) {
+    val ops = remember(actions, allSongs, collection.id, collection.kind, openPlaybackSettings) {
         CollectionOps(
             playAll = actions::playCollection,
             shuffle = {
-                val shuffled = songs.shuffled()
+                val shuffled = allSongs.shuffled()
                 if (shuffled.isNotEmpty()) actions.play(shuffled.first(), shuffled)
             },
             queue = actions::queueCollection,
@@ -213,6 +222,7 @@ fun CollectionScreen(
         }
     }
     val selection = remember { SelectionState() }
+    LaunchedEffect(searchQuery) { selection.exit() }
     var pickerOpen by remember { mutableStateOf(false) }
     SelectionPredictiveBack(selection)
     // 多选期间的批量操作：歌保持列表里的顺序
@@ -240,11 +250,14 @@ fun CollectionScreen(
         }
     }
     val poster = state.collectionView == CollectionView.Poster
+    LaunchedEffect(state.locateRequestId) {
+        if (state.locateSongKey.isNotBlank() && poster) actions.setCollectionView(CollectionView.List)
+    }
     when {
         poster ->
             CollectionPoster(
                 state = state,
-                collection = collection,
+                collection = shownCollection,
                 saved = saved,
                 ops = ops,
                 actions = actions,
@@ -255,9 +268,9 @@ fun CollectionScreen(
                 onSettingsOpenChange = { posterSettingsOpen = it },
             )
         LocalAppWindow.current.twoPane ->
-            TwoPaneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster, albumSpinning)
+            TwoPaneCollection(shownCollection, state, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster, albumSpinning, searchOpen, searchQuery, { searchOpen = it; if (!it) searchQuery = "" }, { searchQuery = it })
         else ->
-            PhoneCollection(collection, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster, albumSpinning)
+            PhoneCollection(shownCollection, state, tint, ops, saved, actions, playingKey, onBack, onMore, selection, selectionOps, showPoster, albumSpinning, searchOpen, searchQuery, { searchOpen = it; if (!it) searchQuery = "" }, { searchQuery = it })
     }
     target?.let {
         SongActionsSheet(
@@ -409,6 +422,7 @@ private fun SelectionBarFor(ops: CollectionSelectionOps, modifier: Modifier = Mo
 @Composable
 private fun PhoneCollection(
     collection: CollectionUiState,
+    state: MusicUiState,
     tint: State<Color>,
     ops: CollectionOps,
     saved: Boolean,
@@ -420,6 +434,10 @@ private fun PhoneCollection(
     selectionOps: CollectionSelectionOps,
     onPosterView: () -> Unit,
     albumSpinning: Boolean,
+    searchOpen: Boolean,
+    searchQuery: String,
+    onSearchOpen: (Boolean) -> Unit,
+    onSearchQuery: (String) -> Unit,
 ) {
     val gutter = LocalAppWindow.current.gutter
     val isAlbum = collection.kind == CollectionKind.Album
@@ -429,6 +447,27 @@ private fun PhoneCollection(
     val collapsed by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
     val scroll = TopAppBarDefaults.pinnedScrollBehavior()
     val songKeys = remember(collection.songs) { distinctKeys(collection.songs) { it.key } }
+    LaunchedEffect(state.locateRequestId, collection.songs, searchQuery) {
+        val target = state.locateSongKey
+        if (target.isBlank()) return@LaunchedEffect
+        if (searchQuery.isNotBlank()) {
+            onSearchQuery("")
+            return@LaunchedEffect
+        }
+        val keys = buildSet {
+            add(target)
+            state.currentTrack?.sources?.forEach { add(it.song.key) }
+        }
+        val index = collection.songs.indexOfFirst { it.key in keys }
+        if (index < 0) {
+            if (!collection.loading) actions.consumePlaybackLocate()
+            return@LaunchedEffect
+        }
+        val albumIntro = if (collection.kind == CollectionKind.Album && collection.album?.description?.isNotBlank() == true) 1 else 0
+        val headerCount = 2 + albumIntro + (if (searchOpen) 1 else 0) + (if (collection.error.isNotBlank()) 1 else 0)
+        listState.scrollToItem(headerCount + index)
+        actions.consumePlaybackLocate()
+    }
     Box(Modifier.fillMaxSize().background(surface)) {
         // 头部渐变跟着第一项一起滚走，滚过头部后顶栏换成实色。
         // 静态渐变缓存进 drawWithCache，动画色只作为 ColorFilter 的 tint 在绘制阶段读取。
@@ -459,6 +498,9 @@ private fun PhoneCollection(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                 },
                 actions = {
+                    IconButton(onClick = { onSearchOpen(!searchOpen) }) {
+                        Icon(if (searchOpen) Icons.Filled.Close else Icons.Filled.Search, if (searchOpen) "关闭歌单内检索" else "歌单内检索")
+                    }
                     ops.openPlaybackSettings?.let { open ->
                         IconButton(onClick = open) { Icon(Icons.Filled.Tune, "换源设置") }
                     }
@@ -521,7 +563,12 @@ private fun PhoneCollection(
                     }
                 }
                 albumIntro(collection, horizontal = gutter)
-                collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = gutter, selection = selection)
+                if (searchOpen) {
+                    item(key = "collectionSearch", contentType = "search") {
+                        CollectionSearchField(searchQuery, onSearchQuery, Modifier.padding(horizontal = gutter).padding(bottom = 12.dp))
+                    }
+                }
+                collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = gutter, selection = selection, query = searchQuery)
                 albumFooter(collection, actions, horizontal = gutter)
             }
         }
@@ -532,6 +579,7 @@ private fun PhoneCollection(
 @Composable
 private fun TwoPaneCollection(
     collection: CollectionUiState,
+    state: MusicUiState,
     tint: State<Color>,
     ops: CollectionOps,
     saved: Boolean,
@@ -543,6 +591,10 @@ private fun TwoPaneCollection(
     selectionOps: CollectionSelectionOps,
     onPosterView: () -> Unit,
     albumSpinning: Boolean,
+    searchOpen: Boolean,
+    searchQuery: String,
+    onSearchOpen: (Boolean) -> Unit,
+    onSearchQuery: (String) -> Unit,
 ) {
     val window = LocalAppWindow.current
     val isAlbum = collection.kind == CollectionKind.Album
@@ -551,7 +603,28 @@ private fun TwoPaneCollection(
     val surface = MaterialTheme.colorScheme.surface
     val playFocus = remember { FocusRequester() }
     TvDefaultFocus(playFocus)
+    val listState = rememberLazyListState()
     val songKeys = remember(collection.songs) { distinctKeys(collection.songs) { it.key } }
+    LaunchedEffect(state.locateRequestId, collection.songs, searchQuery) {
+        val target = state.locateSongKey
+        if (target.isBlank()) return@LaunchedEffect
+        if (searchQuery.isNotBlank()) {
+            onSearchQuery("")
+            return@LaunchedEffect
+        }
+        val keys = buildSet {
+            add(target)
+            state.currentTrack?.sources?.forEach { add(it.song.key) }
+        }
+        val index = collection.songs.indexOfFirst { it.key in keys }
+        if (index < 0) {
+            if (!collection.loading) actions.consumePlaybackLocate()
+            return@LaunchedEffect
+        }
+        val headerCount = (if (searchOpen) 1 else 0) + (if (collection.error.isNotBlank()) 1 else 0)
+        listState.scrollToItem(headerCount + index)
+        actions.consumePlaybackLocate()
+    }
     Box(
         Modifier
             .fillMaxSize()
@@ -650,6 +723,9 @@ private fun TwoPaneCollection(
                             SaveToggle(ops, saved, collection.kind == CollectionKind.Playlist, if (tv) 48.dp else null)
                             MultiSelectToggle(selection, if (tv) 48.dp else null)
                             PosterViewToggle(onPosterView, if (tv) 48.dp else null)
+                            FilledTonalIconButton(onClick = { onSearchOpen(!searchOpen) }, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
+                                Icon(if (searchOpen) Icons.Filled.Close else Icons.Filled.Search, if (searchOpen) "关闭歌单内检索" else "歌单内检索")
+                            }
                             ops.openPlaybackSettings?.let { open ->
                                 FilledTonalIconButton(onClick = open, modifier = Modifier.size(48.dp).tvFocusRing(CircleShape)) {
                                     Icon(Icons.Filled.Tune, "换源设置")
@@ -667,9 +743,15 @@ private fun TwoPaneCollection(
             end = {
                 LazyColumn(
                     Modifier.fillMaxHeight(),
+                    state = listState,
                     contentPadding = PaddingValues(top = LocalFoldPane.current.top(if (tv) 0.dp else 56.dp), bottom = overlay + 48.dp),
                 ) {
-                    collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = 0.dp, selection = selection)
+                    if (searchOpen) {
+                        item(key = "collectionSearch", contentType = "search") {
+                            CollectionSearchField(searchQuery, onSearchQuery, Modifier.padding(bottom = 12.dp))
+                        }
+                    }
+                    collectionSongs(collection, actions, playingKey, songKeys, onMore, horizontal = 0.dp, selection = selection, query = searchQuery)
                     albumFooter(collection, actions, horizontal = 0.dp)
                 }
             },
@@ -794,6 +876,7 @@ private fun LazyListScope.collectionSongs(
     onMore: (Song) -> Unit,
     horizontal: androidx.compose.ui.unit.Dp,
     selection: SelectionState,
+    query: String = "",
 ) {
     val songs = collection.songs
     when {
@@ -808,13 +891,21 @@ private fun LazyListScope.collectionSongs(
             )
         }
         songs.isEmpty() -> item(key = "empty", contentType = "empty") {
-            EmptyState(
-                icon = Icons.AutoMirrored.Filled.PlaylistAdd,
-                title = "这里还没有歌曲",
-                message = "稍后重试，或换一个来源。",
-                actionLabel = "重试",
-                onAction = actions::retryCollection,
-            )
+            if (query.isNotBlank()) {
+                EmptyState(
+                    icon = Icons.Filled.Search,
+                    title = "没有找到匹配歌曲",
+                    message = "换个歌名、歌手或专辑关键词试试。",
+                )
+            } else {
+                EmptyState(
+                    icon = Icons.AutoMirrored.Filled.PlaylistAdd,
+                    title = "这里还没有歌曲",
+                    message = "稍后重试，或换一个来源。",
+                    actionLabel = "重试",
+                    onAction = actions::retryCollection,
+                )
+            }
         }
         else -> {
             if (collection.error.isNotBlank()) {

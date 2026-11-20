@@ -1,8 +1,6 @@
 package com.mytv.mymusic.ui.player.stage.modes
 
 import android.graphics.RectF
-import android.graphics.Typeface
-import android.os.Build
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -34,6 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.em
 import com.mytv.mymusic.data.LyricSubline
+import com.mytv.mymusic.ui.player.LyricFontRuntime
+import com.mytv.mymusic.ui.player.styledLyricTypeface
+import com.mytv.mymusic.ui.player.withLyricFont
 import com.mytv.mymusic.ui.player.stage.StageColors
 import com.mytv.mymusic.ui.player.stage.splitCodePoints
 import kotlin.math.PI
@@ -196,6 +197,7 @@ internal class CineramaScene(
     private val countScale: Float,
     private val subline: LyricSubline,
     private val density: Density,
+    private val font: LyricFontRuntime? = null,
 ) {
     private val arts = HashMap<Int, CineramaArt>()
     private val accent = colors.accent
@@ -295,7 +297,7 @@ internal class CineramaScene(
             fontWeight = weight,
             fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
             letterSpacing = trackEm.em,
-        )
+        ).withLyricFont(font?.family)
     }
 
     private fun measure(text: String, style: TextStyle): TextLayoutResult =
@@ -505,7 +507,7 @@ internal class CineramaScene(
         }
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             textSize = bandFontPx
-            typeface = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) Typeface.create(Typeface.DEFAULT, 600, false) else Typeface.DEFAULT_BOLD
+            typeface = styledLyricTypeface(font, 600)
             color = accent.toArgb()
             letterSpacing = CINERAMA_BAND_TRACK
             val r = cineramaShadowRadius(bandFontPx * 0.044f)

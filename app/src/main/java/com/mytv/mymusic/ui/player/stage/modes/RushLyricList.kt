@@ -188,9 +188,11 @@ internal fun RushLyricList(ctx: LyricStageContext, look: RushLook, content: Stat
     val fontSp = display.textSp * RUSH_TEXT_RATIO * look.size
     val unit = fontSp / RUSH_BASE_FONT_SP
     val typography = MaterialTheme.typography.bodyLarge
-    val styles = remember(typography, fontSp, look.expressive, look.align) {
+    val lyricFont = ctx.font
+    val styles = remember(typography, fontSp, look.expressive, look.align, lyricFont) {
         val lineHeight = fontSp * RUSH_LINE_HEIGHT_RATIO
         val base = typography.copy(
+            fontFamily = lyricFont?.family ?: typography.fontFamily,
             fontSize = fontSp.sp,
             lineHeight = lineHeight.sp,
             fontWeight = FontWeight.Bold,

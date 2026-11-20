@@ -64,6 +64,7 @@ import com.mytv.mymusic.playback.RhythmAnalyzer
 import com.mytv.mymusic.playback.RhythmTimeline
 import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.player.LocalLyricFont
 import com.mytv.mymusic.ui.player.RhythmFeed
 import com.mytv.mymusic.ui.player.TvFrameGate
 import com.mytv.mymusic.ui.player.rememberSystemAnimationsOff
@@ -305,7 +306,8 @@ private fun StageHost(
     }
     val seekState = rememberUpdatedState(seek)
     val seekToLine = remember { { ms: Long -> seekState.value(ms) } }
-    val ctx = remember(lines, song.key, colors, display, settings, audio, prefs.subline, mode, modeAudio) {
+    val font = LocalLyricFont.current
+    val ctx = remember(lines, song.key, colors, display, settings, audio, prefs.subline, mode, modeAudio, font) {
         LyricStageContext(
             lines = lines,
             song = song,
@@ -319,6 +321,7 @@ private fun StageHost(
             audio = audio.takeIf { modeAudio },
             subline = prefs.subline,
             seek = seekToLine,
+            font = font,
         )
     }
 

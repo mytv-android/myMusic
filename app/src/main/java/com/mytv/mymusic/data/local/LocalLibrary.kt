@@ -197,6 +197,8 @@ class LocalLibrary(
     private val writeLock = Mutex()
     private val permissionTick = MutableStateFlow(0)
     private val matchCache = ConcurrentHashMap<String, Song>()
+    // 只在本机记录“进入 native / 普通失败 / 崩溃隔离”；不参与跨设备同步，也不改 Room schema。
+    private val processing = LocalProcessingCheckpoints(this.context)
 
     val matcher = LocalMatcher(this.context, repository) { settings.state.first() }
 
@@ -285,6 +287,7 @@ class LocalLibrary(
     /** 权限结果回来后调用：媒体库来源的歌能不能读跟着变，徽标要重算。 */
     fun onPermissionChanged(granted: Boolean) {
         permissionTick.update { it + 1 }
+        if (!granted) cancelSourceWork()
         scope.launch {
             settings.localMusic { it.copy(permissionDenied = !granted) }
             if (granted) scan()
@@ -320,6 +323,7 @@ class LocalLibrary(
 
     /** 移出扫描范围：记录留着（匹配结果、歌单都不丢），只是不再显示、也不当作本机有文件。 */
     suspend fun removeFolder(uri: String) {
+        cancelSourceWork()
         settings.localMusic { prefs -> prefs.copy(folders = prefs.folders.filterNot { it.uri == uri }) }
         runCatching {
             context.contentResolver.releasePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -327,11 +331,13 @@ class LocalLibrary(
     }
 
     suspend fun setMediaStore(enabled: Boolean) {
+        if (!enabled) cancelSourceWork()
         settings.localMusic { it.copy(mediaStore = enabled) }
         if (enabled) scan()
     }
 
     suspend fun setAutoMatch(enabled: Boolean) {
+        if (!enabled) matchJob?.cancel()
         settings.localMusic { it.copy(autoMatch = enabled) }
         if (enabled) {
             attempted.clear()
@@ -350,6 +356,51 @@ class LocalLibrary(
     fun canScan(prefs: LocalMusicSettings = this.prefs.value): Boolean =
         (prefs.mediaStore && hasAudioPermission()) || prefs.folders.isNotEmpty()
 
+    private fun cancelSourceWork() {
+        LocalSourceWork.cancel(scanJob, matchJob)
+    }
+
+    /** 不用 index 的旧快照判断权限；每次打开文件前读最新设置，并实查 SAF 持久授权。 */
+    private suspend fun sourceReadable(origin: String): Boolean {
+        val current = settings.state.first().localMusic
+        return LocalSourceAccess.isReadable(
+            origin = origin,
+            mediaStoreEnabled = current.mediaStore,
+            audioPermissionGranted = hasAudioPermission(),
+            configuredFolders = current.folders.mapTo(HashSet()) { it.uri },
+            folderGranted = ::hasFolderGrant,
+        )
+    }
+
+    /** 显式“重新扫描”才解除失败 / 崩溃隔离；启动和定时增量扫描不会自动重试。 */
+    private suspend fun prepareRetry() {
+        val issues = processing.issues()
+        if (issues.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val tagIds = issues.filter { it.stage == LocalProcessingStage.Tags }.map { it.localId }
+        val audioIds = issues.filter { it.stage == LocalProcessingStage.Audio }.map { it.localId }
+        if (tagIds.isNotEmpty()) {
+            writeLock.withLock {
+                val current = dao.getMany(tagIds)
+                dao.upsert(current.map { it.copy(tagsRead = false, updatedAt = now) })
+            }
+        }
+        if (audioIds.isNotEmpty()) {
+            writeLock.withLock {
+                val current = dao.getMany(audioIds)
+                dao.upsert(current.mapNotNull { row ->
+                    // 用户后来手选或设为“不匹配”的，不能因为一次全量重扫被撤销。
+                    if (row.matchMethod.isNotEmpty() && row.matchMethod != LocalMatchMethod.NONE) return@mapNotNull null
+                    if (row.matchMethod.isEmpty() && row.matchedAt == 0L) return@mapNotNull null
+                    row.copy(matchMethod = "", matchedAt = 0L, updatedAt = now)
+                })
+            }
+            attempted.removeAll(audioIds.toSet())
+        }
+        // 数据库先恢复成可处理状态，再清标记；中途失败仍保持隔离。
+        issues.forEach(processing::clear)
+    }
+
     /** 启动后稍等再扫一遍（增量的，没变的文件不会再打开），然后补标签、补匹配。 */
     fun startupScan() {
         scope.launch {
@@ -365,11 +416,12 @@ class LocalLibrary(
         if (System.currentTimeMillis() - last > STALE_MS) scan()
     }
 
-    fun scan() {
+    fun scan(retryFailed: Boolean = false) {
         if (scanJob?.isActive == true) return
         if (!canScan()) return
         scanJob = scope.launch(scanDispatcher) {
             try {
+                if (retryFailed) prepareRetry()
                 runScan()
                 readTags()
             } catch (cancel: CancellationException) {
@@ -452,6 +504,10 @@ class LocalLibrary(
         }
         for (file in plan.toHash) {
             ensureActive()
+            if (!sourceReadable(file.origin)) {
+                _scan.update { it.copy(done = it.done + 1) }
+                continue
+            }
             val id = try {
                 LocalIdentity.hash(context, Uri.parse(file.uri), file.size)
             } catch (error: Exception) {
@@ -471,51 +527,75 @@ class LocalLibrary(
         settings.localMusic { it.copy(lastScanAt = System.currentTimeMillis()) }
     }
 
-    /** 第二遍：读标签、内嵌封面、码率采样率。一首一首来，可以随时停；读不出来的也记成读过，不反复试。 */
+    /**
+     * 第二遍：读标签、内嵌封面、码率采样率。每首进入 native 前同步落检查点，返回后立即缩封面、
+     * 丢掉原始图片字节并写库；不再累计一批封面，也不会在第十首崩溃时丢掉前九首的 tagsRead。
+     */
     private suspend fun readTags() = coroutineScope {
-        val pending = dao.all().filter { !it.tagsRead && !it.missing }
+        val pending = dao.all().filter {
+            !it.tagsRead && !it.missing && !processing.isBlocked(it.localId, LocalProcessingStage.Tags)
+        }
         if (pending.isEmpty()) return@coroutineScope
         _scan.update { it.copy(phase = LocalScanPhase.Tags, total = pending.size, done = 0) }
-        val results = ArrayList<Pair<String, LocalFileTags?>>()
-        suspend fun flush() {
-            if (results.isEmpty()) return
-            val covers = results.associate { (id, tags) ->
-                id to (tags?.picture?.let { bytes -> runCatching { LocalMetadata.saveCover(context, id, bytes) }.getOrDefault("") } ?: "")
+
+        // 返回值不含原始封面字节；函数返回后，本首的完整 embeddedPicture 就可以被 GC。
+        fun readOne(row: LocalTrackEntity): Pair<LocalFileTags, String> {
+            val tags = LocalMetadata.read(context, Uri.parse(row.uri))
+            val cover = tags.picture?.let { bytes ->
+                runCatching { LocalMetadata.saveCover(context, row.localId, bytes) }.getOrDefault("")
+            }.orEmpty()
+            return tags.copy(picture = null) to cover
+        }
+
+        for (snapshot in pending) {
+            ensureActive()
+            val row = dao.get(snapshot.localId)
+            if (row == null || row.tagsRead || row.missing || !sourceReadable(row.origin)) {
+                _scan.update { it.copy(done = it.done + 1) }
+                continue
             }
-            writeLock.withLock {
-                val current = dao.getMany(results.map { it.first }).associateBy { it.localId }
-                val now = System.currentTimeMillis()
-                dao.upsert(results.mapNotNull { (id, tags) ->
-                    val row = current[id] ?: return@mapNotNull null
-                    if (tags == null) return@mapNotNull row.copy(tagsRead = true, updatedAt = now)
-                    row.copy(
+            val attempt = processing.begin(row.localId, LocalProcessingStage.Tags)
+            if (attempt == null) {
+                _scan.update { it.copy(done = it.done + 1) }
+                continue
+            }
+            try {
+                val (tags, coverPath) = readOne(row)
+                writeLock.withLock {
+                    val current = dao.get(row.localId) ?: return@withLock
+                    if (current.tagsRead) return@withLock
+                    dao.upsert(listOf(current.copy(
                         // 标签以文件为准：媒体库没标签时拿文件名顶上的标题在这里被换回空的
                         title = tags.title,
                         artist = tags.artist,
                         album = tags.album,
-                        durationSec = if (tags.durationMs > 0) (tags.durationMs / 1000).toInt() else row.durationSec,
+                        durationSec = if (tags.durationMs > 0) (tags.durationMs / 1000).toInt() else current.durationSec,
                         bitrate = tags.bitrate,
                         sampleRate = tags.sampleRate,
                         bitsPerSample = tags.bitsPerSample,
-                        mimeType = row.mimeType.ifBlank { tags.mimeType },
-                        coverPath = covers[id].orEmpty(),
+                        mimeType = current.mimeType.ifBlank { tags.mimeType },
+                        coverPath = coverPath,
                         tagsRead = true,
-                        updatedAt = now,
-                    )
-                })
+                        updatedAt = System.currentTimeMillis(),
+                    )))
+                }
+                processing.complete(attempt)
+            } catch (cancel: CancellationException) {
+                processing.cancel(attempt)
+                throw cancel
+            } catch (error: Exception) {
+                // 普通失败持久化成 failed；即使下面的数据库写也失败，重启仍不会自动撞同一首。
+                processing.fail(attempt)
+                AppLog.w("LocalMusic", "读不了标签 ${row.displayName}：${error.message}")
+                writeLock.withLock {
+                    val current = dao.get(row.localId) ?: return@withLock
+                    if (!current.tagsRead) {
+                        dao.upsert(listOf(current.copy(tagsRead = true, updatedAt = System.currentTimeMillis())))
+                    }
+                }
             }
-            results.clear()
-        }
-        for (row in pending) {
-            ensureActive()
-            val tags = runCatching { LocalMetadata.read(context, Uri.parse(row.uri)) }
-                .onFailure { AppLog.w("LocalMusic", "读不了标签 ${row.displayName}：${it.message}") }
-                .getOrNull()
-            results += row.localId to tags
             _scan.update { it.copy(done = it.done + 1) }
-            if (results.size >= TAG_BATCH) flush()
         }
-        flush()
     }
 
     private suspend fun markMissing(ids: List<String>) {
@@ -533,31 +613,65 @@ class LocalLibrary(
     fun startMatching() {
         if (matchJob?.isActive == true) return
         matchJob = scope.launch(Dispatchers.IO) {
-            val semaphore = Semaphore(MATCH_CONCURRENCY)
             try {
-                var changed = false
-                while (isActive && prefs.value.autoMatch) {
-                    val enabled = index.value.byId
-                    val pending = dao.all().filter {
-                        !it.missing && it.tagsRead && !it.matchSettled && it.localId !in attempted && enabled[it.localId]?.onDevice != false
-                    }
-                    if (pending.isEmpty()) break
-                    _matching.value = LocalMatchProgress(0, pending.size)
-                    coroutineScope {
-                        pending.forEach { row ->
-                            launch {
-                                semaphore.withPermit {
-                                    if (!prefs.value.autoMatch) return@withPermit
-                                    attempted += row.localId
-                                    if (autoMatch(row)) changed = true
-                                    _matching.update { it.copy(done = it.done + 1) }
+                LocalMatchExceptionBoundary.run(
+                    onError = { AppLog.w("LocalMusic", "自动匹配停止：${it.javaClass.simpleName}: ${it.message}") },
+                ) {
+                    val semaphore = Semaphore(MATCH_CONCURRENCY)
+                    val changed = AtomicBoolean(false)
+                    // 索引没加载时绝不能把“还没查到”当成 onDevice；等真实的第一份索引。
+                    index.first { it.loaded }
+                    while (isActive && prefs.value.autoMatch) {
+                        val currentIndex = index.value
+                        val pending = dao.all().filter { row ->
+                            LocalMatchEligibility.isEligible(
+                                row = row,
+                                indexLoaded = currentIndex.loaded,
+                                onDevice = currentIndex.byId[row.localId]?.onDevice,
+                                attempted = attempted,
+                                audioBlocked = processing.isBlocked(row.localId, LocalProcessingStage.Audio),
+                            )
+                        }
+                        if (pending.isEmpty()) break
+                        _matching.value = LocalMatchProgress(0, pending.size)
+                        coroutineScope {
+                            pending.forEach { snapshot ->
+                                launch {
+                                    LocalMatchExceptionBoundary.run(
+                                        onError = { AppLog.w("LocalMusic", "匹配出错 ${snapshot.displayName}：${it.message}") },
+                                    ) {
+                                        semaphore.withPermit {
+                                            try {
+                                                if (!prefs.value.autoMatch) return@withPermit
+                                                // 即使刚巧碰到来源切换，也把它排除出本轮，避免 while 对同一批空转。
+                                                attempted += snapshot.localId
+                                                val row = dao.get(snapshot.localId) ?: return@withPermit
+                                                val latestIndex = index.value
+                                                val eligible = LocalMatchEligibility.isEligible(
+                                                    row = row,
+                                                    indexLoaded = latestIndex.loaded,
+                                                    onDevice = latestIndex.byId[row.localId]?.onDevice,
+                                                    attempted = emptySet(),
+                                                    audioBlocked = processing.isBlocked(row.localId, LocalProcessingStage.Audio),
+                                                )
+                                                if (!eligible || !sourceReadable(row.origin)) return@withPermit
+                                                if (autoMatch(row)) changed.set(true)
+                                            } catch (cancel: CancellationException) {
+                                                // 取消不是“试过但失败”，重新启用来源后还可以进入。
+                                                attempted -= snapshot.localId
+                                                throw cancel
+                                            } finally {
+                                                _matching.update { it.copy(done = it.done + 1) }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
+                    // 匹配进了歌单里的本地歌时要同步出去；同步按指纹比对，没变的不会上传
+                    if (changed.get()) notifyRefsChanged()
                 }
-                // 匹配进了歌单里的本地歌时要同步出去；同步按指纹比对，没变的不会上传
-                if (changed) notifyRefsChanged()
             } finally {
                 _matching.value = LocalMatchProgress()
             }
@@ -590,14 +704,24 @@ class LocalLibrary(
             }
             if (adopted) return true
         }
+        var audioAttempt: LocalProcessingAttempt? = null
         val outcome = try {
-            matcher.matchByTags(row) ?: matcher.matchByAudio(row)
+            matcher.matchByTags(row) ?: run {
+                // 标签搜索可能耗时数秒；真正打开音频前再查一次，不能只信匹配循环入口的结果。
+                if (!sourceReadable(row.origin)) return false
+                val attempt = processing.begin(row.localId, LocalProcessingStage.Audio) ?: return false
+                audioAttempt = attempt
+                matcher.matchByAudio(row).also { processing.complete(attempt) }
+            }
         } catch (cancel: CancellationException) {
+            audioAttempt?.let(processing::cancel)
             throw cancel
         } catch (_: LocalMatchNetworkException) {
-            // 断网：不标“没匹配”，下次启动再试
+            // 网络失败发生在本地音频读取之后，不能把这首误记成文件故障；下次启动再试。
+            audioAttempt?.let(processing::complete)
             return false
         } catch (error: Exception) {
+            audioAttempt?.let(processing::fail)
             AppLog.w("LocalMusic", "匹配出错 ${row.displayName}：${error.message}")
             null
         }
@@ -722,10 +846,24 @@ class LocalLibrary(
         )
     }
 
-    /** 「再听一次歌识曲」：换一段（第 60 秒起）重新识别。 */
+    /** 「再听一次歌识曲」是显式重试：解除这首的识曲失败 / 崩溃隔离，换第 60 秒再读。 */
     suspend fun listenAgain(localId: String): List<LocalCandidate> {
         val row = dao.get(localId) ?: return emptyList()
-        return matcher.listen(row, LocalMatchRules.SAMPLE_RETRY_START_MS)
+        if (row.missing || !sourceReadable(row.origin)) return emptyList()
+        processing.issue(localId, LocalProcessingStage.Audio)?.let(processing::clear)
+        val attempt = processing.begin(localId, LocalProcessingStage.Audio) ?: return emptyList()
+        try {
+            return matcher.listen(row, LocalMatchRules.SAMPLE_RETRY_START_MS).also { processing.complete(attempt) }
+        } catch (cancel: CancellationException) {
+            processing.cancel(attempt)
+            throw cancel
+        } catch (network: LocalMatchNetworkException) {
+            processing.complete(attempt)
+            throw network
+        } catch (error: Exception) {
+            processing.fail(attempt)
+            throw error
+        }
     }
 
     private fun LocalTrackEntity.withMatch(candidate: LocalCandidate): LocalTrackEntity {
@@ -1390,7 +1528,6 @@ class LocalLibrary(
         private const val QUERY_CHUNK = 500
         private const val SHORT_SECONDS = 30
         private const val WRITE_BATCH = 25
-        private const val TAG_BATCH = 10
         private const val MATCH_CONCURRENCY = 2
         private const val STARTUP_DELAY_MS = 5_000L
         private const val STALE_MS = 10 * 60_000L

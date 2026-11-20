@@ -68,6 +68,7 @@ private val QQ_INFO = ProviderInfo(
     listeningModes = true,
     playlistWrite = true,
     playlistReorder = true,
+    comments = true,
 )
 
 class QQProvider : BaseNativeProvider(QQ_INFO) {
@@ -367,6 +368,36 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             avatar = normalizeCover(avatar),
             detail = qqMembershipLabel(vip).orEmpty(),
         )
+    }
+
+    override suspend fun comments(cookie: String, song: Song, page: Int, limit: Int): com.mytv.mymusic.data.SongCommentPage {
+        if (song.source != "qq") throw IllegalArgumentException("source mismatch")
+        var songId = song.extra["song_id"].orEmpty().ifBlank { song.extra["songid"].orEmpty() }
+            .ifBlank { song.id.takeIf { it.toLongOrNull() != null }.orEmpty() }
+        if (songId.isBlank()) {
+            val mid = song.extra["songmid"]?.takeIf { it.isNotBlank() } ?: song.id
+            songId = fetchSongDetail(cookie, mid).extra["song_id"].orEmpty()
+        }
+        if (songId.toLongOrNull() == null) throw IllegalStateException("qq numeric song id not found")
+        val safePage = page.coerceAtLeast(1)
+        val safeLimit = limit.coerceIn(1, 50)
+        val url = QQ_COMMENT_API + "?" + qqQuery(
+            "biztype" to "1",
+            "topid" to songId,
+            "cmd" to "8",
+            "pagenum" to (safePage - 1).toString(),
+            "pagesize" to safeLimit.toString(),
+            "domain" to "qq.com",
+            "ct" to "24",
+            "cv" to "10101010",
+        )
+        val body = NativeHttp.get(
+            url,
+            headers = mapOf("Referer" to "https://y.qq.com/"),
+            cookie = cookie,
+            userAgent = QQ_USER_AGENT,
+        )
+        return parseQqComments(body, safePage, safeLimit)
     }
 
     override suspend fun lyrics(cookie: String, song: Song): String {
@@ -3042,6 +3073,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     }
 
     private companion object {
+        const val QQ_COMMENT_API = "https://c.y.qq.com/base/fcgi-bin/fcg_global_comment_h5.fcg"
         const val QQ_USER_AGENT =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 9_1 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13B143 Safari/601.1"
         const val QQ_WINDOWS_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

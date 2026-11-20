@@ -192,6 +192,8 @@ data class LibrarySearchUiState(
 
 sealed interface UiEvent {
     data class OpenCollection(val title: String, val key: String) : UiEvent
+    /** 从迷你播放器回到当前队列所属的自建歌单。 */
+    data class OpenLocalPlaylist(val id: String) : UiEvent
 
     /** 打开歌手页；[key] 见 ArtistPages。 */
     data class OpenArtist(val key: String) : UiEvent

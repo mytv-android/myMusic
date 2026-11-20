@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -193,15 +195,15 @@ private fun FloatingNavBar(
 }
 
 /**
- * 悬浮胶囊迷你播放器。点按按设置打开播放页或海报墙，左右滑切歌，上滑总是展开播放页，长按打开队列；
- * 手势都有对应的按钮或读屏自定义操作，读屏用户不需要手势。
+ * 悬浮胶囊迷你播放器。点按按设置打开播放页或海报墙，左滑下一首、右滑打开来源歌单并定位当前歌曲，
+ * 上滑总是展开播放页，长按打开队列；手势都有对应的按钮或读屏自定义操作，读屏用户不需要手势。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions, onOpenQueue: () -> Unit, modifier: Modifier = Modifier) {
     val song = state.current ?: return
     val drag = rememberSettlingOffsetState()
-    val threshold = with(LocalDensity.current) { 72.dp.toPx() }
+    val threshold = with(LocalDensity.current) { 112.dp.toPx() }
     // 手势协程不随重组重启，阈值和回调都从最新状态读取
     val currentThreshold by rememberUpdatedState(threshold)
     val currentActions by rememberUpdatedState(actions)
@@ -209,15 +211,33 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
     val container = MaterialTheme.colorScheme.secondaryContainer
     val shape = RoundedCornerShape(20.dp)
     val source = state.currentSource?.providerName ?: song.source
-    Row(
+    Box(
         modifier
             .fillMaxWidth()
             .height(MiniHeight)
-            .offset { IntOffset(drag.offset.roundToInt(), 0) }
             .shadow(8.dp, shape, ambientColor = Color.Black.copy(alpha = 0.3f), spotColor = Color.Black.copy(alpha = 0.3f))
             .clip(shape)
-            .frosted(if (blur) container.copy(alpha = 0.82f) else container, shape)
-            .miniPlayerProgress(position, state.duration, state.current?.isLive == true)
+            .background(MaterialTheme.colorScheme.primaryContainer),
+    ) {
+        Row(
+            Modifier.fillMaxSize().padding(start = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Filled.MyLocation, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            Text(
+                "打开来源歌单",
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+        Row(
+            Modifier
+                .fillMaxSize()
+                .offset { IntOffset(drag.offset.roundToInt(), 0) }
+                .clip(shape)
+                .frosted(if (blur) container.copy(alpha = 0.82f) else container, shape)
+                .miniPlayerProgress(position, state.duration, state.current?.isLive == true)
             .combinedClickable(
                 onClickLabel = state.miniPlayerTarget.openLabel,
                 onLongClickLabel = "打开播放队列",
@@ -229,7 +249,9 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
                     onDragStart = { drag.begin() },
                     onDragEnd = {
                         val value = drag.offset
-                        if (abs(value) > currentThreshold) currentActions.transport(if (value < 0) "next" else "previous")
+                        if (abs(value) > currentThreshold) {
+                            if (value < 0) currentActions.transport("next") else currentActions.openPlaybackOrigin()
+                        }
                         drag.settle()
                     },
                     onDragCancel = { drag.settle() },
@@ -253,6 +275,7 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
                 customActions = listOfNotNull(
                     CustomAccessibilityAction("下一首") { actions.transport("next"); true },
                     CustomAccessibilityAction("上一首") { actions.transport("previous"); true },
+                    CustomAccessibilityAction("打开来源歌单并定位当前歌曲") { actions.openPlaybackOrigin(); true },
                     CustomAccessibilityAction("打开播放队列") { onOpenQueue(); true },
                     // 点按去了海报墙时，上滑展开播放页要有对应的读屏操作
                     if (state.miniPlayerTarget == MiniPlayerTarget.PosterWall) {
@@ -289,6 +312,7 @@ fun MiniPlayer(state: MusicUiState, position: State<Long>, actions: MusicActions
         IconButton(onClick = { actions.transport("next") }, modifier = Modifier.size(48.dp)) {
             Icon(Icons.Filled.SkipNext, "下一首", tint = MaterialTheme.colorScheme.onSecondaryContainer)
         }
+    }
     }
 }
 

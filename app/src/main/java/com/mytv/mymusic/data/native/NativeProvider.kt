@@ -12,6 +12,7 @@ import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.QRCheckResult
 import com.mytv.mymusic.data.QRCreateResult
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.SongCommentPage
 import com.mytv.mymusic.data.TopList
 import java.io.File
 import java.net.URI
@@ -80,6 +81,10 @@ interface NativeProvider {
 
     suspend fun lyrics(cookie: String, song: Song): String =
         throw UnsupportedOperationException("${info.name} 暂不支持歌词")
+
+    /** 歌曲评论；只读，[page] 从 1 开始。 */
+    suspend fun comments(cookie: String, song: Song, page: Int, limit: Int): SongCommentPage =
+        throw UnsupportedOperationException("${info.name} 暂不支持歌曲评论")
 
     suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> =
         throw UnsupportedOperationException("${info.name} 暂不支持歌单搜索")

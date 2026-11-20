@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -811,6 +812,7 @@ internal fun TwoColumns(
     leftWidth: Dp,
     left: LazyListScope.() -> Unit,
     right: LazyListScope.() -> Unit,
+    rightState: LazyListState? = null,
 ) {
     val window = LocalAppWindow.current
     val vertical = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())
@@ -834,6 +836,7 @@ internal fun TwoColumns(
                 Modifier.fillMaxHeight(),
                 contentPadding = PaddingValues(top = pane.top(vertical.calculateTopPadding()), bottom = pane.bottom(vertical.calculateBottomPadding())),
                 verticalArrangement = Arrangement.spacedBy(SegmentGap),
+                state = rightState ?: androidx.compose.foundation.lazy.rememberLazyListState(),
                 content = right,
             )
         },

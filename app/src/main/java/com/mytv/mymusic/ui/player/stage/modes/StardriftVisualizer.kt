@@ -32,6 +32,7 @@ import com.mytv.mymusic.ui.player.stage.SettingValues
 import com.mytv.mymusic.ui.player.stage.StageLine
 import com.mytv.mymusic.ui.player.stage.formatInt
 import com.mytv.mymusic.ui.player.stage.formatSeconds
+import com.mytv.mymusic.ui.player.withLyricFont
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
@@ -92,7 +93,7 @@ object StardriftVisualizer : LyricVisualizer {
                 val textUnit = ctx.display.textSp.sp.toPx() / STARDRIFT_BASE_FONT
                 val fontSp = ctx.display.textSp * cfg.fontScale
                 val fontPx = fontSp.sp.toPx()
-                val style = TextStyle(fontSize = fontSp.sp, fontWeight = FontWeight.Medium)
+                val style = TextStyle(fontSize = fontSp.sp, fontWeight = FontWeight.Medium).withLyricFont(ctx.font?.family)
                 val sky = state.sky(size, stardriftStarCount(cfg.density, ctx.display.countScale), skyUnit)
                 val line = ctx.currentLine?.let { measureDriftLine(measurer, it, style) }
                 // 宿主副行排在安全区底部往上 14dp，字不落进那一条（按两行留）

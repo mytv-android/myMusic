@@ -36,6 +36,7 @@ internal fun HostSubtitle(ctx: LyricStageContext, mode: LyricVisualizer) {
     val insets = ctx.display.insets
     val size = ctx.display.textSp * SUBTITLE_SCALE
     val style = MaterialTheme.typography.bodyLarge.copy(
+        fontFamily = ctx.font?.family ?: MaterialTheme.typography.bodyLarge.fontFamily,
         fontSize = size.sp,
         lineHeight = (size * 1.35f).sp,
         fontWeight = FontWeight.Medium,

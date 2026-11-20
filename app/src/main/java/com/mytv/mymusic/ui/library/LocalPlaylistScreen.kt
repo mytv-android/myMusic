@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.shape.CircleShape
@@ -113,6 +114,8 @@ import com.mytv.mymusic.ui.InfoNote
 import com.mytv.mymusic.ui.TrackActionsSheet
 import com.mytv.mymusic.ui.WallPageActions
 import com.mytv.mymusic.ui.components.AdaptiveSheet
+import com.mytv.mymusic.ui.components.CollectionSearchField
+import com.mytv.mymusic.ui.components.songMatchesCollectionQuery
 import com.mytv.mymusic.ui.components.AppLoading
 import com.mytv.mymusic.ui.components.IconTone
 import com.mytv.mymusic.ui.components.ListRow
@@ -180,6 +183,15 @@ fun LocalPlaylistScreen(
     val playlist = detail?.playlist
     val entries = detail?.entries.orEmpty()
     val songs = detail?.songs.orEmpty()
+    var searchQuery by rememberSaveable(playlistId) { mutableStateOf("") }
+    val visibleEntries = remember(entries, detail, searchQuery) {
+        if (searchQuery.isBlank()) entries else entries.filter { entry ->
+            detail?.songByPosition?.get(entry.position)?.let { songMatchesCollectionQuery(it, searchQuery) } == true
+        }
+    }
+    val shownSongs = remember(visibleEntries, detail) { visibleEntries.mapNotNull { detail?.songByPosition?.get(it.position) } }
+    val visibleRowKeys = remember(visibleEntries) { distinctKeys(visibleEntries) { it.songKey } }
+    val listState = rememberLazyListState()
     val conflict = sync.conflicts.any { it.playlistId == playlistId }
     val bound = playlist?.bound == true
     val readOnly = bound && boundAccess?.readOnly == true
@@ -217,6 +229,7 @@ fun LocalPlaylistScreen(
     // 海报视图的设置面板由这里持有：电视上墙外不放按钮，它从单曲面板里的整页操作打开
     var posterSettingsOpen by remember { mutableStateOf(false) }
     val selection = remember { SelectionState() }
+    LaunchedEffect(searchQuery) { selection.exit() }
     var pickerOpen by remember { mutableStateOf(false) }
     SelectionPredictiveBack(selection)
 
@@ -319,8 +332,8 @@ fun LocalPlaylistScreen(
             }
         } else {
             itemsIndexed(
-                entries,
-                key = { i, _ -> "row:${rowKeys[i]}" },
+                visibleEntries,
+                key = { i, _ -> "row:${visibleRowKeys[i]}" },
                 contentType = { _, _ -> "song" },
             ) { index, entry ->
                 val song = detail?.songByPosition?.get(entry.position) ?: Song()
@@ -364,12 +377,12 @@ fun LocalPlaylistScreen(
                     subtitle = localSubtitle(shown, local),
                     cover = shown.cover,
                     index = index,
-                    count = entries.size,
+                    count = visibleEntries.size,
                     onClick = {
                         when {
                             picking -> selection.toggle(song.key)
                             unplayable.intercept(song, local) -> Unit
-                            else -> actions.play(song, songs)
+                            else -> actions.playLocalPlaylist(song, shownSongs, playlistId, playlist?.name.orEmpty())
                         }
                     },
                     playing = state.current?.key == song.key,
@@ -382,10 +395,19 @@ fun LocalPlaylistScreen(
                     // 「删除」= 从歌单移出（绑定歌单照写回规则同步到平台，撤销按原位置插回）；收藏来的只读歌单没有
                     swipe = rememberRowSwipe(
                         song,
-                        songs,
+                        shownSongs,
                         delete = if (readOnly) null else SwipeDelete("移出", "从歌单移出") { remove(entry, song) },
                         enabled = !picking,
                     ),
+                )
+            }
+        }
+        if (entries.isNotEmpty() && visibleEntries.isEmpty()) {
+            item(key = "searchEmpty", contentType = "empty") {
+                EmptyState(
+                    icon = Icons.Filled.SearchOff,
+                    title = "没有找到匹配歌曲",
+                    message = "换个歌名、歌手或专辑关键词试试。",
                 )
             }
         }
@@ -402,6 +424,11 @@ fun LocalPlaylistScreen(
         }
     }
     val headerExtras: LazyListScope.() -> Unit = {
+        if (!editing) {
+            item(key = "collectionSearch", contentType = "search") {
+                CollectionSearchField(searchQuery, { searchQuery = it }, Modifier.padding(bottom = 8.dp))
+            }
+        }
         if (readOnly && !editing) {
             item(key = "readonly", contentType = "note") {
                 Box(Modifier.padding(bottom = 8.dp)) {
@@ -483,11 +510,11 @@ fun LocalPlaylistScreen(
         if (selection.active) {
             SelectionBar(
                 count = selection.selected.size,
-                allSelected = songs.isNotEmpty() && selection.selected.containsAll(songs.map { it.key }),
-                onToggleAll = { selection.toggleAll(songs.map { it.key }) },
+                allSelected = shownSongs.isNotEmpty() && selection.selected.containsAll(shownSongs.map { it.key }),
+                onToggleAll = { selection.toggleAll(shownSongs.map { it.key }) },
                 onPlay = {
-                    val picked = songs.filter { it.key in selection.selected }
-                    if (picked.isNotEmpty()) actions.play(picked.first(), picked)
+                    val picked = shownSongs.filter { it.key in selection.selected }
+                    if (picked.isNotEmpty()) actions.playLocalPlaylist(picked.first(), picked, playlistId, playlist?.name.orEmpty())
                 },
                 onAddTo = { pickerOpen = true },
                 onExit = { selection.exit() },
@@ -496,17 +523,47 @@ fun LocalPlaylistScreen(
             )
         } else {
             PlaylistActionRow(
-                enabled = songs.isNotEmpty(),
-                onPlayAll = { actions.play(songs.first(), songs) },
-                onShuffle = { val list = songs.shuffled(); actions.play(list.first(), list) },
+                enabled = shownSongs.isNotEmpty(),
+                onPlayAll = { if (shownSongs.isNotEmpty()) actions.playLocalPlaylist(shownSongs.first(), shownSongs, playlistId, playlist?.name.orEmpty()) },
+                onShuffle = { val list = shownSongs.shuffled(); if (list.isNotEmpty()) actions.playLocalPlaylist(list.first(), list, playlistId, playlist?.name.orEmpty()) },
                 onAdd = if (readOnly) null else ({ addOpen = true }),
                 menu = if (showEdit) menu else null,
                 playFocus = playFocus,
-                onMultiSelect = if (songs.isNotEmpty() && !readOnly) ({ selection.start() }) else null,
+                onMultiSelect = if (shownSongs.isNotEmpty() && !readOnly) ({ selection.start() }) else null,
                 // 嵌在“我的”里没有顶栏，入口放操作行；手机和双栏的左栏操作行已经排满，入口在顶栏
                 onPosterView = if (embedded) showPoster else null,
             )
         }
+    }
+
+    LaunchedEffect(state.locateRequestId, entries, searchQuery, editing, posterView) {
+        val target = state.locateSongKey
+        if (target.isBlank()) return@LaunchedEffect
+        if (editing) {
+            editing = false
+            return@LaunchedEffect
+        }
+        if (posterView) {
+            actions.setCollectionView(CollectionView.List)
+            return@LaunchedEffect
+        }
+        if (searchQuery.isNotBlank()) {
+            searchQuery = ""
+            return@LaunchedEffect
+        }
+        val keys = buildSet {
+            add(target)
+            state.currentTrack?.sources?.forEach { add(it.song.key) }
+        }
+        val index = entries.indexOfFirst { detail?.songByPosition?.get(it.position)?.key in keys }
+        if (index < 0) {
+            if (load != null) actions.consumePlaybackLocate()
+            return@LaunchedEffect
+        }
+        val headerCount = (if (window.twoPane && !embedded) 0 else 1) + 1 +
+            (if (readOnly) 1 else 0) + (if (elsewhereNote.isNotBlank()) 1 else 0) + (if (conflict) 1 else 0)
+        listState.scrollToItem(headerCount + index)
+        actions.consumePlaybackLocate()
     }
 
     Box(
@@ -521,6 +578,8 @@ fun LocalPlaylistScreen(
             posterView && (load == null || playlist != null) -> LocalPlaylistPoster(
                 state = state,
                 actions = actions,
+                playlistId = playlistId,
+                title = playlist?.name.orEmpty(),
                 detail = detail,
                 cover = coverUrls.firstOrNull().orEmpty(),
                 onEdit = { editing = true },
@@ -543,6 +602,7 @@ fun LocalPlaylistScreen(
                 val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
                 LazyColumn(
                     Modifier.fillMaxSize(),
+                    state = listState,
                     contentPadding = PaddingValues(
                         start = 28.dp,
                         end = 28.dp,
@@ -635,6 +695,7 @@ fun LocalPlaylistScreen(
                         headerExtras()
                         trackList()
                     },
+                    rightState = listState,
                 )
             }
             else -> PageScaffold(
@@ -659,6 +720,7 @@ fun LocalPlaylistScreen(
             ) { padding ->
                 LazyColumn(
                     Modifier.fillMaxSize(),
+                    state = listState,
                     contentPadding = padding.withGutter(window.gutter),
                     verticalArrangement = Arrangement.spacedBy(SegmentGap),
                 ) {
@@ -792,6 +854,8 @@ private data class PlaylistMenu(
 private fun LocalPlaylistPoster(
     state: MusicUiState,
     actions: MusicActions,
+    playlistId: String,
+    title: String,
     detail: LocalPlaylistDetail?,
     cover: String,
     onEdit: () -> Unit,
@@ -811,12 +875,12 @@ private fun LocalPlaylistPoster(
     }
     val ops = remember(actions, songs, songEntries, onSongActions, onBack) {
         CollectionPosterOps(
-            playAll = { if (songs.isNotEmpty()) actions.play(songs.first(), songs, openPlayer = false) },
+            playAll = { if (songs.isNotEmpty()) actions.playLocalPlaylist(songs.first(), songs, playlistId, title, openPlayer = false) },
             shuffle = {
                 val list = songs.shuffled()
-                if (list.isNotEmpty()) actions.play(list.first(), list, openPlayer = false)
+                if (list.isNotEmpty()) actions.playLocalPlaylist(list.first(), list, playlistId, title, openPlayer = false)
             },
-            playFrom = { index -> songs.getOrNull(index)?.let { actions.play(it, songs, openPlayer = false) } },
+            playFrom = { index -> songs.getOrNull(index)?.let { actions.playLocalPlaylist(it, songs, playlistId, title, openPlayer = false) } },
             playNext = { index -> songs.getOrNull(index)?.let(actions::playSongNext) },
             songActions = { index, page ->
                 val song = songs.getOrNull(index)

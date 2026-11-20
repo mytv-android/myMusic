@@ -365,7 +365,7 @@ fun LocalMusicScreen(
             }
             if (sourcesReady) {
                 IconButton(
-                    onClick = { if (scan.running) library.cancelScan() else library.scan() },
+                    onClick = { if (scan.running) library.cancelScan() else library.scan(retryFailed = true) },
                     modifier = Modifier.tvFocusRing(CircleShape),
                 ) {
                     Icon(if (scan.running) Icons.Filled.Close else Icons.Filled.Refresh, if (scan.running) "停止扫描" else "重新扫描")
@@ -401,7 +401,7 @@ fun LocalMusicScreen(
                     title = "没有找到音乐",
                     message = if (access.canPickFolder) "媒体库里没有歌，或者歌不在扫描范围里。可以把放歌的文件夹加进来。" else "媒体库里没有歌。",
                     actionLabel = if (access.canPickFolder) "添加文件夹" else "重新扫描",
-                    onAction = if (access.canPickFolder) access.pickFolder else ({ library.scan() }),
+                    onAction = if (access.canPickFolder) access.pickFolder else ({ library.scan(retryFailed = true) }),
                 )
             }
             window.twoPane -> TwoColumns(padding, if (window.isTv) 360.dp else 380.dp, header, list)

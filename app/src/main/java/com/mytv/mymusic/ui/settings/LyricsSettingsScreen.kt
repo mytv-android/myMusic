@@ -1,5 +1,7 @@
 package com.mytv.mymusic.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,6 +75,8 @@ import com.mytv.mymusic.ui.components.SegmentedGroup
 import com.mytv.mymusic.ui.components.SwitchRow
 import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
+import com.mytv.mymusic.ui.player.LYRIC_FONT_FALLBACK
+import com.mytv.mymusic.ui.player.LYRIC_FONT_PRIMARY
 import com.mytv.mymusic.ui.player.label
 import com.mytv.mymusic.ui.player.polygon
 import com.mytv.mymusic.ui.player.rhythmDebugAvailable
@@ -133,6 +137,12 @@ internal fun LyricsSettingsScreen(
     val debuggable = rhythmDebugAvailable()
     var animationOpen by rememberSaveable { mutableStateOf(false) }
     val animationDraft = rememberAnimationDraft(animationOpen, state.lyricStage)
+    val primaryFontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) actions.importLyricFont(LYRIC_FONT_PRIMARY, uri)
+    }
+    val fallbackFontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) actions.importLyricFont(LYRIC_FONT_FALLBACK, uri)
+    }
     if (animationDraft != null) {
         // 和全屏歌词页右上角 ✦ 打开的是同一个面板，套播放页的深色配色；这里没有“这首歌”和舞台，设置区顶上放大预览
         PlayerTheme {
@@ -244,6 +254,36 @@ internal fun LyricsSettingsScreen(
                 )
             }
         }
+        item(key = "fontHead", contentType = "sectionHeader") { SectionLabel("歌词字体") }
+        item(key = "fonts", contentType = "lyricFonts") {
+            SegmentedGroup {
+                ListRow(
+                    title = "首选字体",
+                    index = 0,
+                    count = 2,
+                    onClick = { primaryFontPicker.launch(arrayOf("*/*")) },
+                    summary = "中文、英文或主要使用的字体",
+                    value = state.lyricFonts.primaryName.ifBlank { "系统默认" },
+                    trailing = if (state.lyricFonts.primaryName.isBlank()) null else {
+                        { TextButton(onClick = { actions.clearLyricFont(LYRIC_FONT_PRIMARY) }) { Text("移除") } }
+                    },
+                )
+                ListRow(
+                    title = "缺字回退字体",
+                    index = 1,
+                    count = 2,
+                    onClick = { fallbackFontPicker.launch(arrayOf("*/*")) },
+                    summary = if (state.lyricFonts.primaryName.isBlank()) "先导入首选字体；缺字时再试这个字体，最后回退系统" else "首选字体缺字时先试这个字体，最后回退系统",
+                    value = state.lyricFonts.fallbackName.ifBlank { "未设置" },
+                    trailing = if (state.lyricFonts.fallbackName.isBlank()) null else {
+                        { TextButton(onClick = { actions.clearLyricFont(LYRIC_FONT_FALLBACK) }) { Text("移除") } }
+                    },
+                )
+            }
+        }
+        item(key = "fontNote", contentType = "note") {
+            SettingsNote("支持 TTF、OTF、TTC、OTC，单个文件不超过 30 MB；字体只保存在本机并用于播放页歌词与动画预览。Android 10 及以上完整支持逐字回退，旧版本个别动画仅使用首选字体。")
+        }
         item(key = "sublineHead", contentType = "sectionHeader") { SectionLabel("歌词下面那一行") }
         item(key = "subline", contentType = "toggleGroup") {
             ConnectedToggleGroup(
@@ -296,6 +336,20 @@ internal fun LyricsSettingsScreen(
         }
         item(key = "lyriconNote", contentType = "note") {
             SettingsNote("需要先安装并激活词幕核心服务。发送默认开启，接收默认关闭；连不上词幕不影响应用内歌词和播放。")
+        }
+        item(key = "metadataHead", contentType = "sectionHeader") { SectionLabel("歌词与封面补全") }
+        item(key = "metadataFallback", contentType = "switch") {
+            SwitchRow(
+                title = "公共元数据补全",
+                checked = state.metadataFallback,
+                onCheckedChange = actions::setMetadataFallback,
+                index = 0,
+                count = 1,
+                summary = "原平台没有歌词或歌曲缺封面时，按歌名、歌手、专辑和时长匹配 LRCLIB 歌词与 Apple 公开封面。开启后会把这些歌曲信息发给相应服务；匹配不够像时不填。",
+            )
+        }
+        item(key = "metadataNote", contentType = "note") {
+            SettingsNote("只补缺失内容，不覆盖平台已有歌词和内嵌封面。公共曲库以英文歌曲较全，国内新歌可能没有结果。")
         }
         item(key = "appleLyricHead", contentType = "sectionHeader") { SectionLabel("Apple Music 歌词") }
         item(key = "appleLyricProxy", contentType = "switch") {

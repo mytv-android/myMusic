@@ -23,6 +23,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
@@ -136,10 +137,10 @@ private class RingsStage {
             fading = null
         }
         val baseSize = with(density) { (ctx.display.textSp * fontScale).sp.toPx() }
-        val geometry = listOf(safe, baseSize)
+        val geometry = listOf(safe, baseSize, ctx.font)
         val shown = current
         if (shown != null && shown.index == line?.index && shown.geometry == geometry) return
-        val next = line?.takeIf { it.text.isNotBlank() }?.let { buildLine(density, measurer, it, safe, baseSize, geometry) }
+        val next = line?.takeIf { it.text.isNotBlank() }?.let { buildLine(density, measurer, it, safe, baseSize, geometry, ctx.font?.family) }
         if (shown != null && next != null && shown.index == next.index) {
             // 同一句换了字号或安全区：字形跟着变，旧形状的年轮作废
             next.appearAt = shown.appearAt
@@ -151,8 +152,8 @@ private class RingsStage {
         current = next
     }
 
-    private fun buildLine(density: Density, measurer: TextMeasurer, line: StageLine, safe: Rect, baseSize: Float, geometry: Any): RingsShownLine {
-        val baseStyle = TextStyle(fontSize = with(density) { baseSize.toSp() }, fontWeight = FontWeight.Medium)
+    private fun buildLine(density: Density, measurer: TextMeasurer, line: StageLine, safe: Rect, baseSize: Float, geometry: Any, family: FontFamily?): RingsShownLine {
+        val baseStyle = TextStyle(fontFamily = family, fontSize = with(density) { baseSize.toSp() }, fontWeight = FontWeight.Medium)
         val advances = HashMap<String, Float>()
         val layout = layoutRingsLine(
             line.text,
