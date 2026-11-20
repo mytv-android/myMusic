@@ -336,14 +336,14 @@ internal fun LyricsSettingsScreen(
                 index = 0,
                 count = 1,
                 summary = if (overlayGranted) {
-                    "透明显示当前句与翻译，以小号按钮控制播放 / 暂停、下一首和关闭；可拖动位置。"
+                    "歌词在屏宽 90% 的透明区域内居中，按钮自动隐藏；点一下显示播放 / 暂停、下一首和关闭。"
                 } else {
                     "需要“显示在其他应用上层”权限；打开时会先跳转到系统授权页面。"
                 },
             )
         }
         item(key = "floatingNote", contentType = "note") {
-            SettingsNote("点按歌词返回 myMusic，拖动调整位置并自动记住。撤掉系统悬浮窗权限后歌词会隐藏，重新授权即可再开启。")
+            SettingsNote("点一下歌词显示按钮，再点歌词返回 myMusic；按钮几秒后自动隐藏。拖动调整位置并自动记住，撤掉系统权限后歌词会隐藏。")
         }
         item(key = "lyriconHead", contentType = "sectionHeader") { SectionLabel("词幕（Lyricon）") }
         item(key = "lyriconSwitches", contentType = "lyriconSwitches") {

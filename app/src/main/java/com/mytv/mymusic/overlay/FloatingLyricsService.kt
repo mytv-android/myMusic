@@ -50,6 +50,9 @@ class FloatingLyricsService : Service() {
     private var secondaryText: TextView? = null
     private var playButton: ImageButton? = null
     private var nextButton: ImageButton? = null
+    private var controlsRow: View? = null
+    private var controlsVisible = false
+    private var hideControlsAt = Long.MAX_VALUE
     private var snapshot: PlaybackSnapshot? = null
     private var shown: FloatingLyricsContent? = null
     private var observersStarted = false
@@ -101,52 +104,63 @@ class FloatingLyricsService : Service() {
         val density = resources.displayMetrics.density
         fun dp(value: Int): Int = (value * density).toInt()
         val screenWidth = resources.displayMetrics.widthPixels
+        val overlayWidth = screenWidth * 9 / 10
+        val centeredX = ((screenWidth - overlayWidth) / 2).coerceAtLeast(0)
         val preferences = getSharedPreferences(POSITION_PREFS, Context.MODE_PRIVATE)
         val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(6), dp(4), dp(6))
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
             background = null
             isClickable = true
         }
 
-        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val primary = TextView(this).apply {
             textSize = 20f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
             setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), TEXT_SHADOW)
+            gravity = Gravity.CENTER_HORIZONTAL
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
-            maxWidth = (screenWidth - dp(116)).coerceAtLeast(dp(120))
         }
         val secondary = TextView(this).apply {
             textSize = 13f
             setTextColor(SECONDARY)
             setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), TEXT_SHADOW)
+            gravity = Gravity.CENTER_HORIZONTAL
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.END
-            maxWidth = primary.maxWidth
         }
-        texts.addView(primary)
-        texts.addView(secondary)
-        bar.addView(texts, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        bar.addView(primary, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        bar.addView(secondary, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         fun button(icon: Int, description: String, action: () -> Unit): ImageButton = ImageButton(this).apply {
             setImageResource(icon)
             setColorFilter(Color.WHITE)
             background = null
             contentDescription = description
-            setPadding(dp(7), dp(7), dp(7), dp(7))
+            setPadding(dp(6), dp(6), dp(6), dp(6))
             setOnClickListener { action() }
         }
         val play = button(android.R.drawable.ic_media_play, "播放或暂停") { transport("play") }
         val next = button(android.R.drawable.ic_media_next, "下一首") { transport("next") }
         val close = button(android.R.drawable.ic_menu_close_clear_cancel, "关闭悬浮歌词", ::closeFromOverlay)
-        bar.addView(play, LinearLayout.LayoutParams(dp(30), dp(30)))
-        bar.addView(next, LinearLayout.LayoutParams(dp(30), dp(30)))
         close.alpha = CONTROL_ALPHA
-        bar.addView(close, LinearLayout.LayoutParams(dp(30), dp(30)))
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+            addView(play, LinearLayout.LayoutParams(dp(34), dp(34)))
+            addView(next, LinearLayout.LayoutParams(dp(34), dp(34)))
+            addView(close, LinearLayout.LayoutParams(dp(34), dp(34)))
+        }
+        bar.addView(controls, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(2) })
 
         val type = if (Build.VERSION.SDK_INT >= 26) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -154,19 +168,27 @@ class FloatingLyricsService : Service() {
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
         }
         params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            overlayWidth,
             WindowManager.LayoutParams.WRAP_CONTENT,
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = preferences.getInt(POSITION_X, -1)
+            x = if (preferences.getInt(POSITION_WIDTH, -1) == overlayWidth) {
+                preferences.getInt(POSITION_X, centeredX)
+            } else {
+                centeredX
+            }
             y = preferences.getInt(POSITION_Y, dp(80))
         }
         attachDragging(bar)
         bar.setOnClickListener {
-            runCatching { startActivity(WidgetLinks.intent(this, WidgetTarget.Lyrics)) }
+            if (controlsVisible) {
+                runCatching { startActivity(WidgetLinks.intent(this, WidgetTarget.Lyrics)) }
+            } else {
+                showControls()
+            }
         }
         return runCatching {
             windowManager.addView(bar, params)
@@ -175,9 +197,11 @@ class FloatingLyricsService : Service() {
             secondaryText = secondary
             playButton = play
             nextButton = next
+            controlsRow = controls
+            controlsVisible = false
+            hideControlsAt = Long.MAX_VALUE
             bar.post {
                 if (root !== bar) return@post
-                if (params.x < 0) params.x = ((screenWidth - bar.width) / 2).coerceAtLeast(0)
                 clampIntoScreen(save = true)
             }
             true
@@ -185,6 +209,30 @@ class FloatingLyricsService : Service() {
             root = null
             false
         }
+    }
+
+    private fun showControls() {
+        controlsRow?.visibility = View.VISIBLE
+        controlsVisible = true
+        hideControlsAt = SystemClock.elapsedRealtime() + CONTROLS_VISIBLE_MS
+        updateOverlayDescription()
+        root?.post { clampIntoScreen(save = false) }
+    }
+
+    private fun hideControls() {
+        if (!controlsVisible) return
+        controlsRow?.visibility = View.GONE
+        controlsVisible = false
+        hideControlsAt = Long.MAX_VALUE
+        updateOverlayDescription()
+        root?.post { clampIntoScreen(save = false) }
+    }
+
+    private fun updateOverlayDescription() {
+        val content = shown ?: return
+        val interaction = if (controlsVisible) "点按歌词打开应用" else "点按显示播放控制"
+        root?.contentDescription = listOf(content.primary, content.secondary).filter { it.isNotBlank() }
+            .joinToString("，") + "。$interaction，拖动调整位置"
     }
 
     private fun attachDragging(bar: View) {
@@ -243,12 +291,15 @@ class FloatingLyricsService : Service() {
         getSharedPreferences(POSITION_PREFS, Context.MODE_PRIVATE).edit()
             .putInt(POSITION_X, params.x)
             .putInt(POSITION_Y, params.y)
+            .putInt(POSITION_WIDTH, params.width)
             .apply()
     }
 
     private fun render() {
-        val bar = root ?: return
-        val content = floatingLyricsContent(snapshot, SystemClock.elapsedRealtime())
+        if (root == null) return
+        val now = SystemClock.elapsedRealtime()
+        if (controlsVisible && now >= hideControlsAt) hideControls()
+        val content = floatingLyricsContent(snapshot, now)
         if (content == shown) return
         shown = content
         primaryText?.text = content.primary
@@ -263,11 +314,11 @@ class FloatingLyricsService : Service() {
             isEnabled = content.canControl
             alpha = if (content.canControl) CONTROL_ALPHA else 0.25f
         }
-        bar.contentDescription = listOf(content.primary, content.secondary).filter { it.isNotBlank() }
-            .joinToString("，") + "。点按打开应用，拖动调整位置"
+        updateOverlayDescription()
     }
 
     private fun transport(action: String) {
+        showControls()
         val app = application as? MyMusicApp ?: return
         scope.launch {
             val ok = runCatching { app.musicViewModel.widgetTransport(action) }.getOrDefault(false)
@@ -288,12 +339,15 @@ class FloatingLyricsService : Service() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        val density = resources.displayMetrics.density
-        val maxWidth = (resources.displayMetrics.widthPixels - (116 * density).toInt())
-            .coerceAtLeast((120 * density).toInt())
-        primaryText?.maxWidth = maxWidth
-        secondaryText?.maxWidth = maxWidth
-        root?.post { clampIntoScreen(save = true) }
+        val bar = root ?: return
+        val screenWidth = resources.displayMetrics.widthPixels
+        val overlayWidth = screenWidth * 9 / 10
+        if (params.width != overlayWidth) {
+            params.width = overlayWidth
+            params.x = ((screenWidth - overlayWidth) / 2).coerceAtLeast(0)
+        }
+        bar.requestLayout()
+        bar.post { clampIntoScreen(save = true) }
     }
 
     override fun onDestroy() {
@@ -307,6 +361,8 @@ class FloatingLyricsService : Service() {
         private const val POSITION_PREFS = "floating_lyrics_position"
         private const val POSITION_X = "x"
         private const val POSITION_Y = "y"
+        private const val POSITION_WIDTH = "width"
+        private const val CONTROLS_VISIBLE_MS = 3_000L
         private const val CONTROL_ALPHA = 0.72f
         private val TEXT_SHADOW = 0xE6000000.toInt()
         private const val SECONDARY = 0xF2FFFFFF.toInt()
