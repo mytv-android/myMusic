@@ -102,6 +102,7 @@ import com.mytv.mymusic.data.local.LocalLibrary
 import com.mytv.mymusic.data.metadata.CommunityMetadata
 import com.mytv.mymusic.ui.player.LyricFonts
 import com.mytv.mymusic.ui.player.LYRIC_FONT_PRIMARY
+import com.mytv.mymusic.overlay.FloatingLyricsService
 import com.mytv.mymusic.data.local.LocalPlayable
 import com.mytv.mymusic.data.local.forStorage
 import com.mytv.mymusic.data.lx.LxPlatform
@@ -257,6 +258,7 @@ data class MusicUiState(
     val appearance: Appearance = Appearance(),
     val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
     val notificationLyrics: Boolean = false,
+    val floatingLyricsEnabled: Boolean = false,
     val lyriconProviderEnabled: Boolean = true,
     val lyriconSubscriberEnabled: Boolean = false,
     /** Apple Music 匿名歌词是否走第三方中转；见 [setThirdPartyLyrics]。 */
@@ -634,6 +636,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             appearance = settings.toAppearance(),
             lyricsBackground = settings.lyricsBackground,
             notificationLyrics = settings.notificationLyrics,
+            floatingLyricsEnabled = settings.floatingLyricsEnabled,
             lyriconProviderEnabled = settings.lyriconProviderEnabled,
             lyriconSubscriberEnabled = settings.lyriconSubscriberEnabled,
             thirdPartyLyrics = settings.thirdPartyLyrics,
@@ -748,6 +751,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         startLyricon()
+        startFloatingLyrics()
         viewModelScope.launch {
             // 冷启动先把上次存下来的账号资料铺上：等各平台用户信息接口返回之前，
             // 账号卡片已经有头像和昵称可看，不然每次开 App 都要空一会儿
@@ -4451,6 +4455,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         base.value = base.value.copy(deepLink = "")
     }
 
+    private fun startFloatingLyrics() {
+        viewModelScope.launch {
+            _settingsReady.first { it }
+            settingsState.map { it.floatingLyricsEnabled }.distinctUntilChanged().collect { enabled ->
+                FloatingLyricsService.sync(app, enabled)
+            }
+        }
+    }
+
     private fun startLyricon() {
         viewModelScope.launch {
             // 等本机真实设置落下一帧再注册，不能把用户已关闭的互通短暂打开。
@@ -6135,6 +6148,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.settings.audioQuality(value.id) }
     fun setLyricsBackground(value: LyricsBackgroundMode) = viewModelScope.launch { app.settings.lyricsBackground(value) }
     fun setNotificationLyrics(value: Boolean) = viewModelScope.launch { app.settings.notificationLyrics(value) }
+    fun setFloatingLyricsEnabled(value: Boolean) = viewModelScope.launch {
+        if (value && !FloatingLyricsService.hasPermission(app)) {
+            message("还没有悬浮窗权限，请在系统设置中允许 myMusic 显示在其他应用上层")
+            return@launch
+        }
+        app.settings.floatingLyricsEnabled(value)
+        val synced = FloatingLyricsService.sync(app, value)
+        message(
+            when {
+                !value -> "悬浮歌词已关闭"
+                synced -> "悬浮歌词已开启，可拖动位置；点歌词返回应用"
+                else -> "系统暂时不允许启动悬浮歌词，请回到应用后再试"
+            },
+        )
+    }
     fun setLyriconProviderEnabled(value: Boolean) = viewModelScope.launch { app.settings.lyriconProviderEnabled(value) }
     fun setLyriconSubscriberEnabled(value: Boolean) = viewModelScope.launch { app.settings.lyriconSubscriberEnabled(value) }
     fun setRhythmIntensity(value: RhythmIntensity) = viewModelScope.launch { app.settings.rhythmIntensity(value) }
@@ -6958,6 +6986,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onAppForeground() {
         app.sync.syncIfStaleOnForeground()
+        if (_settingsReady.value) FloatingLyricsService.sync(app, settingsState.value.floatingLyricsEnabled)
         val update = updateState.value
         if (pendingUpdateInstall) {
             // 从“安装未知来源”设置页返回：直接再试一次安装。不查 canRequestPackageInstalls，

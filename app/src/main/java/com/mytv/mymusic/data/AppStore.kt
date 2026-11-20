@@ -288,6 +288,7 @@ class SettingsStore(private val context: Context) {
     private val cacheLimitKey = intPreferencesKey("cache_limit_mb")
     private val lyricsBackgroundKey = stringPreferencesKey("lyrics_background")
     private val notificationLyricsKey = booleanPreferencesKey("notification_lyrics")
+    private val floatingLyricsEnabledKey = booleanPreferencesKey("floating_lyrics_enabled")
     private val lyriconProviderEnabledKey = booleanPreferencesKey("lyricon_provider_enabled")
     private val lyriconSubscriberEnabledKey = booleanPreferencesKey("lyricon_subscriber_enabled")
     /** Apple Music 匿名歌词走第三方中转（zarz / paxsenix / AMLL）的总开关。 */
@@ -375,6 +376,7 @@ class SettingsStore(private val context: Context) {
             showBottomNav = values[showBottomNavKey] ?: true,
             lyricsBackground = values[lyricsBackgroundKey].toLyricsBackgroundMode(),
             notificationLyrics = values[notificationLyricsKey] ?: false,
+            floatingLyricsEnabled = values[floatingLyricsEnabledKey] ?: false,
             lyriconProviderEnabled = values[lyriconProviderEnabledKey] ?: true,
             lyriconSubscriberEnabled = values[lyriconSubscriberEnabledKey] ?: false,
             rhythmIntensity = values[rhythmIntensityKey].toRhythmIntensity(),
@@ -459,6 +461,7 @@ class SettingsStore(private val context: Context) {
     suspend fun blurMode(value: String) = context.dataStore.edit { it[blurModeKey] = value }
     suspend fun lyricsBackground(value: LyricsBackgroundMode) = context.dataStore.edit { it[lyricsBackgroundKey] = value.name }
     suspend fun notificationLyrics(value: Boolean) = context.dataStore.edit { it[notificationLyricsKey] = value }
+    suspend fun floatingLyricsEnabled(value: Boolean) = context.dataStore.edit { it[floatingLyricsEnabledKey] = value }
     suspend fun lyriconProviderEnabled(value: Boolean) = context.dataStore.edit { it[lyriconProviderEnabledKey] = value }
     suspend fun lyriconSubscriberEnabled(value: Boolean) = context.dataStore.edit { it[lyriconSubscriberEnabledKey] = value }
     suspend fun rhythmIntensity(value: RhythmIntensity) = context.dataStore.edit { it[rhythmIntensityKey] = value.name }
@@ -809,6 +812,8 @@ data class AppSettings(
     val lyricsBackground: LyricsBackgroundMode = LyricsBackgroundMode.Ambient,
     /** 系统媒体播放条第二行显示当前歌词（顶掉歌手名）；默认关。 */
     val notificationLyrics: Boolean = false,
+    /** 系统悬浮窗歌词；默认关，开启前还要取得系统悬浮窗权限。 */
+    val floatingLyricsEnabled: Boolean = false,
     /** 词幕 Provider 默认开；Subscriber 只在用户主动打开后连接。两项都只存在本机。 */
     val lyriconProviderEnabled: Boolean = true,
     val lyriconSubscriberEnabled: Boolean = false,

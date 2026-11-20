@@ -54,6 +54,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.mytv.mymusic.data.CoverShapeChoice
@@ -64,6 +66,7 @@ import com.mytv.mymusic.data.RHYTHM_OFFSET_MAX_MS
 import com.mytv.mymusic.data.RhythmIntensity
 import com.mytv.mymusic.data.TabletopTop
 import com.mytv.mymusic.lyricon.LyriconSubscriptionState
+import com.mytv.mymusic.overlay.FloatingLyricsService
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
@@ -137,6 +140,15 @@ internal fun LyricsSettingsScreen(
     val debuggable = rhythmDebugAvailable()
     var animationOpen by rememberSaveable { mutableStateOf(false) }
     val animationDraft = rememberAnimationDraft(animationOpen, state.lyricStage)
+    val context = LocalContext.current
+    var overlayGranted by remember { mutableStateOf(FloatingLyricsService.hasPermission(context)) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        overlayGranted = FloatingLyricsService.hasPermission(context)
+    }
+    val overlayPermissionPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        overlayGranted = FloatingLyricsService.hasPermission(context)
+        actions.setFloatingLyricsEnabled(true)
+    }
     val primaryFontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) actions.importLyricFont(LYRIC_FONT_PRIMARY, uri)
     }
@@ -307,6 +319,31 @@ internal fun LyricsSettingsScreen(
                 count = 1,
                 summary = "把当前这句歌词放到系统通知、锁屏等媒体播放条的第二行，歌手名会被替换；歌词不同步时仍显示歌手。",
             )
+        }
+        item(key = "floatingHead", contentType = "sectionHeader") { SectionLabel("悬浮窗歌词") }
+        item(key = "floatingLyrics", contentType = "switch") {
+            SwitchRow(
+                title = "显示悬浮歌词",
+                checked = state.floatingLyricsEnabled && overlayGranted,
+                onCheckedChange = { enabled ->
+                    if (enabled && !overlayGranted) {
+                        runCatching { overlayPermissionPicker.launch(FloatingLyricsService.permissionIntent(context)) }
+                            .onFailure { actions.setFloatingLyricsEnabled(true) }
+                    } else {
+                        actions.setFloatingLyricsEnabled(enabled)
+                    }
+                },
+                index = 0,
+                count = 1,
+                summary = if (overlayGranted) {
+                    "在桌面和其他应用上显示当前句与翻译；可拖动，带播放 / 暂停、下一首和关闭按钮。"
+                } else {
+                    "需要“显示在其他应用上层”权限；打开时会先跳转到系统授权页面。"
+                },
+            )
+        }
+        item(key = "floatingNote", contentType = "note") {
+            SettingsNote("点按歌词返回 myMusic，拖动调整位置并自动记住。撤掉系统悬浮窗权限后歌词会隐藏，重新授权即可再开启。")
         }
         item(key = "lyriconHead", contentType = "sectionHeader") { SectionLabel("词幕（Lyricon）") }
         item(key = "lyriconSwitches", contentType = "lyriconSwitches") {
