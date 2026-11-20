@@ -265,6 +265,7 @@ fun FavoritesScreen(
             onRematch = if (song.source == LOCAL_SOURCE) ({ actionSong = null; unplayable.rematch = song }) else null,
             onOpenArtist = { name -> actions.openArtistByName(name, song) },
             onOpenAlbum = { actions.openAlbumOf(song) },
+            onCollect = { actions.collectOnPlatform(song) },
         )
     }
 }
@@ -484,6 +485,7 @@ fun HistoryScreen(
             onRematch = if (song.source == LOCAL_SOURCE) ({ actionItem = null; unplayable.rematch = song }) else null,
             onOpenArtist = { name -> actions.openArtistByName(name, song) },
             onOpenAlbum = { actions.openAlbumOf(song) },
+            onCollect = { actions.collectOnPlatform(song) },
             // 删后底部出撤销条（按原时间写回），不弹确认
             onRemoveFromHistory = { removeOne(saved, song) },
         )

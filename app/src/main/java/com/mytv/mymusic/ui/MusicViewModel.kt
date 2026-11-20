@@ -4072,6 +4072,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         base.value = base.value.copy(playbackNotice = "", deepLink = "")
     }
 
+    /**
+     * 收藏到平台账号（汽水的「我喜欢的音乐」）。和本机收藏是两件事：这个写去平台，
+     * 换设备也在。平台没实现、没登录、接口报错都转成一条提示，不让界面崩。
+     */
+    fun collectOnPlatform(song: Song) {
+        val provider = song.source
+        if (provider.isBlank() || !app.repository.supportsCollect(provider)) {
+            base.value = base.value.copy(playbackNotice = "${providerName(provider)}暂不支持收藏到账号")
+            return
+        }
+        val cookie = cookieFor(provider)
+        if (cookie.isBlank()) {
+            base.value = base.value.copy(playbackNotice = "请先登录${providerName(provider)}再收藏")
+            return
+        }
+        viewModelScope.launch {
+            val message = try {
+                app.repository.collectTrack(provider, cookie, song)
+                "已收藏《${song.title}》到${providerName(provider)}账号"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                error.message ?: "收藏失败"
+            }
+            base.value = base.value.copy(playbackNotice = message)
+        }
+    }
+
     // ---------- 听歌识曲 ----------
 
     fun startRecognition() {

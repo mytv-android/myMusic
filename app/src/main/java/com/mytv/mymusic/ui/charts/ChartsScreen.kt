@@ -997,6 +997,7 @@ internal fun SongActionsSheet(
         wallPage = wallPage,
         onOpenArtist = { name -> actions.openArtistByName(name, target.song) },
         onOpenAlbum = { actions.openAlbumOf(target.song) },
+        onCollect = { actions.collectOnPlatform(target.song) },
         hideArtist = currentArtist,
         hideAlbum = currentAlbum,
     )

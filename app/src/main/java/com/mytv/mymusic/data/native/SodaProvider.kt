@@ -3,6 +3,8 @@ package com.mytv.mymusic.data.native
 import android.net.Uri
 import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.data.AlbumDetail
+import com.mytv.mymusic.data.ArtistAlbumPage
+import com.mytv.mymusic.data.ArtistDetail
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.ListeningMode
 import com.mytv.mymusic.data.Playlist
@@ -31,6 +33,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.Call
 import okhttp3.Callback
@@ -56,7 +59,7 @@ private val SODA_INFO = ProviderInfo(
     lyrics = true,
     parseSong = true,
     searchPlaylist = true,
-    recommendedPlaylists = false,
+    recommendedPlaylists = true,
     playlistSongs = true,
     parsePlaylist = true,
     searchAlbum = true,
@@ -70,6 +73,8 @@ private val SODA_INFO = ProviderInfo(
     topLists = true,
     topListSongs = true,
     hotSongs = true,
+    playlistWrite = true,
+    playlistReorder = true,
 )
 
 class SodaProvider : BaseNativeProvider(SODA_INFO) {
@@ -78,7 +83,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     private val availableQualityCache = java.util.concurrent.ConcurrentHashMap<String, List<AudioQualityOption>>()
 
     override suspend fun searchSongs(cookie: String, keyword: String): List<Song> {
-        val body = fetchAndroidSearch(cookie, "track", keyword, 1, ANDROID_SEARCH_PAGE_SIZE)
+        val body = fetchSearchBody(cookie, "track", keyword, 1, ANDROID_SEARCH_PAGE_SIZE)
         val resp = decodeSodaJson<SodaSearchResponse>(body, "soda search json parse error")
         val songs = mutableListOf<Song>()
         val seen = mutableSetOf<String>()
@@ -223,26 +228,33 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
     private class SodaLoginSession(
         val session: SodaQrSession,
+        /**
+         * 这个二维码自己的登录通道。libresoda 8d35f59 起 passport 请求改成纯 HTTP 直连
+         * （不再拉签名页要 a_bogus），所以默认用 [SodaQrHttpGateway]；一个二维码一份
+         * cookie jar，互不串登录态。只有二次验证（2046）还走 [SodaQrSigner] 的可见窗口。
+         */
+        val gateway: SodaQrGateway = SodaQrHttpGateway(),
         val createdAt: Long = System.currentTimeMillis(),
         @Volatile var consecutiveErrors: Int = 0,
     )
 
     override suspend fun createLogin(type: String): QRCreateResult {
-        val gateway: SodaQrGateway = SodaQrSigner
-        gateway.close() // 新二维码 = 新签名页会话：设备身份、cookie、localStorage 全部重来
         pruneLoginSessions()
+        // 新二维码 = 新会话：设备身份、cookie、通道全部重来
+        loginSessions.values.forEach { it.gateway.close() }
         val session = SodaQrSession()
+        val entry = SodaLoginSession(session)
         val created = try {
-            SodaQrLogin.create(gateway, session)
+            SodaQrLogin.create(entry.gateway, session)
         } catch (error: CancellationException) {
-            gateway.close()
+            entry.gateway.close()
             throw error
         } catch (error: Exception) {
-            gateway.close()
+            entry.gateway.close()
             throw IllegalStateException("汽水二维码获取失败：${error.message ?: "网络错误"}", error)
         }
         val sessionId = NativeProviders.newSessionId(info.id)
-        loginSessions[sessionId] = SodaLoginSession(session)
+        loginSessions[sessionId] = entry
         return QRCreateResult(
             sessionId = sessionId,
             session = QRSession(
@@ -258,16 +270,17 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val entry = loginSessions[sessionId]
             ?: return QRCheckResult(status = "failed", message = "登录会话已过期，请重新生成二维码", cookie = "")
         pruneLoginSessions()
-        val gateway: SodaQrGateway = SodaQrSigner
+        val gateway = entry.gateway
         val result = try {
             SodaQrLogin.check(gateway, entry.session)
         } catch (error: CancellationException) {
-            gateway.close()
             throw error
         } catch (error: Exception) {
-            // 单次失败多半可重试；连着失败说明签名页出问题了，别空转到过期
+            // 单次失败多半可重试；连着失败说明登录通道出问题了，别空转到过期
             entry.consecutiveErrors += 1
             if (entry.consecutiveErrors >= 3) {
+                gateway.close()
+                loginSessions.remove(sessionId)
                 return QRCheckResult(status = "failed", message = "汽水登录轮询失败：${error.message ?: "未知错误"}", cookie = "")
             }
             return QRCheckResult(status = "waiting", message = "汽水正在确认登录，请稍候…", cookie = "")
@@ -281,6 +294,12 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             gateway.close()
         }
         return result
+    }
+
+    /** 放弃这次扫码登录：释放通道（纯 HTTP 的 cookie jar / 签名页的隐藏 WebView）。 */
+    override fun cancelLogin(sessionId: String) {
+        val entry = loginSessions.remove(sessionId) ?: return
+        entry.gateway.close()
     }
 
     private fun pruneLoginSessions() {
@@ -313,7 +332,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     }
 
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
-        val body = fetchAndroidSearch(cookie, "playlist", keyword, 1, ANDROID_SEARCH_PAGE_SIZE)
+        val body = fetchSearchBody(cookie, "playlist", keyword, 1, ANDROID_SEARCH_PAGE_SIZE)
         val resp = decodeSodaJson<SodaSearchResponse>(body, "soda playlist json parse error")
         val playlists = mutableListOf<Playlist>()
         resp.resultGroups.forEach { group ->
@@ -347,7 +366,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     }
 
     override suspend fun searchAlbums(cookie: String, keyword: String): List<Playlist> {
-        val body = fetchAndroidSearch(cookie, "album", keyword, 1, ANDROID_SEARCH_PAGE_SIZE)
+        val body = fetchSearchBody(cookie, "album", keyword, 1, ANDROID_SEARCH_PAGE_SIZE)
         val resp = decodeSodaJson<SodaSearchResponse>(body, "soda album search json parse error")
         val albums = mutableListOf<Playlist>()
         resp.resultGroups.forEach { group ->
@@ -373,7 +392,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     }
 
     override suspend fun searchArtists(cookie: String, keyword: String): List<Playlist> {
-        val body = fetchAndroidSearch(cookie, "artist", keyword, 1, ANDROID_SEARCH_PAGE_SIZE)
+        val body = fetchSearchBody(cookie, "artist", keyword, 1, ANDROID_SEARCH_PAGE_SIZE)
         val resp = decodeSodaJson<SodaSearchResponse>(body, "soda artist search json parse error")
         val artists = mutableListOf<Playlist>()
         resp.resultGroups.forEach { group ->
@@ -612,6 +631,105 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     internal suspend fun userId(cookie: String): String {
         if (cookie.isBlank()) return ""
         return runCatching { fetchPcMe(cookie).myInfo.id.trim() }.getOrNull().orEmpty()
+    }
+
+    /**
+     * 搜索回包。2026-11 起 Android `/luna/search/all` 对未签名请求只回
+     * `{"extra":{"empty_search":1}}`（或空 body），PC 端 `/luna/pc/search/all`
+     * 带应用签名才返回完整 result_groups。所以配了签名器就走 PC 综合搜索，
+     * 没配时保留原来的 Android 分类接口——不能把未签名的综合请求当成「没有结果」。
+     * 对齐 libresoda `search.rs` 的 `fetch_search_body`。
+     */
+    private suspend fun fetchSearchBody(
+        cookie: String,
+        searchType: String,
+        keyword: String,
+        page: Int,
+        pageSize: Int,
+    ): String = if (isSignerConfigured()) {
+        fetchPcSearchAll(cookie, keyword, page, pageSize, searchType)
+    } else {
+        fetchAndroidSearch(cookie, searchType, keyword, page, pageSize)
+    }
+
+    /**
+     * PC 综合搜索（`GET /luna/pc/search/all`），逐请求应用级签名。
+     * 上游 music-lib 没有这条（它只有 Android 搜索），是照官方 PC 客户端新增的实现。
+     * 签名头没被接受（200 + 空 body / `empty_search`）时退回 Android 分类接口：
+     * 它至少还能给出已收录的结果，比「搜不到」更接近真相。
+     */
+    private suspend fun fetchPcSearchAll(
+        cookie: String,
+        keyword: String,
+        page: Int,
+        pageSize: Int,
+        fallbackType: String,
+    ): String {
+        val safePage = if (page < 1) 1 else page
+        val safePageSize = if (pageSize <= 0) ANDROID_SEARCH_PAGE_SIZE else pageSize
+        val creds = ensureSignerCredentials()
+        val params = pcAppParams()
+        params["device_id"] = creds.deviceId
+        params["iid"] = creds.iid
+        params["fp"] = creds.fp
+        // PC 综合搜索按 3.7.0 的客户端指纹校验，和其余 PC 接口的 3.3.0 不是同一套
+        params["version_name"] = PC_SEARCH_VERSION_NAME
+        params["version_code"] = PC_SEARCH_VERSION_CODE
+        params["q"] = keyword
+        params["cursor"] = ((safePage - 1) * safePageSize).toString()
+        params["search_id"] = java.util.UUID.randomUUID().toString()
+        params["search_method"] = "input"
+        params["debug_params"] = ""
+        params["from_search_id"] = ""
+        params["search_scene"] = ""
+        params["_rticket"] = System.currentTimeMillis().toString()
+        val requestUrl = "https://api.qishui.com/luna/pc/search/all?${buildQuery(params)}"
+        val headers = linkedMapOf(
+            "User-Agent" to PC_SEARCH_USER_AGENT,
+            "Accept" to "application/json",
+            "Accept-Encoding" to "identity",
+            "x-luna-background-type" to "foreground",
+            "x-luna-is-background-req" to "0",
+            "x-luna-is-local-user" to "0",
+            "Cookie" to cookie,
+        )
+        val signed = signRequest(requestUrl, "", headers, "GET")
+        signed.headers.forEach { (key, value) -> headers[key] = value }
+        val response = NativeHttp.getResponse(
+            signed.url,
+            headers,
+            cookie = cookie,
+            userAgent = PC_SEARCH_USER_AGENT,
+        )
+        val body = response.body
+        if (body.isBlank() || body.contains("empty_search")) {
+            AppLog.w(
+                TAG,
+                "pc search/all 无结果 HTTP=${response.code} body=${body.length}B，退回 Android 搜索接口",
+            )
+            return fetchAndroidSearch(cookie, fallbackType, keyword, page, pageSize)
+        }
+        return body
+    }
+
+    override val supportsSearchPagination: Boolean = true
+
+    /** 分页搜索：[limit] 是每页条数，页码从 1 开始。 */
+    override suspend fun searchSongsPage(cookie: String, keyword: String, page: Int, limit: Int): SongSearchPage {
+        val safePage = page.coerceAtLeast(1)
+        val safeLimit = limit.coerceIn(1, 50)
+        val body = fetchSearchBody(cookie, "track", keyword, safePage, safeLimit)
+        val resp = decodeSodaJson<SodaSearchResponse>(body, "soda search json parse error")
+        val songs = mutableListOf<Song>()
+        val seen = mutableSetOf<String>()
+        resp.resultGroups.forEach { group ->
+            group.data.forEach { item ->
+                val track = item.entity.track
+                if (track.id.isEmpty() || !seen.add(track.id)) return@forEach
+                songs += buildSongFromTrack(track)
+            }
+        }
+        return SongSearchPage(songs, safePage, songs.size >= safeLimit)
     }
 
     private suspend fun fetchAndroidSearch(
@@ -1168,18 +1286,20 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
     /**
      * 请求签名服务换 x-helios / x-medusa。签名覆盖 URL + 全部请求头 + body 字节，
-     * 所以传给签名器的必须是即将原样发出的那一份。
+     * 所以传给签名器的必须是即将原样发出的那一份。[method] 只有 GET / POST 两种用法：
+     * 读接口是 GET（body 空），写接口是 POST。
      */
     private suspend fun signRequest(
         requestUrl: String,
         body: String,
         headers: Map<String, String>,
+        method: String = "POST",
     ): SignedRequest {
         val endpoint = effectiveSignerUrl()
         if (endpoint.isEmpty()) throw IllegalStateException(VIP_SIGNER_REQUIRED_MESSAGE)
         val payload = buildJsonObject {
             put("url", requestUrl)
-            put("method", "POST")
+            put("method", method)
             put("body", body)
             put("ts_ms", System.currentTimeMillis())
             putJsonObject("headers") {
@@ -1382,6 +1502,747 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return SodaAppCredentials(deviceId = deviceId, iid = deviceId, fp = deviceId)
     }
 
+    // ---------------------------------------------------------------------
+    // 与 libresoda 对齐的新增能力：歌单写操作、收藏、歌手页、最近播放、联想词。
+    // 这些接口都要求逐请求的应用级签名（x-helios / x-medusa），签名覆盖
+    // 「URL + 全部请求头 + body」，所以参数和头必须在签名之前全部就位。
+    // ---------------------------------------------------------------------
+
+    /**
+     * 带应用级签名的 GET。[params] 是业务查询参数（会并进 PC 公共参数一起签名），
+     * [rawSuffix] 给需要重复 key 的参数用（官方客户端把数组编成 `item_types=a&item_types=b`）。
+     *
+     * [requireSigner] 为真时签名器没配就直接报错——写接口（收藏、歌单增删改）
+     * 不带签名服务端不认，静默降级成未签名请求只会得到空响应。
+     */
+    internal suspend fun pcGet(
+        path: String,
+        params: List<Pair<String, String>> = emptyList(),
+        cookie: String,
+        rawSuffix: String = "",
+        requireSigner: Boolean = false,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): String {
+        val signing = isSignerConfigured()
+        if (requireSigner && !signing) {
+            throw IllegalStateException("这个操作需要汽水签名器：$VIP_SIGNER_REQUIRED_MESSAGE")
+        }
+        val creds = if (signing) ensureSignerCredentials() else localAppCredentials()
+        val query = pcAppParams()
+        query["device_id"] = creds.deviceId
+        query["iid"] = creds.iid
+        query["fp"] = creds.fp
+        params.forEach { (key, value) -> query[key] = value }
+        var requestUrl = "https://api.qishui.com$path?${buildQuery(query)}"
+        if (rawSuffix.isNotEmpty()) requestUrl += "&$rawSuffix"
+        val headers = linkedMapOf(
+            "User-Agent" to creds.userAgentOrDefault(),
+            "Accept" to "application/json",
+            "x-luna-background-type" to "foreground",
+            "x-luna-is-background-req" to "0",
+            "x-luna-is-local-user" to "1",
+            "Cookie" to cookie,
+        )
+        headers.putAll(extraHeaders)
+        val signed = if (signing) runCatching { signRequest(requestUrl, "", headers, "GET") }.getOrNull() else null
+        signed?.headers?.forEach { (key, value) -> headers[key] = value }
+        val response = NativeHttp.getResponse(
+            signed?.url ?: requestUrl,
+            headers,
+            cookie = cookie,
+            userAgent = creds.userAgentOrDefault(),
+        )
+        if (response.body.isBlank()) {
+            // 和 pc track_v2 同一个信号：签名头没被接受，或设备指纹和签名器不一致
+            signerCredentials = null
+            AppLog.w(TAG, "$path 返回空响应 HTTP=${response.code} deviceId=${maskId(creds.deviceId)}")
+            throw IllegalStateException(
+                "汽水 $path 返回空响应：签名头未被接受，请检查签名器、设备指纹与 Cookie",
+            )
+        }
+        return response.body
+    }
+
+    /** 写操作的统一出口：发了 POST、校验回包、把服务端文案翻成用户能看懂的话。 */
+    private suspend fun playlistWrite(
+        cookie: String,
+        path: String,
+        body: String,
+        action: String,
+    ) {
+        if (cookie.isBlank()) {
+            throw PlaylistWriteException("请先登录汽水音乐", PlaylistWriteFailure.NotLoggedIn)
+        }
+        val raw = businessPost(path, body, cookie).body
+        val root = SodaJson.parse(raw)
+        if (!SodaPlaylistEdit.responseIsOk(root)) {
+            val code = jsonInt(root, "status_code") ?: 0
+            val message = SodaPlaylistEdit.responseErrorMessage(root)
+            AppLog.w(TAG, "歌单写操作失败 path=$path code=$code msg=${message.ifBlank { "空" }}")
+            throw PlaylistWriteException(
+                when {
+                    code == 1000003 -> "请先登录汽水音乐"
+                    message.isNotBlank() -> message
+                    else -> "汽水音乐${action}失败（$code）"
+                },
+                if (code == 1000003) PlaylistWriteFailure.NotLoggedIn else PlaylistWriteFailure.Other,
+            )
+        }
+    }
+
+    // ---------------- 歌单写操作（对齐 libresoda playlist_edit.rs） ----------------
+
+    /**
+     * 「我创建的歌单」：`GET /luna/pc/me/playlist`，官方客户端侧边栏用的就是它。
+     * 只有出现在这里的歌单才能改——收藏来的别人的歌单不在列表里。
+     * 隐私歌单在 `extra["is_private"]` 里标记（服务端只有为真时才给字段）。
+     *
+     * 返回「本页歌单 + 下一页游标」：空游标表示没有下一页。
+     */
+    internal suspend fun myPlaylistPage(cookie: String, cursor: String = "", count: Int = 50): Pair<List<Playlist>, String> {
+        if (cookie.isBlank()) return emptyList<Playlist>() to ""
+        val safeCount = if (count <= 0) 50 else count.coerceAtMost(100)
+        val raw = pcGet(
+            SODA_MY_PLAYLISTS_PATH,
+            listOf("cursor" to cursor.trim(), "count" to safeCount.toString()),
+            cookie,
+        )
+        val root = SodaJson.parse(raw) ?: return emptyList<Playlist>() to ""
+        val playlists = SodaArtistApi.firstArray(root, "playlists").mapNotNull { entry ->
+            val id = jsonText(entry, "id")
+            if (id.isEmpty()) return@mapNotNull null
+            val extra = mutableMapOf<String, String>()
+            // 服务端只有隐私歌单才给这个字段，缺席就是不隐私
+            if (jsonBool(entry, "is_private") == true) extra["is_private"] = "true"
+            val ownerId = jsonText(entry, "owner", "id")
+            if (ownerId.isNotEmpty()) extra["owner_id"] = ownerId
+            Playlist(
+                source = SODA_SOURCE,
+                id = id,
+                name = listOf(
+                    jsonText(entry, "public_title"),
+                    jsonText(entry, "title"),
+                    jsonText(entry, "name"),
+                ).firstOrNull { it.isNotBlank() }.orEmpty(),
+                cover = SodaArtistApi.imageUrl(
+                    jsonObj(entry, "url_cover") ?: JsonObject(emptyMap()),
+                    "~c5_300x300.jpg",
+                ),
+                trackCount = jsonInt(entry, "count_tracks") ?: 0,
+                creator = jsonText(entry, "owner", "nickname"),
+                description = jsonText(entry, "desc"),
+                link = "https://www.qishui.com/playlist/$id",
+                extra = extra,
+            )
+        }
+        return playlists to SodaArtistApi.nextCursor(root)
+    }
+
+    /** 我创建的歌单第一页；给账号卡片这类只展示几个的地方用。 */
+    internal suspend fun myPlaylists(cookie: String, count: Int = 50): List<Playlist> =
+        myPlaylistPage(cookie, "", count).first
+
+    /**
+     * 这个歌单能不能用当前账号改：出现在「我创建的歌单」里就能改。
+     * null 表示没法判断（没登录 / 网络失败），调用方按「可以试」处理。
+     */
+    override suspend fun playlistWritable(cookie: String, id: String): Boolean? {
+        if (cookie.isBlank()) return null
+        val playlistId = id.trim()
+        if (playlistId.isEmpty()) return null
+        var cursor = ""
+        val seen = mutableSetOf<String>()
+        while (seen.size < 300) {
+            val (mine, next) = try {
+                myPlaylistPage(cookie, cursor, 100)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                return null
+            }
+            if (mine.any { it.id == playlistId }) return true
+            if (mine.isEmpty() || next.isEmpty() || next == cursor || !seen.add(next)) return false
+            cursor = next
+        }
+        return false
+    }
+
+    override suspend fun addPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        val ids = songs.map { songTrackId(it) }.filter { it.isNotEmpty() }.distinct()
+        if (ids.isEmpty()) return
+        playlistWrite(
+            cookie,
+            SodaPlaylistEdit.APPEND_MEDIA_PATH,
+            SodaPlaylistEdit.mediaBody(playlistId, ids),
+            "添加歌曲",
+        )
+    }
+
+    override suspend fun removePlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        val ids = songs.map { songTrackId(it) }.filter { it.isNotEmpty() }.distinct()
+        if (ids.isEmpty()) return
+        playlistWrite(
+            cookie,
+            SodaPlaylistEdit.DELETE_MEDIA_PATH,
+            SodaPlaylistEdit.mediaBody(playlistId, ids),
+            "移除歌曲",
+        )
+    }
+
+    override suspend fun reorderPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
+        val ids = songs.map { songTrackId(it) }.filter { it.isNotEmpty() }.distinct()
+        if (ids.isEmpty()) return
+        // 排序只有非 PC 路径（PC 路径 404），客户端 IDL 里也只登记了这一条
+        playlistWrite(
+            cookie,
+            SodaPlaylistEdit.SORT_MEDIA_PATH,
+            SodaPlaylistEdit.mediaBody(playlistId, ids),
+            "调整顺序",
+        )
+    }
+
+    /** 在汽水上建歌单；带 [trackIds] 时建完就把这批歌放进去。返回新歌单 id。 */
+    suspend fun createPlaylist(cookie: String, name: String, isPrivate: Boolean = false, trackIds: List<String> = emptyList()): String {
+        SodaPlaylistEdit.checkName(name)?.let { throw PlaylistWriteException(it, PlaylistWriteFailure.Other) }
+        val raw = businessPost(
+            SodaPlaylistEdit.CREATE_PATH,
+            SodaPlaylistEdit.createBody(name, isPrivate, trackIds),
+            cookie,
+        ).body
+        val root = SodaJson.parse(raw)
+        if (!SodaPlaylistEdit.responseIsOk(root)) {
+            val code = jsonInt(root, "status_code") ?: 0
+            val message = SodaPlaylistEdit.responseErrorMessage(root)
+            throw PlaylistWriteException(
+                when {
+                    // 服务端对超长名字只回这个码，本地已经拦过一次，这里兜住服务端硬线
+                    code == 1000004 -> SodaPlaylistEdit.checkName(name) ?: "汽水音乐不接受这个歌单名"
+                    message.isNotBlank() -> message
+                    else -> "汽水音乐创建歌单失败（$code）"
+                },
+                PlaylistWriteFailure.Other,
+            )
+        }
+        return SodaPlaylistEdit.extractPlaylistId(root)
+    }
+
+    /** 改名 / 改描述 / 改可见性；只传要改的字段。 */
+    suspend fun updatePlaylistInfo(
+        cookie: String,
+        playlistId: String,
+        name: String? = null,
+        description: String? = null,
+        isPrivate: Boolean? = null,
+    ) {
+        name?.let { SodaPlaylistEdit.checkName(it)?.let { message -> throw PlaylistWriteException(message, PlaylistWriteFailure.Other) } }
+        playlistWrite(
+            cookie,
+            SodaPlaylistEdit.UPDATE_PATH,
+            SodaPlaylistEdit.updateBody(playlistId, name, description, isPrivate),
+            "修改歌单",
+        )
+    }
+
+    /** 批量删除歌单。 */
+    suspend fun deletePlaylists(cookie: String, playlistIds: List<String>) {
+        val ids = SodaCollection.cleanIds(playlistIds)
+        if (ids.isEmpty()) return
+        playlistWrite(cookie, SodaPlaylistEdit.DELETE_PATH, SodaPlaylistEdit.deleteBody(ids), "删除歌单")
+    }
+
+    /** 歌单名敏感词检查：true = 命中。以写入回包为准，这个只做前端提示。 */
+    suspend fun playlistNameHasSensitiveWord(cookie: String, name: String): Boolean? {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || cookie.isBlank()) return null
+        val raw = pcGet(
+            SodaPlaylistEdit.WORD_CHECK_PATH,
+            listOf("content" to trimmed, "type" to SodaPlaylistEdit.WORD_CHECK_NAME),
+            cookie,
+        )
+        return SodaPlaylistEdit.sensitiveWordHit(SodaJson.parse(raw))
+    }
+
+    /** 导入外部歌单链接；返回新歌单 id。导入是异步的，进度靠 [playlistImportTasks] 查。 */
+    suspend fun importPlaylist(cookie: String, url: String): String {
+        val raw = businessPost(SodaPlaylistEdit.IMPORT_PATH, SodaPlaylistEdit.importBody(url), cookie).body
+        val root = SodaJson.parse(raw)
+        if (!SodaPlaylistEdit.responseIsOk(root)) {
+            val code = jsonInt(root, "status_code") ?: 0
+            throw PlaylistWriteException(
+                SodaPlaylistEdit.responseErrorMessage(root).ifEmpty { "汽水音乐导入歌单失败（$code）" },
+                PlaylistWriteFailure.Other,
+            )
+        }
+        return SodaPlaylistEdit.extractPlaylistId(root)
+    }
+
+    /** 查导入任务进度。 */
+    suspend fun playlistImportTasks(cookie: String, taskIds: List<String>): String =
+        businessPost(SodaPlaylistEdit.IMPORT_TASKS_PATH, SodaPlaylistEdit.importTasksBody(taskIds), cookie).body
+
+    // ---------------- 收藏（对齐 libresoda collection.rs） ----------------
+
+    /** 汽水的「我喜欢的音乐」是平台侧收藏，换设备也在；没登录时不给这个入口。 */
+    override fun supportsCollect(): Boolean = true
+
+    /** 喜欢 / 取消喜欢单曲（「我喜欢的音乐」）。 */
+    override suspend fun collectTrack(cookie: String, song: Song) {
+        val trackId = songTrackId(song)
+        if (trackId.isEmpty()) throw IllegalArgumentException("track id is empty")
+        val raw = businessPost(
+            SodaCollection.COLLECT_MEDIA_PATH,
+            SodaCollection.collectMediaBody(listOf(trackId)),
+            cookie,
+        ).body
+        sodaWriteFailed(raw, "收藏")
+    }
+
+    override suspend fun uncollectTrack(cookie: String, song: Song) {
+        val trackId = songTrackId(song)
+        if (trackId.isEmpty()) throw IllegalArgumentException("track id is empty")
+        val raw = businessPost(
+            SodaCollection.UNCOLLECT_MEDIA_PATH,
+            SodaCollection.uncollectMediaBody(listOf(trackId)),
+            cookie,
+        ).body
+        sodaWriteFailed(raw, "取消收藏")
+    }
+
+    /** 批量版：收藏多首（换源面板「把这批歌收藏到汽水」用）。 */
+    suspend fun collectTracks(cookie: String, songs: List<Song>) {
+        val ids = songs.map { songTrackId(it) }.filter { it.isNotEmpty() }.distinct()
+        if (ids.isEmpty()) return
+        val raw = businessPost(SodaCollection.COLLECT_MEDIA_PATH, SodaCollection.collectMediaBody(ids), cookie).body
+        sodaWriteFailed(raw, "收藏")
+    }
+
+    suspend fun uncollectTracks(cookie: String, songs: List<Song>) {
+        val ids = songs.map { songTrackId(it) }.filter { it.isNotEmpty() }.distinct()
+        if (ids.isEmpty()) return
+        val raw = businessPost(SodaCollection.UNCOLLECT_MEDIA_PATH, SodaCollection.uncollectMediaBody(ids), cookie).body
+        sodaWriteFailed(raw, "取消收藏")
+    }
+
+    suspend fun collectPlaylists(cookie: String, playlistIds: List<String>) {
+        val ids = SodaCollection.cleanIds(playlistIds)
+        if (ids.isEmpty() || cookie.isBlank()) return
+        val raw = businessPost(SodaCollection.COLLECT_PLAYLIST_PATH, SodaCollection.idsBody("playlist_ids", ids), cookie).body
+        sodaWriteFailed(raw, "收藏歌单")
+    }
+
+    suspend fun uncollectPlaylists(cookie: String, playlistIds: List<String>) {
+        val ids = SodaCollection.cleanIds(playlistIds)
+        if (ids.isEmpty() || cookie.isBlank()) return
+        val raw = businessPost(SodaCollection.UNCOLLECT_PLAYLIST_PATH, SodaCollection.idsBody("playlist_ids", ids), cookie).body
+        sodaWriteFailed(raw, "取消收藏歌单")
+    }
+
+    suspend fun collectAlbums(cookie: String, albumIds: List<String>) {
+        val ids = SodaCollection.cleanIds(albumIds)
+        if (ids.isEmpty() || cookie.isBlank()) return
+        val raw = businessPost(SodaCollection.COLLECT_ALBUM_PATH, SodaCollection.idsBody("album_ids", ids), cookie).body
+        sodaWriteFailed(raw, "收藏专辑")
+    }
+
+    suspend fun uncollectAlbums(cookie: String, albumIds: List<String>) {
+        val ids = SodaCollection.cleanIds(albumIds)
+        if (ids.isEmpty() || cookie.isBlank()) return
+        val raw = businessPost(SodaCollection.UNCOLLECT_ALBUM_PATH, SodaCollection.idsBody("album_ids", ids), cookie).body
+        sodaWriteFailed(raw, "取消收藏专辑")
+    }
+
+    suspend fun collectArtists(cookie: String, artistIds: List<String>) {
+        val ids = SodaCollection.cleanIds(artistIds)
+        if (ids.isEmpty() || cookie.isBlank()) return
+        val raw = businessPost(SodaCollection.COLLECT_ARTIST_PATH, SodaCollection.idsBody("artist_ids", ids), cookie).body
+        sodaWriteFailed(raw, "收藏艺人")
+    }
+
+    suspend fun uncollectArtists(cookie: String, artistIds: List<String>) {
+        val ids = SodaCollection.cleanIds(artistIds)
+        if (ids.isEmpty() || cookie.isBlank()) return
+        val raw = businessPost(SodaCollection.UNCOLLECT_ARTIST_PATH, SodaCollection.idsBody("artist_ids", ids), cookie).body
+        sodaWriteFailed(raw, "取消收藏艺人")
+    }
+
+    /**
+     * 我收藏的内容（单曲 / 歌单 / 专辑 / 艺人）。空收藏时服务端**不返回**
+     * `mixed_collections` 字段，只回 `status_info`——按空列表算，不当失败。
+     */
+    internal suspend fun collectedItems(
+        cookie: String,
+        cursor: String = "",
+        count: Int = SodaCollection.DEFAULT_COUNT,
+        itemTypes: List<String> = listOf(SodaCollection.ITEM_ALBUM, SodaCollection.ITEM_PLAYLIST),
+    ): List<SodaCollectedItem> {
+        if (cookie.isBlank()) return emptyList()
+        val suffix = itemTypes.map { "item_types=${queryEscape(it.trim())}" }
+            .filter { it.isNotBlank() }
+            .joinToString("&")
+        val raw = pcGet(
+            SodaCollection.COLLECTED_MIXED_PATH,
+            listOf("cursor" to cursor.trim(), "count" to SodaCollection.clampCount(count).toString()),
+            cookie,
+            rawSuffix = suffix,
+        )
+        return SodaCollectedParser.parse(SodaJson.parse(raw))
+    }
+
+    /** 我收藏的艺人（独立接口，每项 `is_collected=true`）。 */
+    internal suspend fun collectedArtists(cookie: String, cursor: String = "", count: Int = 20): List<SodaCollectedItem> {
+        if (cookie.isBlank()) return emptyList()
+        val raw = pcGet(
+            SodaCollection.ARTIST_COLLECTION_PATH,
+            listOf("cursor" to cursor.trim(), "count" to SodaCollection.clampCount(count).toString()),
+            cookie,
+        )
+        return SodaCollectedParser.parseArtists(SodaJson.parse(raw))
+    }
+
+    /** 写操作回包校验：非 0 的 status_code 一律当失败，把服务端文案带出去。 */
+    private fun sodaWriteFailed(raw: String, action: String) {        val root = SodaJson.parse(raw)
+        if (SodaPlaylistEdit.responseIsOk(root)) return
+        val code = jsonInt(root, "status_code") ?: 0
+        val message = SodaPlaylistEdit.responseErrorMessage(root)
+        AppLog.w(TAG, "收藏写操作失败 action=$action code=$code msg=${message.ifBlank { "空" }}")
+        throw IllegalStateException(
+            when {
+                code == 1000003 -> "请先登录汽水音乐"
+                message.isNotBlank() -> message
+                else -> "汽水音乐${action}失败（$code）"
+            },
+        )
+    }
+
+    // ---------------- 歌手页（对齐 libresoda artist.rs） ----------------
+
+    override suspend fun artistDetail(cookie: String, id: String): ArtistDetail {
+        val artistId = id.trim()
+        if (artistId.isEmpty()) throw IllegalArgumentException("artist id is empty")
+        val raw = pcGet("${SodaArtistApi.ARTIST_PATH}/$artistId", cookie = cookie)
+        return sodaArtistDetail(SodaJson.parse(raw), artistId, info.id)
+    }
+
+    override suspend fun artistSongs(cookie: String, id: String): List<Song> {
+        val artistId = id.trim()
+        if (artistId.isEmpty()) return emptyList()
+        val raw = pcGet(
+            "${SodaArtistApi.ARTIST_PATH}/$artistId/tracks",
+            listOf("cursor" to "", "count" to SodaArtistApi.clampCount(0).toString()),
+            cookie,
+        )
+        return SodaArtistApi.tracks(SodaJson.parse(raw)).map { buildSongFromTrack(it) }
+    }
+
+    override suspend fun artistAlbums(cookie: String, id: String, page: Int, limit: Int): ArtistAlbumPage {
+        val artistId = id.trim()
+        if (artistId.isEmpty()) return ArtistAlbumPage(emptyList())
+        val safeLimit = SodaArtistApi.clampCount(limit)
+        val cursor = ((page.coerceAtLeast(1) - 1) * safeLimit).toString()
+        val raw = pcGet(
+            "${SodaArtistApi.ARTIST_PATH}/$artistId/albums",
+            listOf("cursor" to cursor, "count" to safeLimit.toString()),
+            cookie,
+        )
+        val root = SodaJson.parse(raw)
+        return sodaArtistAlbumPage(root, SodaArtistApi.albums(root))
+    }
+
+    // ---------------- 最近播放 / 播放统计（对齐 libresoda playback.rs） ----------------
+
+    /** 读「最近播放」；服务端字段随版本变动，这里按曲目 id + 标题解。 */
+    suspend fun recentlyPlayed(cookie: String, cursor: String = "", count: Int = 20): List<Song> {
+        if (cookie.isBlank()) return emptyList()
+        val raw = pcGet(
+            SODA_RECENTLY_PLAYED_PATH,
+            listOf(
+                "cursor" to cursor.trim(),
+                "count" to SodaArtistApi.clampCount(count).toString(),
+                "media_type" to "track",
+                "scene" to "",
+            ),
+            cookie,
+        )
+        val root = SodaJson.parse(raw) ?: return emptyList()
+        val entries = SodaArtistApi.firstArray(root, "media_list", "recently_played_media", "items")
+        return entries.mapNotNull { entry ->
+            val track = jsonObj(entry, "track") ?: entry
+            decodeSodaJson<SodaTrack>(track.toString(), "soda recently played json parse error")
+                .takeIf { it.id.isNotEmpty() }
+                ?.let { buildSongFromTrack(it) }
+        }
+    }
+
+    /** 从「最近播放」里删一条。 */
+    suspend fun deleteRecentlyPlayed(cookie: String, trackIds: List<String>) {
+        val ids = SodaCollection.cleanIds(trackIds)
+        if (ids.isEmpty() || cookie.isBlank()) return
+        businessPost("$SODA_RECENTLY_PLAYED_PATH/delete", SodaCollection.mediaOnlyBody(ids), cookie)
+    }
+
+    /** 播放统计：带 `media_id` 才回 stats，只带 status 的是空查询。 */
+    suspend fun mediaStats(cookie: String, trackId: String): String {
+        if (cookie.isBlank() || trackId.isBlank()) return ""
+        return pcGet(SODA_MEDIA_STATS_PATH, listOf("media_id" to trackId, "media_type" to "track"), cookie)
+    }
+
+    /**
+     * 播放前的业务校验（对齐 libresoda `report.rs::check_media`）：回包带版权状态
+     * （`media_status[].status`）和风控结果（`risk_result`）。拿不到就返回空串。
+     */
+    suspend fun checkMedia(
+        cookie: String,
+        trackId: String,
+        durationSeconds: Int = 0,
+        sceneName: String = "player",
+        queueType: String = "feed",
+    ): String {
+        if (cookie.isBlank() || trackId.isBlank()) return ""
+        val body = buildJsonObject {
+            putJsonArray("media_list") {
+                add(buildJsonObject {
+                    put("type", "track")
+                    put("id", trackId.trim())
+                    putJsonObject("attr") { put("duration", durationSeconds.coerceAtLeast(0)) }
+                })
+            }
+            putJsonObject("limited_free_param_map") {}
+            put("scene", 1)
+            put("queue_type", queueType.trim())
+            put("scene_name", sceneName.trim())
+        }.toString()
+        return businessPost(SODA_MCHECK_PATH, body, cookie).body
+    }
+
+    /** 已购 / 收藏的数字专辑（对齐 libresoda `collection.rs::digital_albums`）。 */
+    suspend fun digitalAlbums(cookie: String, cursor: String = "", count: Int = 20): String {
+        if (cookie.isBlank()) return ""
+        return pcGet(
+            SodaCollection.DIGITAL_ALBUMS_PATH,
+            listOf("cursor" to cursor.trim(), "count" to SodaCollection.clampCount(count).toString()),
+            cookie,
+        )
+    }
+
+    /** 指定用户的收藏混合列表；传自己的 user_id 就是「我收藏的」。 */
+    internal suspend fun userMixedCollections(
+        cookie: String,
+        userId: String,
+        cursor: String = "",
+        count: Int = 20,
+        itemTypes: List<String> = listOf(SodaCollection.ITEM_ALBUM, SodaCollection.ITEM_PLAYLIST),
+    ): List<SodaCollectedItem> {
+        val uid = userId.trim()
+        if (cookie.isBlank() || uid.isEmpty()) return emptyList()
+        val suffix = itemTypes.map { "item_types=${queryEscape(it.trim())}" }
+            .filter { it.isNotBlank() }
+            .joinToString("&")
+        val raw = pcGet(
+            SodaCollection.USER_MIXED_PATH,
+            listOf("user_id" to uid, "cursor" to cursor.trim(), "count" to SodaCollection.clampCount(count).toString()),
+            cookie,
+            rawSuffix = suffix,
+        )
+        return SodaCollectedParser.parse(SodaJson.parse(raw))
+    }
+
+    /**
+     * 专辑详情优先走 `GET /luna/pc/albums/{id}`：JSON 直出，还带艺人 id。
+     * 分享页 HTML（抓 `_ROUTER_DATA`）只作兜底——那条链路服务端一改版就整块失效。
+     * PC 接口解不出东西（字段变动、空曲目）时静默回落到分享页，行为和以前一致。
+     */
+    private suspend fun fetchAlbumDetail(cookie: String, id: String): Pair<Playlist, List<Song>> {
+        fetchPcAlbumDetail(cookie, id)?.let { return it }
+        return fetchAlbumDetailFromSharePage(cookie, id)
+    }
+
+    private suspend fun fetchPcAlbumDetail(cookie: String, id: String): Pair<Playlist, List<Song>>? {
+        val albumId = id.trim()
+        if (albumId.isEmpty()) return null
+        val raw = runCatching { pcGet("$SODA_PC_ALBUM_PATH/$albumId", cookie = cookie) }.getOrNull() ?: return null
+        val root = SodaJson.parse(raw) ?: return null
+        val info = SodaArtistApi.detailNode(root) ?: return null
+        val resolvedId = jsonText(info, "id").ifEmpty { albumId }
+        val name = jsonText(info, "name")
+        if (name.isEmpty()) return null
+        val songs = SodaArtistApi.tracks(root).map { buildSongFromTrack(it) }
+        // 一首都没解出来就交给分享页：宁可慢一点，也不能给用户一个空专辑
+        if (songs.isEmpty()) return null
+
+        val artists = jsonObjList(info, "artists")
+        val description = listOf(
+            jsonText(info, "description"),
+            jsonText(info, "desc"),
+            info.pclines(),
+        ).firstOrNull { it.isNotBlank() }.orEmpty()
+        val extra = mutableMapOf("album_id" to resolvedId)
+        val artistId = artists.firstOrNull()?.let { jsonText(it, "id") }.orEmpty()
+        if (artistId.isNotEmpty()) extra["artist_id"] = artistId
+        val releaseDate = jsonLong(info, "release_date") ?: 0L
+        if (releaseDate > 0) extra["release_date"] = releaseDate.toString()
+        val company = jsonText(info, "company")
+        if (company.isNotEmpty()) extra["company"] = company
+
+        val album = Playlist(
+            source = SODA_SOURCE,
+            id = resolvedId,
+            name = name,
+            cover = SodaArtistApi.imageUrl(jsonObj(info, "url_cover") ?: JsonObject(emptyMap()), "~c5_300x300.jpg"),
+            trackCount = jsonInt(info, "count_tracks") ?: songs.size,
+            creator = artists.firstOrNull()?.let { jsonText(it, "name") }.orEmpty(),
+            description = description,
+            link = sodaAlbumLink(resolvedId),
+            extra = extra,
+        )
+        return album to songs
+    }
+
+    /** `pclines` 是分享页里的多行简介，PC 接口有时也带这个字段。 */
+    private fun JsonObject.pclines(): String =
+        SodaJson.stringList(this, "pclines").joinToString(" ").trim()
+
+    private suspend fun fetchAlbumDetailFromSharePage(cookie: String, id: String): Pair<Playlist, List<Song>> {
+        val body = NativeHttp.get(sodaAlbumLink(id), cookie = cookie, userAgent = SODA_USER_AGENT)
+        val page = parseSodaShareAlbumPage(body)
+        val info = page.loaderData.albumPage.albumInfo
+        if (info.id.isEmpty()) throw IllegalStateException("album not found")
+
+        var description = info.pclines.joinToString(" ")
+        description = description.trim()
+        if (description.isEmpty()) description = info.company.trim()
+
+        val extra = mutableMapOf("album_id" to info.id)
+        if (info.releaseDate > 0) extra["release_date"] = info.releaseDate.toString()
+        var album = Playlist(
+            source = SODA_SOURCE,
+            id = info.id,
+            name = info.name,
+            cover = buildImageUrl(info.urlCover, "~c5_300x300.jpg"),
+            trackCount = info.countTracks,
+            creator = joinArtists(info.artists),
+            description = description,
+            link = sodaAlbumLink(info.id),
+            extra = extra,
+        )
+        if (album.trackCount == 0) {
+            album = album.copy(trackCount = page.loaderData.albumPage.trackList.size)
+        }
+
+        val songs = mutableListOf<Song>()
+        page.loaderData.albumPage.trackList.forEach { track ->
+            if (track.id.isEmpty()) return@forEach
+
+            var displaySize = maxBitRateSize(track.bitRates)
+            val previewSize = maxBitRateSize(track.preview.bitRates)
+            if (previewSize > displaySize) displaySize = previewSize
+
+            var artist = joinArtists(track.artists)
+            if (artist.isEmpty()) artist = album.creator
+
+            var cover = buildImageUrl(track.album.urlCover, "~c5_375x375.jpg")
+            if (cover.isEmpty()) cover = buildImageUrl(info.urlCover, "~c5_375x375.jpg")
+
+            var albumId = track.album.id
+            if (albumId.isEmpty()) albumId = info.id
+            var albumName = track.album.name.trim()
+            if (albumName.isEmpty()) albumName = info.name
+
+            val duration = track.duration / 1000
+            var bitrate = 0
+            if (duration > 0 && displaySize > 0) {
+                bitrate = (displaySize * 8 / 1000 / duration).toInt()
+            }
+
+            songs += Song(
+                source = SODA_SOURCE,
+                id = track.id,
+                name = track.name,
+                artist = artist,
+                album = albumName,
+                albumId = albumId,
+                duration = duration,
+                size = displaySize,
+                bitrate = bitrate,
+                cover = cover,
+                link = "https://www.qishui.com/track/${track.id}",
+                extra = trackExtra(track.id, track.labelInfo, mapOf("album_id" to albumId)),
+                isVip = track.labelInfo.isVip(),
+            )
+        }
+        if (songs.isEmpty()) throw IllegalStateException("album has no songs")
+        return album to songs
+    }
+
+    /** 「音乐墙」：总听歌时长 / 本周听歌时长。 */
+    suspend fun musicWall(cookie: String): Pair<Long, Long> {
+        if (cookie.isBlank()) return 0L to 0L
+        val raw = businessPost(SODA_MUSIC_WALL_PATH, "{\"ab_param\":\"\",\"recent_rankings_version\":\"\",\"schema_extra\":\"\"}", cookie).body
+        val root = SodaJson.parse(raw) ?: return 0L to 0L
+        val node = jsonObj(root, "listen_duration") ?: root
+        return jsonLong(node, "total_duration").orZero() to jsonLong(node, "week_duration").orZero()
+    }
+
+    // ---------------- 搜索联想 / 热搜词（对齐 libresoda search.rs） ----------------
+
+    /** 联想词：`GET /luna/pc/sug`，客户端每次请求带一个新的 v4 UUID。 */
+    suspend fun searchSuggestions(cookie: String, keyword: String): List<String> {
+        val query = keyword.trim()
+        if (query.isEmpty()) return emptyList()
+        val raw = pcGet(
+            SODA_SUG_PATH,
+            listOf("q" to query, "sug_scene" to "main", "sug_search_id" to java.util.UUID.randomUUID().toString()),
+            cookie,
+        )
+        val root = SodaJson.parse(raw) ?: return emptyList()
+        return SodaArtistApi.firstArray(root, "sugs", "items").mapNotNull { entry ->
+            val text = listOf(
+                jsonText(entry, "content"),
+                jsonText(entry, "word"),
+                jsonText(entry, "title"),
+                jsonText(entry, "q"),
+            ).firstOrNull { it.isNotBlank() }
+            text?.takeIf { it.isNotBlank() }
+        }.distinct()
+    }
+
+    /** 热搜词：`GET /luna/suggest-words/{type}`，`default` 是客户端默认那一档。 */
+    suspend fun hotSearchWords(cookie: String, type: String = "default"): List<String> {
+        val kind = type.trim().ifEmpty { "default" }
+        val raw = pcGet("${SODA_SUGGEST_WORDS_PATH}/$kind", cookie = cookie)
+        val root = SodaJson.parse(raw) ?: return emptyList()
+        return SodaArtistApi.firstArray(root, "words", "suggest_words", "items").mapNotNull { entry ->
+            val text = listOf(
+                jsonText(entry, "word"),
+                jsonText(entry, "content"),
+                jsonText(entry, "title"),
+            ).firstOrNull { it.isNotBlank() }
+            text?.takeIf { it.isNotBlank() }
+        }.distinct()
+    }
+
+    /** 推荐歌单：`GET /luna/me/playlist/recommend`。 */
+    override suspend fun recommendedPlaylists(cookie: String): List<Playlist> {
+        val raw = pcGet(SODA_RECOMMEND_PLAYLIST_PATH, cookie = cookie)
+        val root = SodaJson.parse(raw) ?: return emptyList()
+        return SodaArtistApi.firstArray(root, "playlists", "items").mapNotNull { entry ->
+            val id = jsonText(entry, "id")
+            if (id.isEmpty()) return@mapNotNull null
+            Playlist(
+                source = SODA_SOURCE,
+                id = id,
+                name = listOf(jsonText(entry, "public_title"), jsonText(entry, "title"), jsonText(entry, "name"))
+                    .firstOrNull { it.isNotBlank() }.orEmpty(),
+                cover = SodaArtistApi.imageUrl(jsonObj(entry, "url_cover") ?: JsonObject(emptyMap()), "~c5_300x300.jpg"),
+                trackCount = jsonInt(entry, "count_tracks") ?: 0,
+                creator = jsonText(entry, "owner", "nickname"),
+                description = jsonText(entry, "desc"),
+                link = "https://www.qishui.com/playlist/$id",
+            )
+        }
+    }
+
+    private fun Long?.orZero(): Long = this ?: 0L
+
     private fun pcTrackV2Url(creds: SodaAppCredentials): String {
         val params = pcAppParams()
         params["device_id"] = creds.deviceId
@@ -1457,9 +2318,19 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             return Uri.fromFile(file).toString()
         }
 
-        val encoded = downloadBytes(info.url)
-        if (encoded.isEmpty()) throw IllegalStateException("soda 音频下载为空")
-        val plain = SodaDecrypt.decryptAudio(encoded, info.playAuth)
+        // 无损整曲几十 MB，180 秒的总超时一次下不完：加密字节先落 .part，断了接着要
+        val downloaded = SodaResumableDownloader(SODA_STREAM_CLIENT, SODA_USER_AGENT).download(
+            url = info.url,
+            target = file,
+            // 密钥指纹：换签名 / 换档后旧字节解不开，必须重下
+            keyFingerprint = NativeCrypto.md5Hex(info.playAuth),
+        )
+        if (downloaded.bytes.isEmpty()) throw IllegalStateException("soda 音频下载为空")
+        if (downloaded.report.resumedFrom > 0) {
+            AppLog.i(TAG, "续传生效 trackId=$trackId 接上=${downloaded.report.resumedFrom}B " +
+                "本次=${downloaded.report.transferred}B 共=${downloaded.report.onDisk}B")
+        }
+        val plain = SodaDecrypt.decryptAudio(downloaded.bytes, info.playAuth)
         val tmp = File(dir, "$name.tmp")
         tmp.writeBytes(plain)
         if (!tmp.renameTo(file)) {
@@ -1470,34 +2341,6 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return Uri.fromFile(file).toString()
     }
 
-    private suspend fun downloadBytes(url: String): ByteArray = suspendCancellableCoroutine { continuation ->
-        val request = Request.Builder().url(url).get().header("User-Agent", SODA_USER_AGENT).build()
-        val call = SODA_STREAM_CLIENT.newCall(request)
-        continuation.invokeOnCancellation { call.cancel() }
-        call.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                if (continuation.isActive) continuation.resumeWithException(e)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    if (!it.isSuccessful) {
-                        if (continuation.isActive) {
-                            continuation.resumeWithException(
-                                IOException("soda audio download failed: HTTP ${it.code}")
-                            )
-                        }
-                        return
-                    }
-                    val bytes = runCatching { it.body?.bytes() ?: ByteArray(0) }.getOrElse { error ->
-                        if (continuation.isActive) continuation.resumeWithException(error)
-                        return
-                    }
-                    if (continuation.isActive) continuation.resume(bytes)
-                }
-            }
-        })
-    }
 
     private fun pruneCache(dir: File) {
         val files = dir.listFiles()?.filter { it.isFile } ?: return
@@ -1927,81 +2770,6 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         )
     }
 
-    // ---------------------------------------------------------------------
-    // Album details
-    // ---------------------------------------------------------------------
-
-    private suspend fun fetchAlbumDetail(cookie: String, id: String): Pair<Playlist, List<Song>> {
-        val body = NativeHttp.get(sodaAlbumLink(id), cookie = cookie, userAgent = SODA_USER_AGENT)
-        val page = parseSodaShareAlbumPage(body)
-        val info = page.loaderData.albumPage.albumInfo
-        if (info.id.isEmpty()) throw IllegalStateException("album not found")
-
-        var description = info.pclines.joinToString(" ")
-        description = description.trim()
-        if (description.isEmpty()) description = info.company.trim()
-
-        val extra = mutableMapOf("album_id" to info.id)
-        if (info.releaseDate > 0) extra["release_date"] = info.releaseDate.toString()
-        var album = Playlist(
-            source = SODA_SOURCE,
-            id = info.id,
-            name = info.name,
-            cover = buildImageUrl(info.urlCover, "~c5_300x300.jpg"),
-            trackCount = info.countTracks,
-            creator = joinArtists(info.artists),
-            description = description,
-            link = sodaAlbumLink(info.id),
-            extra = extra,
-        )
-        if (album.trackCount == 0) {
-            album = album.copy(trackCount = page.loaderData.albumPage.trackList.size)
-        }
-
-        val songs = mutableListOf<Song>()
-        page.loaderData.albumPage.trackList.forEach { track ->
-            if (track.id.isEmpty()) return@forEach
-
-            var displaySize = maxBitRateSize(track.bitRates)
-            val previewSize = maxBitRateSize(track.preview.bitRates)
-            if (previewSize > displaySize) displaySize = previewSize
-
-            var artist = joinArtists(track.artists)
-            if (artist.isEmpty()) artist = album.creator
-
-            var cover = buildImageUrl(track.album.urlCover, "~c5_375x375.jpg")
-            if (cover.isEmpty()) cover = buildImageUrl(info.urlCover, "~c5_375x375.jpg")
-
-            var albumId = track.album.id
-            if (albumId.isEmpty()) albumId = info.id
-            var albumName = track.album.name.trim()
-            if (albumName.isEmpty()) albumName = info.name
-
-            val duration = track.duration / 1000
-            var bitrate = 0
-            if (duration > 0 && displaySize > 0) {
-                bitrate = (displaySize * 8 / 1000 / duration).toInt()
-            }
-
-            songs += Song(
-                source = SODA_SOURCE,
-                id = track.id,
-                name = track.name,
-                artist = artist,
-                album = albumName,
-                albumId = albumId,
-                duration = duration,
-                size = displaySize,
-                bitrate = bitrate,
-                cover = cover,
-                link = "https://www.qishui.com/track/${track.id}",
-                extra = trackExtra(track.id, track.labelInfo, mapOf("album_id" to albumId)),
-                isVip = track.labelInfo.isVip(),
-            )
-        }
-        if (songs.isEmpty()) throw IllegalStateException("album has no songs")
-        return album to songs
-    }
 
     private fun parseSodaShareAlbumPage(body: String): SodaShareAlbumPage {
         val routerJson = extractSodaJsonBlock(body, "_ROUTER_DATA = ")
@@ -2522,7 +3290,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     // Response mapping helpers
     // ---------------------------------------------------------------------
 
-    private fun buildSongFromTrack(track: SodaTrack): Song {
+    internal fun buildSongFromTrack(track: SodaTrack): Song {
         var displaySize = maxBitRateSize(track.bitRates)
         val previewSize = maxBitRateSize(track.preview.bitRates)
         if (previewSize > displaySize) displaySize = previewSize
@@ -2575,7 +3343,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return song
     }
 
-    private fun bestTrackPlayInfo(list: List<SodaTrackPlayInfo>): SodaTrackPlayInfo? {
+    internal fun bestTrackPlayInfo(list: List<SodaTrackPlayInfo>): SodaTrackPlayInfo? {
         var best: SodaTrackPlayInfo? = null
         for (info in list) {
             if (info.mainPlayUrl.trim().isEmpty() && info.backupPlayUrl.trim().isEmpty()) continue
@@ -2656,22 +3424,22 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         }
     }
 
-    private fun normalizeSodaBitrate(bitrate: Int): Int = if (bitrate > 1000) bitrate / 1000 else bitrate
+    internal fun normalizeSodaBitrate(bitrate: Int): Int = if (bitrate > 1000) bitrate / 1000 else bitrate
 
-    private fun trackDurationSeconds(track: SodaTrack): Int =
+    internal fun trackDurationSeconds(track: SodaTrack): Int =
         if (track.duration > 1000) track.duration / 1000 else track.duration
 
-    private fun maxBitRateSize(bitRates: List<SodaBitRate>): Long {
+    internal fun maxBitRateSize(bitRates: List<SodaBitRate>): Long {
         var size = 0L
         bitRates.forEach { if (it.size > size) size = it.size }
         return size
     }
 
-    private fun joinArtists(artists: List<SodaArtist>): String =
+    internal fun joinArtists(artists: List<SodaArtist>): String =
         artists.mapNotNull { artist -> artist.name.trim().takeIf { it.isNotEmpty() } }
             .joinToString(" / ")
 
-    private fun trackExtra(
+    internal fun trackExtra(
         trackId: String,
         label: SodaLabelInfo,
         values: Map<String, String>,
@@ -2694,7 +3462,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return extra
     }
 
-    private fun buildImageUrl(image: SodaImage, suffix: String): String {
+    internal fun buildImageUrl(image: SodaImage, suffix: String): String {
         if (image.urls.isEmpty()) return ""
         var cover = image.urls[0].trim()
         val uri = image.uri.trim()
@@ -2731,7 +3499,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return result
     }
 
-    private fun songTrackId(song: Song): String {
+    internal fun songTrackId(song: Song): String {
         val extraTrackId = song.extra["track_id"].orEmpty().trim()
         if (extraTrackId.isNotEmpty()) return extraTrackId
         return song.id.trim()
@@ -2956,7 +3724,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         params.entries.sortedBy { it.key }
             .joinToString("&") { (key, value) -> "${queryEscape(key)}=${queryEscape(value)}" }
 
-    private fun queryEscape(value: String): String {
+    internal fun queryEscape(value: String): String {
         val bytes = value.toByteArray(Charsets.UTF_8)
         val builder = StringBuilder(bytes.size)
         for (byte in bytes) {
@@ -3208,6 +3976,14 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         const val SODA_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
         const val PC_APP_USER_AGENT = "LunaPC/3.3.0(359450208)"
+
+        /**
+         * PC 综合搜索单独用 3.7.0 的客户端指纹：服务端按它校验这条新链路，
+         * 和其余 PC 接口的 3.3.0 不是同一套（对齐 libresoda `fetch_pc_search_all`）。
+         */
+        const val PC_SEARCH_USER_AGENT = "LunaPC/3.7.0(452316191)"
+        const val PC_SEARCH_VERSION_NAME = "3.7.0"
+        const val PC_SEARCH_VERSION_CODE = "30070000"
         const val ANDROID_SEARCH_USER_AGENT =
             "com.luna.music/100198030 (Linux; U; Android 15; zh_CN_#Hans; ABR-AL80; Build/V417IR;tt-ok/3.12.13.19)"
         const val ANDROID_API_BASE = "https://api.qishui.com/luna"
@@ -3219,6 +3995,25 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         const val RECOMMEND_PLAYLISTS_API = "https://api.qishui.com/luna/pc/discover/mix"
         const val FEED_MODE_API = "https://api.qishui.com/luna/pc/feed/mode"
         const val FEED_SONG_TAB_API = "https://api.qishui.com/luna/pc/feed/song-tab"
+
+        /** 最近播放的读 / 删（libresoda `playback.rs`）。 */
+        const val SODA_RECENTLY_PLAYED_PATH = "/luna/pc/me/recently-played-media"
+        /** 播放统计 / 上报，参数透传。 */
+        const val SODA_MEDIA_STATS_PATH = "/luna/pc/media-stats"
+        /** 「音乐墙」：总听歌时长 / 本周听歌时长。 */
+        const val SODA_MUSIC_WALL_PATH = "/luna/me/music_wall"
+        /** 搜索联想词。 */
+        const val SODA_SUG_PATH = "/luna/pc/sug"
+        /** 热搜词，路径后面还要拼类型（`default` 是客户端默认档）。 */
+        const val SODA_SUGGEST_WORDS_PATH = "/luna/suggest-words"
+        /** 推荐歌单。 */
+        const val SODA_RECOMMEND_PLAYLIST_PATH = "/luna/me/playlist/recommend"
+        /** 「我创建的歌单」：官方客户端侧边栏用的就是它，也是判断歌单能否修改的依据。 */
+        const val SODA_MY_PLAYLISTS_PATH = "/luna/pc/me/playlist"
+        /** PC 专辑详情：JSON 直出，比抓分享页 HTML 稳。 */
+        const val SODA_PC_ALBUM_PATH = "/luna/pc/albums"
+        /** 播放前的业务校验：版权状态 + 风控结果。 */
+        const val SODA_MCHECK_PATH = "/luna/pc/mcheck"
         const val SODA_FEED_BATCH = 10
         const val HOT_SONG_TOP_LIST_ID = "7036274230471712007"
         const val DEFAULT_HOT_SONG_LIMIT = 100
@@ -3368,24 +4163,27 @@ private data class SodaStatusInfo(
 )
 
 @Serializable
-private data class SodaArtist(val name: String = "")
+internal data class SodaArtist(
+    val id: String = "",
+    val name: String = "",
+)
 
 @Serializable
-private data class SodaImage(
+internal data class SodaImage(
     val urls: List<String> = emptyList(),
     val uri: String = "",
     @SerialName("template_prefix") val templatePrefix: String = "",
 )
 
 @Serializable
-private data class SodaBitRate(
+internal data class SodaBitRate(
     val br: Int = 0,
     val quality: String = "",
     val size: Long = 0,
 )
 
 @Serializable
-private data class SodaTrackPlayInfo(
+internal data class SodaTrackPlayInfo(
     @SerialName("main_play_url") val mainPlayUrl: String = "",
     @SerialName("backup_play_url") val backupPlayUrl: String = "",
     @SerialName("play_auth") val playAuth: String = "",
@@ -3397,19 +4195,19 @@ private data class SodaTrackPlayInfo(
 )
 
 @Serializable
-private data class SodaTrackAudioInfo(
+internal data class SodaTrackAudioInfo(
     @SerialName("play_info_list") val playInfoList: List<SodaTrackPlayInfo> = emptyList(),
 )
 
 @Serializable
-private data class SodaAlbum(
+internal data class SodaAlbum(
     val id: String = "",
     val name: String = "",
     @SerialName("url_cover") val urlCover: SodaImage = SodaImage(),
 )
 
 @Serializable
-private data class SodaPreview(
+internal data class SodaPreview(
     val vid: String = "",
     val start: Int = 0,
     val duration: Int = 0,
@@ -3417,20 +4215,20 @@ private data class SodaPreview(
 )
 
 @Serializable
-private data class SodaQualityBenefit(
+internal data class SodaQualityBenefit(
     val condition: String = "",
     @SerialName("need_vip") val needVip: Boolean = false,
     @SerialName("need_purchase") val needPurchase: Boolean = false,
 )
 
 @Serializable
-private data class SodaQualityPolicy(
+internal data class SodaQualityPolicy(
     @SerialName("play_detail") val playDetail: SodaQualityBenefit? = null,
     @SerialName("download_detail") val downloadDetail: SodaQualityBenefit? = null,
 )
 
 @Serializable
-private data class SodaLabelInfo(
+internal data class SodaLabelInfo(
     @SerialName("only_vip_download") val onlyVipDownload: Boolean = false,
     @SerialName("only_vip_playable") val onlyVipPlayable: Boolean = false,
     @SerialName("quality_only_vip_can_download") val qualityOnlyVipCanDownload: List<String> = emptyList(),
@@ -3439,7 +4237,7 @@ private data class SodaLabelInfo(
 )
 
 @Serializable
-private data class SodaTrack(
+internal data class SodaTrack(
     val id: String = "",
     val name: String = "",
     val duration: Int = 0,

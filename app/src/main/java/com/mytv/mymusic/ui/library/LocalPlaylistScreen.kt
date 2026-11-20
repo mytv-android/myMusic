@@ -711,6 +711,7 @@ fun LocalPlaylistScreen(
             onDismiss = { actionEntry = null },
             onOpenArtist = { name -> actions.openArtistByName(name, song) },
             onOpenAlbum = { actions.openAlbumOf(song) },
+            onCollect = { actions.collectOnPlatform(song) },
             // 本地歌：这台设备没有文件、放的是匹配到的平台版本时，只有这里能换匹配（换好的会同步回有文件的设备）
             onRematch = if (song.source == LOCAL_SOURCE) ({ actionEntry = null; unplayable.rematch = song }) else null,
             wallPage = actionPage.takeIf { posterView },

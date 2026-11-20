@@ -460,6 +460,7 @@ fun SearchScreen(
             },
             onOpenArtist = { name -> actions.openArtistByName(name, song) },
             onOpenAlbum = { actions.openAlbumOf(song) },
+            onCollect = { actions.collectOnPlatform(song) },
         )
     }
     if (ctx.pickerOpen) {

@@ -168,6 +168,22 @@ interface NativeProvider {
     suspend fun passwordLogin(username: String, password: String): String =
         throw UnsupportedOperationException("${info.name} 暂不支持账号密码登录")
 
+    /**
+     * 这个平台有没有账号侧的「收藏」：把一首歌加进平台账号的我喜欢 / 收藏夹。
+     * 和本机收藏是两件事：这个写去平台，换设备也在。默认 false，界面据此决定显不显示这一行。
+     */
+    fun supportsCollect(): Boolean = false
+
+    /** 收藏到平台账号；没实现或没登录时抛 [UnsupportedOperationException]。 */
+    suspend fun collectTrack(cookie: String, song: Song) {
+        throw UnsupportedOperationException("${info.name} 暂不支持收藏")
+    }
+
+    /** 从平台账号取消收藏。 */
+    suspend fun uncollectTrack(cookie: String, song: Song) {
+        throw UnsupportedOperationException("${info.name} 暂不支持取消收藏")
+    }
+
     /** 登录账号的昵称、头像、会员/等级；null 表示这个平台没有实现或资料不可用。 */
     suspend fun accountInfo(cookie: String): AccountInfo? = null
 

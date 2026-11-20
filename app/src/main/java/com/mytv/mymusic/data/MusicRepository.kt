@@ -148,6 +148,18 @@ open class MusicRepository(
     suspend fun reorderPlaylistTracks(provider: String, cookie: String, playlistId: String, songs: List<Song>) =
         requireProvider(provider).reorderPlaylistTracks(cookie, playlistId, songs)
 
+    /** 这个平台有没有账号侧收藏（汽水的「我喜欢的音乐」）；界面据此决定显不显示这一行。 */
+    fun supportsCollect(provider: String): Boolean =
+        NativeProviders.get(provider)?.supportsCollect() == true
+
+    /** 收藏到平台账号。平台没实现时抛 [UnsupportedOperationException]，由界面兜成提示。 */
+    suspend fun collectTrack(provider: String, cookie: String, song: Song) =
+        requireProvider(provider).collectTrack(cookie, song)
+
+    /** 从平台账号取消收藏。 */
+    suspend fun uncollectTrack(provider: String, cookie: String, song: Song) =
+        requireProvider(provider).uncollectTrack(cookie, song)
+
     fun providerInfo(provider: String): ProviderInfo? = NativeProviders.get(provider)?.info
 
     private fun requireProvider(id: String): NativeProvider =
