@@ -6,6 +6,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.floor
 import kotlin.math.hypot
 
 class WallGeometryTest {
@@ -261,6 +262,67 @@ class WallGeometryTest {
                 assertTrue("第 $song 首有更近的一份 ($bx,$by,$s)", hypot(o.centerX - wx, o.centerY - wy) >= d)
             }
         }
+    }
+
+    @Test
+    fun nearestCopyFindsTheSongAfterDraggingFarAway() {
+        // 441 首：重复单元 8 块 × 5 块。拖到单元外几屏远以后，原来只看中心块周围 ±2 块的写法一份都找不到
+        val m = WallMetrics.Phone
+        val scene = WallScene(m, fieldFor(441))
+        val center = WallPoint(180f, 400f)
+        val cam = WallPoint(9000f, 5000f)
+        val wx = cam.x + center.x
+        val wy = cam.y + center.y
+        val cbx = floor(wx / m.blockWidth).toInt()
+        val cby = floor(wy / m.blockHeight).toInt()
+        var nearby = 0
+        for (by in cby - 2..cby + 2) for (bx in cbx - 2..cbx + 2) for (s in 0 until WallLayout.SLOTS) {
+            if (scene.songAt(bx, by, s) == 303) nearby++
+        }
+        assertEquals(0, nearby)
+        // 每一首都能找到最近的自己；一个单元里的每一首都验一遍（单元外的重复版式一样，距离只是平移）
+        for (song in 0 until 441) {
+            val p = scene.nearestCopy(song, cam, center)!!
+            assertEquals(song, scene.songAt(p.bx, p.by, p.slot))
+            val d = hypot(scene.rectAt(p).centerX - wx, scene.rectAt(p).centerY - wy)
+            for (by in cby - 12..cby + 12) for (bx in cbx - 18..cbx + 18) {
+                for (s in 0 until WallLayout.SLOTS) {
+                    if (scene.songAt(bx, by, s) != song) continue
+                    val o = scene.rectAt(SlotPos(bx, by, s))
+                    assertTrue("第 $song 首有更近的一份 ($bx,$by,$s)", hypot(o.centerX - wx, o.centerY - wy) >= d)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun nearestCopyStaysExactAtEveryQueryPoint() {
+        // 查询点落在块里各个位置（含块边界、负坐标）时，找到的都得是最近的一份
+        val m = WallMetrics.Phone
+        val scene = WallScene(m, fieldFor(441))
+        for (song in listOf(0, 17, 303, 440)) {
+            for (qx in listOf(-3000f, -57f, -0.5f, 333f, 5000f)) for (qy in listOf(-2000f, -0.5f, 91f, 4000f)) {
+                val p = scene.nearestCopy(song, WallPoint(qx, qy), WallPoint(0f, 0f))!!
+                assertEquals(song, scene.songAt(p.bx, p.by, p.slot))
+                val d = hypot(scene.rectAt(p).centerX - qx, scene.rectAt(p).centerY - qy)
+                val cbx = floor(qx / m.blockWidth).toInt()
+                val cby = floor(qy / m.blockHeight).toInt()
+                for (by in cby - 14..cby + 14) for (bx in cbx - 20..cbx + 20) {
+                    for (s in 0 until WallLayout.SLOTS) {
+                        if (scene.songAt(bx, by, s) != song) continue
+                        val o = scene.rectAt(SlotPos(bx, by, s))
+                        assertTrue("第 $song 首 $qx,$qy 有更近的一份 ($bx,$by,$s)", hypot(o.centerX - qx, o.centerY - qy) >= d)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun nearestCopyIsNullOutsideTheQueue() {
+        val scene = WallScene(WallMetrics.Phone, fieldFor(30))
+        assertNull(scene.nearestCopy(30, WallPoint(0f, 0f), WallPoint(0f, 0f)))
+        assertNull(scene.nearestCopy(-1, WallPoint(0f, 0f), WallPoint(0f, 0f)))
     }
 
     @Test

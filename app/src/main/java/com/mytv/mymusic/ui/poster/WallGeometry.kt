@@ -421,29 +421,48 @@ internal class WallScene(
     }
 
     /**
-     * 这首歌离屏幕点 [screen]（相对镜头 [cam]）最近的一份。普通墙在中心块周围 ±2 块里找，
-     * 按屏幕上实际的位置算（含放大块的重排）；听歌模式每首只有一份，直接算位置，占位格和越界返回 null。
+     * 这首歌离屏幕点 [screen]（相对镜头 [cam]）最近的一份。普通墙按重复单元精确找：一首歌每隔 [WallField.Looping.cols]
+     * 块 / [WallField.Looping.rows] 块出现一次，块里的版式随块坐标换模板，所以对单元里每个坐这首歌的位取离查询点最近的那个重复。
+     * 不能只在中心块周围几块里找——墙拖远以后那几块里可能一份都没有，切歌跟随、“定位”就会找不到。
+     * 听歌模式每首只有一份，直接算位置；占位格、越界和没有这首歌时返回 null。
      */
     fun nearestCopy(song: Int, cam: WallPoint, screen: WallPoint): SlotPos? {
         val f = field
         if (f is WallField.FeedBand) return if (song >= 0 && song < f.songs) f.posOf(song) else null
+        val looping = f as? WallField.Looping ?: return null
+        val n = looping.n
+        if (n <= 0 || song < 0 || song >= n) return null
         val wx = cam.x + screen.x
         val wy = cam.y + screen.y
-        val cbx = floor(wx / metrics.blockWidth).toInt()
-        val cby = floor(wy / metrics.blockHeight).toInt()
+        val cols = looping.cols
+        val rows = looping.rows
+        val unitW = cols * metrics.blockWidth
+        val unitH = rows * metrics.blockHeight
+        val unitSlots = cols * rows * WallLayout.SLOTS
         var best: SlotPos? = null
         var bd = Float.POSITIVE_INFINITY
-        for (by in cby - 2..cby + 2) for (bx in cbx - 2..cbx + 2) {
-            val rs = rectsOf(bx, by)
-            for (s in 0 until WallLayout.SLOTS) {
-                if (songAt(bx, by, s) != song) continue
-                val w = world(bx, by, rs[s])
+        // 重复单元里坐这首歌的位：单元第 index 位坐的是第 index % n 首。同一首在一个周期里可能坐不止一个位
+        var index = song
+        while (index < unitSlots) {
+            val block = index / WallLayout.SLOTS
+            val slot = index % WallLayout.SLOTS
+            val c = block % cols
+            val r = block / cols
+            // 这个位每隔一个重复单元出现一次。块内位置（模板、镜像随块坐标变）最多偏出一格，所以取查询点所在的那个
+            // 重复和前后各一个，最近的一份一定在这三个里
+            val m0 = floor((wx - c * metrics.blockWidth) / unitW).toInt()
+            val k0 = floor((wy - r * metrics.blockHeight) / unitH).toInt()
+            for (dk in -1..1) for (dm in -1..1) {
+                val bx = c + (m0 + dm) * cols
+                val by = r + (k0 + dk) * rows
+                val w = world(bx, by, rectsOf(bx, by)[slot])
                 val d = hypot(w.centerX - wx, w.centerY - wy)
                 if (d < bd) {
                     bd = d
-                    best = SlotPos(bx, by, s)
+                    best = SlotPos(bx, by, slot)
                 }
             }
+            index += n
         }
         return best
     }

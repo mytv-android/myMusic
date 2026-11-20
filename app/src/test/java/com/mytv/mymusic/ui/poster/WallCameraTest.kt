@@ -152,6 +152,28 @@ class WallCameraTest {
     }
 
     @Test
+    fun advanceIdleOnlyMovesTheClock() {
+        val c = WallCamera()
+        c.fling(1000f, 0f, WallPoint(0f, 0f))
+        val at = c.position
+        // 睡着期间镜头不动：只推进空闲计时，惯性等真正有帧了再走
+        c.advanceIdle(0.4f)
+        assertEquals(at, c.position)
+        assertTrue(c.isFlinging)
+        c.step(1f / 60f)
+        assertTrue(c.x < at.x)
+    }
+
+    @Test
+    fun advanceIdleStartsTheDriftAtTheThreshold() {
+        val c = WallCamera(random = Random(1))
+        c.driftEnabled = true
+        c.advanceIdle((WallCamera.DRIFT_AFTER + 0.1).toFloat())
+        assertTrue(c.isDrifting)
+        assertEquals(0f, c.x, 0f)
+    }
+
+    @Test
     fun flingDecaysTheSameAtAnyFrameRate() {
         fun run(fps: Int, seconds: Double): WallCamera = WallCamera().also { c ->
             c.fling(1500f, -800f, WallPoint(0f, 0f))

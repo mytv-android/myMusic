@@ -7,6 +7,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 import kotlin.random.Random
 
 class PosterWallStateTest {
@@ -222,6 +223,27 @@ class PosterWallStateTest {
         assertTrue(s.camera.isFlinging)
         s.settle()
         assertTrue(s.camX > start.x - 40f)
+    }
+
+    @Test
+    fun wakingTheFrameLoopAfterADragDoesNotJumpTheFling() {
+        val s = wall(phone(current = 4), phoneView)
+        s.settle()
+        val start = s.camera.position
+        // 手指按着拖了 0.4 秒：这段时间镜头跟手走
+        s.beginDrag()
+        s.dragBy(120f, 0f)
+        now += 400_000_000L
+        val held = s.camera.position
+        assertEquals(start.x - 120f, held.x, 1e-3f)
+        s.endDrag(-1000f, 0f)
+        // 帧循环被这最后一次操作叫醒：睡过去的 0.4 秒已经过时，惯性一点不走
+        s.resumeAfterSleep()
+        assertEquals(held, s.camera.position)
+        // 之后真正的一帧只走 1/60 秒：1000 dp/s 走 (1 − e^(−4.2/60)) / 4.2 ≈ 16.1dp
+        s.tick(1f / 60f)
+        val first = abs(held.x - s.camera.x)
+        assertEquals(16.1f, first, 0.5f)
     }
 
     @Test

@@ -865,13 +865,23 @@ internal class PosterWallState internal constructor(
                 } else {
                     withTimeoutOrNull(max(1L, ceil(wait * 1000).toLong())) { wakeups.receive() }
                 }
-                val now = clock()
-                val dt = (now - lastTick).coerceAtLeast(0L) / 1e9f
-                lastTick = max(lastTick, now)
-                lastFrame = NO_FRAME
-                tick(dt)
+                resumeAfterSleep()
             }
         }
+    }
+
+    /**
+     * 帧循环从睡着里醒来（[runFrames] 调用）。睡着这段时间镜头没动，这段时长不能当成一帧推给弹簧或惯性：
+     * 拖得越久，松手时惯性第一帧就跳得越远（issue #24 录下来的正是这个）。时间只推进空闲计时（电视浮层该淡出、
+     * 到点该起漂），镜头从此刻重新开始走。
+     */
+    internal fun resumeAfterSleep() {
+        val now = clock()
+        val dt = (now - lastTick).coerceAtLeast(0L) / 1e9f
+        lastTick = max(lastTick, now)
+        lastFrame = NO_FRAME
+        camera.advanceIdle(dt)
+        tick(0f)
     }
 
     /** 推进 [dt] 秒：镜头、入场波、微光，然后把结果写回快照状态。 */

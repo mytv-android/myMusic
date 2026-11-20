@@ -200,6 +200,17 @@ internal class WallCamera(
         return was
     }
 
+    /**
+     * 只推进空闲计时，不动镜头：帧循环睡着时用它。睡着期间没有运动，醒来多半是刚拉起了弹簧或惯性，
+     * 那段时间的镜头位移要留给真正的帧去走，不能当成一帧一下子推掉。到点开始漂移。
+     */
+    fun advanceIdle(dt: Float) {
+        val raw = max(0.0, dt.toDouble())
+        val before = idleSeconds
+        idleSeconds += raw
+        if (driftEnabled && drift == null && before < DRIFT_AFTER && idleSeconds >= DRIFT_AFTER) startDrift()
+    }
+
     /** 推进 [dt] 秒；返回这一帧镜头是否动了。 */
     fun step(dt: Float): Boolean {
         val raw = max(0.0, dt.toDouble())
