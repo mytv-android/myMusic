@@ -88,6 +88,7 @@ import com.mytv.mymusic.ui.player.stage.label
 import com.mytv.mymusic.ui.player.stage.modeOf
 import com.mytv.mymusic.ui.player.stage.rememberAnimationDraft
 import com.mytv.mymusic.ui.theme.PlayerTheme
+import com.mytv.mymusic.ui.theme.isTelevision
 
 internal val LyricsBackgroundMode.label: String
     get() = when (this) {
@@ -141,6 +142,7 @@ internal fun LyricsSettingsScreen(
     var animationOpen by rememberSaveable { mutableStateOf(false) }
     val animationDraft = rememberAnimationDraft(animationOpen, state.lyricStage)
     val context = LocalContext.current
+    val television = remember(context) { context.isTelevision() }
     var overlayGranted by remember { mutableStateOf(FloatingLyricsService.hasPermission(context)) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         overlayGranted = FloatingLyricsService.hasPermission(context)
@@ -320,30 +322,32 @@ internal fun LyricsSettingsScreen(
                 summary = "把当前这句歌词放到系统通知、锁屏等媒体播放条的第二行，歌手名会被替换；歌词不同步时仍显示歌手。",
             )
         }
-        item(key = "floatingHead", contentType = "sectionHeader") { SectionLabel("悬浮窗歌词") }
-        item(key = "floatingLyrics", contentType = "switch") {
-            SwitchRow(
-                title = "显示悬浮歌词",
-                checked = state.floatingLyricsEnabled && overlayGranted,
-                onCheckedChange = { enabled ->
-                    if (enabled && !overlayGranted) {
-                        runCatching { overlayPermissionPicker.launch(FloatingLyricsService.permissionIntent(context)) }
-                            .onFailure { actions.setFloatingLyricsEnabled(true) }
+        if (!television) {
+            item(key = "floatingHead", contentType = "sectionHeader") { SectionLabel("桌面歌词（悬浮窗）") }
+            item(key = "floatingLyrics", contentType = "switch") {
+                SwitchRow(
+                    title = "显示桌面歌词",
+                    checked = state.floatingLyricsEnabled && overlayGranted,
+                    onCheckedChange = { enabled ->
+                        if (enabled && !overlayGranted) {
+                            runCatching { overlayPermissionPicker.launch(FloatingLyricsService.permissionIntent(context)) }
+                                .onFailure { actions.setFloatingLyricsEnabled(true) }
+                        } else {
+                            actions.setFloatingLyricsEnabled(enabled)
+                        }
+                    },
+                    index = 0,
+                    count = 1,
+                    summary = if (overlayGranted) {
+                        "歌词在屏宽 90% 的透明区域内居中，按钮自动隐藏；点一下显示播放 / 暂停、下一首和关闭。"
                     } else {
-                        actions.setFloatingLyricsEnabled(enabled)
-                    }
-                },
-                index = 0,
-                count = 1,
-                summary = if (overlayGranted) {
-                    "歌词在屏宽 90% 的透明区域内居中，按钮自动隐藏；点一下显示播放 / 暂停、下一首和关闭。"
-                } else {
-                    "需要“显示在其他应用上层”权限；打开时会先跳转到系统授权页面。"
-                },
-            )
-        }
-        item(key = "floatingNote", contentType = "note") {
-            SettingsNote("点一下歌词显示按钮，再点歌词返回 myMusic；按钮几秒后自动隐藏。拖动调整位置并自动记住，撤掉系统权限后歌词会隐藏。")
+                        "需要“显示在其他应用上层”权限；打开时会先跳转到系统授权页面。"
+                    },
+                )
+            }
+            item(key = "floatingNote", contentType = "note") {
+                SettingsNote("点一下歌词显示按钮，再点歌词返回 myMusic；按钮几秒后自动隐藏。拖动调整位置并自动记住，撤掉系统权限后歌词会隐藏。")
+            }
         }
         item(key = "lyriconHead", contentType = "sectionHeader") { SectionLabel("词幕（Lyricon）") }
         item(key = "lyriconSwitches", contentType = "lyriconSwitches") {

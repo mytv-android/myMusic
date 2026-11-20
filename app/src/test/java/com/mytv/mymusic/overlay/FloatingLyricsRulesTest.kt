@@ -64,6 +64,19 @@ class FloatingLyricsRulesTest {
     }
 
     @Test
+    fun televisionCannotStartDesktopLyricsEvenFromAnOldEnabledConfiguration() {
+        assertFalse(floatingLyricsServiceAllowed(television = true, enabled = true, hasPermission = true))
+        assertFalse(floatingLyricsServiceAllowed(television = true, enabled = false, hasPermission = true))
+    }
+
+    @Test
+    fun phonesNeedBothTheSwitchAndOverlayPermission() {
+        assertTrue(floatingLyricsServiceAllowed(television = false, enabled = true, hasPermission = true))
+        assertFalse(floatingLyricsServiceAllowed(television = false, enabled = true, hasPermission = false))
+        assertFalse(floatingLyricsServiceAllowed(television = false, enabled = false, hasPermission = true))
+    }
+
+    @Test
     fun draggingIsClampedToEveryVisibleEdge() {
         assertEquals(
             FloatingLyricsPosition(0, 0),

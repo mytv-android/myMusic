@@ -26,6 +26,9 @@ internal fun floatingLyricsContent(snapshot: PlaybackSnapshot?, now: Long): Floa
     return FloatingLyricsContent(primary, secondary, snapshot.playing, canControl = true)
 }
 
+internal fun floatingLyricsServiceAllowed(television: Boolean, enabled: Boolean, hasPermission: Boolean): Boolean =
+    !television && enabled && hasPermission
+
 internal data class FloatingLyricsPosition(val x: Int, val y: Int)
 
 /** 整根悬浮条都留在屏幕里；悬浮条比屏幕还宽 / 高时贴左上，不出现负的可拖范围。 */

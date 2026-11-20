@@ -6149,6 +6149,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setLyricsBackground(value: LyricsBackgroundMode) = viewModelScope.launch { app.settings.lyricsBackground(value) }
     fun setNotificationLyrics(value: Boolean) = viewModelScope.launch { app.settings.notificationLyrics(value) }
     fun setFloatingLyricsEnabled(value: Boolean) = viewModelScope.launch {
+        if (value && app.isTelevision()) {
+            message("TV 不提供桌面歌词")
+            return@launch
+        }
         if (value && !FloatingLyricsService.hasPermission(app)) {
             message("还没有悬浮窗权限，请在系统设置中允许 myMusic 显示在其他应用上层")
             return@launch

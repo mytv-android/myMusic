@@ -23,6 +23,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.mytv.mymusic.MyMusicApp
+import com.mytv.mymusic.ui.theme.isTelevision
 import com.mytv.mymusic.widget.PlaybackSnapshot
 import com.mytv.mymusic.widget.WidgetHub
 import com.mytv.mymusic.widget.WidgetLinks
@@ -66,7 +67,7 @@ class FloatingLyricsService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!hasPermission(this)) {
+        if (isTelevision() || !hasPermission(this)) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -377,7 +378,7 @@ class FloatingLyricsService : Service() {
         /** 返回系统是否接受了启动 / 停止；后台启动受限时由下次回到应用再补一次。 */
         fun sync(context: Context, enabled: Boolean): Boolean {
             val intent = Intent(context, FloatingLyricsService::class.java)
-            if (!enabled || !hasPermission(context)) {
+            if (!floatingLyricsServiceAllowed(context.isTelevision(), enabled, hasPermission(context))) {
                 context.stopService(intent)
                 return true
             }
