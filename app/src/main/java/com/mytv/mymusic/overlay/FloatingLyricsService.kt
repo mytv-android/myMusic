@@ -6,7 +6,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
@@ -105,31 +105,25 @@ class FloatingLyricsService : Service() {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(8), dp(6), dp(8))
-            background = GradientDrawable().apply {
-                color = android.content.res.ColorStateList.valueOf(BACKGROUND)
-                cornerRadius = dp(18).toFloat()
-                setStroke(dp(1), STROKE)
-            }
+            setPadding(dp(8), dp(6), dp(4), dp(6))
+            background = null
             isClickable = true
         }
-        val grip = View(this).apply { background = GradientDrawable().apply {
-            color = android.content.res.ColorStateList.valueOf(GRIP)
-            cornerRadius = dp(2).toFloat()
-        } }
-        bar.addView(grip, LinearLayout.LayoutParams(dp(3), dp(32)).apply { marginEnd = dp(10) })
 
         val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val primary = TextView(this).apply {
-            textSize = 17f
+            textSize = 20f
             setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), TEXT_SHADOW)
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
-            maxWidth = (screenWidth - dp(156)).coerceAtLeast(dp(120))
+            maxWidth = (screenWidth - dp(116)).coerceAtLeast(dp(120))
         }
         val secondary = TextView(this).apply {
-            textSize = 12.5f
+            textSize = 13f
             setTextColor(SECONDARY)
+            setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), TEXT_SHADOW)
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.END
             maxWidth = primary.maxWidth
@@ -143,15 +137,16 @@ class FloatingLyricsService : Service() {
             setColorFilter(Color.WHITE)
             background = null
             contentDescription = description
-            setPadding(dp(6), dp(6), dp(6), dp(6))
+            setPadding(dp(7), dp(7), dp(7), dp(7))
             setOnClickListener { action() }
         }
         val play = button(android.R.drawable.ic_media_play, "播放或暂停") { transport("play") }
         val next = button(android.R.drawable.ic_media_next, "下一首") { transport("next") }
         val close = button(android.R.drawable.ic_menu_close_clear_cancel, "关闭悬浮歌词", ::closeFromOverlay)
-        bar.addView(play, LinearLayout.LayoutParams(dp(38), dp(38)))
-        bar.addView(next, LinearLayout.LayoutParams(dp(38), dp(38)))
-        bar.addView(close, LinearLayout.LayoutParams(dp(38), dp(38)))
+        bar.addView(play, LinearLayout.LayoutParams(dp(30), dp(30)))
+        bar.addView(next, LinearLayout.LayoutParams(dp(30), dp(30)))
+        close.alpha = CONTROL_ALPHA
+        bar.addView(close, LinearLayout.LayoutParams(dp(30), dp(30)))
 
         val type = if (Build.VERSION.SDK_INT >= 26) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -262,11 +257,11 @@ class FloatingLyricsService : Service() {
         playButton?.apply {
             setImageResource(if (content.playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
             isEnabled = content.canControl
-            alpha = if (content.canControl) 1f else 0.4f
+            alpha = if (content.canControl) CONTROL_ALPHA else 0.25f
         }
         nextButton?.apply {
             isEnabled = content.canControl
-            alpha = if (content.canControl) 1f else 0.4f
+            alpha = if (content.canControl) CONTROL_ALPHA else 0.25f
         }
         bar.contentDescription = listOf(content.primary, content.secondary).filter { it.isNotBlank() }
             .joinToString("，") + "。点按打开应用，拖动调整位置"
@@ -294,7 +289,7 @@ class FloatingLyricsService : Service() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         val density = resources.displayMetrics.density
-        val maxWidth = (resources.displayMetrics.widthPixels - (156 * density).toInt())
+        val maxWidth = (resources.displayMetrics.widthPixels - (116 * density).toInt())
             .coerceAtLeast((120 * density).toInt())
         primaryText?.maxWidth = maxWidth
         secondaryText?.maxWidth = maxWidth
@@ -312,10 +307,9 @@ class FloatingLyricsService : Service() {
         private const val POSITION_PREFS = "floating_lyrics_position"
         private const val POSITION_X = "x"
         private const val POSITION_Y = "y"
-        private val BACKGROUND = Color.argb(235, 22, 27, 38)
-        private const val STROKE = 0x38FFFFFF
-        private val GRIP = 0x99FFFFFF.toInt()
-        private const val SECONDARY = 0xCCFFFFFF.toInt()
+        private const val CONTROL_ALPHA = 0.72f
+        private val TEXT_SHADOW = 0xE6000000.toInt()
+        private const val SECONDARY = 0xF2FFFFFF.toInt()
 
         fun hasPermission(context: Context): Boolean = Settings.canDrawOverlays(context)
 

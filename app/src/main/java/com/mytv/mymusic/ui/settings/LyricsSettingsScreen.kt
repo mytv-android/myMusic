@@ -336,7 +336,7 @@ internal fun LyricsSettingsScreen(
                 index = 0,
                 count = 1,
                 summary = if (overlayGranted) {
-                    "在桌面和其他应用上显示当前句与翻译；可拖动，带播放 / 暂停、下一首和关闭按钮。"
+                    "透明显示当前句与翻译，以小号按钮控制播放 / 暂停、下一首和关闭；可拖动位置。"
                 } else {
                     "需要“显示在其他应用上层”权限；打开时会先跳转到系统授权页面。"
                 },
