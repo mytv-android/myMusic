@@ -649,15 +649,18 @@ internal fun PlaybackSettingsScreen(
             }
         }
         item(key = "qualityHead", contentType = "sectionHeader") { SectionLabel("播放音质") }
-        item(key = "quality", contentType = "toggleGroup") {
+        item(key = "quality", contentType = "chips") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ConnectedToggleGroup(
-                    options = QUALITY_PREFERENCE_OPTIONS,
-                    selected = AudioQuality.normalize(state.audioQuality) ?: AudioQuality.Auto,
-                    onSelect = { actions.setAudioQuality(it) },
-                    label = { it.preferenceLabel },
-                    modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
-                )
+                val selectedQuality = AudioQuality.normalize(state.audioQuality) ?: AudioQuality.Auto
+                // 七档塞不进一行连接按钮组，窄屏每格只剩几十 dp、字全被省略；chip 自动换行，宽度跟着文字走
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    QUALITY_PREFERENCE_OPTIONS.forEach { quality ->
+                        MusicChip(quality.preferenceLabel, quality == selectedQuality) { actions.setAudioQuality(quality) }
+                    }
+                }
                 SettingsNote(
                     "锁了档位就只取那一档；平台给不了（没上架、账号没有会员）时先换平台，仍不行才退回自动档。" +
                         "各平台能选哪些档取决于当前账号，Spotify 与 Apple Music 只有试听片段。",
