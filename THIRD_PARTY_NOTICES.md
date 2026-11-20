@@ -9,6 +9,13 @@
 
 The vendored Go source is retained as the reference for the Kotlin native port in `app/src/main/java/com/mytv/mymusic/data/native`. This includes the word-timing lyric conversions ported from `lyrics/lyrics.go` (`ParseLRC` / `ParseYRC` / `ParseQRC` / `ParseKRC` / `ConvertVerbatimLRC` → the verbatim-LRC output in `QQProvider.kt`, `KugouProvider.kt`, `NetEaseProvider.kt`), the `spotify/` package (anonymous Web Player search, the public-embed and chart-mirror fallbacks, the Web API credential/token flow → `SpotifyProvider.kt`), and the audio-quality ladders from `model/quality.go` plus each platform's `quality.go` (`AudioQuality` / `AudioQualityOption` / `NormalizeAudioQuality`, the per-platform candidate ladders, and the "never silently downgrade a requested tier" rule → `AudioQuality.kt` and the per-provider `availableQualityOptions` / `downloadUrlWithQuality`). The Kotlin port is a derivative work distributed under AGPL-3.0. Modifications must retain this notice and the AGPL-3.0 terms.
 
+### Spotify additions beyond the vendored Go reference
+
+`SpotifyProvider.kt` carries two things the vendored `spotify/` package does not have, both recovered from Spotify's own web player rather than from music-lib:
+
+- The `fetchPlaylistMetadata` / `fetchPlaylistContents` persisted queries (sha256 `21ea11a6ac75a5f3e01fd365d29c18e0a4a8b7dc09f89bbb5d73910190c6acaf`, taken from `web-player.<hash>.js` on `open.spotifycdn.com`), which return a playlist's cover and owner plus one page of tracks with each track's own `albumOfTrack.coverArt`. Without them an anonymous playlist listing can only stamp the playlist's cover onto every track.
+- A `throwOnError` switch on `NativeHttp`, because a client that throws on every non-2xx response can never act on the status code — Spotify's 401 token refresh, 429 backoff and fall back to the public embed all need to read it.
+
 ## LX Music custom-source runtime / QuickJS
 
 - Upstream: https://github.com/lyswhut/lx-music-mobile
@@ -226,6 +233,7 @@ These features were written from the mods' public descriptions only; none of the
 
 - Upstream: https://github.com/shub39/Rush
 - Revision checked: 9fa1391c4b4b472f7d03c9bfbd47612330574463 (master on 2026-11-09, app version 7.2.1)
+- Metadata fallback: the LRCLIB search sequence (cleaned title/artist/album, combined query, then original title) follows the same revision's `LrcLibApi`. Lyrics come from the public LRCLIB service. Rush uses Genius search artwork; myMusic instead uses tokenless Apple Search results so no upstream credential is bundled. Matching and candidate scoring use myMusic's existing `TrackMatcher`. Implementation: `app/src/main/java/com/mytv/mymusic/data/metadata/CommunityMetadata.kt`.
 - Share cards revision checked: 5a952bf6894df97b63819bdb372abad479c503f6 (master on 2026-11-18)
 - Copyright (C) 2026 Shubham Gorai
 - License: GNU General Public License v3.0 or (at your option) any later version

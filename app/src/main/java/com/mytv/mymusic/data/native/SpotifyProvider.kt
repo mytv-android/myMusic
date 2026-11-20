@@ -7,9 +7,11 @@ import com.mytv.mymusic.data.PlaylistCategory
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
@@ -50,7 +52,7 @@ private val SPOTIFY_INFO = ProviderInfo(
     topLists = true,
     topListSongs = true,
     hotSongs = true,
-    note = "整曲受 DRM 保护，仅能播放官方 30 秒试听；未配置凭据时用匿名 Web Player 检索、公开嵌入与榜单镜像兜底。",
+    note = "整曲受 DRM 保护，仅能播放官方 30 秒试听；未配置凭据时用匿名 Web Player 检索、匿名歌单目录（带每首歌自己的专辑封面）、公开嵌入与榜单镜像兜底。",
 )
 
 /** Spotify 的 HTTP 错误：能不能回退到公开嵌入，全看状态码。 */
@@ -60,7 +62,8 @@ private class SpotifyApiException(val status: Int, message: String) : Exception(
  * Spotify 平台。
  *
  * 两条链路并存：配了 Client ID/Secret 或 token 时走官方 Web API；没配（或官方接口 401/403/404/429）
- * 就退回公开嵌入页与匿名 Web Player 检索，所以搜索、歌单、专辑、榜单在零配置下都能用。
+ * 就退回匿名 Web Player 的持久化查询与公开嵌入页，所以搜索、歌单、专辑、榜单在零配置下都能用。
+ * 官方接口的状态码必须能读出来才能降级，见 [NativeHttp.getResponse] 的 `throwOnError`。
  * 整曲始终拿不到——DRM 保护的资源不存在明文地址，只能给官方 preview。
  *
  * 移植自 music-lib 的 spotify 包（AGPL-3.0）。
@@ -186,6 +189,7 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
     ): JsonObject? {
         var authRetried = false
         var rateLimitRetried = false
+        var lastError: SpotifyApiException? = null
         repeat(3) {
             val token = ensureAccessToken(userOnly)
             val url = buildString {
@@ -197,10 +201,12 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
                     })
                 }
             }
+            // 非 2xx 也要能读到状态码，否则 401/429 的重试和降级判断全都失效
             val response = NativeHttp.getResponse(
                 url,
                 headers = mapOf("Authorization" to "Bearer $token", "Accept" to "application/json"),
                 userAgent = USER_AGENT,
+                throwOnError = false,
             )
             if (response.code == 401 && !authRetried) {
                 authRetried = true
@@ -209,13 +215,17 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
             }
             if (response.code == 429 && !rateLimitRetried) {
                 rateLimitRetried = true
+                delay(RETRY_BACKOFF_MS)
                 return@repeat
             }
-            if (response.code !in 200..299) throw SpotifyApiException(response.code, spotifyErrorMessage(response.body))
+            if (response.code !in 200..299) {
+                throw SpotifyApiException(response.code, spotifyErrorMessage(response.body)).also { lastError = it }
+            }
             if (response.body.isBlank()) return null
             return json.parseToJsonElement(response.body).jsonObject
         }
-        throw IllegalStateException("spotify 请求在重新鉴权重试后仍然失败")
+        // 401/429 各重试一次后仍不成功：把最后一次的状态码抛出去，让调用方走降级
+        throw lastError ?: IllegalStateException("spotify 请求在重新鉴权重试后仍然失败")
     }
 
     // ---- 匿名 Web Player ----
@@ -379,9 +389,28 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
             }
         }.toString()
 
+        val root = webPlayerGraphQL("searchDesktop", payload)
+        if (root["errors"]?.jsonArray?.isNotEmpty() == true && webSearchResultCount(root) == 0) {
+            val message = root["errors"]?.jsonArray?.firstOrNull()?.jsonObject?.get("message")?.jsonPrimitive?.content
+            throw IllegalStateException("spotify 匿名检索被拒：${message ?: "未知错误"}")
+        }
+        if (webSearchCache.size >= SEARCH_CACHE_SIZE) {
+            webSearchCache.keys.take(webSearchCache.size - SEARCH_CACHE_SIZE + 1).forEach { webSearchCache.remove(it) }
+        }
+        webSearchCache[keyword] = root to System.currentTimeMillis() + SEARCH_CACHE_TTL_MS
+        return root
+    }
+
+    /**
+     * 匿名 Web Player 的持久化查询：401/403 换一次匿名身份后重试，其余状态码带消息抛出。
+     *
+     * [payload] 已经带好 operationName 与 extensions.persistedQuery，这里只负责鉴权与重试。
+     */
+    private suspend fun webPlayerGraphQL(operation: String, payload: String): JsonObject {
         var authRetried = false
         while (true) {
             val auth = anonymousAuthOrThrow()
+            // 非 2xx 也要看状态码才能判断该重鉴权还是该报错
             val response = NativeHttp.postJson(
                 "$PARTNER_BASE/pathfinder/v2/query",
                 payload,
@@ -396,6 +425,7 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
                     "Cookie" to auth.cookie,
                 ),
                 userAgent = WEB_PLAYER_USER_AGENT,
+                throwOnError = false,
             )
             if ((response.code == 401 || response.code == 403) && !authRetried) {
                 authRetried = true
@@ -403,22 +433,31 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
                 continue
             }
             if (response.code !in 200..299) {
-                throw IllegalStateException("spotify 匿名检索 ${response.code}: ${spotifyErrorMessage(response.body)}")
+                throw IllegalStateException(
+                    "spotify $operation ${response.code}: ${spotifyErrorMessage(response.body)}",
+                )
             }
-            val root = json.parseToJsonElement(response.body).jsonObject
-            if (root["errors"]?.jsonArray?.isNotEmpty() == true && webSearchResultCount(root) == 0) {
-                val message = root["errors"]?.jsonArray?.firstOrNull()?.jsonObject?.get("message")?.jsonPrimitive?.content
-                throw IllegalStateException("spotify 匿名检索被拒：${message ?: "未知错误"}")
-            }
-            if (webSearchCache.size >= SEARCH_CACHE_SIZE) {
-                webSearchCache.keys.take(webSearchCache.size - SEARCH_CACHE_SIZE + 1).forEach { webSearchCache.remove(it) }
-            }
-            webSearchCache[keyword] = root to System.currentTimeMillis() + SEARCH_CACHE_TTL_MS
-            return root
+            if (response.body.isBlank()) throw IllegalStateException("spotify $operation 响应为空")
+            return json.parseToJsonElement(response.body).jsonObject
         }
     }
 
+    internal fun persistedQueryPayload(operation: String, hash: String, variables: JsonObject): String =
+        buildJsonObject {
+            put("operationName", operation)
+            put("variables", variables)
+            putJsonObject("extensions") {
+                putJsonObject("persistedQuery") {
+                    put("version", 1)
+                    put("sha256Hash", hash)
+                }
+            }
+        }.toString()
+
     private val webSearchCache = java.util.concurrent.ConcurrentHashMap<String, Pair<JsonObject, Long>>()
+
+    /** 歌单元数据缓存：榜单页每次进入都会读，避免重复打匿名接口。 */
+    private val playlistMetaCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Playlist?, Long>>()
 
     private fun webSearchItems(root: JsonObject, vararg keys: String): List<JsonObject> {
         val search = root["data"]?.jsonObject?.get("searchV2")?.jsonObject ?: return emptyList()
@@ -539,6 +578,7 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
             endpoint,
             headers = mapOf("Accept" to "text/html,application/xhtml+xml"),
             userAgent = USER_AGENT,
+            throwOnError = false,
         )
         if (response.code !in 200..299) throw IllegalStateException("spotify 嵌入页 ${response.code}")
         val payload = nextDataPayload(response.body) ?: throw IllegalStateException("spotify 嵌入页没有 __NEXT_DATA__")
@@ -646,9 +686,10 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
             if (album.isNotBlank()) put("album_name", album)
             if (duration > 0) put("duration", duration.toString())
         }
+        // 404 表示没有精确匹配，是正常分支，不能当成失败
         val exactResponse = spotifyPublicGet("$LRCLIB_API/get", exact)
         if (exactResponse.code == 200) {
-            val text = lrclibText(exactResponse.body)
+            val text = lrclibLyricsText(exactResponse.body)
             if (text.isNotBlank()) return text
         }
         if (exactResponse.code != 404 && exactResponse.code != 200) {
@@ -662,9 +703,7 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
         val candidates = runCatching {
             json.decodeFromString<List<LrclibLyrics>>(searchResponse.body)
         }.getOrDefault(emptyList())
-        return candidates.firstOrNull { lrclibText(it.syncedLyrics.ifBlank { it.plainLyrics }).isNotBlank() }
-            ?.let { lrclibText(it.syncedLyrics.ifBlank { it.plainLyrics }) }
-            .orEmpty()
+        return candidates.firstOrNull { it.text().isNotBlank() }?.text().orEmpty()
     }
 
     override suspend fun searchPlaylists(cookie: String, keyword: String): List<Playlist> {
@@ -716,7 +755,15 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
                         return@getOrElse null
                     }
                     throw error
-                } ?: continue
+                }
+            // 空响应不一定是结束信号，但也可能一直返回空；只在拿到页面时继续翻页
+            if (page == null) {
+                if (offset == 0 && endpoint == "items") {
+                    endpoint = "tracks"
+                    continue
+                }
+                break
+            }
             val items = page["items"]?.jsonArray?.mapNotNull { it.jsonObject }.orEmpty()
             songs += items.mapNotNull { item ->
                 val track = item["track"]?.jsonObject ?: item["item"]?.jsonObject ?: return@mapNotNull null
@@ -742,7 +789,10 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
     }
 
     private suspend fun fetchPlaylist(config: Config, playlistId: String): Playlist {
-        if (!config.hasCatalogAuthentication()) return fetchPlaylistFromEmbed(playlistId)
+        if (!config.hasCatalogAuthentication()) {
+            webPlayerPlaylistMetadata(playlistId)?.let { return it }
+            return fetchPlaylistFromEmbed(playlistId)
+        }
         val response = runCatching { config.getJson("/playlists/${urlEncode(playlistId)}", mapOf("market" to config.marketOrDefault())) }
             .getOrElse { error ->
                 if (!allowsPublicFallback(error)) throw error
@@ -768,21 +818,191 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
         )
     }
 
-    /** 没凭据时歌单曲目的两条公开兜底：嵌入页 + kworb 榜单镜像，谁先成功用谁。 */
-    private suspend fun playlistTracksFromPublic(playlistId: String): List<Song> {
-        val chartCountry = chartCountryOf(playlistId)
-        val results = coroutineScope {
-            buildList {
-                add(async { runCatching { songsFromEmbed(fetchEmbedEntity("playlist", playlistId)) } })
-                if (chartCountry != null) {
-                    add(async { runCatching { chartTracks(playlistId, chartCountry) } })
-                }
-            }.awaitAll()
+    /**
+     * 匿名 Web Player 拿歌单元数据：名称、封面、创建者、描述一次到位。
+     *
+     * 比嵌入页强在能拿到 `images.items[].sources`（封面）与 `ownerV2`（创建者），
+     * 嵌入页这两项经常缺。带缓存，榜单页反复进也不再重复请求。
+     */
+    private suspend fun webPlayerPlaylistMetadata(playlistId: String): Playlist? {
+        playlistMetaCache[playlistId]?.takeIf { System.currentTimeMillis() < it.second }?.let { return it.first }
+        val payload = persistedQueryPayload(
+            "fetchPlaylistMetadata",
+            PLAYLIST_QUERY_HASH,
+            buildJsonObject {
+                put("uri", "spotify:playlist:$playlistId")
+                put("enableWatchFeedEntrypoint", false)
+            },
+        )
+        val playlist = runCatching {
+            val root = webPlayerGraphQL("fetchPlaylistMetadata", payload)
+            val node = root["data"]?.jsonObject?.get("playlistV2")?.jsonObject ?: return@runCatching null
+            playlistFromWebPlayerMetadata(playlistId, node)
+        }.getOrNull()
+        if (playlistMetaCache.size >= PLAYLIST_META_CACHE_SIZE) {
+            playlistMetaCache.keys.take(playlistMetaCache.size - PLAYLIST_META_CACHE_SIZE + 1)
+                .forEach { playlistMetaCache.remove(it) }
         }
-        results.firstOrNull { it.isSuccess }?.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
-        val failure = results.firstOrNull { it.isFailure }?.exceptionOrNull()
-        throw IllegalStateException("spotify 歌单 $playlistId 公开兜底失败：${failure?.message ?: "未知错误"}")
+        playlistMetaCache[playlistId] = playlist to System.currentTimeMillis() + PLAYLIST_META_TTL_MS
+        return playlist
     }
+
+    internal fun playlistFromWebPlayerMetadata(playlistId: String, node: JsonObject): Playlist? {
+        val name = node["name"]?.jsonPrimitive?.content?.trim().orEmpty()
+        if (name.isBlank()) return null
+        val images = node["images"]?.jsonObject?.get("items")?.jsonArray
+            ?.mapNotNull { it.jsonObject?.get("sources")?.jsonArray?.mapNotNull { source -> source.jsonObject } }
+            ?.firstOrNull()
+            .orEmpty()
+        val ownerName = node["ownerV2"]?.jsonObject?.get("data")?.jsonObject?.get("name")?.jsonPrimitive?.content?.trim().orEmpty()
+        val description = node["description"]?.jsonPrimitive?.content?.trim().orEmpty()
+        return Playlist(
+            id = node["uri"]?.jsonPrimitive?.content?.let { idFromUri(it, "playlist") }?.takeIf { it.isNotBlank() } ?: playlistId,
+            name = name,
+            cover = bestCover(images),
+            // 元数据接口不给曲目数，交由调用方按实际拿到的歌曲数补
+            trackCount = 0,
+            creator = ownerName,
+            description = description,
+            source = "spotify",
+            link = "$OPEN_BASE/playlist/$playlistId",
+            extra = buildMap {
+                put("type", "playlist")
+                put("spotify_id", playlistId)
+            },
+        )
+    }
+
+    /** 歌单封面：先匿名 GraphQL，不中再退回嵌入页 / oEmbed。 */
+    private suspend fun playlistCover(playlistId: String): String {
+        webPlayerPlaylistMetadata(playlistId)?.cover?.takeIf { it.isNotBlank() }?.let { return it }
+        val fromEmbed = runCatching { fetchPlaylistFromEmbed(playlistId).cover }.getOrNull().orEmpty()
+        if (fromEmbed.isNotBlank()) return fromEmbed
+        return runCatching {
+            fetchOEmbed(playlistId)?.let { bestCover(listOf(buildJsonObject { put("url", it.thumbnail_url) })) }.orEmpty()
+        }.getOrNull().orEmpty()
+    }
+
+    /**
+     * 没凭据时歌单曲目的三条公开兜底，按优先级谁先成功用谁：
+     * 匿名 GraphQL 目录（带每首歌的真实专辑封面）→ 嵌入页 → kworb 榜单镜像。
+     *
+     * 嵌入页一处两用：既是兜底，又要给 GraphQL 目录补试听地址，所以只取一次。
+     */
+    private suspend fun playlistTracksFromPublic(playlistId: String): List<Song> = coroutineScope {
+        val chartCountry = chartCountryOf(playlistId)
+        val embed = async { runCatching { fetchEmbedEntity("playlist", playlistId) }.getOrNull() }
+        val chart = if (chartCountry != null) {
+            async { runCatching { chartTracks(playlistId, chartCountry) }.getOrNull() }
+        } else {
+            null
+        }
+        val fromWebPlayer = async { runCatching { webPlayerPlaylistTracks(playlistId, embed) }.getOrNull() }
+
+        val candidates = listOfNotNull(fromWebPlayer, async { embed.await()?.let { songsFromEmbed(it) } }, chart)
+            .map { it.await() }
+            .filterNotNull()
+            .filter { it.isNotEmpty() }
+        candidates.firstOrNull()?.let { return@coroutineScope it }
+        throw IllegalStateException("spotify 歌单 $playlistId 公开兜底失败")
+    }
+
+    /**
+     * 匿名 Web Player 的歌单目录：一次请求拿满一页，且每首歌都带 `albumOfTrack.coverArt`，
+     * 不会像嵌入页那样把所有曲目都盖成歌单封面。
+     *
+     * [embed] 是调用方已经取好的嵌入页——GraphQL 目录不带试听地址，而预览片段是 Spotify
+     * 唯一能播的音源，得靠嵌入页的 `audioPreview` 按曲目 id 补上。
+     */
+    private suspend fun webPlayerPlaylistTracks(
+        playlistId: String,
+        embed: Deferred<EmbedEntity?>,
+    ): List<Song> {
+        val songs = mutableListOf<Song>()
+        var offset = 0
+        while (true) {
+            val payload = persistedQueryPayload(
+                "fetchPlaylistContents",
+                PLAYLIST_QUERY_HASH,
+                buildJsonObject {
+                    put("uri", "spotify:playlist:$playlistId")
+                    put("offset", offset)
+                    put("limit", PLAYLIST_PAGE_SIZE)
+                },
+            )
+            val root = webPlayerGraphQL("fetchPlaylistContents", payload)
+            val content = root["data"]?.jsonObject?.get("playlistV2")?.jsonObject?.get("content")?.jsonObject
+                ?: throw IllegalStateException("spotify 匿名歌单目录没有返回内容")
+            val items = content["items"]?.jsonArray?.mapNotNull { it.jsonObject }.orEmpty()
+            songs += items.mapNotNull { item ->
+                val track = item["itemV2"]?.jsonObject?.get("data")?.jsonObject
+                    ?: item["itemV3"]?.jsonObject?.get("data")?.jsonObject
+                    ?: return@mapNotNull null
+                songFromWebPlayerContentsTrack(track)
+            }
+            val total = content["totalCount"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+            if (items.isEmpty() || (total > 0 && songs.size >= total)) break
+            offset += items.size
+        }
+        if (songs.isEmpty()) throw IllegalStateException("spotify 匿名歌单 $playlistId 没有曲目")
+        return fillPreviewUrls(songs, embed.await())
+    }
+
+    /** GraphQL 目录没有试听地址，用嵌入页的 `audioPreview` 按曲目 id 补齐。 */
+    private fun fillPreviewUrls(songs: List<Song>, entity: EmbedEntity?): List<Song> {
+        val previews = entity?.trackList
+            ?.mapNotNull { track ->
+                val id = track.uri.trim().removePrefix("spotify:track:")
+                val url = track.audioPreview?.url?.trim().orEmpty()
+                if (id.isBlank() || url.isBlank()) null else id to url
+            }
+            ?.toMap()
+            .orEmpty()
+        if (previews.isEmpty()) return songs
+        return songs.map { song ->
+            val url = previews[song.id]?.takeIf { it.isNotBlank() } ?: return@map song
+            if (song.url.isBlank()) song.copy(url = url) else song
+        }
+    }
+
+    internal fun songFromWebPlayerContentsTrack(track: JsonObject): Song? {
+        val id = idFromUri(track["uri"]?.jsonPrimitive?.content, "track") ?: return null
+        val name = track["name"]?.jsonPrimitive?.content?.trim().orEmpty()
+        if (name.isBlank()) return null
+        val album = track["albumOfTrack"]?.jsonObject
+        val extra = buildMap {
+            put("type", "track")
+            put("spotify_id", id)
+            put("preview_only", "true")
+            put("metadata_source", "web_player")
+            track["trackNumber"]?.jsonPrimitive?.content?.toIntOrNull()?.takeIf { it > 0 }?.let { put("track_number", it.toString()) }
+            track["discNumber"]?.jsonPrimitive?.content?.toIntOrNull()?.takeIf { it > 0 }?.let { put("disc_number", it.toString()) }
+            if (track["contentRating"]?.jsonObject?.get("label")?.jsonPrimitive?.content?.equals("EXPLICIT", true) == true) {
+                put("explicit", "true")
+            }
+            if (track["playability"]?.jsonObject?.get("playable")?.jsonPrimitive?.content == "false") put("playable", "false")
+        }
+        return Song(
+            id = id,
+            name = name,
+            artist = webPlayerArtists(track["artists"]?.jsonObject),
+            album = album?.get("name")?.jsonPrimitive?.content?.trim().orEmpty(),
+            albumId = idFromUri(album?.get("uri")?.jsonPrimitive?.content, "album").orEmpty(),
+            duration = webPlayerTrackDuration(track) / 1000,
+            cover = bestCover(album?.get("coverArt")?.jsonObject?.get("sources")?.jsonArray?.mapNotNull { it.jsonObject }.orEmpty()),
+            url = "",
+            ext = "mp3",
+            source = "spotify",
+            link = "$OPEN_BASE/track/$id",
+            extra = extra,
+        )
+    }
+
+    /** 目录里时长字段叫 `trackDuration`，检索里叫 `duration`，两个都认。 */
+    private fun webPlayerTrackDuration(track: JsonObject): Int =
+        track["trackDuration"]?.jsonObject?.get("totalMilliseconds")?.jsonPrimitive?.content?.toIntOrNull()
+            ?: track["duration"]?.jsonObject?.get("totalMilliseconds")?.jsonPrimitive?.content?.toIntOrNull()
+            ?: 0
 
     override suspend fun recommendedPlaylists(cookie: String): List<Playlist> {
         val config = configOf(cookie)
@@ -932,16 +1152,30 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
             .orEmpty()
     }
 
-    override suspend fun topLists(cookie: String): List<TopList> = TOP_LISTS.map { definition ->
-        TopList(
-            id = definition.id,
-            name = definition.name,
-            description = definition.description,
-            updateFrequency = "每日更新",
-            trackCount = 50,
-            source = "spotify",
-            link = "$OPEN_BASE/playlist/${definition.playlistId}",
-        )
+    override suspend fun topLists(cookie: String): List<TopList> = coroutineScope {
+        // 封面要按歌单逐个取。匿名身份拿不到就别试了——否则每份封面都会各自跑一遍
+        // bootstrap + TOTP + clienttoken，六份就是十几次无效请求。
+        val canResolveCover = runCatching { anonymousAuthOrThrow() }.isSuccess
+        val covers = if (canResolveCover) {
+            TOP_LISTS.map { definition ->
+                async { runCatching { playlistCover(definition.playlistId) }.getOrNull().orEmpty() }
+            }.awaitAll()
+        } else {
+            emptyList()
+        }
+        TOP_LISTS.mapIndexed { index, definition ->
+            TopList(
+                id = definition.id,
+                name = definition.name,
+                cover = covers.getOrElse(index) { "" },
+                description = definition.description,
+                updateFrequency = "每日更新",
+                trackCount = 50,
+                source = "spotify",
+                link = "$OPEN_BASE/playlist/${definition.playlistId}",
+                extra = mapOf("spotify_id" to JsonPrimitive(definition.playlistId)),
+            )
+        }
     }
 
     override suspend fun topListSongs(cookie: String, id: String): List<Song> {
@@ -1250,9 +1484,7 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
         )
         if (response.code != 200) throw IllegalStateException("spotify 榜单镜像 ${response.code}")
         val entries = parseKworbChart(response.body)
-        val cover = runCatching {
-            fetchOEmbed(playlistId)?.let { bestCover(listOf(buildJsonObject { put("url", it.thumbnail_url) })) }.orEmpty()
-        }.getOrNull().orEmpty()
+        val cover = playlistCover(playlistId)
         return entries.take(CHART_TRACK_LIMIT).map { entry ->
             Song(
                 id = entry.id,
@@ -1366,6 +1598,7 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
         Playlist(
             id = definition.playlistId,
             name = definition.name,
+            cover = playlistMetaCache[definition.playlistId]?.first?.cover.orEmpty(),
             creator = "Spotify",
             description = definition.description,
             source = "spotify",
@@ -1374,11 +1607,18 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
         )
     }
 
-    private fun lrclibText(raw: String): String = raw.trim()
+    /** LRCLIB 的 `/get` 回的是整条 JSON，歌词正文在 `syncedLyrics` / `plainLyrics` 里。 */
+    internal fun lrclibLyricsText(body: String): String =
+        runCatching { json.decodeFromString<LrclibLyrics>(body) }.getOrNull()?.text().orEmpty()
 
     private suspend fun spotifyPublicGet(endpoint: String, query: Map<String, String>): NativeResponse {
         val url = if (query.isEmpty()) endpoint else "$endpoint?" + query.entries.joinToString("&") { (k, v) -> "${urlEncode(k)}=${urlEncode(v)}" }
-        return NativeHttp.getResponse(url, headers = mapOf("Accept" to "application/json"), userAgent = USER_AGENT)
+        return NativeHttp.getResponse(
+            url,
+            headers = mapOf("Accept" to "application/json"),
+            userAgent = USER_AGENT,
+            throwOnError = false,
+        )
     }
 
     private fun allowsAnonymousFallback(error: Throwable): Boolean {
@@ -1476,7 +1716,10 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
     )
 
     @Serializable
-    private data class LrclibLyrics(val syncedLyrics: String = "", val plainLyrics: String = "")
+    private data class LrclibLyrics(val syncedLyrics: String = "", val plainLyrics: String = "") {
+        /** 有逐字歌词就用逐字，否则退回纯文本。 */
+        fun text(): String = syncedLyrics.trim().ifBlank { plainLyrics.trim() }
+    }
 
     private companion object {
         const val API_BASE = "https://api.spotify.com/v1"
@@ -1493,6 +1736,8 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
         const val WEB_PLAYER_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
         const val SEARCH_QUERY_HASH = "fcad5a3e0d5af727fb76966f06971c19cfa2275e6ff7671196753e008611873c"
+        // fetchPlaylist / fetchPlaylistMetadata / fetchPlaylistContents 共用同一个持久化查询
+        const val PLAYLIST_QUERY_HASH = "21ea11a6ac75a5f3e01fd365d29c18e0a4a8b7dc09f89bbb5d73910190c6acaf"
         const val SEARCH_LIMIT = 30
         const val PLAYLIST_PAGE_SIZE = 50
         const val ALBUM_PAGE_SIZE = 50
@@ -1500,10 +1745,13 @@ class SpotifyProvider : BaseNativeProvider(SPOTIFY_INFO) {
         const val CHART_TRACK_LIMIT = 50
         const val SPOTIFY_PROBE_SONG_ID = "2sFepQNyl1WjpROruP8bJ0"
         const val TOKEN_SAFETY_MS = 30_000L
+        const val RETRY_BACKOFF_MS = 1_000L
         const val ANONYMOUS_TOKEN_TTL_MS = 45 * 60 * 1000L
         const val ANONYMOUS_AUTH_MARGIN_MS = 2 * 60 * 1000L
         const val SEARCH_CACHE_TTL_MS = 60_000L
         const val SEARCH_CACHE_SIZE = 64
+        const val PLAYLIST_META_TTL_MS = 10 * 60 * 1000L
+        const val PLAYLIST_META_CACHE_SIZE = 64
 
         val SPOTIFY_PREVIEW_QUALITY = AudioQualityOption(
             value = AudioQuality.Preview,
