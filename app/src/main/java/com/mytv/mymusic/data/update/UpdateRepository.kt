@@ -1,5 +1,6 @@
 package com.mytv.mymusic.data.update
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
@@ -418,11 +419,7 @@ class UpdateRepository(
      */
     suspend fun install(file: File): InstallResult {
         _state.update { it.copy(permissionRequired = false, error = "") }
-        val uri = runCatching {
-            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        }.onFailure {
-            Log.w(TAG, "无法生成更新包的 content URI", it)
-        }.getOrNull()
+        val uri = apkInstallUri(file)
         if (uri != null) {
             if (startInstallerActivity(Intent.ACTION_VIEW, uri)) return InstallResult.Launched
             if (startInstallerActivity(Intent.ACTION_INSTALL_PACKAGE, uri)) return InstallResult.Launched
@@ -431,6 +428,23 @@ class UpdateRepository(
         _state.update { it.copy(permissionRequired = true, error = "请先允许本应用安装未知来源的应用") }
         return InstallResult.NeedsPermission
     }
+
+    /**
+     * 安装器 Intent 用的 APK URI。Android 7 起跨应用传 file:// 会抛 FileUriExposedException，
+     * 必须走 FileProvider；Android 6 上小米电视等 ROM 的安装器 intent-filter 只声明了 file:
+     * scheme，给 content:// 解析不到 Activity，此时退回 file:// 并把文件开放给安装器进程读取。
+     */
+    @SuppressLint("SetWorldReadable")
+    private fun apkInstallUri(file: File): Uri? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            runCatching { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file) }
+                .onFailure { Log.w(TAG, "无法生成更新包的 content URI", it) }
+                .getOrNull()
+        } else {
+            file.parentFile?.apply { setReadable(true, false); setExecutable(true, false) }
+            file.setReadable(true, false)
+            Uri.fromFile(file)
+        }
 
     /** 用隐式 Action 唤起系统安装器；没有任何 Activity 能承接时返回 false。 */
     private fun startInstallerActivity(action: String, apkUri: Uri): Boolean = try {
