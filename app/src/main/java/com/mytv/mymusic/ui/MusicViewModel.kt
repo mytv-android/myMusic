@@ -124,7 +124,9 @@ import com.mytv.mymusic.data.native.PlaylistWriteFailure
 import com.mytv.mymusic.data.sync.SyncStrategy
 import com.mytv.mymusic.data.update.InstallResult
 import com.mytv.mymusic.data.update.UpdatePhase
+import com.mytv.mymusic.data.update.UpdatePrompt
 import com.mytv.mymusic.data.update.UpdateUiState
+import com.mytv.mymusic.data.update.updatePromptFor
 import com.mytv.mymusic.lyricon.LyriconController
 import com.mytv.mymusic.lyricon.LyriconMapper
 import com.mytv.mymusic.lyricon.LyriconTrackInput
@@ -825,7 +827,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             app.sync.syncIfStaleOnForeground()
         }
         viewModelScope.launch {
-            // 每次打开 App 都检查更新；发现新版本立刻自动下载，用户没有“稍后”可选
+            // 每次打开 App 都检查更新；发现新版本弹一次更新弹窗等用户确认，不再自动下载
             uiLaunched.first { it }
             checkUpdatesInBackground()
         }
@@ -6898,19 +6900,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- update ----------
 
-    /** 启动和回前台时检查更新；发现新版本直接开始下载，下载期间应用照常可用。 */
+    /**
+     * 启动和回前台时检查更新。发现新版本只把状态停在 Available，由 [updatePrompt] 弹出更新弹窗等用户
+     * 确认，不再自动下载：车机上自动下载完接着自动拉起安装器，装不上就把用户卡在一次失败的安装里。
+     */
     private fun checkUpdatesInBackground() {
         lastUpdateAttemptAt = SystemClock.elapsedRealtime()
         viewModelScope.launch {
             app.update.check(manual = false)
-            if (updateState.value.phase == UpdatePhase.Available) downloadUpdate()
         }
     }
 
     fun checkForUpdates() {
         viewModelScope.launch {
             app.update.check(manual = true)
-            if (updateState.value.phase == UpdatePhase.Available) downloadUpdate()
         }
     }
 
@@ -6919,9 +6922,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun checkForUpdatesNow(): UpdateUiState {
         app.update.check(manual = true)
-        if (updateState.value.phase == UpdatePhase.Available) downloadUpdate()
         return app.update.state.value
     }
+
+    /** 用户点过「暂不更新」的版本号；0 表示没有。只对同一个版本生效，重启进程后重新弹窗。 */
+    private val _updatePromptPostponed = MutableStateFlow(0L)
 
     fun downloadUpdate() {
         when (updateState.value.phase) {
@@ -6935,6 +6940,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         updateDownloadJob?.cancel()
         updateDownloadJob = viewModelScope.launch { app.update.download() }
+    }
+
+    /**
+     * 更新提示该长什么样：弹窗（等用户确认）/ 一条可点开的提醒（用户本次运行点过「暂不更新」）/ 不显示。
+     * 弹窗和提醒都只在真有新版本时出现，下载、校验、安装过程中不占位置。
+     */
+    val updatePrompt: StateFlow<UpdatePrompt> =
+        combine(updateState, _updatePromptPostponed) { state, postponed ->
+            updatePromptFor(state.phase, state.info?.versionCode, postponed)
+        }
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UpdatePrompt.None)
+
+    /** 弹窗里点「暂不更新」：本次运行不再弹同一个版本，改成底部一条可以点开的提醒。 */
+    fun postponeUpdate() {
+        _updatePromptPostponed.value = updateState.value.info?.versionCode ?: 0L
+    }
+
+    /** 点提醒条重新打开更新弹窗。 */
+    fun reopenUpdatePrompt() {
+        _updatePromptPostponed.value = 0L
     }
 
     fun installUpdate() {
@@ -7004,7 +7030,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // 没拉起过（下载完时界面不在前台，比如组件在后台起播）也在这里拉起
             viewModelScope.launch { launchUpdateInstaller() }
         }
-        // 没有待安装的更新时定期复查，发现新版本同样立刻下载；上次失败也重试一次
+        // 没有待安装的更新时定期复查，发现新版本同样弹窗；上次失败也重试一次
         val phase = updateState.value.phase
         if ((phase == UpdatePhase.Idle || phase == UpdatePhase.Error) &&
             SystemClock.elapsedRealtime() - lastUpdateAttemptAt > UPDATE_RECHECK_INTERVAL_MS

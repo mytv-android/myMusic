@@ -399,6 +399,8 @@ class MusicActions(private val model: MusicViewModel) {
     fun openReleasePage() = model.openReleasePage()
     fun clearUpdateError() = model.clearUpdateError()
     fun dismissUpdate() = model.dismissUpdate()
+    fun postponeUpdate() = model.postponeUpdate()
+    fun reopenUpdatePrompt() = model.reopenUpdatePrompt()
 
     fun setEqEnabled(value: Boolean) = model.setEqualizerEnabled(value)
     fun selectEqPreset(id: String) = model.selectEqualizerPreset(id)

@@ -1,21 +1,27 @@
 package com.mytv.mymusic.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,9 +50,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.update.UpdateInfo
 import com.mytv.mymusic.data.update.UpdatePhase
+import com.mytv.mymusic.data.update.UpdatePrompt
 import com.mytv.mymusic.data.update.UpdateUiState
+import com.mytv.mymusic.data.update.formatReleaseDate
+import com.mytv.mymusic.data.update.formatSize
+import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.tvFocusRing
+import java.time.ZoneId
 
 /** 浮层离屏幕左右边和底栏的距离。 */
 private val PillMargin = 16.dp
@@ -54,15 +65,17 @@ private val PillMargin = 16.dp
 private val PillWidth = 420.dp
 
 /**
- * 更新浮层：检测到新版本自动下载，下载和校验期间底部只浮一条进度条，应用照常可以播放、搜索、切页。
+ * 更新浮层。检查到新版本先由 [UpdatePromptDialog] 弹窗等用户确认，不再自动下载；用户点了「立即更新」
+ * 才下载和校验，期间底部只浮一条进度条，应用照常可以播放、搜索、切页。
  *
  * 下载校验完由 ViewModel 自动拉起系统安装器（那一步是系统界面，应用绕不过去），
  * 只有安装被系统拦下、需要用户去授权“安装未知应用”时才出现要用户动手的卡片。
- * 下载失败时浮一条可重试的提示；用户也可以先收起，下次启动或定期复查会重新走一遍。
+ * 下载失败时浮一条可重试的提示；弹窗里点了「暂不更新」则换成一条可以点开的提醒，重启进程会重新弹窗。
  */
 @Composable
 fun UpdateOverlay(
     update: UpdateUiState,
+    prompt: UpdatePrompt,
     actions: MusicActions,
     progress: () -> Float,
     bottomPadding: Dp,
@@ -70,11 +83,8 @@ fun UpdateOverlay(
     val info = update.info ?: return
     val failure = update.phase == UpdatePhase.Error && update.error.isNotBlank()
     // Ready 不在这里显示：校验完 ViewModel 立刻拉起系统安装器，拦下时走权限卡片，起不来时走失败提示
-    val running = when (update.phase) {
-        UpdatePhase.Available, UpdatePhase.Downloading, UpdatePhase.Verifying -> true
-        else -> false
-    }
-    if (!update.permissionRequired && !failure && !running) return
+    val running = update.phase == UpdatePhase.Downloading || update.phase == UpdatePhase.Verifying
+    if (!update.permissionRequired && !failure && !running && prompt != UpdatePrompt.Reminder) return
     val window = LocalAppWindow.current
     // 只有手机是贴底整宽的一条；平板、折叠屏、电视都靠右下角，别横跨导航栏和播放窗格
     val strip = window.isPhone
@@ -92,9 +102,114 @@ fun UpdateOverlay(
         when {
             update.permissionRequired -> InstallPermissionCard(info, actions, actionFocus, slot)
             failure -> UpdateFailurePill(update, actions, slot)
+            prompt == UpdatePrompt.Reminder -> UpdateReminderPill(info, actions, slot)
             else -> UpdatePill(info, update, progress, slot)
         }
     }
+}
+
+/**
+ * 弹窗里点了「暂不更新」后的提醒条：只说有新版本，点一下重新打开弹窗。
+ * 不自动下载、不拦页面，重启进程后弹窗会照常再弹一次。
+ */
+@Composable
+private fun UpdateReminderPill(info: UpdateInfo, actions: MusicActions, modifier: Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier
+            .clip(CircleShape)
+            .background(scheme.surfaceContainerHigh)
+            .clickable(onClick = actions::reopenUpdatePrompt)
+            .tvFocusRing(CircleShape)
+            .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
+            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            Modifier
+                .size(40.dp)
+                .clip(MaterialShapes.Cookie9Sided.toShape())
+                .background(scheme.primary),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.SystemUpdate, null, Modifier.size(20.dp), tint = scheme.onPrimary)
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                "发现新版本 myMusic ${info.versionName}",
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "点一下打开更新",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        TextButton(onClick = actions::reopenUpdatePrompt) { Text("更新") }
+    }
+}
+
+/**
+ * 启动（或复查）发现新版本时的更新弹窗。强制但不阻断：只有「立即更新」和「暂不更新」两个选择，
+ * 下载交给用户点，装不装得起来也由用户定，车机上不会再自动下载完就弹一次失败的安装。
+ */
+@Composable
+fun UpdatePromptDialog(info: UpdateInfo, actions: MusicActions) {
+    val scheme = MaterialTheme.colorScheme
+    val tv = LocalAppWindow.current.isTv
+    val confirmFocus = remember { FocusRequester() }
+    LaunchedEffect(tv) { if (tv) runCatching { confirmFocus.requestFocus() } }
+    val zone = remember { ZoneId.systemDefault() }
+    val release = remember(info.size, info.publishedAt, zone) {
+        buildString {
+            append(formatSize(info.size))
+            if (info.publishedAt.isNotBlank()) append(" · ${formatReleaseDate(info.publishedAt, zone)}")
+        }
+    }
+    AlertDialog(
+        onDismissRequest = actions::postponeUpdate,
+        modifier = Modifier.widthIn(max = 440.dp),
+        title = {
+            DialogAvoidsFold()
+            Text("发现新版本 myMusic ${info.versionName}")
+        },
+        text = {
+            Column(
+                Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(release, style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
+                if (info.notes.isEmpty()) {
+                    Text(
+                        "下载后校验 SHA-256、包名和版本号，然后自动打开系统安装器。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onSurfaceVariant,
+                    )
+                } else {
+                    info.notes.forEach { note ->
+                        Text("· $note", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = actions::downloadUpdate,
+                modifier = Modifier.focusRequester(confirmFocus).tvFocusRing(RoundedCornerShape(20.dp)),
+            ) { Text("立即更新") }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = actions::postponeUpdate,
+                modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+            ) { Text("暂不更新") }
+        },
+    )
 }
 
 /** 下载中的胶囊：版本号、波浪进度和百分比；只做提示，不可聚焦，不打断当前页面。 */

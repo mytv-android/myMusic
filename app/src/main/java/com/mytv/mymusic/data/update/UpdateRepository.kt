@@ -36,6 +36,9 @@ import okhttp3.Request
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 
 @Serializable
@@ -668,3 +671,8 @@ fun formatSize(bytes: Long): String = when {
     bytes >= 1024L -> String.format(java.util.Locale.ROOT, "%.0f KB", bytes / 1024.0)
     else -> "$bytes B"
 }
+
+/** 发布时间的本地日期；ISO 字符串解析不了就原样显示。 */
+fun formatReleaseDate(value: String, zone: ZoneId): String = runCatching {
+    DateTimeFormatter.ISO_LOCAL_DATE.withZone(zone).format(Instant.parse(value))
+}.getOrDefault(value)

@@ -83,6 +83,7 @@ import com.mytv.mymusic.CrashReporter
 import com.mytv.mymusic.data.Song
 import kotlin.coroutines.cancellation.CancellationException
 import com.mytv.mymusic.data.TopList
+import com.mytv.mymusic.data.update.UpdatePrompt
 import com.mytv.mymusic.ui.adaptive.BottomPlayerBar
 import com.mytv.mymusic.ui.adaptive.BottomPlayerBarHeight
 import com.mytv.mymusic.ui.adaptive.NowPlayingPane
@@ -171,6 +172,7 @@ fun MyMusicApp(model: MusicViewModel) {
     val position = model.position.collectAsState()
     val update by model.updateDetails.collectAsState()
     val updateProgress = model.updateState.collectAsState()
+    val updatePrompt by model.updatePrompt.collectAsState()
     val transfer by model.transfer.collectAsState()
     val platformImport by model.platformImport.collectAsState()
     val context = LocalContext.current
@@ -581,10 +583,15 @@ fun MyMusicApp(model: MusicViewModel) {
         // 更新浮层：下载期间只占底栏上方一条，应用照常可用；只有安装被系统拦下时才要用户动手
         UpdateOverlay(
             update = update,
+            prompt = updatePrompt,
             actions = actions,
             progress = { updateProgress.value.progress },
             bottomPadding = pillBottom,
         )
+        // 每次启动发现新版本都弹一次；用户点「暂不更新」后本次运行只留底栏那条提醒
+        if (updatePrompt == UpdatePrompt.Dialog) {
+            update.info?.let { info -> UpdatePromptDialog(info, actions) }
+        }
         startupCrash?.let { report ->
             CrashReportDialog(report = report, onDismiss = { startupCrash = null })
         }

@@ -67,6 +67,7 @@ import com.mytv.mymusic.CrashReport
 import com.mytv.mymusic.CrashReporter
 import com.mytv.mymusic.data.update.UpdatePhase
 import com.mytv.mymusic.data.update.UpdateUiState
+import com.mytv.mymusic.data.update.formatReleaseDate
 import com.mytv.mymusic.data.update.formatSize
 import com.mytv.mymusic.ui.CrashReportDialog
 import com.mytv.mymusic.ui.ErrorBlock
@@ -83,15 +84,13 @@ import com.mytv.mymusic.ui.components.tvFocusRing
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 private const val PROJECT_URL = "https://github.com/mytv-android/myMusic"
 private const val TELEGRAM_URL = "https://t.me/mytv_android_channel"
 
 /**
- * 关于与更新：应用信息、新版本卡片（下载进度、校验、安装都在卡片里完成）、
+ * 关于与更新：应用信息、新版本卡片（下载进度、校验、安装都在卡片里完成，要点「立即下载」才开始）、
  * 检查更新 / 隐私 / 许可 / 项目主页 / 群 / 复制诊断。
  */
 @Composable
@@ -489,7 +488,7 @@ private fun UpdateCard(update: UpdateUiState, actions: MusicActions, progress: (
     val primaryColors = ButtonDefaults.buttonColors(containerColor = scheme.tertiary, contentColor = scheme.onTertiary)
     val zone = ZoneId.systemDefault()
     val releaseSummary = remember(info.size, info.publishedAt, zone) {
-        "${formatSize(info.size)} · ${formatDate(info.publishedAt, zone)}"
+        "${formatSize(info.size)} · ${formatReleaseDate(info.publishedAt, zone)}"
     }
     Column(
         Modifier
@@ -561,10 +560,6 @@ private fun UpdateCard(update: UpdateUiState, actions: MusicActions, progress: (
         }
     }
 }
-
-private fun formatDate(value: String, zone: ZoneId): String = runCatching {
-    DateTimeFormatter.ISO_LOCAL_DATE.withZone(zone).format(Instant.parse(value))
-}.getOrDefault(value)
 
 /** 只有进度绘制和百分比文字观察下载数值，版本说明与按钮不跟着刷新。 */
 @Composable
