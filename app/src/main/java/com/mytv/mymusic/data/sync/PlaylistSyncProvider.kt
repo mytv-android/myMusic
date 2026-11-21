@@ -251,11 +251,12 @@ class GiteeSyncProvider(private val http: OkHttpClient = syncHttpClient()) : Pla
             ?: throw SyncException(SyncFailureKind.Corrupt, "云端代码片段里没有 $fileName，无法同步。")
         val content = file["content"]?.jsonPrimitive?.content
             ?: throw SyncException(SyncFailureKind.Corrupt, "云端文件内容无法读取。")
+        val updatedAt = root["updated_at"]?.jsonPrimitive?.content.orEmpty()
         return RemoteFile(
             id = root["id"]?.jsonPrimitive?.content.orEmpty(),
             content = content,
-            revision = root["updated_at"]?.jsonPrimitive?.content ?: "",
-            updatedAt = parseIso(root["updated_at"]?.jsonPrimitive?.content),
+            revision = giteeRevision(updatedAt, content),
+            updatedAt = parseIso(updatedAt),
             htmlUrl = root["html_url"]?.jsonPrimitive?.content.orEmpty(),
         )
     }
@@ -274,6 +275,16 @@ class GiteeSyncProvider(private val http: OkHttpClient = syncHttpClient()) : Pla
             throw SyncException(SyncFailureKind.Network, "网络不可达：${error.message ?: "请检查连接"}")
         }
     }
+}
+
+/**
+ * Gitee 的 revision。Gitee 只给 `updated_at`，而且是秒级：同一秒里两次不同内容的写入会拿到
+ * 同一个 revision，被 [remoteMatches] 当成“云端没变”而跳过合并。拼上内容哈希才是真正的内容
+ * 版本（设计稿里的“updated_at + 内容 SHA-256”），写没写进去一看就知道。
+ */
+internal fun giteeRevision(updatedAt: String, content: String): String {
+    if (updatedAt.isBlank()) return ""
+    return "$updatedAt:${sha256(content.toByteArray(Charsets.UTF_8))}"
 }
 
 private fun httpFailure(code: Int, raw: String): SyncException {

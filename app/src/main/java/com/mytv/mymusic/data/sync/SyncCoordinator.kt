@@ -429,7 +429,7 @@ class SyncCoordinator(
                             return@withLock false
                         }
                         val latest = provider.read(token, account.remoteId)
-                        if (!remoteMatches(latest, currentRemoteFile)) {
+                        if (!sameRemoteState(latest, currentRemoteFile)) {
                             // 云端在合并期间被其他设备更新：按最新内容重新合并，避免覆盖对方
                             val latestSnapshot = SyncJson.decode(latest.content)
                             val latestLocal = localSnapshot()
@@ -1578,7 +1578,8 @@ class SyncCoordinator(
                 return false
             }
             val latest = provider.read(token, account.remoteId)
-            if (remoteMatches(latest, lastUploaded)) {
+            // 内容就是我们刚推上去的那一版，只是 revision 又变了：已经收敛，不是别的设备插进来
+            if (remoteMatches(latest, lastUploaded) || holdsSnapshot(latest, base)) {
                 saveBase(base, latest.revision)
                 saveAccount(account.copy(
                     lastSyncedAt = System.currentTimeMillis(),
@@ -1635,7 +1636,7 @@ class SyncCoordinator(
             )
             // 上传前再确认一次；若又变了，回到循环开头按最新内容重新合并
             val check = provider.read(token, account.remoteId)
-            if (!remoteMatches(check, latest)) continue
+            if (!sameRemoteState(check, latest)) continue
             _state.update { it.copy(phase = "正在同步其他设备的更新") }
             applySnapshot(merged, removeAbsent = false, dirty = true)
             lastUploaded = try {
@@ -1777,3 +1778,25 @@ internal fun remoteMatches(current: RemoteFile, other: RemoteFile): Boolean {
     if (current.revision.isNotBlank() && other.revision.isNotBlank()) return current.revision == other.revision
     return current.updatedAt == other.updatedAt && current.content == other.content
 }
+
+/**
+ * 两次云端读结果是不是同一份内容。[remoteMatches] 之外再认一条：解出来的快照签名一致。
+ * Gitee 的 revision 只是 `updated_at`（秒级），推送后立刻再读经常对得上内容、对不上时间戳，
+ * 只比 revision 会把“没人动过”当成“云端被改了”，白合并几轮还把轮次用光。
+ */
+internal fun sameRemoteState(current: RemoteFile, other: RemoteFile): Boolean {
+    if (remoteMatches(current, other)) return true
+    val a = runCatching { SyncJson.decode(current.content) }.getOrNull() ?: return false
+    val b = runCatching { SyncJson.decode(other.content) }.getOrNull() ?: return false
+    return snapshotSignature(a) == snapshotSignature(b)
+}
+
+/**
+ * 云端现在放着的是不是正好就是我们刚写出去的那一版。是的话这台设备已经收敛，
+ * 不管 revision 因为什么原因变了（Gitee 的秒级时间戳、服务端延迟刷新）都该算同步成功，
+ * 不能再当成别的设备插进来、重新合并重新推一遍——那样每推一次 revision 就又变一次，
+ * 几轮之后只会得到“云端文件在同步期间持续变化”。
+ */
+internal fun holdsSnapshot(file: RemoteFile, snapshot: SyncSnapshot): Boolean =
+    runCatching { snapshotSignature(SyncJson.decode(file.content)) == snapshotSignature(snapshot) }
+        .getOrDefault(false)
