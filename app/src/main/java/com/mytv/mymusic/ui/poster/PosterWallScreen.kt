@@ -76,6 +76,7 @@ import com.mytv.mymusic.ui.charts.SongActionsSheet
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalSharedTransitionScope
+import com.mytv.mymusic.ui.components.RequestKeepScreenOn
 import com.mytv.mymusic.ui.components.sharedNowPlayingCover
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.player.AmbientClock
@@ -118,6 +119,8 @@ internal fun PosterWallScreen(
     val current = state.current ?: return
     val window = LocalAppWindow.current
     val tv = window.isTv
+    // 海报墙是慢慢逛的，手一直悬在屏幕前点来点去：开着时常亮，别逛到一半熄屏（电视走设置里的开关）
+    RequestKeepScreenOn(!tv && active)
     val songs = state.queue
     val currentKey = current.key
     val currentIndex = remember(songs, currentKey) { songs.indexOfFirst { it.key == currentKey } }

@@ -35,6 +35,7 @@ import com.mytv.mymusic.ui.MyMusicApp
 import com.mytv.mymusic.widget.ChartWidgetWorker
 import com.mytv.mymusic.widget.WidgetLinks
 import com.mytv.mymusic.ui.components.LocalDarkBarsRequests
+import com.mytv.mymusic.ui.components.LocalKeepScreenOnRequests
 import com.mytv.mymusic.ui.theme.LayoutMode
 import com.mytv.mymusic.ui.theme.MyMusicTheme
 import com.mytv.mymusic.ui.theme.isTelevision
@@ -87,15 +88,17 @@ class MainActivity : ComponentActivity() {
                     LayoutMode.Tv -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                 }
             }
-            // 播放时保持屏幕常亮（设置 › 播放页 › 播放时阻止屏保）：系统屏保是屏幕超时才启动的，
-            // 屏幕不超时它就不启动。暂停、关掉开关都不挂；离开应用后窗口不可见，旗标不生效，照常息屏
-            LaunchedEffect(tvDevice, state.appearance.layout, state.keepScreenOn, state.playing) {
-                val keepAwake =
+            val darkBars = remember { mutableIntStateOf(0) }
+            val keepOnRequests = remember { mutableIntStateOf(0) }
+            // 播放时保持屏幕常亮（设置 › 播放页 › 播放时阻止屏保，只对电视生效）：系统屏保是屏幕超时才启动的，
+            // 屏幕不超时它就不启动。暂停、关掉开关都不挂；离开应用后窗口不可见，旗标不生效，照常息屏。
+            // 手机 / 平板看全屏歌词、逛海报墙时同样常亮，由页面自己请求（RequestKeepScreenOn）
+            LaunchedEffect(tvDevice, state.appearance.layout, state.keepScreenOn, state.playing, keepOnRequests.intValue) {
+                val tvAwake =
                     (tvDevice || state.appearance.layout == LayoutMode.Tv) && state.keepScreenOn && state.playing
-                if (keepAwake) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                if (tvAwake || keepOnRequests.intValue > 0) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
-            val darkBars = remember { mutableIntStateOf(0) }
             val dark = tvDevice ||
                 state.appearance.layout == LayoutMode.Tv ||
                 state.appearance.isDark(isSystemInDarkTheme()) ||
@@ -114,6 +117,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 CompositionLocalProvider(
                     LocalDarkBarsRequests provides darkBars,
+                    LocalKeepScreenOnRequests provides keepOnRequests,
                     LocalWindowFold provides fold,
                 ) { MyMusicApp(model) }
             }

@@ -128,6 +128,7 @@ import com.mytv.mymusic.ui.adaptive.modeLabel
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.Posture
 import com.mytv.mymusic.ui.components.ProviderIcon
+import com.mytv.mymusic.ui.components.RequestKeepScreenOn
 import com.mytv.mymusic.ui.components.tvFocusRing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -228,6 +229,8 @@ fun PlayerScreen(
     val animationDraft = rememberAnimationDraft(animationOpen, state.lyricStage)
     // 桌面姿态上半屏此刻放什么：设置里选的，或者工具栏、更多菜单临时换成的歌词
     val tabletopShown = if (lyricsMode) TabletopTop.Lyrics else state.tabletopTop
+    // 全屏看歌词、桌面姿态上半屏是歌词时常亮：屏幕超时不会在唱到一半时把画面熄掉，电视仍由设置里的开关决定
+    RequestKeepScreenOn(!window.isTv && (lyricsMode || (tabletop && tabletopShown == TabletopTop.Lyrics)))
     // 舞台露在面板旁边：电视（开面板就进环境模式）、宽屏专注歌词（含书本姿态）、桌面姿态上半屏放歌词
     val stageBeside = window.isTv || (wideLayout && !tabletop && lyricsMode) || (tabletop && tabletopShown == TabletopTop.Lyrics)
     val pinnedId = state.lyricStage.pins[song.key]?.takeIf(state.lyricStage::isKnown)

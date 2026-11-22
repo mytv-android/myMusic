@@ -128,6 +128,19 @@ fun RequestDarkBars(active: Boolean) {
     }
 }
 
+/** 正在请求屏幕常亮的沉浸页面数（全屏歌词、海报墙）：大于 0 时窗口挂起常亮旗标，见 MainActivity。 */
+val LocalKeepScreenOnRequests = staticCompositionLocalOf<MutableIntState> { mutableIntStateOf(0) }
+
+/** [active] 时请求屏幕常亮（全屏看歌词 / 海报墙时手不去碰屏幕），不再需要或离开组合时撤回。 */
+@Composable
+fun RequestKeepScreenOn(active: Boolean) {
+    val requests = LocalKeepScreenOnRequests.current
+    DisposableEffect(requests, active) {
+        if (active) requests.intValue++
+        onDispose { if (active) requests.intValue-- }
+    }
+}
+
 /**
  * 整页固定深色的页面（详情页的海报视图）的配色，交给外壳：手机底栏、平板导航栏和底部播放条换成它，
  * 不在深色的墙旁边露一块浅色。最后登记的页面生效；页面离开组合时只撤回自己登记的那份。
