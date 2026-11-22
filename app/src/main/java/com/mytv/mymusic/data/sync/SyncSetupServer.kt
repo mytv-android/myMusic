@@ -234,12 +234,17 @@ internal class SyncSetupSession(
             "以后证书变了，电视会停下来提醒。可以关闭此页面。"
     }
 
-    private fun isValidWebDav(account: WebDavAccount): Boolean =
-        WebDavPaths.parseServerUrl(account.serverUrl) != null &&
-            account.serverUrl.length <= MAX_REMOTE_CHARS &&
-            account.username.isNotBlank() && account.username.length <= MAX_FIELD_CHARS &&
-            account.password.isNotEmpty() && account.password.length <= MAX_TOKEN_CHARS &&
-            account.directory.length <= MAX_FIELD_CHARS
+    private fun isValidWebDav(account: WebDavAccount): Boolean {
+        val normalized = account.normalized()
+        val parsed = normalized.baseUrl ?: return false
+        val saved = snapshot().sync.webDav
+        val reusePassword = normalized.password.isEmpty() && saved?.hasPassword == true &&
+            WebDavPaths.parseServerUrl(saved.serverUrl) == parsed && saved.username == normalized.username
+        return normalized.serverUrl.length <= MAX_REMOTE_CHARS &&
+            normalized.username.isNotBlank() && normalized.username.length <= MAX_FIELD_CHARS &&
+            (normalized.password.isNotEmpty() || reusePassword) && normalized.password.length <= MAX_TOKEN_CHARS &&
+            normalized.directory.length <= MAX_FIELD_CHARS
+    }
 
     private fun safeSetupError(message: String): String = when {
         message.startsWith("令牌无效") || message.startsWith("令牌权限") || message.startsWith("令牌无法读取") -> message

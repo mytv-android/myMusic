@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Search
@@ -88,6 +89,7 @@ internal enum class SettingsSection(
     Accounts("settings/accounts", "平台账号", "扫码登录、Cookie 与退出", Icons.Filled.Person, IconTone.Secondary),
     Sync("settings/sync", "音乐库同步", "自建歌单的云端同步", Icons.Filled.Cloud, IconTone.Secondary),
     LocalMusic("settings/local", "本地音乐", "扫描范围、封面歌词匹配与上传", Icons.Filled.AudioFile, IconTone.Secondary),
+    InputPanel("settings/input-panel", "手机辅助输入", "文字、音源与常用设置", Icons.Filled.PhoneAndroid, IconTone.Secondary),
     Storage("settings/storage", "存储", "缓存、下载与占用", Icons.Filled.Storage, IconTone.Tertiary),
     About("settings/about", "关于与更新", "版本、更新、许可与隐私", Icons.Filled.Info, IconTone.Tertiary),
     Licenses("settings/licenses", "开源许可", "应用、上游库与第三方依赖", Icons.Filled.Code, IconTone.Tertiary),
@@ -104,13 +106,14 @@ internal enum class SettingsSection(
         /** 设置首页 / 双栏左栏的三组。 */
         val groups = listOf(
             listOf(Appearance, Lyrics, Playback, Report, Equalizer, Sources, Search, Swipe),
-            listOf(Accounts, Sync, LocalMusic),
+            listOf(Accounts, Sync, LocalMusic, InputPanel),
             listOf(Storage, About),
         )
 
         /** 实际列出的分组：电视上没有滑动操作，不列「滑动操作」。 */
-        fun groupsFor(tv: Boolean): List<List<SettingsSection>> =
-            if (tv) groups.map { group -> group.filter { it != Swipe } } else groups
+        fun groupsFor(tv: Boolean): List<List<SettingsSection>> = groups.map { group ->
+            group.filter { section -> if (tv) section != Swipe else section != InputPanel }
+        }
     }
 }
 

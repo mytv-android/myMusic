@@ -3,6 +3,7 @@ package com.mytv.mymusic.ui.settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
@@ -59,6 +61,7 @@ import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
 import com.mytv.mymusic.ui.components.IconTone
 import com.mytv.mymusic.ui.components.ListRow
+import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.SegmentedGroup
 import com.mytv.mymusic.ui.components.tvFocusRing
@@ -400,7 +403,20 @@ private fun LxImportSheet(
 ) {
     var mode by rememberSaveable { mutableStateOf("online") }
     var url by rememberSaveable { mutableStateOf("") }
+    var remoteInput by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
+    val tv = LocalAppWindow.current.isTv
+    if (remoteInput) {
+        TvFieldInputDialog(
+            targetId = "lx-source-url",
+            label = "自定义音源 · 脚本地址",
+            value = url,
+            busy = busy,
+            onValueChange = { url = it },
+            onSubmit = onImport,
+            onDismiss = { remoteInput = false },
+        )
+    }
     AdaptiveSheet(onDismiss = onDismiss, title = "添加自定义音源", subtitle = "兼容落雪音乐移动端 JavaScript 脚本") {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
             ConnectedToggleGroup(
@@ -421,8 +437,15 @@ private fun LxImportSheet(
                     singleLine = true,
                     enabled = !busy,
                     trailingIcon = {
-                        IconButton(onClick = { clipboard.getText()?.text?.let { url = it } }, enabled = !busy) {
-                            Icon(Icons.Filled.ContentPaste, "粘贴脚本地址")
+                        Row {
+                            IconButton(onClick = { clipboard.getText()?.text?.let { url = it } }, enabled = !busy) {
+                                Icon(Icons.Filled.ContentPaste, "粘贴脚本地址")
+                            }
+                            if (tv) {
+                                IconButton(onClick = { remoteInput = true }, enabled = !busy) {
+                                    Icon(Icons.Filled.PhoneAndroid, "用手机输入脚本地址")
+                                }
+                            }
                         }
                     },
                 )

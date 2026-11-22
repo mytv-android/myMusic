@@ -125,6 +125,7 @@ internal fun settingsOverview(
                 "未连接 · 本机优先"
             },
             SettingsSection.LocalMusic to localMusic,
+            SettingsSection.InputPanel to "扫码输入",
             SettingsSection.Storage to "缓存 ${formatBytes(cacheBytes)} · 下载 ${formatBytes(downloadsBytes)}",
             SettingsSection.About to if (updateAvailable) "$version · 发现新版本 ${info?.versionName.orEmpty()}（构建 ${info?.versionCode ?: 0}）" else version,
         ),

@@ -125,6 +125,7 @@ private fun SectionContent(
                 app.nav.navigate("syncConnect/$provider")
             }
         }
+        SettingsSection.InputPanel -> TvInputPanelScreen(app, onBack, embedded)
         SettingsSection.LocalMusic -> LocalMusicSettingsScreen(
             onBack = onBack,
             embedded = embedded,

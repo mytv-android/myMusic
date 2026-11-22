@@ -682,7 +682,7 @@ private fun ConflictResolver(
 
 /** 首次连接时本机和云端都有歌单：同样的三选一。 */
 @Composable
-private fun InitialMergeDialog(
+internal fun InitialMergeDialog(
     preview: InitialMergePreview,
     sync: SyncUiState,
     actions: MusicActions,
