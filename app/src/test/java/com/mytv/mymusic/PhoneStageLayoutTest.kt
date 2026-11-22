@@ -1,5 +1,6 @@
 package com.mytv.mymusic
 
+import com.mytv.mymusic.ui.player.phonePreviewBudget
 import com.mytv.mymusic.ui.player.phoneStageSlots
 import com.mytv.mymusic.ui.player.segmentWidths
 import org.junit.Assert.assertEquals
@@ -58,6 +59,20 @@ class PhoneStageLayoutTest {
             previous = cover
         }
         assertEquals(256, at(tight, 0).cover)
+    }
+
+    @Test
+    fun previewBudgetStaysNonNegativeWhenTheSpatialSpringUndershoots() {
+        // defaultSpatialSpec 的 dampingRatio 是 0.8：预览从 1 收回 0 时会冲过 0（56dp 在 3x 上约 -3px）。
+        // 这个值直接当 Constraints 的 maxHeight 用，负数会在测量时抛 IllegalArgumentException 把应用崩掉
+        val px = 56f * 3
+        listOf(1f, 1.02f, 0.5f, 0.02f, 0f, -0.015f, -0.05f, -0.6f).forEach { space ->
+            assertTrue("space=$space", phonePreviewBudget(space, px) >= 0)
+        }
+        assertEquals(168, phonePreviewBudget(1f, px))
+        assertEquals(84, phonePreviewBudget(0.5f, px))
+        assertEquals(0, phonePreviewBudget(0f, px))
+        assertEquals(0, phonePreviewBudget(-0.015f, px))
     }
 
     @Test

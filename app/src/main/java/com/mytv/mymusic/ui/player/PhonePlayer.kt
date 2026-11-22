@@ -757,7 +757,7 @@ private class PhoneStagePolicy(
         val inner = (width - side * 2).coerceAtLeast(0)
         val top = measurables[SlotTop].firstOrNull()?.measure(full)
         val meta = measurables[SlotMeta].firstOrNull()?.measure(Constraints.fixedWidth((width - 40.dp.roundToPx()).coerceAtLeast(0)))
-        val previewBudget = (PreviewHeight.toPx() * previewSpace.value).roundToInt()
+        val previewBudget = phonePreviewBudget(previewSpace.value, PreviewHeight.toPx())
         val preview = measurables[SlotPreview].firstOrNull()?.measure(Constraints(maxWidth = inner, maxHeight = previewBudget))
         val controls = measurables[SlotControls].firstOrNull()?.measure(Constraints(minWidth = width, maxWidth = width, maxHeight = height))
         val bottomMargin = 8.dp.roundToPx()
@@ -920,6 +920,15 @@ internal fun phoneShortSlots(width: Int, height: Int, top: Int, controls: Int, d
 
 /** [phoneStageSlots] 的结果（像素）。 */
 internal class PhoneStageSlots(val cover: Int, val coverTop: Int, val metaTop: Int, val previewTop: Int)
+
+/**
+ * 两行歌词预览占的高度（像素）：[space] 是收放进度（0..1），[previewHeightPx] 是放满时的高度。
+ * 驱动它的 MotionScheme.defaultSpatialSpec 是 dampingRatio 0.8 的空间弹簧，回程会冲过 0
+ * （56dp 在 3x 上约 168px，最低到 -3px 左右）。负的 maxHeight 违反 Constraints 的前置条件，
+ * 量一下就直接抛 IllegalArgumentException 闪退，所以这里夹回 0：过渡中少占几像素看不出来，崩了才致命。
+ */
+internal fun phonePreviewBudget(space: Float, previewHeightPx: Float): Int =
+    (previewHeightPx * space).roundToInt().coerceAtLeast(0)
 
 /**
  * 手机播放页中段的竖向分配（像素）：[top] 是顶栏底边，[bottom] 是控件区顶边，[meta] 是标题区实际高度，
