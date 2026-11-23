@@ -42,6 +42,7 @@
 | 歌曲身份 | `local:<sha256>`，云端引用是附加信息 | `subsonic:<accountId>:<songId>` |
 | 搜索/换源 | 不参与 | **完整参与**聚合搜索与换源 |
 | 播放 | `WebDavDataSource`（请求头认证） | 路由 DataSource（查询参数认证） |
+| 收藏/歌单/队列 | 客户端侧状态，靠同步 v3 跨设备 | **服务端状态，服务器自己同步**；只有「歌单绑定」和「收藏」跟同步文件走（§5.8） |
 
 一句话：WebDAV 是「我的歌放在哪」，Subsonic 是「我还能从哪听歌」。
 
@@ -566,14 +567,63 @@ https://nas.local:4533/rest/stream.view?id=<songId>&format=raw
 - 单曲直接写文件；专辑/歌手/歌单返回 zip，要么解包要么**只对单曲开放下载**（推荐后者，第一期）。
 - `EnableDownloads=false` 时回错误 50，`downloadUrl` 要把 message 抛成人话。
 
-### 5.8 不在范围内的事
+### 5.8 同步：哪些跟同步走、哪些不跟（以及为什么）
 
-- **不同步。** Subsonic 源不进 `SyncCoordinator` 的同步文件（那是「跨设备同步自建歌单」的语义）。
-  账号密码走 `SecretStore`，和 WebDAV 的规则一样：**永远不进同步文件**。
+先纠正一个容易搞错的事实：**现有同步文件里已经明文放着平台 Cookie**。
+`SyncSnapshot.cookies: List<SyncCookie>`（`data/sync/SyncModels.kt:36`），
+`SyncCoordinator.localSnapshot()` 建快照时 `settings.cookieSnapshot()` 全量带上，
+没有任何开关。所以「密码不能进同步文件」**不构成不同步的理由**——应用的既有安全姿态已经接受了这件事。
+
+真正的原因是语义上的。
+
+#### 5.8.1 服务器自己就是同步后端
+
+Navidrome / Airsonic 上这些状态全在服务端，同一账号的所有客户端天然共享：
+
+| 状态 | 服务端端点 | 要客户端同步吗 |
+|---|---|---|
+| 收藏 | `getStarred2` / `star` / `unstar` | 不要 |
+| 歌单及内容 | `getPlaylists` / `getPlaylist` / `updatePlaylist` | 不要 |
+| 播放队列 | `getPlayQueue` / `savePlayQueue` | 不要 |
+| 书签 / 播放位置 | `getBookmarks` / `createBookmark` | 不要 |
+| 电台 | `getInternetRadioStations` | 不要 |
+| 播放次数 | `scrobble` | 不要 |
+
+这正是 Subsonic 和网易云 / QQ 的本质区别：那些平台的收藏和歌单客户端**没有写入权**，
+所以要用「自建歌单 + 绑定平台歌单」去代理，才需要跨设备同步；Subsonic 的写入权是完整的，
+服务器就是权威源。客户端再存一份只会带来「以谁为准」的合并冲突，而这种冲突没有有意义的答案。
+
+现有同步 v3 要解决的命题——「自建歌单 + 本地音乐线索在多台设备间一致」——在 Subsonic 场景下不存在：
+歌单就在服务器上，本机只是一个视图。下载 / 离线缓存是按设备的，和所有平台一样不跟同步走。
+
+#### 5.8.2 但有三样东西确实会跟同步走，前两样几乎是白拿
+
+1. **歌单绑定（零改动）。** `SyncPlaylist.link: SyncLink?` 带 `provider` + `id` + `cover`，
+   建快照和合并都在处理它（`data/sync/SyncCoordinator.kt:1500`）。`provider` 就是个字符串，
+   填 `"subsonic:<accountId>"` 直接就能用。
+2. **收藏（零改动）。** `applyFavorites` 按 `key` 存 `SavedSong` + `Song` JSON，
+   **不检查 provider 是否配过**。所以 A 设备收藏了一首 Subsonic 歌，B 设备同步过来照样显示；
+   B 设备没配这台服务器时只是播不了，和「某个平台在这台设备上不可用」走同一套降级。
+3. **账号本身（可选）。** 见下。
+
+#### 5.8.3 账号要不要同步：建议只同步「地址 + 用户名 + 显示名」
+
+不同步密码的理由**不是**同步文件不安全，而是：
+
+- `SecretStore` 的 Keystore 是设备绑定的，同步过来的是密文、另一台设备解不开；要能用就得明文同步，
+  而那比 Cookie 更敏感——Cookie 会过期，服务器密码不会。
+- 内网地址（`http://192.168.x.x:4533`）在别的设备网络里不可达，同步过去是一台连不上的服务器，
+  用户还得手动删。
+
+所以最优形态是「待配置账号」：地址 / 用户名 / 显示名跟同步走，落到本机时置成「需要输密码」的状态，
+电视上尤其省事（电视输密码最痛苦）。**第一期可以先不做**——就三个字段，每台设备配一次的成本很低。
+
+### 5.9 不在范围内的事
+
 - **不做上传。** Subsonic 协议没有上传端点（Navidrome 只有 Native API 能传，且要 JWT），
   所以 `data/cloud` 那套 `CloudUploadSource` 与 Subsonic 无关。
 - **不做 Jukebox。** Navidrome 未实现 `jukeboxControl`，Airsonic 有但没人用。
-- **不做播客 / 视频 / 聊天。** Navidrome 对这些端点一律 410/501。
+- **不做播客 / 视频 / 聊天。** Navidrome 对这些端点一律 410 / 501。
 
 ---
 
@@ -671,5 +721,6 @@ P0 的落地顺序（都是小步，可分别提交）：
 | 内网权限 | `data/sync/LocalNetworkAccess.kt` |
 | 明文流量配置 | `app/src/main/res/xml/network_security_config.xml` |
 | 绑定平台歌单 | `data/BoundPlaylists.kt` |
+| 同步快照结构（绑定/收藏会跟同步走） | `data/sync/SyncModels.kt`、`data/sync/SyncCoordinator.kt` |
 | 歌词管线 | `ui/LyricPipeline.kt` |
 | 账号配置 UI 范本 | `ui/local/LocalWebDavScreen.kt`、`ui/library/WebDavSyncForm.kt` |
