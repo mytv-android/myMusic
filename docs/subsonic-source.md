@@ -4,7 +4,8 @@
 > 用途：给实现做方案设计与事实依据。本文只描述已核实的协议契约、本仓库的对接点与取舍，不代替实现代码。
 > 工程：`C:\PythonProject\myMusic`，Android/Kotlin，minSdk 23，targetSdk 37，Media3 1.11.1，OkHttp 5.5.0，Room 2.8.5。
 > 核实来源：Subsonic 官方 API 页（subsonic.org/pages/api.jsp）、OpenSubsonic 规范站（opensubsonic.github.io）、
-> Navidrome 官方文档 `docs/developers/subsonic-api/`、Navidrome 与 Airsonic-Advanced 的 master 源码（下文逐条给出文件路径）。
+> Navidrome 官方文档、Navidrome 与 Airsonic-Advanced 的 master 源码（下文逐条给出文件路径），
+> 以及 `https://demo.navidrome.org`（demo/demo）上的真实调用——见 §9，协议层大部分结论是实测的。
 
 ---
 
@@ -289,6 +290,10 @@ Airsonic-Advanced 则反过来：`getChatMessages`/`addChatMessage` 410，`getVi
 | `apiKeyAuthentication` | 1 | 认 `apiKey` 查询参数（且不能和 `u` 同时出现） |
 | `sonicSimilarity` | 1 | 仅装了 AudioMuse-AI 插件时追加（`api.sonic.HasProvider()`） |
 
+> **发布版比 master 少一个。** master 源码里有 8 个，但公开 demo 跑的 `0.64.2` 实测只回 7 个——
+> **没有 `apiKeyAuthentication`**（那个还在 master，没进发布版）。所以 §9 的实测向量里 API key 这条路
+> 在 0.64.2 上是验不了的，别在 demo 上试。
+
 **扩展是逐项可选的**，规范原话："Each part of the OpenSubsonic API is designed to be optional"。
 所以客户端的正确姿势是：**`ping` 之后调一次 `getOpenSubsonicExtensions`，把返回的 name 列表存进账号，
 每个能力点用前先查表**，不要假定「Navidrome 就有」。
@@ -314,8 +319,13 @@ Navidrome `server/subsonic/stream.go` → `core/stream/media_streamer.go:158`：
 
 1. **`format=raw`（原文件直出）= 可 seek**，走 `http.ServeContent`，标准 206 + `Content-Range`。
    Media3 拖动、缓存、`LiveBypassDataSourceFactory` 全都正常工作。
-2. **转码流（ffmpeg 管道）= 不可 seek**，服务器主动声明 `Accept-Ranges: none`，只有 `timeOffset`
-   （OpenSubsonic `transcodeOffset`，单位**秒**，`core/stream.Request.Offset int // seconds`）能定位。
+2. **转码流的 Range 支持取决于服务端转码缓存，不是"一律不支持"**（这条是实测修正的，见 §9.3）：
+   - **冷缓存**（第一次请求这首歌这个码率）→ ffmpeg 管道边转边吐，`Transfer-Encoding: chunked` +
+     `Accept-Ranges: none`，**Range 被忽略**，Media3 拿不到总长度（`C.LENGTH_UNSET`）；
+   - **转码完成并被服务端缓存后** → 之后任意 Range 都回 206 + `Content-Range`，
+     total 是**转码后**的完整字节数（不是原文件大小）。
+   - `timeOffset`（OpenSubsonic `transcodeOffset`，单位**秒**，`core/stream.Request.Offset int // seconds`）
+     另起一条管道，同样回 200 + `Accept-Ranges: none`。
 3. **`format=raw` 是权威的**：`core/stream/legacy_client.go ResolveRequest` 第一行就是
    `if reqFormat == "raw" { return Request{Format: "raw"} }`，**跳过服务器端按 player 配置的强制转码**。
    不带 `format` 也不带 `maxBitRate` 时，`buildLegacyClientInfo` 会给一个只声明 `ProtocolHTTP` 的
@@ -325,7 +335,10 @@ Navidrome `server/subsonic/stream.go` → `core/stream/media_streamer.go:158`：
 
 **对本应用的做法**：
 - 播放一律 `stream.view?id=…&format=raw`，先把「原文件直出」坐实。
-- 只有在 `getTranscodeDecision` 可用、且用户显式选了「省流量转码」时才走转码，并**明确告知拖动会重新起一条流**。
+- 转码模式下**第一次播放会拿不到总长度**：进度条显示不出来、拖动行为退化。
+  要么提示用户，要么等 `Content-Range` 出现后再更新总时长（Media3 的 `ProgressiveMediaSource`
+  会在拿到 206 后自己纠正）。服务端转码缓存有过期时间，冷启动后第一次仍会这样。
+- 只有在 `getTranscodeDecision` 可用、且用户显式选了「省流量转码」时才走转码。
 - 客户端可以声明自己的解码能力走 `getTranscodeDecision`（OpenSubsonic `transcoding` 扩展），
   但这需要探测 Media3 的解码器能力，工作量不小，**第一期不做**。
 - 服务器返回 `Accept-Ranges: none` 时，参考 WebDAV 那条路径的既有处理（`WebDavRangeReader` 的
@@ -461,10 +474,20 @@ Subsonic 账号和平台账号是同一类东西（"我在这个服务上的凭�
 `Unstable` / `Note` 可以填「自建服务器，行为随服务器实现而异」，和现有平台的用法一致。
 
 **能力位最好按探测结果动态填，不要写死。** `ProviderInfo` 是 `data class`，`SubsonicProvider.info`
-可以在 `ping` + `getOpenSubsonicExtensions` 之后按服务器实际情况构造：
-Supysonic（1.12.0）没有 `search3` / `getLyricsBySongId` / `getStarred2`，
-Airsonic-Advanced 没有 `getLyricsBySongId`——这些直接把对应能力位置 false，
-比让用户在搜索页看到一个永远失败的源好。表里标 ✅ 的都是"服务器支持时才开"的意思。
+可以在探测之后按实际情况构造。**`getUser` 比 `getOpenSubsonicExtensions` 更能反映这个账号实际能做什么**——
+demo 上实测（§9.4）：
+
+```json
+{"username":"demo","scrobblingEnabled":true,"adminRole":false,"settingsRole":false,
+ "downloadRole":true,"uploadRole":false,"playlistRole":false,"coverArtRole":false,
+ "streamRole":true,"jukeboxRole":false,"shareRole":true,"folder":[1]}
+```
+
+所以对 demo 账号，`PlaylistWrite` 必须是 false（`playlistRole: false`）——
+但 `getCoverArt` 照样回 200（`coverArtRole: false` 管的是"改封面"不是"看封面"），
+`Download` 可以是 true（`downloadRole: true`）。表里标 ✅ 的都是"服务器+账号都允许时才开"的意思：
+Supysonic（1.12.0）没有 `search3` / `getLyricsBySongId`，Airsonic-Advanced 没有 `getLyricsBySongId`，
+这些直接把对应能力位置 false，比让用户在搜索页看到一个永远失败的源好。
 
 #### 5.1.5 provider 列表刷新（唯一需要写代码的生命周期问题）
 
@@ -617,12 +640,13 @@ https://nas.example.com/rest/stream.view?id=<songId>&format=raw
 - `offset` 是整条歌词的统一偏移（毫秒），**不要**把它加到每一行的 `start` 上——按 OpenSubsonic
   规范它「applies equally to both timestamps」，即整条平移，由渲染层处理。
 - 一条歌可以有多组 `structuredLyrics`（多语言）。现有管线已经有翻译层合并顺序的处理
-  （见 `ui/LyricPipeline.kt`）。挑选顺序建议：先 `synced == true` 且 `lang` 是 `eng`/`zho`/`und` 的；
-  golden vector 里那条未同步的 `lang` 是 `xxx`（ISO 639-2 的"无语言内容"），**不是 `und`**，
-  按 `und` 去匹配会漏掉它。
+  （见 `ui/LyricPipeline.kt`）。
+- **`lang` 的"无语言标签"写法实测是 `none`**，不是源码快照里的 `xxx`——demo 上 `sad robot`
+  返回两组：`lang = "eng"` 和 `lang = "none"`，内容相同。挑选顺序建议：先 `synced == true` 的；
+  同 `synced` 时优先 `eng` / `zho`，把 `none` / `xxx` / 空都当成"未标注语言"，
+  **别只按 `und` 去匹配，会一组都选不中**。
 - **Airsonic-Advanced 没有 `getLyricsBySongId`**，只有 `getLyrics?artist=&title=` 的纯文本。
-  能力探测（`getOpenSubsonicExtensions`）失败时走纯文本分支——正好对应 `ProviderInfo.lyrics` 能力位
-  可以按服务器实现动态置 false。Supysonic（1.12.0）同样只有纯文本。
+  能力探测（`getOpenSubsonicExtensions`）失败时走纯文本分支。Supysonic（1.12.0）同样只有纯文本。
 - v2 才有逐字（`cueLine`/`cue`/`byteStart`/`byteEnd`）。Navidrome 已经广告 `songLyrics: [1, 2]`，
   但**第一期只吃 line 级**；逐字等现有 Rush 歌词页有富余再上。
 
@@ -737,7 +761,7 @@ Navidrome / Airsonic 上这些状态全在服务端，同一账号的所有客�
 
 | # | 坑 | 影响 | 规避 |
 |---|---|---|---|
-| 1 | **转码流不支持 Range** | 拖动失败/从头读，用户体感「卡」 | 默认 `format=raw`；探测到 `Accept-Ranges: none` 就给提示 |
+| 1 | **转码流第一次拿不到 Range**（服务端转码缓存冷启动时 `Accept-Ranges: none` + chunked） | 进度条显示不出总时长、拖动退化 | 默认 `format=raw`；转码模式下等 `Content-Range` 出现再更新总时长，或给一句提示 |
 | 2 | **封面/歌词/取流全要认证** | 封面白图、播放 401 | 封面走本地磁盘缓存（§5.4）；播放走路由 DataSource（§5.3） |
 | 3 | **登录限流伪装成密码错误**（5 次/20 秒） | 用户反复被拒却以为是密码错 | 「测试连接」不自动重试；错误 40 的文案里带「可能被临时限流，请稍等 20 秒」 |
 | 4 | **`musicFolder.id` 是 int，其它 id 是 string** | 解析崩溃 / 类型不匹配 | 解析层对 id 统一按「可 string 可 int」处理 |
@@ -796,25 +820,201 @@ P0 的落地顺序（都是小步，可分别提交）：
 
 ## 8. 未验证项与下一步
 
-本文的所有协议结论都来自官方文档与源码，**没有真机实测**。接入前建议按这个顺序补实测：
+§9 已经在 `https://demo.navidrome.org` 上做了真实调用，所以**协议层的大部分结论现在是实测的**：
+认证三路（明文 / token+salt / `enc:`）、`getMusicFolders` / `getAlbumList2` / `getAlbum` / `search3` /
+`getCoverArt` / `getLyricsBySongId` / `getUser`、`format=raw` 的 206、转码流的冷热缓存差异，全部有真向量。
+**还没实测的是下面这些**，按优先级排：
 
 0. **先守住院子**：`NativeProviders` 拆静态/动态表后，加一条单测断言 `all()` 返回的 id 集合和现在完全一致
    （16 个），且 `get()` / `providerForSession()` 行为不变。这一步不过，后面全白做。
-1. **最小闭环**：用自己的 Navidrome 实例跑通
-   `curl 'https://host/rest/ping.view?u=x&t=<md5(pw+salt)>&s=<salt>&v=1.16.1&c=myMusic&f=json'`，
-   确认 `status=ok` 和 `type`。这一步不做，后面全是猜。
-2. **Range 实测**：同一首歌分别 `format=raw` 和不带 format，用 `curl -r 1000-2000` 各打一次，
-   看是不是 206。这决定 §4 的结论在你的服务器上成立。
-3. **Airsonic-Advanced 兼容**：如果身边有实例，确认 `f=json` 与 `getAlbumList2` 的实际返回
-   （Airsonic 的 JSON 是 JAXB 序列化出来的，字段名可能和 Navidrome 有细微差别）。
-   **另外务必找一个 Supysonic（1.12.0）或只支持密码认证的服务器验降级**——token/salt 失败后改发
-   `p=enc:<hex>` 这条路是猜的，没实测过。
+1. **`enc:` 降级路径**：token/salt 失败后改发 `p=enc:<hex>` 这条**只在 demo 上正向验过**
+   （`enc:` 本身可用），**没验过"先 token 失败再退 enc"的切换逻辑**，更没在只支持密码的服务器
+   （Supysonic 1.12.0）上试过。
+2. **下载路径**：`downloadUrl` 返回带凭据的 URL 后，`MusicViewModel.downloadSong` 那条裸 OkHttp
+   真能下下来（§5.7）。这是全套里唯一"凭据必须进 URL"的地方，别在评审时才发现。
+   demo 上 `downloadRole: true`，可以直接试。
+3. **Airsonic-Advanced 兼容**：没有公共实例（§9.5），`f=json` 是 JAXB 序列化出来的，
+   字段名可能和 Navidrome 有细微差别；`jwt` 参数和 1.15.0 的版本协商也只在源码层读过。
 4. **自签证书**：确认 `PinnedTrustManager` 复用到 Subsonic 的 OkHttpClient 上无需改动
    （`data/webdav/WebDavCertificate.kt:122` 的 `manager` 已经是独立于 WebDAV 的）。
-5. **下载路径**：确认 `downloadUrl` 返回带凭据的 URL 后，`MusicViewModel.downloadSong` 那条裸 OkHttp
-   真能下下来（§5.7）。这是全套里唯一"凭据必须进 URL"的地方，别在评审时才发现。
-6. **golden vector 单测**：把 §2.3 / §3.3 / §5.5 里那份快照 JSON 抄成测试资源，
+   demo 是公网 + 有效证书，这条路它替不了。
+5. **golden vector 单测**：把 §9.3 从 demo 抓回来的 `Child` 字段全集和歌词结构抄成测试资源，
    解析层按它逐字段自测。这和本仓库处理签名类问题的思路一致：**缺的是算法契约，不是流量样本**。
+
+---
+
+## 9. 公共测试源（2026-11-23 逐条实测）
+
+### 9.1 唯一可用的公共实例
+
+| | |
+|---|---|
+| 地址 | `https://demo.navidrome.org` |
+| 用户名 / 密码 | `demo` / `demo` |
+| `serverVersion` | `0.64.2 (10114574)` |
+| Subsonic 版本 | `1.16.1`，`openSubsonic: true` |
+| Web UI | `https://demo.navidrome.org/app/`（可登录后核对客户端写进去的东西） |
+| 曲库 | Jamendo / Chillhop / Nine Inch Nails / NCS / blocSonic 的免费音乐 |
+| 歌单数 | **155 个**（`getPlaylists` 实测），够测列表和分页 |
+| 托管 | PikaPods，1 核 / 512MB / 10GB |
+
+凭据来源：navidrome.org 官方 `/demo/` 页面原文 "User: demo / Password: demo"，
+不是猜的。`guest/guest`、`admin/admin` 实测返回错误 40。
+
+**这是一个共享的、持久化的实例——只能读，不要写。** 上面的 album 上
+`starred: 2026-11-22`、`played: 2026-11-23`，说明状态会一直留着、不清空。
+往它里面 `star` / `createPlaylist` / `scrobble` 会污染别人看到的数据。
+（而且 demo 账号 `playlistRole: false`，写歌单本来就会被拒，见 §9.4。）
+
+**不要用它测的东西**：登录限流（§6 第 3 条）——连错 5 次会把自己锁 20 秒，
+公共实例上还会连累别人； playlist 写入； `startScan`（`adminRole: false`）。
+
+### 9.2 已在 demo 上验证通过的调用
+
+```bash
+B=https://demo.navidrome.org/rest
+U=demo; P=demo; V=1.16.1; C=myMusic
+
+# 1) ping —— 明文密码
+curl "$B/ping.view?u=$U&p=$P&v=$V&c=$C&f=json"
+# → {"subsonic-response":{"status":"ok","version":"1.16.1","type":"navidrome",
+#     "serverVersion":"0.64.2 (10114574)","openSubsonic":true}}
+
+# 2) ping —— token/salt（token = md5(password + salt)，小写十六进制）
+S=abcdef123456
+T=$(printf '%s%s' "$P" "$S" | md5sum | cut -d' ' -f1)
+curl "$B/ping.view?u=$U&t=$T&s=$S&v=$V&c=$C&f=json"          # → status: ok
+
+# 3) ping —— enc: 十六进制（Subysonic 只有这一条路，见 §1）
+E=$(printf '%s' "$P" | xxd -p | tr -d '\n')
+curl "$B/ping.view?u=$U&p=enc:$E&v=$V&c=$C&f=json"           # → status: ok
+
+# 4) 能力探测（公开端点，不需要认证）
+curl "$B/getOpenSubsonicExtensions.view?v=$V&c=$C&f=json"
+# → 7 个扩展：transcodeOffset / formPost / songLyrics[1,2] / indexBasedQueue /
+#   transcoding / playbackReport / topSongsByArtistId   ← 没有 apiKeyAuthentication
+
+# 5) 账号能力（决定 ProviderInfo 能力位，见 §5.1.4）
+curl "$B/getUser.view?u=$U&p=$P&v=$V&c=$C&f=json&username=demo"
+# → downloadRole:true  playlistRole:false  scrobblingEnabled:true  folder:[1]
+
+# 6) 浏览
+curl "$B/getMusicFolders.view?u=$U&p=$P&v=$V&c=$C&f=json"                     # musicFolder.id 是 int
+curl "$B/getAlbumList2.view?u=$U&p=$P&v=$V&c=$C&f=json&type=newest&size=3"
+curl "$B/getAlbum.view?u=$U&p=$P&v=$V&c=$C&f=json&id=6dGMsiesuYw9lti9yGIGWY"
+curl "$B/search3.view?u=$U&p=$P&v=$V&c=$C&f=json&query=chillhop&songCount=2&albumCount=1&artistCount=1"
+
+# 7) 封面 / 歌词
+curl "$B/getCoverArt.view?u=$U&p=$P&v=$V&c=$C&id=al-6dGMsiesuYw9lti9yGIGWY_ebbb154f246c04a5&size=300"
+# → 200 image/png，Cache-Control: public, max-age=31536000, immutable，
+#   etag: "ebbb154f246c04a5.300.false.q75"   ← etag 里带着 size，可当缓存键
+curl "$B/getLyricsBySongId.view?u=$U&p=$P&v=$V&c=$C&f=json&id=5Z8mReLzZSpQxhE5rX6tAH"
+```
+
+### 9.3 实测抓到的两个关键向量
+
+**原文件直出，Range 正常**（`format=raw`）：
+
+```
+$ curl -D- -o /dev/null "$B/stream.view?u=$U&p=$P&v=$V&c=$C&format=raw&id=0uTqxDgHNaihj2pIciP0h8" \
+       -H "Range: bytes=1000-1999"
+HTTP/1.1 206 Partial Content
+Content-Type: audio/mpeg
+Content-Length: 1000
+Accept-Ranges: bytes
+content-range: bytes 1000-1999/5365035
+```
+
+**转码流的 Range 取决于服务端转码缓存**（这条修正了本文原来的说法，见 §4 第 2 条）。
+同一首歌、同一码率，冷热两次请求：
+
+```
+# 冷缓存（第一次请求这首 @64k）：
+HTTP/1.1 200 OK
+Content-Type: audio/ogg
+Transfer-Encoding: chunked
+Accept-Ranges: none            ← Range 被忽略，拿不到总长度
+
+# 转码完成之后再请求任意区间：
+HTTP/1.1 206 Partial Content
+Content-Length: 1000
+Accept-Ranges: bytes
+content-range: bytes 1000-1999/1793079    ← total 是转码后的字节数，不是原文件的 5365035
+```
+
+换一首没转码过的歌（`1pSim0LwCjgENdO2UKjIM8` @64k）立刻又回到 `200 + chunked + Accept-Ranges: none`，
+所以这不是偶发。`timeOffset=30` 也是 `200 + Accept-Ranges: none`（另起一条管道）。
+
+**`Child` 字段全集**（`getAlbum` 里 `song[0]`，可直接当解析层的黄金向量）：
+
+```
+id, title, artist, album, albumId, artistId, artists, albumArtists, displayArtist,
+displayAlbumArtist, displayComposer, contributors, duration(秒), size(字节),
+bitRate(kbps), suffix, contentType, coverArt, track, year, playCount, played, starred,
+userRating, averageRating, genres, moods, groupings, works, movements, isrc, mediaType,
+musicBrainzId, replayGain, channelCount, samplingRate, bitDepth, bpm, comment, sortName,
+explicitStatus, created, parent, path, isDir, type
+```
+
+注意 `discNumber` 不总是有（这首就没有），解析时要能容忍缺字段。
+
+**歌词实测结构**（`lang` 的实际写法见 §5.5）：
+
+```json
+{"lyricsList":{"structuredLyrics":[
+  {"displayArtist":"pornophonique","displayTitle":"sad robot","lang":"eng",
+   "synced":false,"line":[{"value":"his steely skin is covered"}, …36 行…]},
+  {"displayArtist":"pornophonique","displayTitle":"sad robot","lang":"none",
+   "synced":false,"line":[{"value":"his steely skin is covered"}, …36 行…]}
+]}}
+```
+
+无歌词的歌回 `{"lyricsList":{}}`（空对象，不是 `null`），解析要认这个。
+
+### 9.4 demo 账号的能力边界（决定 ProviderInfo 怎么填）
+
+`getUser` 实测（§9.2 第 5 条）说明这个账号：
+
+| 能力 | 值 | 对客户端的意义 |
+|---|---|---|
+| `downloadRole` | true | `Download` 可以开 |
+| `playlistRole` | **false** | **`PlaylistWrite` 必须置 false**，否则用户点编辑必失败 |
+| `scrobblingEnabled` | true | 可以发 `scrobble` |
+| `streamRole` | true | 能播 |
+| `shareRole` | true | `getShares` 可用 |
+| `adminRole` / `settingsRole` | false | 不能 `startScan` |
+| `uploadRole` / `jukeboxRole` | false | 没有上传/点歌 |
+| `folder` | `[1]` | 只看得见一个库 |
+
+`coverArtRole: false` **不影响** `getCoverArt`（实测 200）——它管的是"改封面"不是"看封面"。
+
+### 9.5 没有公共实例的服务器（自己起）
+
+Airsonic-Advanced、Gonic、Supysonic 都没有找到可用的公共 demo
+（`airsonic-advanced.github.io`、`demo.gonic.io`、`supysonic.deforsake.com` 均无响应，
+`demo.subsonic.org` 超时）。要测这三家，本地起一个最快——Docker 镜像名已核实存在于 Docker Hub：
+
+```bash
+# Navidrome（要复现 §9.3 的转码缓存行为，需要挂一个 transcoding 缓存目录）
+docker run -d --name nd -p 4533:4533 \
+  -e ND_SCANSCHEDULE=1h -e ND_LOGLEVEL=info \
+  -v "$PWD/nd/music:/music" -v "$PWD/nd/data:/data" \
+  deluan/navidrome:latest
+
+# Airsonic-Advanced（唯一要验的：f=json 的字段名、jwt 参数、1.15.0 的版本协商）
+docker run -d --name aa -p 4040:4040 airsonicadvanced/airsonic-advanced:latest
+
+# Gonic（1.16.1 + token/salt 双路）
+docker run -d --name gonic -p 4747:4747 -v "$PWD/gonic:/data" sentriz/gonic:latest
+
+# Supysonic 没有 Docker 镜像（Docker Hub 上 spl0k/supysonic 已不存在），按官方 README 装：
+#   pip install supysonic && pip install gunicorn
+```
+
+**优先级**：Navidrome demo 能覆盖 80% 的验证量（浏览、播放、Range、封面、歌词、能力位、认证三路）。
+Airsonic-Advanced 是第二优先——它是唯一要单独验「非 OpenSubsonic 服务器怎么降级」的，
+`f=json` 还是 JAXB 序列化出来的，字段名可能有细微差别。
+Gonic / Supysonic 可以放到最后，或者干脆不测（协议相同，差异只在版本和扩展）。
 
 ---
 
@@ -839,4 +1039,5 @@ P0 的落地顺序（都是小步，可分别提交）：
 | 明文流量配置 | `app/src/main/res/xml/network_security_config.xml` |
 | 绑定平台歌单 | `data/BoundPlaylists.kt` |
 | 歌词管线 | `ui/LyricPipeline.kt` |
+| **公共测试源（demo/demo）** | `https://demo.navidrome.org`，Web UI `/app/`，详见 §9 |
 | 账号配置 UI 范本 | `ui/local/LocalWebDavScreen.kt`、`ui/library/WebDavSyncForm.kt` |
