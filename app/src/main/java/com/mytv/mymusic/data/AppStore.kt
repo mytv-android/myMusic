@@ -191,30 +191,52 @@ enum class CrossfadeMode(val label: String) {
 /**
  * GitHub 加速镜像；空串是源站直连。
  *
- * 2026-11-17 实测（Release 资产 / `api.github.com` / raw 三类端点）：
- * - 直连：资产与 raw 可用；`api.github.com` 常因共享出口 IP 被限流 403。
+ * 2026-11-23 实测（Release 资产 / `api.github.com` / raw 三类端点，成都教育网出口）：
  * - gh-proxy.org / gh-proxy.com：三类全通，且代理 `api.github.com`。
- * - ghfile.geekertao.top / ghfast.top / gh.3w.pm：只转发资产与 raw，**不代理 API**。
- * - ghproxy.net：资产可用但 6~22s，仅作兜底。
+ * - ghfile.geekertao.top / ghfast.top / gh.3w.pm / cors.isteed.cc：只转发资产与 raw，**不代理 API**。
+ * - ghproxy.net：可用但 2~4.5s，仅作兜底。
+ * - raw.githack.com / rawcdn.githack.com / githack.com：只服务 raw/blob，最后兜底。
  *
- * 已剔除（NXDOMAIN / TLS 不握手 / 落地页）：ghp.ci、hub.gitmirror.com、github.moeyy.xyz、
- * gh.cc、ghproxy.cn、gh-proxy.net、mirror.ghproxy.com、gh-proxy.ygxz.in、gh.llkk.cc、
- * gh.api.99988866.xyz、ghproxy.com。
+ * 已剔除（域名不再解析 / TLS 不握手 / 403 只许 git / 变成落地页）：ghp.ci、hub.gitmirror.com、
+ * github.moeyy.xyz、gh.cc、ghproxy.cn、gh-proxy.net、mirror.ghproxy.com、gh-proxy.ygxz.in、
+ * gh.llkk.cc、gh.api.99988866.xyz、ghproxy.com、ghproxy.link、ghps.cc、gh.ddlc.top、
+ * kkgithub.com、bgithub.xyz、githubfast.com、gitclone.com，以及 100 余个社区流传的 `gh.*`
+ * 前缀代理。判定「活」的唯一标准是能前缀式抓回 raw 正文（HTTP 200 且不是 HTML 反爬页），
+ * 网页能否打开不作数；实测脚本与完整记录见 gitee `mytv-android/my-mirror`。
+ *
+ * 运行时还会从 gitee `my-mirror` 拉最新清单与这里的内置值合并，见 [GithubMirrors]。
+ * 排序铁律：**镜像 / 国内直连优先，raw 最后兜底**——按 [tier] 升序取，同档位保持声明顺序。
  */
-enum class GithubMirror(val label: String, val prefix: String) {
+enum class GithubMirror(
+    val id: String,
+    val label: String,
+    /** [MirrorKind.PREFIX] 拼在原 URL 前；[MirrorKind.RAW_HOST] 只存主机名；直连为空串。 */
+    val prefix: String,
+    val kind: MirrorKind,
+    /** 是否代理 `api.github.com`（不代理的线路只能用于下载资产与 raw） */
+    val proxiesApi: Boolean,
+    val tier: Int,
+) {
     /** 并发测速所有线路，选最快可达者（原有行为） */
-    Auto("自动测速", ""),
-    Direct("GitHub 直连", ""),
-    ProxyOrg("gh-proxy.org", "https://gh-proxy.org/"),
-    ProxyCom("gh-proxy.com", "https://gh-proxy.com/"),
-    Geekertao("ghfile.geekertao.top", "https://ghfile.geekertao.top/"),
-    Ghfast("ghfast.top", "https://ghfast.top/"),
-    ThreeW("gh.3w.pm", "https://gh.3w.pm/"),
-    ProxyNet("ghproxy.net", "https://ghproxy.net/"),
+    Auto("auto", "自动测速", "", MirrorKind.PREFIX, true, TIER_MODE),
+    Direct("direct", "GitHub 直连", "", MirrorKind.PREFIX, true, TIER_DIRECT),
+    ProxyOrg("gh-proxy.org", "gh-proxy.org", "https://gh-proxy.org/", MirrorKind.PREFIX, true, TIER_FAST),
+    ProxyCom("gh-proxy.com", "gh-proxy.com", "https://gh-proxy.com/", MirrorKind.PREFIX, true, TIER_FAST),
+    Geekertao("ghfile.geekertao.top", "ghfile.geekertao.top", "https://ghfile.geekertao.top/", MirrorKind.PREFIX, false, TIER_FAST),
+    Ghfast("ghfast.top", "ghfast.top", "https://ghfast.top/", MirrorKind.PREFIX, false, TIER_FAST),
+    ThreeW("gh.3w.pm", "gh.3w.pm", "https://gh.3w.pm/", MirrorKind.PREFIX, false, TIER_FAST),
+    CorsIsteed("cors.isteed.cc", "cors.isteed.cc", "https://cors.isteed.cc/", MirrorKind.PREFIX, false, TIER_FAST),
+    ProxyNet("ghproxy.net", "ghproxy.net", "https://ghproxy.net/", MirrorKind.PREFIX, false, TIER_SLOW),
+    RawGithack("raw.githack.com", "raw.githack.com", "raw.githack.com", MirrorKind.RAW_HOST, false, TIER_RAW_ONLY),
+    RawcdnGithack("rawcdn.githack.com", "rawcdn.githack.com", "rawcdn.githack.com", MirrorKind.RAW_HOST, false, TIER_RAW_ONLY),
+    Githack("githack.com", "githack.com", "githack.com", MirrorKind.RAW_HOST, false, TIER_RAW_ONLY),
     ;
 
     /** 具体代理线路（自动测速与直连另行展开）。 */
     val isProxy: Boolean get() = this != Auto && this != Direct
+
+    fun toRoute(): MirrorRoute =
+        MirrorRoute(id, label, prefix, kind, proxiesApi, tier, enabled = true)
 
     companion object {
         val proxies: List<GithubMirror> = entries.filter { it.isProxy }

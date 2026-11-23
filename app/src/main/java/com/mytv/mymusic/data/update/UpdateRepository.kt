@@ -16,6 +16,8 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.mytv.mymusic.data.GithubMirror
+import com.mytv.mymusic.data.GithubMirrors
+import com.mytv.mymusic.data.MirrorRoute
 import com.mytv.mymusic.data.SettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -94,7 +96,9 @@ class UpdateRepository(
     private val settings: SettingsStore,
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        // 读超时与速度门槛取同一个值：超过 5 秒一个字节都读不到，这条线路对这次请求
+        // 就已经没用了，赶紧失败换下一站，而不是干等 60 秒。
+        .readTimeout(GithubMirrors.SPEED_GATE_MS, TimeUnit.MILLISECONDS)
         .build(),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -108,11 +112,11 @@ class UpdateRepository(
 
     /** 检查更新与下载各自缓存一份线路测速结果，避免每次请求都重新探测。 */
     private var manifestProbeExpiry = 0L
-    private var manifestProbeOrder: List<String>? = null
+    private var manifestProbeOrder: List<MirrorRoute>? = null
     /** 测速结果对应的镜像设置；用户换了线路，旧顺序立刻作废。 */
     private var manifestProbeMirror: GithubMirror? = null
     private var downloadProbeExpiry = 0L
-    private var downloadProbeOrder: List<String>? = null
+    private var downloadProbeOrder: List<MirrorRoute>? = null
     private var downloadProbeMirror: GithubMirror? = null
 
     @Volatile
@@ -137,6 +141,8 @@ class UpdateRepository(
     suspend fun check(manual: Boolean): Boolean = withContext(Dispatchers.IO) {
         _state.update { it.copy(phase = UpdatePhase.Checking, phaseLabel = "正在检查更新", error = "", permissionRequired = false) }
         try {
+            // 远程清单可能已经过期，顺手补一次；拉不到也不影响内置清单。
+            GithubMirrors.refreshListIfStale(context)
             val manifest = fetchManifest(manifestMirrorOrder())
                 ?: throw IOException("检查更新失败：所有线路均不可用")
             settings.lastUpdateCheck(System.currentTimeMillis())
@@ -226,11 +232,11 @@ class UpdateRepository(
         try {
             var lastError: Exception? = null
             var downloaded = false
-            for (mirror in downloadMirrorOrder(info.url)) {
+            for (route in downloadMirrorOrder(info.url)) {
                 if (downloadCancelled) break
                 _state.update { it.copy(progress = 0f) }
                 try {
-                    downloadFrom(mirrorUrl(mirror, info.url), target, info)
+                    downloadFrom(route.urlFor(info.url) ?: continue, target, info)
                     downloaded = true
                     break
                 } catch (error: Exception) {
@@ -290,6 +296,12 @@ class UpdateRepository(
             val digest = MessageDigest.getInstance("SHA-256")
             var copied = 0L
             val progressGate = DownloadProgressGate()
+            // 速度门槛：小于门槛的小文件要求 5 秒内下完，大文件要求 5 秒内过门槛。
+            val gateBytes = minOf(
+                GithubMirrors.SPEED_GATE_MIN_BYTES,
+                if (total > 0) total else GithubMirrors.SPEED_GATE_MIN_BYTES,
+            )
+            val gateDeadline = System.currentTimeMillis() + GithubMirrors.SPEED_GATE_MS
             val buffer = ByteArray(64 * 1024)
             target.outputStream().use { output ->
                 body.byteStream().use { input ->
@@ -301,6 +313,12 @@ class UpdateRepository(
                         copied += read
                         if (total > 0 && progressGate.shouldEmit(System.nanoTime(), complete = copied >= total)) {
                             _state.update { it.copy(progress = (copied.toFloat() / total).coerceIn(0f, 1f)) }
+                        }
+                        if (copied < gateBytes && System.currentTimeMillis() > gateDeadline) {
+                            throw IOException(
+                                "前 ${GithubMirrors.SPEED_GATE_MS / 1000} 秒只下载了 " +
+                                    "${copied / 1024} KB，低于速度门槛",
+                            )
                         }
                     }
                 }
@@ -319,15 +337,21 @@ class UpdateRepository(
     /**
      * GitHub 直连在国内经常超时，内置多个加速镜像 + 源站直连兜底。
      * 并发测速后按耗时升序使用，测速结果缓存 5 分钟；不可达的线路留在末尾作为兜底。
+     *
+     * 线路顺序见 [GithubMirrors]：内置一份，运行时再与 gitee `my-mirror` 的最新清单合并，
+     * 铁律是「镜像 / 国内直连优先，raw 最后兜底」。
      */
-    private suspend fun probeMirrors(target: String, mirrors: List<String>): List<String> = coroutineScope {
-        val results = mirrors.map { mirror ->
+    private suspend fun probeMirrors(target: String, routes: List<MirrorRoute>): List<MirrorRoute> = coroutineScope {
+        val results = routes.map { route ->
             async {
+                val url = route.urlFor(target)
                 val startedAt = System.nanoTime()
-                val reachable = withTimeoutOrNull(PROBE_TIMEOUT_MS) {
+                val reachable = if (url == null) {
+                    false
+                } else withTimeoutOrNull(PROBE_TIMEOUT_MS) {
                     try {
                         val request = Request.Builder()
-                            .url(mirrorUrl(mirror, target))
+                            .url(url)
                             .head()
                             .header("User-Agent", USER_AGENT)
                             .build()
@@ -336,46 +360,45 @@ class UpdateRepository(
                         false
                     }
                 }
-                mirror to if (reachable == true) System.nanoTime() - startedAt else Long.MAX_VALUE
+                route to if (reachable == true) System.nanoTime() - startedAt else Long.MAX_VALUE
             }
         }.awaitAll()
-        results.sortedWith(compareBy({ it.second }, { it.first })).map { it.first }
+        results.sortedWith(compareBy({ it.second }, { it.first.label })).map { it.first }
     }
 
-    private suspend fun manifestMirrorOrder(): List<String> {
+    private suspend fun manifestMirrorOrder(): List<MirrorRoute> {
         val now = System.currentTimeMillis()
         val selected = settings.state.first().githubMirror
         manifestProbeOrder
             ?.takeIf { now < manifestProbeExpiry && manifestProbeMirror == selected }
             ?.let { return it }
-        return probeMirrors(MANIFEST_URL, candidateMirrors(selected)).let { order ->
-            val pinned = applyPinnedMirror(order, selected)
-            manifestProbeOrder = pinned
+        return probeMirrors(MANIFEST_URL, GithubMirrors.candidates(context, MANIFEST_URL, selected)).let { order ->
+            manifestProbeOrder = order
             manifestProbeMirror = selected
             manifestProbeExpiry = now + PROBE_TTL_MS
-            pinned
+            order
         }
     }
 
-    private suspend fun downloadMirrorOrder(target: String): List<String> {
+    private suspend fun downloadMirrorOrder(target: String): List<MirrorRoute> {
         val now = System.currentTimeMillis()
         val selected = settings.state.first().githubMirror
         downloadProbeOrder
             ?.takeIf { now < downloadProbeExpiry && downloadProbeMirror == selected }
             ?.let { return it }
-        return probeMirrors(target, candidateMirrors(selected)).let { order ->
-            val pinned = applyPinnedMirror(order, selected)
-            downloadProbeOrder = pinned
+        return probeMirrors(target, GithubMirrors.candidates(context, target, selected)).let { order ->
+            downloadProbeOrder = order
             downloadProbeMirror = selected
             downloadProbeExpiry = now + PROBE_TTL_MS
-            pinned
+            order
         }
     }
 
     /** 依次尝试各线路，返回第一个能解析且 schema 正确的更新清单。 */
-    private fun fetchManifest(order: List<String>): UpdateManifest? {
-        for (mirror in order) {
-            val body = fetchText(mirrorUrl(mirror, MANIFEST_URL)) ?: continue
+    private fun fetchManifest(order: List<MirrorRoute>): UpdateManifest? {
+        for (route in order) {
+            val url = route.urlFor(MANIFEST_URL) ?: continue
+            val body = fetchText(url) ?: continue
             val manifest = runCatching { json.decodeFromString<UpdateManifest>(body) }.getOrNull() ?: continue
             if (manifest.schema == "mymusic.update") return manifest
         }
@@ -394,9 +417,6 @@ class UpdateRepository(
     } catch (_: Exception) {
         null
     }
-
-    private fun mirrorUrl(mirror: String, target: String): String =
-        if (mirror.isEmpty()) target else mirror + target
 
     private fun verifyApk(file: File, info: UpdateInfo) {
         val current = currentPackageInfo() ?: throw IOException("无法读取当前版本")
@@ -648,20 +668,6 @@ class UpdateRepository(
         private const val PROBE_TTL_MS = 5 * 60 * 1000L
         private const val PROBE_TIMEOUT_MS = 3_000L
 
-        /** 候选线路：选中具体线路时它排最前，其余线路与直连仍在后面兜底。清单见 [GithubMirror]。 */
-        private fun candidateMirrors(selected: GithubMirror): List<String> {
-            val proxies = GithubMirror.proxies.map { it.prefix }
-            return when (selected) {
-                GithubMirror.Auto -> proxies + ""
-                GithubMirror.Direct -> listOf("") + proxies
-                else -> listOf(selected.prefix) + proxies.filterNot { it == selected.prefix } + ""
-            }
-        }
-
-        /** 用户选中的具体线路永远排在测速结果前面。 */
-        private fun applyPinnedMirror(order: List<String>, selected: GithubMirror): List<String> =
-            if (selected.isProxy) listOf(selected.prefix) + order.filterNot { it == selected.prefix }
-            else order
     }
 }
 
