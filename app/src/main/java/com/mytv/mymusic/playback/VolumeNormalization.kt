@@ -43,7 +43,11 @@ object VolumeNormalization {
                 val peak = if (mean != 0f && maxDb != null) 10f.pow(maxDb / 20f) else null
                 effective(gain, peak)
             }
-            else -> 0f
+            else -> if (song.source.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX)) {
+                effective(extra.float("replay_gain"), extra.float("replay_peak"))
+            } else {
+                0f
+            }
         }
     }
 
@@ -60,7 +64,8 @@ object VolumeNormalization {
                 "qianqian_replay_gain",
                 "qianqian_max_volume",
             )
-            else -> false
+            else -> song.source.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX) &&
+                (extra.containsKey("replay_gain") || extra.containsKey("replay_peak"))
         }
     }
 

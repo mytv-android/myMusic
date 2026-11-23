@@ -2,6 +2,7 @@ package com.mytv.mymusic.playback
 
 import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.data.native.MHubTls
+import com.mytv.mymusic.data.subsonic.SubsonicRoutingDataSourceFactory
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -89,8 +90,11 @@ class PlaybackService : MediaSessionService() {
         // 取流拿到的地址自己放不出来。见 BilibiliCdnFactory。
         val upstream = BilibiliCdnFactory(
             fallback = MHubTls.RoutingFactory(
-                fallback = app?.cloud?.routing(DefaultDataSource.Factory(this))
-                    ?: DefaultDataSource.Factory(this),
+                fallback = SubsonicRoutingDataSourceFactory(
+                    clients = { app?.subsonic?.routingClients().orEmpty() },
+                    fallback = app?.cloud?.routing(DefaultDataSource.Factory(this))
+                        ?: DefaultDataSource.Factory(this),
+                ),
             )
         )
         val baseFactory = DefaultMediaSourceFactory(

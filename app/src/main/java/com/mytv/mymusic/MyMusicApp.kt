@@ -18,6 +18,8 @@ import com.mytv.mymusic.data.native.AppleTokenCache
 import com.mytv.mymusic.data.native.NativeProviders
 import com.mytv.mymusic.data.native.SodaPlayReporter
 import com.mytv.mymusic.data.native.SodaProvider
+import com.mytv.mymusic.data.subsonic.SubsonicManager
+import com.mytv.mymusic.data.subsonic.SubsonicRoutingDataSourceFactory
 import com.mytv.mymusic.data.playreport.KuwoPlayReporter
 import com.mytv.mymusic.data.playreport.NetEasePlayReporter
 import com.mytv.mymusic.data.playreport.PlayReportHub
@@ -48,6 +50,7 @@ import java.io.File
 class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
     lateinit var repository: MusicRepository
     lateinit var settings: SettingsStore
+    lateinit var subsonic: SubsonicManager
     lateinit var database: AppDatabase
     lateinit var mediaCache: SimpleCache
     lateinit var cacheEvictor: AdjustableLruEvictor
@@ -60,7 +63,10 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         com.mytv.mymusic.playback.AutomixAnalyzer(this, mediaCache, automixStore) {
             // 和播放侧同一套工厂：本地歌的 WebDAV 副本带认证，B 站 CDN 带防盗链头
             com.mytv.mymusic.playback.BilibiliCdnFactory(
-                cloud.routing(androidx.media3.datasource.DefaultDataSource.Factory(this))
+                SubsonicRoutingDataSourceFactory(
+                    clients = { subsonic.routingClients() },
+                    fallback = cloud.routing(androidx.media3.datasource.DefaultDataSource.Factory(this)),
+                )
             )
         }
     }
@@ -143,8 +149,14 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         repository = MusicRepository()
         settings = SettingsStore(this)
         database = AppDatabase.create(this)
+        subsonic = SubsonicManager(this, settings, appScope, database)
         cacheEvictor = AdjustableLruEvictor(defaultCacheLimitMb() * MB)
         mediaCache = createMediaCache()
+        appScope.launch(Dispatchers.IO) {
+            settings.state.map { it.cookies }.distinctUntilChanged().collect { cookies ->
+                subsonic.syncAccounts(cookies)
+            }
+        }
         appScope.launch(Dispatchers.IO) {
             settings.state.map { it.cacheLimitMb }.distinctUntilChanged().collect { mb ->
                 cacheEvictor.updateMaxBytes((if (mb > 0) mb else defaultCacheLimitMb()) * MB)
@@ -170,6 +182,7 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
             scope = appScope,
         )
         update = UpdateRepository(this, settings)
+        subsonic.onLocalChange = sync::onLocalChange
         // 本地歌的线索跟着歌单同步：建快照时从本地音乐库取，合并完写回；线索一变（换匹配、上传、删云端）就防抖同步
         sync.localRefs = localLibrary.syncRefs
         localLibrary.onRefsChanged = { sync.onLocalChange() }

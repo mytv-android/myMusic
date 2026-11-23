@@ -34,6 +34,8 @@ import com.mytv.mymusic.data.local.LocalRemoteEntity
 import com.mytv.mymusic.data.local.LocalTrackEntity
 import com.mytv.mymusic.data.local.LocalUploadDao
 import com.mytv.mymusic.data.local.LocalUploadEntity
+import com.mytv.mymusic.data.subsonic.SubsonicTrackDao
+import com.mytv.mymusic.data.subsonic.SubsonicTrackEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -705,6 +707,26 @@ class SettingsStore(private val context: Context) {
         it[cookieUpdatedAtKey] = json.encodeToString(updatedAt)
     }
 
+    /** 只有当前值仍等于调用方读到的那一份才写入，避免迟到的认证探测覆盖删除或新账号配置。 */
+    internal suspend fun cookieIfCurrent(provider: String, expectedRaw: String, cookie: String): Boolean {
+        var written = false
+        context.dataStore.edit {
+            val current = runCatching {
+                json.decodeFromString<Map<String, String>>(it[cookiesKey] ?: "{}")
+            }.getOrDefault(emptyMap()).toMutableMap()
+            if (current[provider] != expectedRaw) return@edit
+            current[provider] = cookie
+            val updatedAt = runCatching {
+                json.decodeFromString<Map<String, Long>>(it[cookieUpdatedAtKey] ?: "{}")
+            }.getOrDefault(emptyMap()).toMutableMap()
+            updatedAt[provider] = System.currentTimeMillis()
+            it[cookiesKey] = json.encodeToString(current)
+            it[cookieUpdatedAtKey] = json.encodeToString(updatedAt)
+            written = true
+        }
+        return written
+    }
+
     /** 同步读取 Cookie 和修改时间，避免两次 DataStore 读取之间出现不一致。 */
     suspend fun cookieSnapshot(): CookieSnapshot {
         val values = context.dataStore.data.first()
@@ -1249,8 +1271,9 @@ interface AggregateDao {
         LocalRefEntity::class,
         LocalRemoteEntity::class,
         LocalUploadEntity::class,
+        SubsonicTrackEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -1261,6 +1284,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun localTracks(): LocalTrackDao
     abstract fun localRefs(): LocalRefDao
     abstract fun localUploads(): LocalUploadDao
+    abstract fun subsonicTracks(): SubsonicTrackDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -1630,8 +1654,33 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `subsonic_tracks` (
+                        `account_id` TEXT NOT NULL,
+                        `song_id` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `artist` TEXT NOT NULL,
+                        `album` TEXT NOT NULL,
+                        `album_id` TEXT NOT NULL,
+                        `duration` INTEGER NOT NULL,
+                        `size` INTEGER NOT NULL,
+                        `bitrate` INTEGER NOT NULL,
+                        `suffix` TEXT NOT NULL,
+                        `cover_art` TEXT NOT NULL,
+                        `extra_json` TEXT NOT NULL,
+                        `updated_at` INTEGER NOT NULL,
+                        PRIMARY KEY(`account_id`, `song_id`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         internal val ALL_MIGRATIONS: Array<Migration>
-            get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+            get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
 
         fun create(context: Context) = Room.databaseBuilder(context, AppDatabase::class.java, "mymusic.db")
             .addMigrations(*ALL_MIGRATIONS)

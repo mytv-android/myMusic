@@ -764,6 +764,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
+            app.subsonic.revision.collect {
+                resolver.clearCache()
+                searchEngine.clearCache()
+                val providers = runCatching { app.repository.providers() }.getOrDefault(emptyList())
+                base.value = base.value.copy(providers = providers)
+            }
+        }
+        viewModelScope.launch {
             settingsState.map { it.cookies }.distinctUntilChanged().collect { cookies ->
                 cookies.forEach { (id, cookie) ->
                     if (cookie.isBlank()) {
@@ -3576,11 +3584,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             message(text, error = true)
             return
         }
-        val url = ready.url
+        val url = try {
+            if (ready.source.providerId.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX)) {
+                app.repository.downloadUrl(ready.source.song, cookieFor(ready.source.providerId))
+            } else {
+                ready.url
+            }
+        } catch (error: Exception) {
+            val text = error.message?.takeIf { it.isNotBlank() } ?: "没有可下载的地址"
+            markDownloadFailed(song, previous, text)
+            message(text, error = true)
+            return
+        }
+        val subsonicDownload = ready.source.providerId.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX)
         // 只用这次取流拿到的真实后缀，不再拿搜索结果的元数据猜
         val extension = listOf(
             ready.source.song.ext,
-            Uri.parse(url).path?.let { File(it).extension }.orEmpty(),
+            if (subsonicDownload) com.mytv.mymusic.data.native.extensionFromUrl(url)
+            else Uri.parse(url).path?.let { File(it).extension }.orEmpty(),
         ).firstOrNull { it.isNotBlank() }?.lowercase() ?: "mp3"
         val file = targetFile(extension)
         val temp = File(directory, "${file.name}.part")
@@ -3591,6 +3612,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     val cached = File(Uri.parse(url).path.orEmpty())
                     if (!cached.isFile) error("本地缓存文件不存在")
                     cached.copyTo(temp, overwrite = true)
+                } else if (subsonicDownload) {
+                    val response = app.subsonic.openDownload(url) ?: error("服务器账号已变更，请重新下载")
+                    response.use {
+                        temp.outputStream().use { output -> it.body.byteStream().copyTo(output) }
+                    }
                 } else {
                     // B 站的音频字节在 *.bilivideo.com 上，不带 Referer 和浏览器档 UA 就是 403
                     // （播放侧那套工厂管不到这里，这次下载是自己发的请求）

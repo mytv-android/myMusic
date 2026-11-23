@@ -2,9 +2,10 @@ package com.mytv.mymusic.data.native
 
 import com.mytv.mymusic.data.ProviderInfo
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 
 object NativeProviders {
-    private val providers: List<NativeProvider> = buildList {
+    private val staticProviders: List<NativeProvider> = buildList {
         addProvider { NetEaseProvider() }
         addProvider { QQProvider() }
         addProvider { KugouProvider() }
@@ -32,9 +33,22 @@ object NativeProviders {
         }
     }
 
-    fun get(id: String): NativeProvider? = providers.firstOrNull { it.info.id == id }
-    fun all(): List<NativeProvider> = providers
-    fun infos(): List<ProviderInfo> = providers.map { it.info }
+    private val dynamicProviders = CopyOnWriteArrayList<NativeProvider>()
+
+    @Synchronized
+    fun register(provider: NativeProvider) {
+        require(staticProviders.none { it.info.id == provider.info.id }) { "duplicate native provider: ${provider.info.id}" }
+        dynamicProviders.removeAll { it.info.id == provider.info.id }
+        dynamicProviders += provider
+    }
+
+    fun unregister(id: String) {
+        dynamicProviders.removeAll { it.info.id == id }
+    }
+
+    fun get(id: String): NativeProvider? = all().firstOrNull { it.info.id == id }
+    fun all(): List<NativeProvider> = staticProviders + dynamicProviders
+    fun infos(): List<ProviderInfo> = all().map { it.info }
 
     fun newSessionId(providerId: String): String = "$providerId:${UUID.randomUUID()}"
 

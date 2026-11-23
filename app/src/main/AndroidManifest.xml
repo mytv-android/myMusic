@@ -108,6 +108,11 @@
                 android:value="androidx.startup"
                 tools:node="remove" />
         </provider>
+        <provider
+            android:name=".data.subsonic.SubsonicCoverProvider"
+            android:authorities="${applicationId}.subsonic-covers"
+            android:exported="false"
+            android:grantUriPermissions="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

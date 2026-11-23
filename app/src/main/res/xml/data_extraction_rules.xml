@@ -2,8 +2,10 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="mymusic_secrets.xml" />
+        <exclude domain="sharedpref" path="subsonic_security.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="mymusic_secrets.xml" />
+        <exclude domain="sharedpref" path="subsonic_security.xml" />
     </device-transfer>
 </data-extraction-rules>

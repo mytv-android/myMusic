@@ -117,7 +117,11 @@ private fun SectionContent(
         }
         SettingsSection.Accounts -> {
             val state by app.model.state.collectAsState()
-            AccountsSettingsScreen(state, actions, onBack, embedded)
+            AccountsSettingsScreen(state, actions, onBack, embedded, onOpen)
+        }
+        SettingsSection.Subsonic -> {
+            val state by app.model.state.collectAsState()
+            SubsonicSettingsScreen(state, onBack, embedded)
         }
         SettingsSection.Sync -> {
             val sync by app.model.syncState.collectAsState()

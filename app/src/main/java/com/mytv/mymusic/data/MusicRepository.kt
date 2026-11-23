@@ -41,6 +41,9 @@ open class MusicRepository(
         quality: AudioQuality = AudioQuality.Auto,
     ): PlayableStream = requireProvider(song.source).playableStream(cookie, song, workDir, quality)
 
+    suspend fun downloadUrl(song: Song, cookie: String, quality: AudioQuality = AudioQuality.Auto): String =
+        requireProvider(song.source).downloadUrl(cookie, song, quality)
+
     /** 统一的洛雪播放候选：脚本按自定义音源顺序跨平台尝试，原生接口不在这里兜底。 */
     open suspend fun playableLxStream(songs: List<Song>, quality: AudioQuality): LxPlaybackResult? =
         lxPlayback.resolve(songs, quality.id)

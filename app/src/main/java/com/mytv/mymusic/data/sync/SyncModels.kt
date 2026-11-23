@@ -97,6 +97,10 @@ data class SyncTrack(
     val album: String = "",
     val durationSec: Int = 0,
     val cover: String = "",
+    /** Subsonic 的 coverArt / mbid / isrc；其它源保持空，不写进同步文件。 */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val extra: Map<String, String> = emptyMap(),
+    /** Subsonic 原始文件后缀，供另一台设备下载时命名；其它源不写。 */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val ext: String = "",
     // v3：只有本地歌（key 是 local:sha256:…）才有；平台歌是 null，不写进文件，免得每首多十几个字节
     @EncodeDefault(EncodeDefault.Mode.NEVER) val local: SyncLocal? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val remote: SyncRemote? = null,
@@ -111,7 +115,15 @@ data class SyncTrack(
         album = album,
         duration = durationSec,
         source = provider,
-        cover = cover,
+        cover = cover.ifBlank {
+            if (provider.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX)) {
+                com.mytv.mymusic.data.subsonic.SubsonicCoverUris.create(provider, extra["subsonic_cover"].orEmpty())
+            } else {
+                ""
+            }
+        },
+        extra = extra,
+        ext = ext,
     )
 }
 
@@ -276,7 +288,13 @@ fun buildSnapshot(
                     deletedAt = playlist.deletedAt?.let(SyncTime::toIso),
                     tracks = tracks,
                     link = playlist.takeIf { it.bound && it.deletedAt == null }
-                        ?.let { SyncLink(it.linkProvider, it.linkId, it.linkCover) },
+                        ?.let {
+                            SyncLink(
+                                it.linkProvider,
+                                it.linkId,
+                                it.linkCover.takeIf { cover -> isWebUrl(cover) || com.mytv.mymusic.data.subsonic.SubsonicCoverUris.isPortable(cover) }.orEmpty(),
+                            )
+                        },
                 )
             },
         favorites = favorites.mapNotNull { it.toSyncFavorite(localRefs) } +
@@ -336,7 +354,12 @@ internal fun Song.toSyncTrack(localRefs: Map<String, SyncTrackRefs> = emptyMap()
     val local = source == LOCAL_TRACK_PROVIDER
     val refs = if (local) localRefs[key] else null
     // 本地歌用匹配到的平台封面：换了匹配，别的设备上的封面跟着换
-    val shownCover = if (local) refs?.cover?.takeIf(::isWebUrl) ?: cover.takeIf(::isWebUrl).orEmpty() else cover
+    val shownCover = when {
+        local -> refs?.cover?.takeIf(::isWebUrl) ?: cover.takeIf(::isWebUrl).orEmpty()
+        source.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX) &&
+            com.mytv.mymusic.data.subsonic.SubsonicCoverUris.isPortable(cover) -> cover
+        else -> cover.takeIf(::isWebUrl).orEmpty()
+    }
     return SyncTrack(
         key = key,
         provider = source,
@@ -346,6 +369,12 @@ internal fun Song.toSyncTrack(localRefs: Map<String, SyncTrackRefs> = emptyMap()
         album = album,
         durationSec = duration,
         cover = shownCover,
+        extra = if (source.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX)) {
+            extra.filterKeys { it in setOf("subsonic_cover", "mbid", "isrc", "track", "disc", "year") }
+        } else {
+            emptyMap()
+        },
+        ext = if (source.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX)) ext else "",
         local = refs?.local?.takeUnless { it.isEmpty },
         remote = refs?.remote,
         match = refs?.match,

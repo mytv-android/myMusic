@@ -254,7 +254,7 @@ fun SyncCenterScreen(
                 onClick = exportFile,
                 icon = Icons.Filled.SaveAlt,
                 iconTone = IconTone.Tertiary,
-                summary = "歌单、收藏和平台 Cookie 存成 JSON，含 Cookie，只给自己换机用",
+                summary = "歌单、收藏、平台 Cookie 和音乐服务器凭据存成 JSON，只给自己换机用",
             )
         }
         item(key = "import", contentType = "row") {
@@ -313,7 +313,7 @@ fun SyncCenterScreen(
         }
         item(key = "note", contentType = "note") {
             Box(Modifier.padding(top = 16.dp)) {
-                InfoNote("同步自建歌单、收藏和平台账号 Cookie。Cookie 会以明文写入同步文件，请勿公开文件链接或共享 WebDAV 目录；最近播放、下载文件、播放地址不会进入云端。")
+                InfoNote("同步自建歌单、收藏、平台账号 Cookie 和音乐服务器凭据。这些内容会以明文写入同步文件，请勿公开文件链接或共享 WebDAV 目录；最近播放、下载文件、播放地址不会进入云端。")
             }
         }
     }
@@ -794,7 +794,7 @@ fun SyncConnectScreen(
                     if (webDav) {
                         "自建歌单、收藏和平台账号 Cookie，写进 WebDAV 目录里的 mymusic-library.json。Cookie 是明文，别把这个目录共享出去。WebDAV 密码只存在本机。"
                     } else {
-                        "自建歌单、收藏和平台账号 Cookie。Cookie 会以明文写入私密 Gist / 代码片段，请勿公开文件链接。不包括最近播放、下载文件和播放进度。"
+                        "自建歌单、收藏、平台账号 Cookie 和音乐服务器凭据。这些内容会以明文写入私密 Gist / 代码片段，请勿公开文件链接。不包括最近播放、下载文件和播放进度。"
                     },
                     Modifier.padding(top = 4.dp),
                     style = MaterialTheme.typography.bodyMedium,

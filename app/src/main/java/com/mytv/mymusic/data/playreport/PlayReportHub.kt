@@ -83,6 +83,10 @@ object PlayReportHub {
         reporters[reporter.providerId] = reporter
     }
 
+    fun unregister(providerId: String) {
+        reporters.remove(providerId)?.discard()
+    }
+
     fun reporter(providerId: String): PlayReporter? = reporters[providerId]
 
     fun setEnabled(value: Boolean) {

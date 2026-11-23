@@ -74,11 +74,13 @@ object AppLog {
 private val REDACT_MEDIA_TOKEN = Regex("""(media-user-token\s*[=:]\s*)([^;\s"',]+)""", RegexOption.IGNORE_CASE)
 private val REDACT_BEARER = Regex("""("Authorization"\s*:\s*"Bearer\s+)([^"]+)(")""")
 private val REDACT_JWT = Regex("""eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}""")
+private val REDACT_SUBSONIC_QUERY = Regex("""([?&](?:p|t|s|apiKey|jwt)=)([^&\s"']+)""", RegexOption.IGNORE_CASE)
 
 internal fun redact(text: String): String = text
     .replace(REDACT_MEDIA_TOKEN, "$1<redacted>")
     .replace(REDACT_BEARER, "$1<redacted>$3")
     .replace(REDACT_JWT, "<redacted-jwt>")
+    .replace(REDACT_SUBSONIC_QUERY, "$1<redacted>")
 
     /** 收集一次设备和版本信息，导出时放在最前面。 */
     fun captureHeader(context: android.content.Context) {

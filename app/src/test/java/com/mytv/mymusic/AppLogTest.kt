@@ -31,6 +31,16 @@ class AppLogTest {
     }
 
     @Test
+    fun `subsonic query credentials are redacted`() {
+        val out = AppLog.redact("https://nas/rest/download.view?id=a&u=demo&t=token&s=salt&p=enc%3Asecret&apiKey=nds_key")
+        assertFalse(out.contains("token"))
+        assertFalse(out.contains("salt"))
+        assertFalse(out.contains("secret"))
+        assertFalse(out.contains("nds_key"))
+        assertTrue(out.contains("u=demo"))
+    }
+
+    @Test
     fun `ordinary messages are untouched`() {
         val plain = "整曲就绪 Shape of You 253kbps https://aod.itunes.apple.com/x.m3u8"
         assertEquals(plain, AppLog.redact(plain))

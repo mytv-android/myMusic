@@ -91,7 +91,10 @@ internal fun settingsOverview(
 ): SettingsOverview {
     val appearance = state.appearance
     val eqLabel = EqPresets.byId(equalizer.presetId)?.label ?: "自定义"
-    val logged = state.providers.filter { !state.cookies[it.id].isNullOrBlank() }
+    val logged = state.providers.filter {
+        !it.id.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX) && !state.cookies[it.id].isNullOrBlank()
+    }
+    val servers = com.mytv.mymusic.data.subsonic.SubsonicAccount.fromCookies(state.cookies).size
     val account = sync.account
     val info = update.info
     val updateAvailable = info != null
@@ -115,9 +118,11 @@ internal fun settingsOverview(
             SettingsSection.Search to "默认${providerName(state.providers, state.providerId)}",
             SettingsSection.Swipe to swipeSummary(state.swipe, rtl),
             SettingsSection.Accounts to when {
-                logged.isEmpty() -> "未登录任何平台"
-                logged.size <= 2 -> "已登录 ${logged.joinToString("、") { it.name }}"
-                else -> "已登录 ${logged.size} 个平台"
+                logged.isEmpty() && servers == 0 -> "未登录任何平台"
+                logged.size <= 2 -> (listOf("已登录 ${logged.joinToString("、") { it.name }}").takeIf { logged.isNotEmpty() }.orEmpty() +
+                    listOf("$servers 台服务器").takeIf { servers > 0 }.orEmpty()).joinToString(" · ")
+                else -> listOf("已登录 ${logged.size} 个平台", "$servers 台服务器".takeIf { servers > 0 })
+                    .filterNotNull().joinToString(" · ")
             },
             SettingsSection.Sync to if (account != null) {
                 "${sync.providerLabel} · ${relativeTime(account.lastSyncedAt).ifBlank { "尚未同步" }}"
@@ -177,7 +182,7 @@ internal fun SettingsHomeScreen(
         ) {
             item(key = "groups", contentType = "settingsGroups") { SettingsGroups(overview, selected = null, twoPane = false, onOpen = onOpen) }
             item(key = "note", contentType = "note") {
-                SettingsNote("开启同步后，平台 Cookie 会写入私密同步文件；同步令牌和 WebDAV 密码只保存在本机，不会进入日志或同步文件。", Modifier.padding(top = 8.dp))
+                SettingsNote("开启同步后，平台 Cookie 和音乐服务器凭据会写入私密同步文件；同步令牌、WebDAV 密码与服务器证书指纹只保存在本机，不会进入日志或同步文件。", Modifier.padding(top = 8.dp))
             }
         }
     }
