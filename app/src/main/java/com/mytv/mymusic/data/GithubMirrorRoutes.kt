@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -102,6 +103,48 @@ object GithubMirrors {
     private const val USER_AGENT = "myMusic-Android"
 
     /**
+     * 一条镜像线路的地址是否可接受。与 myHotpot / myBV 同一套标准：
+     * 只接受 https 且 443、不带用户信息/查询/片段，主机不能是本机或内网。
+     *
+     * 这里**没有**「主机必须在白名单里」这道闸门——远程清单要能加新镜像，
+     * 六个应用一视同仁。拦住危险主机的是下面这几条，与主机在不在表里无关。
+     */
+    private fun isSafeMirrorBase(base: String): Boolean {
+        val url = base.trim().toHttpUrlOrNull() ?: return false
+        if (url.scheme != "https" || url.port != 443) return false
+        if (url.username.isNotEmpty() || url.password.isNotEmpty()) return false
+        if (url.query != null || url.fragment != null) return false
+        return !isLocalMirrorHost(url.host)
+    }
+
+    /**
+     * 主机是否只能指向本机或内网。按字面判断，不做 DNS 解析——
+     * 解析会让结论依赖运行环境，而且这一层只是 URL 预检。
+     */
+    private fun isLocalMirrorHost(host: String): Boolean {
+        val normalized = host.trim().trimEnd('.').lowercase()
+        if (normalized.isEmpty()) return true
+        if (normalized == "localhost" || normalized.endsWith(".localhost") ||
+            normalized.endsWith(".local") || normalized.endsWith(".lan") ||
+            normalized.endsWith(".internal") || normalized.endsWith(".home.arpa")
+        ) {
+            return true
+        }
+        // 数字字面量（含 127.1、2130706433、0x7f000001 这类简写）一律按本地处理：
+        // 公网镜像不会用 IP 字面量，用简写绕过的只有内网地址。
+        return isNumericHost(normalized)
+    }
+
+    private fun isNumericHost(host: String): Boolean {
+        val bare = host.removePrefix("[").removeSuffix("]")
+        if (bare.isEmpty()) return false
+        if (bare.all { it in '0'..'9' || it == '.' }) return true
+        if (bare.contains(':')) return true
+        if (bare.startsWith("0x", ignoreCase = true)) return true
+        return bare.all { it in '0'..'9' } && bare.length in 8..10
+    }
+
+    /**
      * 应用内用镜像时的速度门槛：前 [SPEED_GATE_MS] 毫秒拉不到 [SPEED_GATE_MIN_BYTES]
      * 就踢掉换下一站。小于门槛的小文件要求 5 秒内下完，由调用方按总长度取 min。
      */
@@ -187,21 +230,31 @@ object GithubMirrors {
         val parsed = runCatching { remoteJson.decodeFromString<RemoteMirrorList>(body) }
             .getOrNull() ?: return null
         if (parsed.schema != LIST_SCHEMA) return null
-        return parsed.mirrors.take(MAX_REMOTE_ENTRIES).mapNotNull { entry ->
-            if (entry.id.isBlank() || entry.base.isBlank()) return@mapNotNull null
-            MirrorRoute(
-                id = entry.id,
-                label = entry.label.ifBlank { entry.id },
-                prefix = entry.base.trim(),
-                kind = when (entry.kind.lowercase()) {
+            return parsed.mirrors.take(MAX_REMOTE_ENTRIES).mapNotNull { entry ->
+                if (entry.id.isBlank() || entry.base.isBlank()) return@mapNotNull null
+                val kind = when (entry.kind.lowercase()) {
                     "raw_host" -> MirrorKind.RAW_HOST
                     else -> MirrorKind.PREFIX
-                },
-                proxiesApi = entry.api,
-                tier = entry.tier.coerceIn(TIER_FAST, TIER_RAW_ONLY),
-                enabled = entry.enabled,
-            )
-        }
+                }
+                val prefix = when (kind) {
+                    MirrorKind.PREFIX -> entry.base.trim().trimEnd('/') + "/"
+                    // raw_host 只存主机名
+                    MirrorKind.RAW_HOST -> entry.base.trim().trimEnd('/')
+                }
+                // raw_host 补成完整 URL 才能过校验；过不了的就地丢掉——
+                // 远程清单写飘了不该把请求指向本机或内网。
+                val checkUrl = if (kind == MirrorKind.RAW_HOST) "https://$prefix/" else prefix
+                if (!isSafeMirrorBase(checkUrl)) return@mapNotNull null
+                MirrorRoute(
+                    id = entry.id,
+                    label = entry.label.ifBlank { entry.id },
+                    prefix = prefix,
+                    kind = kind,
+                    proxiesApi = entry.api,
+                    tier = entry.tier.coerceIn(TIER_FAST, TIER_RAW_ONLY),
+                    enabled = entry.enabled,
+                )
+            }
     }
 
     /**
