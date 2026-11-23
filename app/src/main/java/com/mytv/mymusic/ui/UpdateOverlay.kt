@@ -35,7 +35,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,12 +59,15 @@ import com.mytv.mymusic.data.update.formatSize
 import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.tvFocusRing
+import kotlinx.coroutines.delay
 import java.time.ZoneId
 
 /** 浮层离屏幕左右边和底栏的距离。 */
 private val PillMargin = 16.dp
 /** 平板、折叠屏和电视上浮层的宽度；手机上撑满可用宽度。 */
 private val PillWidth = 420.dp
+/** 「暂不更新」后的提醒只短暂停留，之后可从关于页重新打开更新。 */
+internal const val UPDATE_REMINDER_DURATION_MS = 5_000L
 
 /**
  * 更新浮层。检查到新版本先由 [UpdatePromptDialog] 弹窗等用户确认，不再自动下载；用户点了「立即更新」
@@ -70,7 +75,7 @@ private val PillWidth = 420.dp
  *
  * 下载校验完由 ViewModel 自动拉起系统安装器（那一步是系统界面，应用绕不过去），
  * 只有安装被系统拦下、需要用户去授权“安装未知应用”时才出现要用户动手的卡片。
- * 下载失败时浮一条可重试的提示；弹窗里点了「暂不更新」则换成一条可以点开的提醒，重启进程会重新弹窗。
+ * 下载失败时浮一条可重试的提示；弹窗里点了「暂不更新」则换成一条 5 秒后自动隐藏的提醒，重启进程会重新弹窗。
  */
 @Composable
 fun UpdateOverlay(
@@ -84,7 +89,15 @@ fun UpdateOverlay(
     val failure = update.phase == UpdatePhase.Error && update.error.isNotBlank()
     // Ready 不在这里显示：校验完 ViewModel 立刻拉起系统安装器，拦下时走权限卡片，起不来时走失败提示
     val running = update.phase == UpdatePhase.Downloading || update.phase == UpdatePhase.Verifying
-    if (!update.permissionRequired && !failure && !running && prompt != UpdatePrompt.Reminder) return
+    var reminderVisible by remember(prompt, info.versionCode) { mutableStateOf(prompt == UpdatePrompt.Reminder) }
+    LaunchedEffect(prompt, info.versionCode) {
+        if (prompt == UpdatePrompt.Reminder) {
+            delay(UPDATE_REMINDER_DURATION_MS)
+            reminderVisible = false
+        }
+    }
+    val reminder = prompt == UpdatePrompt.Reminder && reminderVisible
+    if (!update.permissionRequired && !failure && !running && !reminder) return
     val window = LocalAppWindow.current
     // 只有手机是贴底整宽的一条；平板、折叠屏、电视都靠右下角，别横跨导航栏和播放窗格
     val strip = window.isPhone
@@ -102,7 +115,7 @@ fun UpdateOverlay(
         when {
             update.permissionRequired -> InstallPermissionCard(info, actions, actionFocus, slot)
             failure -> UpdateFailurePill(update, actions, slot)
-            prompt == UpdatePrompt.Reminder -> UpdateReminderPill(info, actions, slot)
+            reminder -> UpdateReminderPill(info, actions, slot)
             else -> UpdatePill(info, update, progress, slot)
         }
     }
@@ -110,7 +123,7 @@ fun UpdateOverlay(
 
 /**
  * 弹窗里点了「暂不更新」后的提醒条：只说有新版本，点一下重新打开弹窗。
- * 不自动下载、不拦页面，重启进程后弹窗会照常再弹一次。
+ * 5 秒后自动隐藏，之后仍可从关于页更新；重启进程后弹窗会照常再弹一次。
  */
 @Composable
 private fun UpdateReminderPill(info: UpdateInfo, actions: MusicActions, modifier: Modifier) {

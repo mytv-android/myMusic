@@ -20,7 +20,10 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import com.mytv.mymusic.data.update.UpdateInfo
 import com.mytv.mymusic.data.update.UpdatePhase
+import com.mytv.mymusic.data.update.UpdatePrompt
 import com.mytv.mymusic.data.update.UpdateUiState
+import com.mytv.mymusic.ui.UPDATE_REMINDER_DURATION_MS
+import com.mytv.mymusic.ui.UpdateOverlay
 import com.mytv.mymusic.ui.settings.AboutScreen
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -349,6 +352,32 @@ class ComposePerformanceBehaviorTest {
         compose.onNodeWithText("正在下载 57%", substring = true).assertIsDisplayed()
         compose.onNodeWithText("测试更新说明", substring = true).assertExists()
         compose.onNodeWithText("发现新版本 1.1（构建 2）").assertExists()
+    }
+
+    @Test
+    fun postponedUpdateReminderHidesAutomatically() {
+        val actions = testActions()
+        val prompt = mutableStateOf(UpdatePrompt.Reminder)
+        val update = UpdateUiState(
+            phase = UpdatePhase.Available,
+            info = UpdateInfo(2, "1.1", "v1.1", "", 1_048_576L, "https://example.test/app.apk", "test", emptyList()),
+        )
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            TestTheme {
+                UpdateOverlay(update, prompt.value, actions, progress = { 0f }, bottomPadding = 0.dp)
+            }
+        }
+        compose.onNodeWithText("发现新版本 myMusic 1.1").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(UPDATE_REMINDER_DURATION_MS)
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("发现新版本 myMusic 1.1").assertDoesNotExist()
+
+        compose.runOnIdle { prompt.value = UpdatePrompt.Dialog }
+        compose.mainClock.advanceTimeByFrame()
+        compose.runOnIdle { prompt.value = UpdatePrompt.Reminder }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("发现新版本 myMusic 1.1").assertIsDisplayed()
     }
 
     @Test
