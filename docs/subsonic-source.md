@@ -43,7 +43,7 @@
 | 歌曲身份 | `local:<sha256>`，云端引用是附加信息 | `subsonic:<accountId>:<songId>` |
 | 搜索/换源 | 不参与 | **完整参与**聚合搜索与换源 |
 | 播放 | `WebDavDataSource`（请求头认证） | 路由 DataSource（查询参数认证） |
-| 收藏/歌单/队列 | 客户端侧状态，靠同步 v3 跨设备 | **服务端状态，服务器自己同步**；只有「歌单绑定」和「收藏」跟同步文件走（§5.8） |
+| 收藏/歌单/队列 | 客户端侧状态，靠同步 v3 跨设备 | **服务端状态，服务器自己同步**；只有「歌单绑定」「收藏」和「账号本身」跟同步文件走（§5.8） |
 
 一句话：WebDAV 是「我的歌放在哪」，Subsonic 是「我还能从哪听歌」。
 
@@ -55,15 +55,28 @@
 |---|---|---|---|---|---|---|---|
 | **Navidrome**（master） | **1.16.1** | ✅ | ✅ | ✅ | ✅ `nds_` 前缀 | ✅ 查询参数 | 8 个（§3.6） |
 | **Airsonic-Advanced**（master） | **1.15.0** | ✅ | ✅ | ✅ | ❌ | ✅ 查询参数 `jwt` | ❌ 源码中 0 处 opensubsonic |
-| 经典 Airsonic | 1.15.0 | 有 JAXB JSON 序列化器 | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Gonic / Supysonic 等 | 各自 1.13–1.16 | 多数支持 | 多数支持 | 多数支持 | ❌ | ❌ | 部分 |
+| **经典 Airsonic**（已归档） | 1.15.0 | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Gonic**（master） | **1.16.1** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Supysonic** | **1.12.0** | ✅ | **❌ 只有密码** | ✅ 明文或 `enc:` | ❌ | ❌ | ❌ |
 
-来源：
+来源（都能在源码里指到行）：
 - Navidrome：`docs/developers/subsonic-api/` 明确 "compatible with Subsonic API v1.16.1, with some exceptions"。
 - Airsonic-Advanced：`subsonic-rest-api/src/main/resources/subsonic-rest-api.xsd` 根元素 `version="1.15.0"`，
-  `airsonic-main/.../controller/JAXBWriter.java:111 getRestProtocolVersion()` 读的就是这个 XSD 的 version。
-- Airsonic-Advanced 的 JWT：`airsonic-main/.../security/JWTRequestParameterProcessingFilter.java` +
-  `airsonic-main/.../service/JWTSecurityService.java:31 public static final String JWT_PARAM_NAME = "jwt"`。
+  `airsonic-main/.../controller/JAXBWriter.java:111 getRestProtocolVersion()` 读的就是这个 XSD 的 version；
+  `f=json` / `f=jsonp` 见 `JAXBWriter.java:157-166`。
+- 经典 Airsonic：同一个 `JAXBWriter` 结构，`f=json` 见 `airsonic/airsonic` 仓库 `JAXBWriter.java:127`。
+- Gonic：`server/ctrlsubsonic/spec/spec.go:21 apiVersion = "1.16.1"`；
+  token/salt 与密码双路见 `server/ctrlsubsonic/ctrl.go:245-267`（`checkCredsToken`）。
+- Supysonic：`supysonic/api/__init__.py:14 API_VERSION = "1.12.0"`；
+  认证只有密码一路——`supysonic/api/_helpers.py` 的 `decode_password()` 只处理 `enc:` 前缀，
+  **没有 token/salt 分支**。
+
+**从这张表直接得出的两条实现规则：**
+
+1. **认证必须做降级**：先发 token+salt；如果回错误 40/41，就把盐丢掉、改发 `p=enc:<hex(utf8(password))>` 再试一次，
+   并把「这台服务器用哪种」记在账号里。Supysic（1.12.0）只有这一条路。
+2. **Supysonic 是 1.12.0**，一定没有 OpenSubsonic 扩展和 `getLyricsBySongId`；`search3` / `getStarred2`
+   这类较新端点也不要假定存在，按能力探测降级（§3.6）。
 
 **版本协商的真相**（重要，能省掉一堆兼容代码）：
 Airsonic-Advanced 的 `RESTRequestParameterProcessingFilter.attemptAuthentication` 只比较 **major**：
@@ -130,8 +143,11 @@ case token != "": fmt.Sprintf("%x", md5.Sum([]byte(user.Password+salt))) == toke
 Airsonic-Advanced 只支持前三种，且**接受已通过其他方式（如 Basic Auth）认证的请求**
 （`RESTRequestParameterProcessingFilter` 里 `previousAuth.isAuthenticated()` 直接放行）。
 
-**对本应用的建议**：主用 token+salt，盐在账号保存时生成一次并固定（保证 URL 稳定，见 §5.2）；
-把「粘贴 API key」作为高级选项，检测到 `nds_` 前缀就自动改用 `apiKey` 参数。
+**对本应用的建议**：主用 token+salt，**盐每次请求随机生成**——凭据在 DataSource 层注入、不进 URL（§5.3），
+所以没有缓存键的问题，随机盐还能防重放。把「粘贴 API key」作为高级选项，检测到 `nds_` 前缀就自动改用 `apiKey` 参数。
+
+**必须做的降级**：token/salt 失败（错误 40 或 41）时，丢掉盐、改发 `p=enc:<hex(utf8(password))>` 再试一次，
+并把「这台服务器认哪种」记进账号，之后一直用成功的那种。Supysonic 只有密码这一条路（§1）。
 
 **踩雷预警——登录限流**：Navidrome 对失败的 Subsonic 登录按 `(客户端IP, 用户名)` 限流，
 默认 `authrequestlimit=5` / `authwindowlength=20s`（`conf/configuration.go:1041`、`consts/consts.go:78`），
@@ -230,7 +246,7 @@ Airsonic-Advanced 有真实目录。→ **UI 上不要承诺「按目录浏览�
 
 | 端点 | 用途 | 坑 |
 |---|---|---|
-| **`stream.view?id=&format=raw`** | 播放/试听 | 见 §4，这是全篇最重要的一节 |
+| **`stream.view?id=&format=raw`** | 播放/试听 | 见 §4 |
 | `download.view?id=` | 下载；id 可以是歌曲/专辑/歌手/歌单 | 专辑以上返回 **zip**；`EnableDownloads=false` 时回 50 |
 | `getCoverArt.view?id=&size=` | 封面 | **要认证**；Navidrome 另有 `square` 参数 |
 | `getAvatar.view?username=` | 头像 | 开了 Gravatar 会 302 |
@@ -257,7 +273,7 @@ Airsonic-Advanced 有真实目录。→ **UI 上不要承诺「按目录浏览�
 Airsonic-Advanced 则反过来：`getChatMessages`/`addChatMessage` 410，`getVideoInfo`/`getCaptions` 501，
 播客端点齐全。→ 客户端**不要假定任何非核心端点存在**，一律按错误码降级。
 
-### 3.6 OpenSubsonic 扩展：Navidrome 实际广告的 8 个
+### 3.6 OpenSubsonic 扩展：Navidrome 实际广告的 8 个（+1 个条件）
 
 `server/subsonic/opensubsonic.go` 里 `GetOpenSubsonicExtensions` 的硬编码返回：
 
@@ -334,19 +350,28 @@ fun get(id: String): NativeProvider? = providers.firstOrNull { it.info.id == id 
 fun infos(): List<ProviderInfo> = providers.map { it.info }
 ```
 
-要支持多账号，把它改成「静态表 + 动态表」：
+要支持多账号，把它改成「静态表 + 动态表」。**注意保留现在每个 provider 的 try/catch**——
+某个 provider 初始化抛异常不能把整表拖垮（`addProvider` 现在就是这个用途）：
 
 ```kotlin
-private val static = listOf(/* 现有 16 个 */)
+private val static: List<NativeProvider> = buildList {
+    addProvider { NetEaseProvider() }   // 逐个 try/catch，照现在的写法
+    …
+}
 private val dynamic = CopyOnWriteArrayList<NativeProvider>()   // Subsonic 实例
 
-fun register(provider: NativeProvider) { dynamic.removeAll { it.info.id == provider.info.id }; dynamic += provider }
+fun register(provider: NativeProvider) {
+    dynamic.removeAll { it.info.id == provider.info.id }; dynamic += provider
+}
 fun unregister(id: String) { dynamic.removeAll { it.info.id == id } }
 fun all(): List<NativeProvider> = static + dynamic
+
+fun get(id: String): NativeProvider? = all().firstOrNull { it.info.id == id }
+fun infos(): List<ProviderInfo> = all().map { it.info }
 ```
 
-`MusicRepository.providers()` / `requireProvider()` 改读 `all()`。这是唯一的接口层改动，`MusicRepository`
-的几十个 `suspend fun` 一个都不用动。
+`MusicRepository.providers()` / `requireProvider()` 改读 `all()`。这是 provider 层的全部改动，
+`MusicRepository` 的几十个 `suspend fun` 一个都不用动。
 
 #### 5.1.2 账号 ID 与 `Song.source`
 
@@ -435,6 +460,12 @@ Subsonic 账号和平台账号是同一类东西（"我在这个服务上的凭�
 
 `Unstable` / `Note` 可以填「自建服务器，行为随服务器实现而异」，和现有平台的用法一致。
 
+**能力位最好按探测结果动态填，不要写死。** `ProviderInfo` 是 `data class`，`SubsonicProvider.info`
+可以在 `ping` + `getOpenSubsonicExtensions` 之后按服务器实际情况构造：
+Supysonic（1.12.0）没有 `search3` / `getLyricsBySongId` / `getStarred2`，
+Airsonic-Advanced 没有 `getLyricsBySongId`——这些直接把对应能力位置 false，
+比让用户在搜索页看到一个永远失败的源好。表里标 ✅ 的都是"服务器支持时才开"的意思。
+
 #### 5.1.5 provider 列表刷新（唯一需要写代码的生命周期问题）
 
 `MusicViewModel` 在 init 里**只读一次** `repository.providers()`（`ui/MusicViewModel.kt:817`），
@@ -451,7 +482,11 @@ viewModelScope.launch {
 }
 ```
 
-`MyMusicApp.onCreate()` 里按当前 cookies 做首次注册；之后增删账号都由上面这个 collector 兜住。
+**首次注册的时序坑**：`MyMusicApp.onCreate()` 里**不能同步**拿到 cookies——DataStore 的第一帧是异步的
+（`settings.state` 是 Flow，`stateIn` 还带着初始值）。要在 `appScope` 里挂一个协程
+`settings.state.first().cookies` 再注册；`settingsState` 在 VM 里 `stateIn` 起来之前的那一小段窗口，
+搜索/换源里暂时看不到 Subsonic 源，可接受（现有代码对 DataStore 首帧也是这个态度，见 `MusicViewModel` 的
+`settingsReady`）。之后增删账号都由上面那个 collector 兜住。
 
 另外**新账号要自动启用**：`AggregationSettings.enabledOrDefault` 是
 `enabledProviders.filter { it in available }`，而默认列表是 `listOf("netease","qq","kugou","kuwo","migu","lx")`——
@@ -512,8 +547,8 @@ https://nas.example.com/rest/stream.view?id=<songId>&format=raw
 `WebDavRoutingDataSourceFactory.handles` 同一套判法），再从 `settings.cookies` 里对应的
 `subsonic:<accountId>` 取出账号，用它的 OkHttpClient（带 `u`/`t`/`s`/`v`/`c` 参数注入 +
 自签证书信任）起 `OkHttpDataSource`；认不出来就原样交给 fallback。
-账号查找走内存里那份 cookie 快照，**不解密、不碰磁盘**，和 `CloudHub.routing` 现在读
-`webDavAccounts.info.value?.serverUrl` 而不解密密码是同一个套路。
+账号查找走进程里那份 cookie 快照，**不读磁盘、不做 IO**，和 `CloudHub.routing` 现在读
+`webDavAccounts.info.value?.serverUrl` 而不去解 Keystore 是同一个套路。
 
 **为什么值得多这一层，而不是把凭据直接拼进 URL：**
 
@@ -533,6 +568,8 @@ https://nas.example.com/rest/stream.view?id=<songId>&format=raw
 > 「怎么成为一个源」；这一层解决的是「Subsonic 的认证只能放在查询参数里」。
 > WebDAV 需要它，是因为 WebDAV 用请求头认证；Subsonic 需要它，是因为 Subsonic 用查询参数认证、
 > 而查询参数会污染缓存键和日志。
+>
+> **但下载这条路绕不过去**：下载不走播放器工厂链，URL 必须自带凭据。见 §5.7。
 
 ### 5.4 封面：这是最容易被低估的一块
 
@@ -545,8 +582,8 @@ https://nas.example.com/rest/stream.view?id=<songId>&format=raw
 
 | 方案 | 做法 | 评价 |
 |---|---|---|
-| A. 本地磁盘缓存 | 后台把封面字节写进 `cacheDir/covers/<accountId>/<coverArtId>@<size>.jpg`，`Song.cover` 填 `file://…` | **推荐**。零改动下游；离线可用；RemoteViews/桌面小组件也能用；Coil 内存缓存天然生效 |
-| B. 全局 Coil 拦截器 | 给 Application 实现 `ImageLoaderFactory`，在 OkHttp 层按 host 补认证参数 | 改动小（一个类），但只解决 Coil 路径，桌面小组件（`WidgetImages` 用 `SingletonImageLoader.execute`）和分享截图要另行确认；且自签证书也要在这套 client 里再配一遍 |
+| A. 本地磁盘缓存 | 后台把封面字节写进 `cacheDir/covers/<accountId>/<coverArtId>@<size>.jpg`，`Song.cover` 填 `file://…` | **推荐**。零改动下游；离线可用；桌面小组件（RemoteViews）和分享截图都能用；Coil 内存缓存天然生效 |
+| B. 全局 Coil 拦截器 | Application 实现 `ImageLoaderFactory`，在 OkHttp 层按 host 补认证参数 | 覆盖面比我原先写的大——`SingletonImageLoader.get()` 会优先用 Application 的 `ImageLoaderFactory`，所以 `WidgetImages`、`ShareImages` 也一起覆盖到了。真正缺点是：要给整个应用换一套全局 ImageLoader（回归面覆盖所有图的加载），而且自签证书信任要在 Coil 那套 OkHttpClient 里再配一遍 |
 | C. 每处传 headers | — | 否决，侵入面太大 |
 
 选 A。注意：
@@ -556,6 +593,8 @@ https://nas.example.com/rest/stream.view?id=<songId>&format=raw
   按 `300` / `600` 两档各存一份。
 - `Song.cover` 指到 `file://` 后，`CoverSizes` 那类「按 URL 改尺寸」的逻辑会失效——
   需要让它认识 `subsonic-cover:` 这种自定义 scheme，或者干脆在模型层存两套（原 id + 本地路径）。
+- 拉封面的时机：进专辑/歌手页时按可见项预取，别在 `LazyColumn` 的每个 item 里同步触发
+  （Navidrome 的 `getCoverArt` 有并发限流，§6 第 12 条）。
 
 ### 5.5 歌词
 
@@ -578,10 +617,12 @@ https://nas.example.com/rest/stream.view?id=<songId>&format=raw
 - `offset` 是整条歌词的统一偏移（毫秒），**不要**把它加到每一行的 `start` 上——按 OpenSubsonic
   规范它「applies equally to both timestamps」，即整条平移，由渲染层处理。
 - 一条歌可以有多组 `structuredLyrics`（多语言）。现有管线已经有翻译层合并顺序的处理
-  （见 `ui/LyricPipeline.kt`），按 `lang` 取 `eng`/`und` 优先即可。
+  （见 `ui/LyricPipeline.kt`）。挑选顺序建议：先 `synced == true` 且 `lang` 是 `eng`/`zho`/`und` 的；
+  golden vector 里那条未同步的 `lang` 是 `xxx`（ISO 639-2 的"无语言内容"），**不是 `und`**，
+  按 `und` 去匹配会漏掉它。
 - **Airsonic-Advanced 没有 `getLyricsBySongId`**，只有 `getLyrics?artist=&title=` 的纯文本。
   能力探测（`getOpenSubsonicExtensions`）失败时走纯文本分支——正好对应 `ProviderInfo.lyrics` 能力位
-  可以按服务器实现动态置 false。
+  可以按服务器实现动态置 false。Supysonic（1.12.0）同样只有纯文本。
 - v2 才有逐字（`cueLine`/`cue`/`byteStart`/`byteEnd`）。Navidrome 已经广告 `songLyrics: [1, 2]`，
   但**第一期只吃 line 级**；逐字等现有 Rush 歌词页有富余再上。
 
@@ -594,12 +635,30 @@ https://nas.example.com/rest/stream.view?id=<songId>&format=raw
   所以 `ProviderInfo.playlistReorder = false`，正好和现有 `PlaylistReorder` 能力位对得上）。
 - `readonly=true` 的共享歌单不能写，编辑时自动解绑（照现有「没有这个能力的平台编辑绑定歌单仍然解绑」的规则）。
 
-### 5.7 下载
+### 5.7 下载（这里绕不过"凭据进 URL"）
 
-`NativeProvider.downloadUrl(cookie, song, quality)` 是现成的钩子，返回 `download.view?id=…` 的地址即可，
-下载记录 `DownloadRecord(key, payload, path, state)`（`data/AppStore.kt:909`）那套完全不用改。
-- 单曲直接写文件；专辑/歌手/歌单返回 zip，要么解包要么**只对单曲开放下载**（推荐后者，第一期）。
-- `EnableDownloads=false` 时回错误 50，`downloadUrl` 要把 message 抛成人话。
+`NativeProvider.downloadUrl(cookie, song, quality)` 是现成的钩子，`DownloadRecord(key, payload, path, state)`
+（`data/AppStore.kt:909`）那套完全不用改。**但下载的取流路径和播放不是同一条**，这是最容易漏的地方：
+
+`MusicViewModel.downloadSong()`（`ui/MusicViewModel.kt:3525`）走的是
+`resolvePlayable(...)` → `SourceResolver` 拿到 URL → **用自己的裸 OkHttp `http` 直接 GET**，
+不经过 `PlaybackService` 里那条工厂链。源码注释说得很直白：「播放侧那套工厂管不到这里，这次下载是自己发的请求」——
+B 站就是靠 `BilibiliCdn.headers(url)` 在下载前补 Referer + UA 的。
+
+**所以 `downloadUrl` 返回的 URL 必须自带认证参数**，否则下载必然 401：
+
+```
+https://nas.example.com/rest/download.view?id=<songId>&u=<user>&t=<md5(pw+salt)>&s=<random>&v=1.16.1&c=myMusic
+```
+
+配套的三条约束：
+
+- 盐用**一次性随机值**，不沿用账号里那个；这个 URL 会短暂待在 `SourceResolver.urlCache` 里
+  （键是 `song.key`，TTL 一到就没了），用完即弃比长期有效好。
+- 只对单曲开放下载。`download.view` 对专辑/歌手/歌单返回的是 **zip**，
+  解包 + 落库 + 封面一整套都要额外做，第一期不值得。
+- `EnableDownloads=false` 时服务器回错误 50，`downloadUrl` 要把 message 抛成人话，
+  别让它变成一句「下载失败」。
 
 ### 5.8 同步：哪些跟同步走、哪些不跟（以及为什么）
 
@@ -689,8 +748,9 @@ Navidrome / Airsonic 上这些状态全在服务端，同一账号的所有客�
 | 9 | **Android 17 本地网络权限**（仅当地址解析到私网/链路本地时） | 局域网 IP 直接被内核丢包，服务端无日志 | 复用 `data/sync/LocalNetworkAccess.kt`，连之前先查 `isGranted`；公网域名和 Tailscale 走不到这条 |
 | 10 | **`stream` 不计播放数**（Navidrome 官方明说只有 `scrobble` + `submission=true` 才算） | 服务器端「已播放」永远是 0 | 播够时长发一次 `scrobble`（现有 playreport 体系已有类似钩子） |
 | 11 | **大库分页慢**（`getAlbumList2` 的 `size` 上限 500，靠 `offset`） | 首屏慢 | 本地缓存表 + 分页预取；首次同步显示进度 |
-| 12 | **`getCoverArt` 有独立并发限流**：Navidrome 默认 `max(2, CPU/2)` 个并发，超出排队（积压上限 100、超时 1 分钟） | 海报墙/网格一次性拉几十张封面时明显变慢 | 封面按 §5.3 落本地磁盘，只拉一次；Coil 自带并发与内存缓存 |
-| 13 | **`Song.url` / `PlayableStream.url` 会泄密** | 凭据进 `SourceResolver.urlCache`、日志、分享卡 | 认证只在 DataSource 层注入（§5.3），URL 保持干净 |
+| 12 | **`getCoverArt` 有独立并发限流**：Navidrome 默认 `max(2, CPU/2)` 个并发，超出排队（积压上限 100、超时 1 分钟） | 海报墙/网格一次性拉几十张封面时明显变慢 | 封面按 §5.4 落本地磁盘，只拉一次；Coil 自带并发与内存缓存 |
+| 13 | **`Song.url` / `PlayableStream.url` 会泄密** | 凭据进 `SourceResolver.urlCache`、日志、分享卡 | 播放走路由 DataSource、URL 保持干净（§5.3） |
+| 13b | **下载路径不走播放器工厂链**（`MusicViewModel.downloadSong` 自己发裸 OkHttp 请求） | `downloadUrl` 返回干净 URL → 下载必然 401 | `downloadUrl` 必须返回带凭据的 URL，盐用一次性随机值（§5.7） |
 | 14 | **新账号默认不在 `enabledProviders` 里**（默认列表只有 netease/qq/kugou/kuwo/migu/lx） | 加完服务器搜不到任何歌，用户以为坏了 | 保存账号时把 id 追加进 `AggregationSettings.enabledProviders`（照 `MusicViewModel.kt:749` LX 的写法） |
 | 15 | **`MusicViewModel` 只在 init 读一次 provider 列表** | 运行时新增/删除服务器不出现在搜索和换源列表 | 账号放 `settings.cookies` 后，`repository.providers()` 从 cookies 派生；VM 收集 `settingsState.map { it.cookies.keys }` 重读（§5.1.5） |
 | 16 | **密码明文进 DataStore，并明文随同步文件同步** | 用户以为凭据被加密了 | 和平台 Cookie 完全同级，不是新风险；但保存账号的 UI 要明说"会随同步文件同步到你的其他设备"，别装作加密过 |
@@ -705,8 +765,8 @@ Navidrome / Airsonic 上这些状态全在服务端，同一账号的所有客�
 | **P0 打通** | `data/subsonic/` 协议层 + `SubsonicProvider`（`NativeProvider` 实现）；`NativeProviders` 动态注册；账号就是 `settings.cookies` 里的一条 value；账号配置 UI | 加一台服务器后，搜索/换源列表里出现它自己的名字；填错密码能看到人话错误 |
 | **P1 能听** | `stream.view?format=raw` + `SubsonicRoutingDataSourceFactory` 接入 `PlaybackService`；封面本地磁盘缓存 | 从「专辑 → 歌曲」点进去能播，能拖动，海报墙和播放页封面正常 |
 | **P2 能浏览** | `search3` / `getAlbumList2` / `getArtists` / `getAlbum` / `getGenres`；Room v13 缓存表 + 分页 | 上万首的库首屏 1 秒内；搜索可用 |
-| **P3 能管** | 收藏（`star`/`unstar`）、评分（`setRating`）、歌单增删 + 绑定平台歌单、歌词（`getLyricsBySongId` + 纯文本降级）、`downloadUrl` | 编辑后刷新服务器上能看到变化；下载能落盘 |
-| **P4 锦上添花** | `scrobble` 上报、播放上报 `reportPlayback`、播放队列保存/恢复（`savePlayQueue` / `savePlayQueueByIndex`）、`getInternetRadioStations`、「服务器最新专辑」榜 | — |
+| **P3 能管** | 收藏（`star`/`unstar`）、评分（`setRating`）、歌单增删 + 绑定平台歌单、歌词（`getLyricsBySongId` + 纯文本降级）、`downloadUrl`（**必须带凭据**，§5.7） | 编辑后刷新服务器上能看到变化；下载能落盘 |
+| **P4 锦上添花** | `scrobble` 上报、播放上报 `reportPlayback`、播放队列保存/恢复（`savePlayQueue` / `savePlayQueueByIndex`）、`getInternetRadioStations`、「服务器最新专辑」榜 | 服务器端「已播放 / 正在播放」能正确显示；换设备后能接着放 |
 
 P0 的落地顺序（都是小步，可分别提交）：
 
@@ -747,10 +807,12 @@ P0 的落地顺序（都是小步，可分别提交）：
    看是不是 206。这决定 §4 的结论在你的服务器上成立。
 3. **Airsonic-Advanced 兼容**：如果身边有实例，确认 `f=json` 与 `getAlbumList2` 的实际返回
    （Airsonic 的 JSON 是 JAXB 序列化出来的，字段名可能和 Navidrome 有细微差别）。
+   **另外务必找一个 Supysonic（1.12.0）或只支持密码认证的服务器验降级**——token/salt 失败后改发
+   `p=enc:<hex>` 这条路是猜的，没实测过。
 4. **自签证书**：确认 `PinnedTrustManager` 复用到 Subsonic 的 OkHttpClient 上无需改动
    （`data/webdav/WebDavCertificate.kt:122` 的 `manager` 已经是独立于 WebDAV 的）。
-5. **凭据不进 URL 的代价**：如果最终选择把 `u&t&s` 拼进 URL（§5.3 的退让方案），
-   要实测 Media3 缓存命中率，并确认 `SourceResolver.urlCache` / `QueueStore` / `AppLog` 都没有落盘。
+5. **下载路径**：确认 `downloadUrl` 返回带凭据的 URL 后，`MusicViewModel.downloadSong` 那条裸 OkHttp
+   真能下下来（§5.7）。这是全套里唯一"凭据必须进 URL"的地方，别在评审时才发现。
 6. **golden vector 单测**：把 §2.3 / §3.3 / §5.5 里那份快照 JSON 抄成测试资源，
    解析层按它逐字段自测。这和本仓库处理签名类问题的思路一致：**缺的是算法契约，不是流量样本**。
 
@@ -771,6 +833,7 @@ P0 的落地顺序（都是小步，可分别提交）：
 | 自签证书指纹钉住范本（按设备存，不同步） | `data/webdav/WebDavCertificate.kt` |
 | 路由 DataSource 范本 | `data/webdav/WebDavDataSource.kt`、`data/native/MHubTls.kt` |
 | 播放器工厂链（插入点） | `playback/PlaybackService.kt:89` |
+| **下载取流路径（和播放不是同一条）** | `ui/MusicViewModel.kt:3525`（`downloadSong`）、`data/native/BilibiliCdn.kt`（补 headers 的先例） |
 | Room 版本与迁移 | `data/AppStore.kt:1211` |
 | 内网权限 | `data/sync/LocalNetworkAccess.kt` |
 | 明文流量配置 | `app/src/main/res/xml/network_security_config.xml` |
