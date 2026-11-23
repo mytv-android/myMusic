@@ -22,8 +22,9 @@
 
 1. **就是 `NativeProvider`，而且天然支持多服务器。** Subsonic 是协议，和网易云、QQ、酷狗是同一层的东西——
    一个 `SubsonicProvider` 实例对应一台服务器，`NativeProviders` 里注册 N 个实例，UI 的搜索/换源/歌单/榜单
-   就自动多出 N 个源，各自带自己的名字。账号存在 `SubsonicAccountStore` 里，实例构造时闭包住自己的账号，
-   `cookie` 参数直接忽略（凭据不进 `settings.cookies`，也就不进同步文件）。
+   就自动多出 N 个源，各自带自己的名字。**账号就是 `settings.cookies` 里的一条 value**
+   （key = `subsonic:<accountId>`，value 是 `{url, username, password, name}` 的 JSON），
+   所以同步、退出登录墓碑、provider 列表刷新全部白拿，不需要新的账号存储，也不需要 Keystore（§5.1.3）。
 2. **但一定要产出 `Song` / `Playlist`。** 本仓库的歌单、收藏、播放队列、海报墙、歌词、缓存全部以
    `Song.key = "$source:$id"` 为身份。Subsonic 层只做「协议 → `Song`」的翻译，下游 UI 一行不改。
 3. **播放链路仍然要加一层路由 DataSource，但这和「是不是 NativeProvider」无关。** Subsonic 的认证只能靠
@@ -378,16 +379,39 @@ fun all(): List<NativeProvider> = static + dynamic
 `isVip = false`、`url` 空的源返回 `Unknown`，而 `orderCandidates` 只过滤 `Unavailable`/`VipOnly`/`PreviewOnly`，
 **`Unknown` 照样会被尝试**——不需要额外改聚合层。
 
-#### 5.1.3 `cookie` 参数怎么处理
+#### 5.1.3 `cookie` 参数就是账号本身（不需要新存储，不需要 Keystore）
 
-`NativeProvider` 的每个方法都收 `cookie: String`，来自 `settingsState.value.cookies[provider.id]`
-（见 `aggregate/AggregateSearchEngine.kt:87`、`SourceResolver`）。对 Subsonic **直接忽略**：
+`NativeProvider` 的每个方法都收 `cookie: String`，来源是 `settingsState.value.cookies[provider.id]`
+（见 `aggregate/AggregateSearchEngine.kt:87`、`SourceResolver`）。对 Subsonic **这个参数不再是"忽略"，
+它就是账号**：
 
-- 凭据在 `SubsonicAccountStore`（SharedPreferences + `SecretStore`/Keystore），实例构造时注入，
-  `cookie` 永远为空串。
-- 唯一读 cookie 的分支是 `song.isVip && cookie.isBlank()` → `VipOnly`；Subsonic 歌没有 VIP 概念，
-  `isVip` 恒为 false，踩不到。
-- 好处：密码/API key **不会进 `settings.cookies`**，也就不会跟着同步文件跑。
+```
+settings.cookies["subsonic:<accountId>"] = """{"url":"https://…","username":"…","password":"…","name":"家里的 Navidrome"}"""
+```
+
+之所以选这条路，是因为代码里现成的三件事正好都能白拿：
+
+| 现成能力 | 位置 | 对 Subsonic 意味着什么 |
+|---|---|---|
+| `settings.cookies` 是 `Map<String, String>`，按 provider id 分格 | `data/AppStore.kt:257` `cookiesKey` | 多账号天然成立，key 就是账号 id |
+| 同步快照带 `cookies`，含墓碑和 `updatedAt` | `data/sync/SyncModels.kt:36`、`SyncCoordinator.localSnapshot()` | 在一台设备上加服务器，其它设备自动出现；删账号以墓碑同步出去 |
+| `settings.state` 是 Flow，VM 已经 `stateIn` 在观察 | `ui/MusicViewModel.kt:400` | provider 列表随账号变化自动刷新（见 5.1.5） |
+
+`SubsonicProvider(account)` 构造时解析这条 JSON、闭包住自己的 `SubsonicAccount`，`cookie` 参数到了就是它自己。
+
+**关于 Keystore：没有理由用。** `SecretStore`（`data/sync/SecretStore.kt`，Keystore + AES-GCM）
+目前只服务两处——同步令牌和 WebDAV 密码，是**按需选用**的，不是应用级规定。
+平台 Cookie 全都明文放在 `preferencesDataStore("mymusic")` 里并随同步文件同步。
+Subsonic 账号和平台账号是同一类东西（"我在这个服务上的凭据"），走同一条路才一致；
+单独给它上 Keystore 反而会让它成为唯一不能跨设备同步的账号。
+
+**安全姿态要说清楚，不能假装被加密了：** 密码会明文进 DataStore，并明文进同步文件
+（同步文件本身就是 WebDAV 上的一个 JSON）。这和现有平台 Cookie 完全同级，
+设置 UI 里应该明说"该凭据会随同步文件同步到你的其他设备"，让用户自己决定同步位置放哪。
+
+**真正不该同步的是自签证书指纹**，但理由不是安全而是语义：TOFU 指纹是"本机第一次连上时用户当面确认过"
+的记录，同步出去等于让另一台设备无条件信任一张它从未验证过的证书。指纹按设备存在本机
+（照 `WebDavCertificate` 的做法，但不进 `SyncSnapshot`）。
 
 #### 5.1.4 `ProviderInfo` 能力位怎么填
 
@@ -411,26 +435,32 @@ fun all(): List<NativeProvider> = static + dynamic
 
 `Unstable` / `Note` 可以填「自建服务器，行为随服务器实现而异」，和现有平台的用法一致。
 
-#### 5.1.5 provider 列表刷新（唯一需要留意的生命周期问题）
+#### 5.1.5 provider 列表刷新（唯一需要写代码的生命周期问题）
 
 `MusicViewModel` 在 init 里**只读一次** `repository.providers()`（`ui/MusicViewModel.kt:817`），
-之后不再刷新。所以新增/删除服务器后要让新源出现在搜索和换源列表里，需要一条刷新路径：
+之后不再刷新。账号改成存在 `settings.cookies` 里之后，`repository.providers()` 就能直接从 cookies 派生，
+而 `settingsState` 是 VM 里已经 `stateIn` 起来的 Flow（`ui/MusicViewModel.kt:400`）——
+加一个 collector 重读一次就行：
 
-1. `SubsonicAccountStore` 照 `WebDavAccountStore` 的样子暴露 `StateFlow<List<SubsonicAccountInfo>>`；
-2. `MyMusicApp.onCreate()` 里按账号列表 `register` / `unregister`；
-3. `MusicViewModel` 加一个 collector，账号列表变化就重读 `repository.providers()` 写回 `base.value.providers`。
+```kotlin
+viewModelScope.launch {
+    // 账号（settings.cookies 里的 subsonic:*）变了就重新注册/反注册 provider
+    settingsState.map { it.cookies.keys }.distinctUntilChanged().collect {
+        base.value = base.value.copy(providers = app.repository.providers())
+    }
+}
+```
+
+`MyMusicApp.onCreate()` 里按当前 cookies 做首次注册；之后增删账号都由上面这个 collector 兜住。
 
 另外**新账号要自动启用**：`AggregationSettings.enabledOrDefault` 是
 `enabledProviders.filter { it in available }`，而默认列表是 `listOf("netease","qq","kugou","kuwo","migu","lx")`——
 新 id 不在里面就会被默认关掉，用户不手动去设置里开就搜不到任何东西。
 照 LX 导入脚本时的写法（`ui/MusicViewModel.kt:749`）把新账号 id 追加进 `enabledProviders`。
 
-### 5.2 数据层：账号与歌曲缓存
+### 5.2 数据层：歌曲缓存
 
-账号用 SharedPreferences（多账号，JSON 数组）+ `SecretStore` 存密码/API key，
-**不要照 WebDAV 那样只存一个**——多服务器是这个方案的前提。
-
-歌曲缓存落一张薄表（Room 升到 v13）：
+账号不需要单独的存储（见 5.1.3）。要落库的只有歌曲缓存：
 
 | 方案 | 做法 | 评价 |
 |---|---|---|
@@ -438,7 +468,8 @@ fun all(): List<NativeProvider> = static + dynamic
 | **B. 落一张薄缓存表**（推荐） | `subsonic_tracks(account_id, song_id, title, artist, album, duration, suffix, bitrate, cover_art, updated_at)`，主键 `(account_id, song_id)` | 搜索/排序/海报墙走本地；配合 15 分钟节流刷新（现成范式见 `BoundPlaylists`） |
 
 Room 当前 `version = 12`（`data/AppStore.kt:1231`）。加表就是 v13 + 一条 `Migration(12, 13)`，
-迁移写法照 `AppStore.MIGRATION_1_2` 的样子。
+迁移写法照 `AppStore.MIGRATION_1_2` 的样子。`account_id` 从 cookie key 里取，
+删账号时按它清行——墓碑同步过来时也要清（`applyCookies` 之后紧接着做）。
 
 ### 5.3 播放链路：为什么仍要一层路由 DataSource
 
@@ -474,12 +505,15 @@ val upstream = BilibiliCdnFactory(
 `playableStream` 返回的 URL **不带凭据**：
 
 ```
-https://nas.local:4533/rest/stream.view?id=<songId>&format=raw
+https://nas.example.com/rest/stream.view?id=<songId>&format=raw
 ```
 
 `SubsonicRoutingDataSourceFactory` 按 scheme+host+port 认出是哪台服务器（和
-`WebDavRoutingDataSourceFactory.handles` 同一套判法），用那台服务器自己的 OkHttpClient
-（带 `u`/`t`/`s`/`v`/`c` 参数注入 + 自签证书信任）起 `OkHttpDataSource`；否则原样交给 fallback。
+`WebDavRoutingDataSourceFactory.handles` 同一套判法），再从 `settings.cookies` 里对应的
+`subsonic:<accountId>` 取出账号，用它的 OkHttpClient（带 `u`/`t`/`s`/`v`/`c` 参数注入 +
+自签证书信任）起 `OkHttpDataSource`；认不出来就原样交给 fallback。
+账号查找走内存里那份 cookie 快照，**不解密、不碰磁盘**，和 `CloudHub.routing` 现在读
+`webDavAccounts.info.value?.serverUrl` 而不解密密码是同一个套路。
 
 **为什么值得多这一层，而不是把凭据直接拼进 URL：**
 
@@ -596,7 +630,7 @@ Navidrome / Airsonic 上这些状态全在服务端，同一账号的所有客�
 现有同步 v3 要解决的命题——「自建歌单 + 本地音乐线索在多台设备间一致」——在 Subsonic 场景下不存在：
 歌单就在服务器上，本机只是一个视图。下载 / 离线缓存是按设备的，和所有平台一样不跟同步走。
 
-#### 5.8.2 但有三样东西确实会跟同步走，前两样几乎是白拿
+#### 5.8.2 但有三样东西确实会跟同步走，而且全都是白拿
 
 1. **歌单绑定（零改动）。** `SyncPlaylist.link: SyncLink?` 带 `provider` + `id` + `cover`，
    建快照和合并都在处理它（`data/sync/SyncCoordinator.kt:1500`）。`provider` 就是个字符串，
@@ -604,19 +638,32 @@ Navidrome / Airsonic 上这些状态全在服务端，同一账号的所有客�
 2. **收藏（零改动）。** `applyFavorites` 按 `key` 存 `SavedSong` + `Song` JSON，
    **不检查 provider 是否配过**。所以 A 设备收藏了一首 Subsonic 歌，B 设备同步过来照样显示；
    B 设备没配这台服务器时只是播不了，和「某个平台在这台设备上不可用」走同一套降级。
-3. **账号本身（可选）。** 见下。
+3. **账号本身（零改动）。** 见 5.8.3。
 
-#### 5.8.3 账号要不要同步：建议只同步「地址 + 用户名 + 显示名」
+#### 5.8.3 账号：随同步走，而且是白拿的
 
-不同步密码的理由**不是**同步文件不安全，而是：
+既然账号就是 `settings.cookies` 里的一条 value（§5.1.3），那它在**设计上就已经跟着同步 v3 走了**——
+不需要写任何同步代码：
 
-- `SecretStore` 的 Keystore 是设备绑定的，同步过来的是密文、另一台设备解不开；要能用就得明文同步，
-  而那比 Cookie 更敏感——Cookie 会过期，服务器密码不会。
-- 内网地址（`http://192.168.x.x:4533`）在别的设备网络里不可达，同步过去是一台连不上的服务器，
-  用户还得手动删。
+| 行为 | 现成机制 |
+|---|---|
+| 在手机上添加服务器 → 电视上出现 | `SyncSnapshot.cookies` 建快照全量带上 |
+| 删账号 → 所有设备上消失 | `SyncCookie.deletedAt` 墓碑 + `applyCookies` 的移除分支 |
+| 改密码 → 以 `updatedAt` 新的为准 | `applyCookies` 按 provider 逐个比时间戳 |
+| 「用云端覆盖本机」→ 本机多余的账号被清掉 | `applyCookies(removeAbsent = true)` |
 
-所以最优形态是「待配置账号」：地址 / 用户名 / 显示名跟同步走，落到本机时置成「需要输密码」的状态，
-电视上尤其省事（电视输密码最痛苦）。**第一期可以先不做**——就三个字段，每台设备配一次的成本很低。
+之前一版我写「密码不进同步文件、所以账号不同步」，两个前提都是错的：
+`settings.cookies` 本来就没加密（`preferencesDataStore("mymusic")` 明文字符串），
+平台 Cookie 也本来就随同步文件走且没有开关。Subsonic 账号和平台账号是同一类东西，走同一条路才一致。
+
+**要处理的只有两件事：**
+
+1. **UI 上要说清楚。** 密码明文进同步文件，设置里保存账号时给一句提示
+   （"凭据会随同步文件同步到你的其他设备"），同步位置是用户自己选的 WebDAV，风险由用户判断。
+2. **连不上是常态，不是异常。** Subsonic 服务器可能是内网地址、Tailscale、Cloudflare Tunnel、
+   公网反代域名——没有哪一种应该被假定。手机在移动网络下连不上家里的 NAS 是正常的，
+   所以 UI 要能显示「连不上」并允许单设备删除，而不是把"同步过来一台连不上的服务器"当成设计缺陷。
+   （真正按设备存的只有自签证书指纹，理由见 §5.1.3。）
 
 ### 5.9 不在范围内的事
 
@@ -638,14 +685,16 @@ Navidrome / Airsonic 上这些状态全在服务端，同一账号的所有客�
 | 5 | **Navidrome 没有文件夹浏览**（模拟树） | 做了「按目录」UI 就废了 | UI 只做 歌手/专辑/风格/歌单 |
 | 6 | **Airsonic-Advanced 无 OpenSubsonic** | `getLyricsBySongId`、`formPost`、`apiKey`、`indexBasedQueue` 全没有 | 每个能力都做 `ping`/`getOpenSubsonicExtensions` 探测 + 降级分支 |
 | 7 | **每次请求都会注册/触碰一个 player，并种 cookie** `nd-player-<hex(user)>` | 用户在自己服务器上看到一堆陌生设备条目 | 用一个固定的 `c=myMusic`；apiKey 认证时不种 cookie（源码 `boundByKey` 分支） |
-| 8 | **内网地址 + 自签证书** | 连不上，且报错信息看不懂 | 复用 `WebDavCertificate` 的 TOFU 指纹钉住（`PinnedTrustManager`）；明文已全局放行（`app/src/main/res/xml/network_security_config.xml`），无需额外配置 |
-| 9 | **Android 17 本地网络权限** | 局域网 IP 直接被内核丢包，服务端无日志 | 复用 `data/sync/LocalNetworkAccess.kt`，连内网地址前先查 `isGranted` |
+| 8 | **自签证书**（无论内网还是公网域名都有人用） | 连不上，且报错信息看不懂 | 复用 `WebDavCertificate` 的 TOFU 指纹钉住（`PinnedTrustManager`）；指纹按设备存、不进同步文件；明文已全局放行（`app/src/main/res/xml/network_security_config.xml`），无需额外配置 |
+| 9 | **Android 17 本地网络权限**（仅当地址解析到私网/链路本地时） | 局域网 IP 直接被内核丢包，服务端无日志 | 复用 `data/sync/LocalNetworkAccess.kt`，连之前先查 `isGranted`；公网域名和 Tailscale 走不到这条 |
 | 10 | **`stream` 不计播放数**（Navidrome 官方明说只有 `scrobble` + `submission=true` 才算） | 服务器端「已播放」永远是 0 | 播够时长发一次 `scrobble`（现有 playreport 体系已有类似钩子） |
 | 11 | **大库分页慢**（`getAlbumList2` 的 `size` 上限 500，靠 `offset`） | 首屏慢 | 本地缓存表 + 分页预取；首次同步显示进度 |
 | 12 | **`getCoverArt` 有独立并发限流**：Navidrome 默认 `max(2, CPU/2)` 个并发，超出排队（积压上限 100、超时 1 分钟） | 海报墙/网格一次性拉几十张封面时明显变慢 | 封面按 §5.3 落本地磁盘，只拉一次；Coil 自带并发与内存缓存 |
 | 13 | **`Song.url` / `PlayableStream.url` 会泄密** | 凭据进 `SourceResolver.urlCache`、日志、分享卡 | 认证只在 DataSource 层注入（§5.3），URL 保持干净 |
 | 14 | **新账号默认不在 `enabledProviders` 里**（默认列表只有 netease/qq/kugou/kuwo/migu/lx） | 加完服务器搜不到任何歌，用户以为坏了 | 保存账号时把 id 追加进 `AggregationSettings.enabledProviders`（照 `MusicViewModel.kt:749` LX 的写法） |
-| 15 | **`MusicViewModel` 只在 init 读一次 provider 列表** | 运行时新增/删除服务器不出现在搜索和换源列表 | `SubsonicAccountStore` 暴露 StateFlow，VM 收集后重读 `repository.providers()`（§5.1.5） |
+| 15 | **`MusicViewModel` 只在 init 读一次 provider 列表** | 运行时新增/删除服务器不出现在搜索和换源列表 | 账号放 `settings.cookies` 后，`repository.providers()` 从 cookies 派生；VM 收集 `settingsState.map { it.cookies.keys }` 重读（§5.1.5） |
+| 16 | **密码明文进 DataStore，并明文随同步文件同步** | 用户以为凭据被加密了 | 和平台 Cookie 完全同级，不是新风险；但保存账号的 UI 要明说"会随同步文件同步到你的其他设备"，别装作加密过 |
+| 17 | **服务器地址形态五花八门**（内网 IP / Tailscale / Cloudflare Tunnel / 公网反代域名） | 手机在移动网络下连不上家里的 NAS，容易被当成 bug | 不要假定某一种形态；UI 显示「连不上」并允许单设备删除，退出登录的墓碑会把它从所有设备清掉 |
 
 ---
 
@@ -653,7 +702,7 @@ Navidrome / Airsonic 上这些状态全在服务端，同一账号的所有客�
 
 | 期 | 内容 | 验收标准 |
 |---|---|---|
-| **P0 打通** | `data/subsonic/` 协议层 + `SubsonicProvider`（`NativeProvider` 实现）；`NativeProviders` 动态注册；`SubsonicAccountStore` 多账号 + Keystore；账号配置 UI | 加一台服务器后，搜索/换源列表里出现它自己的名字；填错密码能看到人话错误 |
+| **P0 打通** | `data/subsonic/` 协议层 + `SubsonicProvider`（`NativeProvider` 实现）；`NativeProviders` 动态注册；账号就是 `settings.cookies` 里的一条 value；账号配置 UI | 加一台服务器后，搜索/换源列表里出现它自己的名字；填错密码能看到人话错误 |
 | **P1 能听** | `stream.view?format=raw` + `SubsonicRoutingDataSourceFactory` 接入 `PlaybackService`；封面本地磁盘缓存 | 从「专辑 → 歌曲」点进去能播，能拖动，海报墙和播放页封面正常 |
 | **P2 能浏览** | `search3` / `getAlbumList2` / `getArtists` / `getAlbum` / `getGenres`；Room v13 缓存表 + 分页 | 上万首的库首屏 1 秒内；搜索可用 |
 | **P3 能管** | 收藏（`star`/`unstar`）、评分（`setRating`）、歌单增删 + 绑定平台歌单、歌词（`getLyricsBySongId` + 纯文本降级）、`downloadUrl` | 编辑后刷新服务器上能看到变化；下载能落盘 |
@@ -662,11 +711,14 @@ Navidrome / Airsonic 上这些状态全在服务端，同一账号的所有客�
 P0 的落地顺序（都是小步，可分别提交）：
 
 1. `NativeProviders` 拆静态/动态两张表，`all()` 合并——先不动任何现有行为。
-2. `SubsonicAccount` + `SubsonicAccountStore`（SharedPreferences 多账号 + `SecretStore`）。
+2. `SubsonicAccount` + 存取：就是 `settings.cookies` 里 `subsonic:<accountId>` → JSON，
+   **不新建存储、不用 Keystore**；删除账号时同步写墓碑（`SyncCookie(deletedAt)` 那套）。
 3. `SubsonicClient`：OkHttp + JSON + 四种认证 + 错误码映射 + 限流不重试。
 4. `SubsonicProvider(account)`：实现 `info`、`searchSongsPage`、`playableStream`、`playlistSongs`、`lyrics`。
-5. `MyMusicApp.onCreate` 注册；`MusicViewModel` 收集账号 StateFlow 刷新 + 自动启用。
-6. 账号配置 UI（照 `ui/local/LocalWebDavScreen.kt` / `ui/library/WebDavSyncForm.kt` 的表单范式）。
+5. `MusicRepository.providers()` 从 cookies 派生 Subsonic 实例；`MyMusicApp.onCreate` 首次注册；
+   VM 收集 `settingsState.cookies` 刷新 + 新账号自动启用。
+6. 账号配置 UI（照 `ui/local/LocalWebDavScreen.kt` / `ui/library/WebDavSyncForm.kt` 的表单范式），
+   保存时提示"凭据会随同步文件同步"。
 
 ### 7.1 Navidrome 已注册但本文未展开的端点
 
@@ -710,17 +762,18 @@ P0 的落地顺序（都是小步，可分别提交）：
 |---|---|
 | 歌曲/歌单模型 | `data/Models.kt` |
 | **Provider 抽象（Subsonic 就实现在这）** | `data/native/NativeProvider.kt`、`data/native/NativeProviders.kt` |
-| provider 列表刷新位置 | `ui/MusicViewModel.kt:817`、`ui/MusicViewModel.kt:749`（LX 自动启用的写法） |
+| 账号存放处（`settings.cookies`，明文 DataStore） | `data/AppStore.kt:257`（`cookiesKey`）、`:359`（解析） |
+| provider 列表刷新位置 | `ui/MusicViewModel.kt:817`、`:400`（`settingsState`）、`:749`（LX 自动启用的写法） |
+| Keystore（按需选用，Subsonic 不用） | `data/sync/SecretStore.kt` |
 | 聚合搜索/换源的 cookie 与可用性 | `aggregate/AggregateSearchEngine.kt`、`aggregate/SourceResolver.kt`、`aggregate/Availability.kt` |
 | 启用开关与平台顺序 | `aggregate/Models.kt`（`AggregationSettings`） |
-| 账号存储范本 | `data/webdav/WebDavAccount.kt`、`data/sync/SecretStore.kt` |
-| 自签证书指纹钉住范本 | `data/webdav/WebDavCertificate.kt` |
+| 同步快照结构（账号/绑定/收藏都跟同步走） | `data/sync/SyncModels.kt`、`data/sync/SyncCoordinator.kt`、`data/AppStore.kt:703`（`applyCookies`） |
+| 自签证书指纹钉住范本（按设备存，不同步） | `data/webdav/WebDavCertificate.kt` |
 | 路由 DataSource 范本 | `data/webdav/WebDavDataSource.kt`、`data/native/MHubTls.kt` |
 | 播放器工厂链（插入点） | `playback/PlaybackService.kt:89` |
 | Room 版本与迁移 | `data/AppStore.kt:1211` |
 | 内网权限 | `data/sync/LocalNetworkAccess.kt` |
 | 明文流量配置 | `app/src/main/res/xml/network_security_config.xml` |
 | 绑定平台歌单 | `data/BoundPlaylists.kt` |
-| 同步快照结构（绑定/收藏会跟同步走） | `data/sync/SyncModels.kt`、`data/sync/SyncCoordinator.kt` |
 | 歌词管线 | `ui/LyricPipeline.kt` |
 | 账号配置 UI 范本 | `ui/local/LocalWebDavScreen.kt`、`ui/library/WebDavSyncForm.kt` |
