@@ -244,9 +244,38 @@ class TvInputPanelServerTest {
         assertEquals(TvSignerSubmission("", "", true), signers.last())
     }
 
+    /**
+     * issue #33：手机扫码后网页打不开，只看到 {"error":"页面不存在"}。
+     * 手机浏览器和扫码器常把结尾的 `/` 吃掉，而页面里的 CSS/JS/接口全是相对路径，
+     * 所以少一个斜线也必须能打开面板，而不是 404。
+     */
     @Test
-    fun rejectsCrossSiteOversizedAndExpiredRequests() {
-        var now = 1000L
+    fun missingTrailingSlashStillOpensThePanel() {
+        val (base, _) = start(TvInputPanelSnapshot())
+        val withoutSlash = base.newBuilder().query(null).build().toString().trimEnd('/')
+        client.newCall(Request.Builder().url(withoutSlash).get().build()).execute().use { response ->
+            assertEquals(200, response.code)
+            assertTrue(response.body.string().contains("input.js"))
+        }
+        // 相对路径的资源跟着重定向后也要拿得到
+        get(base, "input.css").use { response ->
+            assertEquals(200, response.code)
+            assertEquals("body{color:white}", response.body.string())
+        }
+    }
+
+    @Test
+    fun bareHostAddressTellsTheUserToScanInsteadOfRawJson() {
+        val (base, _) = start(TvInputPanelSnapshot())
+        client.newCall(Request.Builder().url(base.newBuilder().encodedPath("/").build()).get().build())
+            .execute().use { response ->
+                assertEquals(404, response.code)
+                assertTrue(response.body.string().contains("二维码"))
+            }
+    }
+
+    @Test
+    fun rejectsCrossSiteOversizedAndExpiredRequests() {        var now = 1000L
         val (base, _) = start(TvInputPanelSnapshot(), clock = { now }, sessionMillis = 250)
         val body = """{"target":"search","text":"方大同"}"""
         post(base, "api/input", body, withHeader = false).use { assertEquals(400, it.code) }

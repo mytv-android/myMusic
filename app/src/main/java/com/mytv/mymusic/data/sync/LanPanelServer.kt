@@ -11,9 +11,12 @@ import java.security.SecureRandom
 internal data class LanPanelStarted(val url: String, val expiresAt: Long)
 
 /**
- * 电视上「手机扫码打开的局域网网页」的公共底座：同步配置（[SyncSetupServer]）和传歌单文件共用。
+ * 电视上「手机扫码打开的局域网网页」的公共底座：同步配置（[SyncSetupServer]）、传歌单文件和
+ * 手机辅助输入（TvInputPanelServer）共用。
  *
  * - 只认 `/s/<令牌>/` 下的路径，令牌 128 位随机、只在二维码里；
+ * - 结尾少一个斜线时 301 回规范地址：手机浏览器和扫码器常把 `/` 吃掉，而页面里的 CSS、JS 和
+ *   接口全是相对路径，少了它整页就打不开（issue #33）；
  * - 只收局域网来源（回环、私网、链路本地），过期一律 410；
  * - 统一的安全头（no-store、nosniff、no-referrer、CORP、Permissions-Policy，HTML 带 CSP）；
  * - 写接口的共用检查（同源、非跨站、自定义头、Content-Type、Content-Length 上限），见 [checkWrite]。
@@ -62,11 +65,31 @@ internal abstract class LanPanelServer(
             return errorResponse(Response.Status.GONE, expiredMessage)
         }
         val uri = session.uri.orEmpty()
+        // 结尾的斜线被浏览器或扫码器吃掉时不能整页 404：页面里的 input.css / input.js / theme.css
+        // 和 api/* 全是相对路径，少一个斜线它们会掉到 /s/ 下面，所以先 301 回规范地址。
+        if (uri == sessionPath.removeSuffix("/") || uri == "$sessionPath/") {
+            return redirect(sessionPath)
+        }
         if (!uri.startsWith(sessionPath)) {
-            return errorResponse(Response.Status.NOT_FOUND, "页面不存在")
+            // 电视上显示的只有 ip:端口，照着敲会落到这里；说清该扫码，别回一段看不懂的 JSON。
+            return errorResponse(Response.Status.NOT_FOUND, "请扫描电视上的二维码打开面板")
         }
         return route(session, uri.removePrefix(sessionPath))
     }
+
+    /**
+     * 只在会话路径内部重定向，令牌不会出现在会话外的响应里。带上几句正文和链接，
+     * 万一扫码器的内置浏览器不跟随 301，用户看到的也不是一片空白。
+     */
+    protected fun redirect(target: String): Response = textResponse(
+        Response.Status.REDIRECT,
+        "text/html; charset=UTF-8",
+        """<!doctype html><meta charset="utf-8"><title>正在打开面板</title>
+<meta http-equiv="refresh" content="0;url=$target">
+<body style="font:16px system-ui;padding:24px">正在打开面板…<br>
+<a href="$target">如果没有自动跳转，点这里</a></body>""",
+        html = true,
+    ).apply { addHeader("Location", target) }
 
     protected fun asset(name: String, mime: String, html: Boolean = false): Response {
         val bytes = assets(name) ?: return errorResponse(Response.Status.NOT_FOUND, "面板资源未打包")
