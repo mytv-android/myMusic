@@ -463,20 +463,38 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             val listId = trimmed.removePrefix("cloudlist:").trim()
             if (listId.isNotEmpty()) return fetchCloudlistDetail(cookie, listId).second
         }
+        if (trimmed.startsWith(COLLECTION_ID_PREFIX)) {
+            val globalId = trimmed.removePrefix(COLLECTION_ID_PREFIX).trim()
+            if (globalId.isNotEmpty()) {
+                return fetchCollectionFiles(globalId)
+                    ?: throw IllegalStateException("kugou shared playlist $globalId has no songs")
+            }
+        }
         return fetchPlaylistDetail(cookie, id).second
     }
 
     override suspend fun parsePlaylist(cookie: String, link: String): CollectionResult {
+        // 网页分享页 /songlist/gcid_xxx/、概念版 App 的官方分享页、以及 t1.kugou.com 短链
+        // 都指向同一个自建/收藏歌单，只是拿到的标识不一样
+        val gcid = kugouLinkGcid(link)
+        if (gcid != null) {
+            val (playlist, songs) = fetchSonglistDetail(cookie, gcid)
+            return CollectionResult(playlist, songs)
+        }
+        val chain = kugouLinkChain(link)
+        if (chain != null) {
+            val (playlist, songs) = fetchSharedPlaylist(chain)
+            return CollectionResult(playlist, songs)
+        }
+        val globalId = kugouLinkCollectionId(link)
+        if (globalId != null) {
+            val (playlist, songs) = fetchCollectionDetail(globalId)
+            return CollectionResult(playlist, songs)
+        }
         return when {
             link.contains("/yy/special/single/") -> {
                 val match = KUGOU_SPECIAL_LINK_REGEX.find(link)
                     ?: throw IllegalArgumentException("invalid kugou playlist link")
-                val (playlist, songs) = fetchPlaylistDetail(cookie, match.groupValues[1])
-                CollectionResult(playlist, songs)
-            }
-            link.contains("/songlist/") -> {
-                val match = KUGOU_SONGLIST_LINK_REGEX.find(link)
-                    ?: throw IllegalArgumentException("invalid kugou songlist link")
                 val (playlist, songs) = fetchPlaylistDetail(cookie, match.groupValues[1])
                 CollectionResult(playlist, songs)
             }
@@ -2135,7 +2153,18 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
             link = "https://www.kugou.com/songlist/$playlistId/",
         )
 
-        // 分享页只内嵌前 10 首，几百首的歌单会只剩几条；补齐靠 specialid 翻页的全量接口。
+        // 分享页只内嵌前 10 首，几百首的歌单会只剩几条；概念版自建歌单又没有 specialid
+        // 可翻，所以先按 gcid 解出 global_collection_id，翻 get_other_list_file 的全量
+        // 分页接口（匿名可拿，按 count 翻页，歌单里有多少就导多少——issue #35）。
+        // 这条走不通（接口限流、gcid 解不出来）再退回 specialid，最后才是页面内嵌的那几首。
+        val fullByGcid = decodeGcid(firstNonEmpty(resp.globalCollectionId, id))
+            ?.let { globalId -> fetchCollectionFiles(globalId) }
+        if (fullByGcid != null) {
+            val embedded = resp.info.songs.mapNotNull { embedSonglistSong(it) }
+            val merged = mergeSonglistSongs(fullByGcid, embedded)
+            return playlist.copy(trackCount = merged.size) to merged
+        }
+
         val specialId = resp.info.listInfo.specialid
         if (specialId > 0) {
             val (total, full) = fetchSpecialSongs(cookie, specialId.toString())
@@ -2151,6 +2180,272 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
 
         val result = if (playlist.trackCount == 0) playlist.copy(trackCount = songs.size) else playlist
         return result to songs
+    }
+
+    /**
+     * 概念版 App 的短链分享（`t1.kugou.com/<chain>`）：先解出 `global_collection_id`，
+     * 再按 [fetchCollectionDetail] 拿全量。短链过期或解不出来时抛异常，别退化成 10 首。
+     */
+    private suspend fun fetchSharedPlaylist(chain: String): Pair<Playlist, List<Song>> {
+        val resolved = resolveShareChain(chain)
+            ?: throw IllegalStateException("kugou share link is not available any more")
+        return fetchCollectionDetail(resolved.globalSpecialId)
+    }
+
+    /** 按 `global_collection_id` 拿一个自建/收藏歌单：元数据 + 全量歌曲。 */
+    private suspend fun fetchCollectionDetail(globalCollectionId: String): Pair<Playlist, List<Song>> {
+        val songs = fetchCollectionFiles(globalCollectionId)
+            ?: throw IllegalStateException("kugou playlist $globalCollectionId has no songs")
+        val info = collectionInfo(globalCollectionId)
+        val playlist = Playlist(
+            // 绑定歌单按这个 id 刷新，所以必须能一路路由回这里
+            id = COLLECTION_ID_PREFIX + globalCollectionId,
+            name = info?.specialName.orEmpty().ifBlank { "酷狗歌单" },
+            cover = info?.imgUrl.orEmpty().replaceFirst("{size}", "240"),
+            trackCount = songs.size,
+            playCount = info?.playCount?.toLong() ?: 0L,
+            creator = info?.nickname.orEmpty(),
+            description = info?.intro.orEmpty(),
+            source = "kugou",
+            link = "https://www.kugou.com/songlist/$globalCollectionId/",
+        )
+        return playlist to songs
+    }
+
+    /**
+     * 分享页只内嵌前 10 首；按 gcid 解出 `global_collection_id`，再翻
+     * [KUGOU_COLLECTION_FILE_API] 的全量分页接口拿齐（不需要登录）。
+     *
+     * 接口回的数组不按 `sort` 连续排，拼齐后交给 [orderedByServerPosition] 归位。
+     * 解不出来或一首都没有时返回 null，调用方退回 specialid / 页面内嵌。
+     */
+    private suspend fun fetchCollectionFiles(gcidOrGlobalId: String): List<Song>? {
+        val globalCollectionId = if (gcidOrGlobalId.startsWith("collection_")) {
+            gcidOrGlobalId
+        } else {
+            decodeGcid(gcidOrGlobalId) ?: return null
+        }
+        val items = mutableListOf<KugouCollectionFileItem>()
+        var total = 0
+        var page = 1
+        while (true) {
+            val resp = collectionFileRequest(globalCollectionId, page)
+            if (page == 1) total = resp.data.count
+            val batch = resp.data.info
+            if (batch.isEmpty()) break
+            items += batch
+            if (batch.size < COLLECTION_FILE_PAGE_SIZE) break
+            if (total > 0 && items.size >= total) break
+            if (page >= COLLECTION_FILE_MAX_PAGES) break
+            page++
+        }
+        val songs = items.orderedByServerPosition { it.sort.numericString().toIntOrNull() }
+            .mapNotNull { collectionFileToSong(it) }
+        return songs.takeIf { it.isNotEmpty() }
+    }
+
+    /** `gcid_xxx` → `global_collection_id`（`collection_xxx`）。 */
+    private suspend fun decodeGcid(gcid: String): String? {
+        val id = gcid.trim()
+        if (id.isEmpty()) return null
+        val data = buildJsonObject {
+            put("ret_info", 1)
+            putJsonArray("data") {
+                add(buildJsonObject {
+                    put("id", id)
+                    put("id_type", 2)
+                })
+            }
+        }.toString()
+        val params = mapOf(
+            "dfid" to "-",
+            "appid" to "1005",
+            "mid" to "0",
+            "clientver" to "20109",
+            "clienttime" to "640612895",
+            "uuid" to "-",
+        )
+        val url = KUGOU_GID_DECODE_API + "?" +
+            query(params + ("signature" to signStdAndroidParams(params, data)))
+        val body = NativeHttp.postJson(
+            url,
+            data,
+            cookie = "",
+            randomIp = true,
+            userAgent = KUGOU_GID_DECODE_UA,
+            headers = mapOf("Referer" to MOBILE_REFERER),
+        ).body
+        val resp = json.decodeFromString<KugouGcidDecodeResponse>(body)
+        if (resp.status != 1 || resp.errCode != 0) return null
+        return resp.data.list.firstOrNull { it.globalCollectionId.isNotBlank() }?.globalCollectionId
+    }
+
+    /** 概念版短链 `t1.kugou.com/<chain>` → `global_collection_id`；匿名可用。 */
+    private suspend fun resolveShareChain(chain: String): KugouShareChainInfo? {
+        val id = chain.trim()
+        if (id.isEmpty()) return null
+        val url = KUGOU_SHARE_CHAIN_API + "?" + query(
+            mapOf(
+                "pagesize" to COLLECTION_FILE_PAGE_SIZE.toString(),
+                "chain" to id,
+                "su" to "1",
+                "page" to "1",
+                "n" to String.format(Locale.ROOT, "%.16f", Math.random()),
+            )
+        )
+        val body = NativeHttp.get(
+            url,
+            cookie = "",
+            randomIp = true,
+            userAgent = KUGOU_GID_DECODE_UA,
+        )
+        val resp = json.decodeFromString<KugouShareChainResponse>(body)
+        if (resp.status != 1 || resp.errcode != 0) return null
+        return resp.info.takeIf { it.globalSpecialId.isNotBlank() }
+    }
+
+    /** 歌单元数据（名称、封面、简介、创建者）；拿不到不影响歌曲列表。 */
+    private suspend fun collectionInfo(globalCollectionId: String): KugouCollectionInfo? {
+        val params = mapOf(
+            "appid" to "1058",
+            "specialid" to "0",
+            "global_specialid" to globalCollectionId,
+            "format" to "jsonp",
+            "srcappid" to "2919",
+            "clientver" to "20000",
+            "clienttime" to KUGOU_SHARE_CLIENTTIME,
+            "mid" to KUGOU_SHARE_CLIENTTIME,
+            "uuid" to KUGOU_SHARE_CLIENTTIME,
+            "dfid" to "-",
+        )
+        val url = KUGOU_COLLECTION_INFO_API + "?" +
+            query(params + ("signature" to signSonginfoParams(params)))
+        val body = NativeHttp.get(
+            url,
+            cookie = "",
+            randomIp = true,
+            userAgent = KUGOU_GID_DECODE_UA,
+            headers = mapOf(
+                "mid" to KUGOU_SHARE_CLIENTTIME,
+                "Referer" to KUGOU_SHARE_REFERER,
+                "dfid" to "-",
+                "clienttime" to KUGOU_SHARE_CLIENTTIME,
+            ),
+        )
+        return runCatching { json.decodeFromString<KugouCollectionInfoResponse>(body).data }.getOrNull()
+            ?.takeIf { it.songCount > 0 || it.specialName.isNotBlank() }
+    }
+
+    private suspend fun collectionFileRequest(
+        globalCollectionId: String,
+        page: Int,
+    ): KugouCollectionFileResponse {
+        val params = mapOf(
+            "need_sort" to "1",
+            "module" to "CloudMusic",
+            "clientver" to "11589",
+            "pagesize" to COLLECTION_FILE_PAGE_SIZE.toString(),
+            "global_collection_id" to globalCollectionId,
+            "userid" to "0",
+            "page" to page.toString(),
+            "type" to "0",
+            "area_code" to "1",
+            "appid" to "1005",
+        )
+        val url = KUGOU_COLLECTION_FILE_API + "?" +
+            query(params + ("signature" to signStdAndroidParams(params)))
+        val body = NativeHttp.get(
+            url,
+            cookie = "",
+            randomIp = true,
+            userAgent = KUGOU_COLLECTION_FILE_UA,
+            headers = mapOf("Referer" to KUGOU_SHARE_REFERER),
+        )
+        val resp = json.decodeFromString<KugouCollectionFileResponse>(body)
+        if (resp.errorCode != 0 || resp.errcode != 0) {
+            throw IllegalStateException(
+                "kugou collection file api error: error_code=${resp.errorCode} errcode=${resp.errcode} error=${resp.error}"
+            )
+        }
+        return resp
+    }
+
+    /**
+     * `get_other_list_file` 的条目转 [Song]。
+     *
+     * 音质哈希全在 `relate_goods` 里（128/320/无损/母带一应俱全），挑最高的那个；
+     * `name` 是「歌手 - 歌名」，歌手另外在 `singerinfo` 里，两边都要。
+     */
+    internal fun collectionFileToSong(item: KugouCollectionFileItem): Song? {
+        val hashes = pickSonglistHashes(item.hash, item.size, item.bitrate, item.relateGoods)
+        var fileHash = hashes.fileHash
+        var hqHash = hashes.hqHash
+        var sqHash = hashes.sqHash
+        var size = hashes.size
+        var bitrate = hashes.bitrate
+        val finalHash = firstNonEmpty(
+            sqHash,
+            hqHash,
+            item.transParam.ogg320Hash,
+            item.hash,
+            fileHash,
+            item.transParam.ogg128Hash,
+        )
+        if (!isValidHash(finalHash)) return null
+
+        when (finalHash) {
+            sqHash -> Unit
+            hqHash -> Unit
+            item.transParam.ogg320Hash -> if (item.transParam.ogg320FileSize > 0) {
+                size = item.transParam.ogg320FileSize
+                bitrate = 320
+            }
+            item.transParam.ogg128Hash -> if (item.transParam.ogg128FileSize > 0) {
+                size = item.transParam.ogg128FileSize
+                bitrate = 128
+            }
+            item.hash, fileHash -> if (item.size > 0) size = item.size
+        }
+
+        val duration = normalizeKugouDuration(item.timeLength)
+        if (duration > 0 && size > 0) bitrate = (size * 8 / 1000 / duration).toInt()
+
+        val albumId = firstNonEmpty(item.albumId.numericString(), item.albumInfo.id.numericString())
+        val audioId = firstNonEmpty(item.audioId.numericString(), item.audioGroupId)
+        val albumAudioId = firstNonEmpty(
+            item.addMixSongId.numericString(),
+            item.mixSongId.numericString(),
+            item.audioId.numericString(),
+        )
+        val cover = firstNonEmpty(item.cover, item.transParam.unionCover).replaceFirst("{size}", "240")
+
+        return Song(
+            id = finalHash,
+            name = pickSonglistSongName(firstNonEmpty(item.name, item.filename)),
+            artist = joinSonglistArtists(item.singerInfo),
+            album = item.albumInfo.name,
+            albumId = albumId,
+            duration = duration,
+            size = size,
+            bitrate = bitrate,
+            source = "kugou",
+            cover = cover,
+            link = "https://www.kugou.com/song/#hash=$finalHash",
+            extra = buildMap {
+                put("hash", finalHash)
+                put("ogg_320_hash", item.transParam.ogg320Hash)
+                put("ogg_128_hash", item.transParam.ogg128Hash)
+                put("sq_hash", sqHash)
+                put("file_hash", fileHash)
+                put("hq_hash", hqHash)
+                put("mv_hash", item.mvHash)
+                put("audio_id", audioId)
+                put("album_audio_id", albumAudioId)
+                put("album_id", albumId)
+                put("privilege", item.privilege.toString())
+            },
+            isVip = item.privilege == 10,
+        )
     }
 
     internal fun parseSonglistPayload(html: String): KugouSonglistPayload {
@@ -3389,6 +3684,23 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         else -> "failed"
     }
 
+    /**
+     * 歌单分享链接里的 gcid：网页分享页 `songlist/gcid_xxx/` 和概念版 App 的官方分享页
+     * （`activity.kugou.com/share/...&global_specialid=gcid_xxx`）指的是同一个东西。
+     */
+    internal fun kugouLinkGcid(link: String): String? =
+        KUGOU_SONGLIST_LINK_REGEX.find(link)?.groupValues?.get(1)
+            ?: KUGOU_SHARE_GID_REGEX.find(link)?.groupValues?.get(1)
+
+    /** 概念版 App 的短链分享 `t1.kugou.com/<chain>` 里的 chain。 */
+    internal fun kugouLinkChain(link: String): String? =
+        KUGOU_SHARE_CHAIN_REGEX.find(link)?.groupValues?.get(1)
+            ?: KUGOU_SHARE_CHAIN_PARAM_REGEX.find(link)?.groupValues?.get(1)
+
+    /** 链接里直接带着 `collection_xxx` 时不用再解一次。 */
+    internal fun kugouLinkCollectionId(link: String): String? =
+        KUGOU_COLLECTION_ID_REGEX.find(link)?.groupValues?.get(1)
+
     private fun joinCookies(cookies: Map<String, String>): String =
         cookies.entries
             .filter { it.key.trim().isNotEmpty() }
@@ -3410,6 +3722,10 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
 
     private fun signAndroidParams(params: Map<String, String>, data: String): String =
         NativeCrypto.md5Hex(KUGOU_LITE_SIGN + signedPairs(params) + data + KUGOU_LITE_SIGN)
+
+    /** 标准版 Android 签名：公开歌单接口（pubsongs / t.kugou.com）用的是这一档盐。 */
+    private fun signStdAndroidParams(params: Map<String, String>, data: String = ""): String =
+        NativeCrypto.md5Hex(KUGOU_ANDROID_SIGN + signedPairs(params) + data + KUGOU_ANDROID_SIGN)
 
     /** 识曲接口的请求体是二进制 PCM，签名必须按原始字节算，不能转成字符串。 */
     internal fun matchSignature(params: Map<String, String>, data: ByteArray): String =
@@ -3472,9 +3788,30 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         const val MATCH_API = "https://gateway.kugou.com/fingerprint.service/v1/music_trackid_mulit"
         const val MATCH_USER_AGENT = "KuGou/11490 (Android)"
         const val MOBILE_REFERER = "http://m.kugou.com"
+        const val KUGOU_SHARE_REFERER = "https://m3ws.kugou.com/share/index.php"
+        /** 概念版 App 的短链分享（`t1.kugou.com/<chain>`）解出 global_collection_id；匿名可用。 */
+        const val KUGOU_SHARE_CHAIN_API = "http://m.kugou.com/schain/transfer"
+        /** 歌单元数据（名称、封面、简介、创建者）。 */
+        const val KUGOU_COLLECTION_INFO_API = "https://mobiles.kugou.com/api/v5/special/info_v2"
+        /** 洛雪同款：分享接口认的是这一串固定的 clienttime/mid/uuid。 */
+        const val KUGOU_SHARE_CLIENTTIME = "1586163242519"
+        /** 绑定歌单 id 前缀：按 global_collection_id 引用的他人/分享歌单。 */
+        const val COLLECTION_ID_PREFIX = "collection:"
+        /** `gcid_xxx` → `global_collection_id`；匿名可用，不需要登录。 */
+        const val KUGOU_GID_DECODE_API = "https://t.kugou.com/v1/songlist/batch_decode"
+        /** 按 global_collection_id 翻一个收藏/自建歌单的全量歌曲；匿名可用。 */
+        const val KUGOU_COLLECTION_FILE_API = "http://pubsongs.kugou.com/v2/get_other_list_file"
+        const val KUGOU_COLLECTION_FILE_UA = "Android10-AndroidPhone-11589-201-0-playlist-wifi"
+        const val KUGOU_GID_DECODE_UA =
+            "Mozilla/5.0 (Linux; Android 10; HUAWEI HMA-AL00) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.106 Mobile Safari/537.36"
+        const val COLLECTION_FILE_PAGE_SIZE = 300
+        /** 翻页硬上限：12000 首，防服务端一直返回满页时死循环。 */
+        const val COLLECTION_FILE_MAX_PAGES = 40
         const val VIP_INFO_API = "https://vip.kugou.com/recharge/roleinfo"
         const val KUGOU_SIGN_KEY = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
         const val KUGOU_LITE_SIGN = "LnT6xpN3khm36zse0QzvmgTZ3waWdRSA"
+        /** 标准版 Android 签名盐；概念版之外的网关接口（洛雪 musicSdk/kg/util.js 的 android 档）用它。 */
+        const val KUGOU_ANDROID_SIGN = "OIlwieks28dk2k092lksi2UIkp"
         const val KUGOU_LITE_APP_ID = "3116"
         const val KUGOU_LITE_VER = "11440"
         const val KUGOU_GATEWAY = "https://gateway.kugou.com"
@@ -3503,6 +3840,14 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         val KUGOU_HASH_REGEX = Regex("""hash=([a-f0-9]{32})""", RegexOption.IGNORE_CASE)
         val KUGOU_SPECIAL_LINK_REGEX = Regex("""special/single/(\d+)\.html""")
         val KUGOU_SONGLIST_LINK_REGEX = Regex("""songlist/(gcid_[a-zA-Z0-9]+)""")
+        /** 概念版 App 的官方分享页，`global_specialid` 就是歌单的 gcid。 */
+        val KUGOU_SHARE_GID_REGEX = Regex("""global_specialid=([A-Za-z0-9_]+)""")
+        /** 概念版 App 的短链分享：`t1.kugou.com/<chain>`。 */
+        val KUGOU_SHARE_CHAIN_REGEX = Regex("""t1\.kugou\.com/([A-Za-z0-9]+)""")
+        /** 已经解出 chain 的地址：`m.kugou.com/schain/transfer?...&chain=<chain>`。 */
+        val KUGOU_SHARE_CHAIN_PARAM_REGEX = Regex("""[?&]chain=([A-Za-z0-9]+)""")
+        /** 已经解出来的 global_collection_id，`songlist/collection_xxx/` 这种链接直接带。 */
+        val KUGOU_COLLECTION_ID_REGEX = Regex("""(?:songlist/|global_collection_id=)(collection_[A-Za-z0-9_]+)""")
         val KUGOU_SONGLIST_PAYLOAD_REGEX =
             Regex("""window\.[${'$'}]output\s*=\s*(\{.*?\})\s*;\s*</script>""")
         val KUGOU_ALBUM_LINK_REGEXES = listOf(
@@ -3719,6 +4064,7 @@ private data class KugouSpecialSongItem(
 @Serializable
 internal data class KugouSonglistPayload(
     @SerialName("encode_gic") val encodeGic: String = "",
+    @SerialName("global_collection_id") val globalCollectionId: String = "",
     val info: KugouSonglistInfo = KugouSonglistInfo(),
 )
 
@@ -3796,6 +4142,108 @@ private data class KugouCloudlistPage(
     val listVer: Long,
     /** hash / fileHash → fileid，写歌单时用来定位曲目。 */
     val fileIds: Map<String, Long>,
+)
+
+/** 概念版短链分享 `t1.kugou.com/<chain>` 解出来的标识。 */
+@Serializable
+private data class KugouShareChainResponse(
+    val status: Int = 0,
+    val errcode: Int = 0,
+    val error: String = "",
+    val info: KugouShareChainInfo = KugouShareChainInfo(),
+)
+
+@Serializable
+private data class KugouShareChainInfo(
+    /** 自建/收藏歌单在这里；`specialid=-2147483648` 是自建歌单的哨兵值。 */
+    @SerialName("global_specialid") val globalSpecialId: String = "",
+    val specialid: String = "",
+    @SerialName("cType") val cType: String = "",
+    val u: String = "",
+)
+
+@Serializable
+private data class KugouGcidDecodeResponse(
+    val status: Int = 0,
+    @SerialName("err_code") val errCode: Int = 0,
+    @SerialName("errmsg") val errMsg: String = "",
+    val data: KugouGcidDecodeData = KugouGcidDecodeData(),
+)
+
+@Serializable
+private data class KugouGcidDecodeData(
+    val list: List<KugouGcidDecodeItem> = emptyList(),
+)
+
+@Serializable
+private data class KugouGcidDecodeItem(
+    val id: String = "",
+    @SerialName("global_collection_id") val globalCollectionId: String = "",
+    val info: KugouGcidDecodeInfo = KugouGcidDecodeInfo(),
+)
+
+@Serializable
+private data class KugouGcidDecodeInfo(
+    @SerialName("listid") val listId: JsonElement? = null,
+    @SerialName("specialid") val specialId: Int = 0,
+)
+
+/** `special/info_v2`：按 global_specialid 拿歌单元数据。 */
+@Serializable
+private data class KugouCollectionInfoResponse(
+    val data: KugouCollectionInfo = KugouCollectionInfo(),
+)
+
+@Serializable
+private data class KugouCollectionInfo(
+    @SerialName("specialname") val specialName: String = "",
+    @SerialName("imgurl") val imgUrl: String = "",
+    val intro: String = "",
+    val nickname: String = "",
+    @SerialName("songcount") val songCount: Int = 0,
+    @SerialName("playcount") val playCount: Int = 0,
+    @SerialName("collectcount") val collectCount: Int = 0,
+    @SerialName("publishtime") val publishTime: String = "",
+    @SerialName("user_avatar") val userAvatar: String = "",
+)
+
+/** `get_other_list_file`：按 global_collection_id 拿一个歌单的全量歌曲，匿名可用。 */
+@Serializable
+private data class KugouCollectionFileResponse(
+    @SerialName("error_code") val errorCode: Int = 0,
+    val errcode: Int = 0,
+    val error: String = "",
+    val data: KugouCollectionFileData = KugouCollectionFileData(),
+)
+
+@Serializable
+private data class KugouCollectionFileData(
+    val count: Int = 0,
+    val info: List<KugouCollectionFileItem> = emptyList(),
+)
+
+@Serializable
+internal data class KugouCollectionFileItem(
+    val hash: String = "",
+    @SerialName("audio_id") val audioId: JsonElement? = null,
+    @SerialName("audio_group_id") val audioGroupId: String = "",
+    @SerialName("add_mixsongid") val addMixSongId: JsonElement? = null,
+    @SerialName("mixsongid") val mixSongId: JsonElement? = null,
+    @SerialName("album_id") val albumId: JsonElement? = null,
+    val name: String = "",
+    val filename: String = "",
+    @SerialName("timelen") val timeLength: Int = 0,
+    val size: Long = 0,
+    val bitrate: Int = 0,
+    val cover: String = "",
+    @SerialName("mvhash") val mvHash: String = "",
+    val privilege: Int = 0,
+    @SerialName("relate_goods") val relateGoods: List<KugouRelateGood> = emptyList(),
+    @SerialName("albuminfo") val albumInfo: KugouAlbumInfo = KugouAlbumInfo(),
+    @SerialName("singerinfo") val singerInfo: List<KugouSinger> = emptyList(),
+    @SerialName("trans_param") val transParam: KugouTransParam = KugouTransParam(),
+    /** 服务端给的全局位置，0 在最前；跨页拼齐后按它排序。 */
+    val sort: JsonElement? = null,
 )
 
 @Serializable
