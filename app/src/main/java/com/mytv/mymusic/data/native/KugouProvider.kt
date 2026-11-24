@@ -2260,53 +2260,35 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         }
 
         val dfid = firstNonEmpty(cookieMap["dfid"].orEmpty(), "-")
-        val clienttime = nowSeconds()
-        val data = buildJsonObject {
-            put("listid", listId)
-            put("userid", userID)
-            put("area_code", 1)
-            put("show_relate_goods", 1)
-            put("pagesize", 300)
-            put("allplatform", 1)
-            put("show_cover", 1)
-            put("type", 0)
-            put("token", token)
-            put("page", 1)
-        }.toString()
-        val params = mapOf(
-            "dfid" to dfid,
-            "mid" to mid,
-            "uuid" to "-",
-            "appid" to KUGOU_LITE_APP_ID,
-            "clientver" to KUGOU_LITE_VER,
-            "clienttime" to clienttime,
-            "token" to token,
-            "userid" to userID,
-        )
-        val url = buildAndroidUrl("https://gateway.kugou.com/v4/get_list_all_file", params, data)
-        val body = NativeHttp.postJson(
-            url,
-            data,
-            headers = androidHeaders(dfid, mid, clienttime, "cloudlist.service.kugou.com"),
-            cookie = cookie,
-            randomIp = true,
-            userAgent = KUGOU_ANDROID_UA,
-        ).body
-        val resp = json.decodeFromString<KugouCloudlistResponse>(body)
-        if (resp.status != 1 || resp.errorCode != 0 || resp.errcode != 0) {
-            throw IllegalStateException(
-                "kugou cloudlist detail api error: status=${resp.status} error_code=${resp.errorCode} errcode=${resp.errcode} error=${resp.error}"
-            )
+
+        // 单页 300 首是服务端上限，一千多首的歌单得按 count 翻页才拿得全；
+        // 翻回来的页不按 sort 连续排，拼齐后要交给 [orderedByServerPosition] 归位。
+        val items = mutableListOf<KugouCloudlistItem>()
+        var total = 0
+        var listVer = 0L
+        var page = 1
+        while (true) {
+            val resp = cloudlistRequest(cookie, listId, dfid, mid, token, userID, page)
+            if (page == 1) {
+                total = resp.data.count.numericString().toIntOrNull() ?: 0
+                listVer = firstNonEmpty(
+                    resp.data.listVer.numericString(),
+                    resp.data.listVerLower.numericString(),
+                    resp.listVer.numericString(),
+                ).toLongOrNull() ?: 0L
+            }
+            val batch = resp.data.info
+            if (batch.isEmpty()) break
+            items += batch
+            if (batch.size < CLOUDLIST_PAGE_SIZE) break
+            if (total > 0 && items.size >= total) break
+            if (page >= CLOUDLIST_MAX_PAGES) break
+            page++
         }
 
-        val playlist = Playlist(
-            id = kugouCloudlistId(listId),
-            source = "kugou",
-            trackCount = resp.data.count.numericString().toIntOrNull() ?: 0,
-        )
         val songs = mutableListOf<Song>()
         val fileIds = mutableMapOf<String, Long>()
-        for (item in resp.data.info) {
+        for (item in items.orderedByServerPosition { it.sort.numericString().toIntOrNull() }) {
             var baseSize = item.size
             if (baseSize == 0L) baseSize = item.fileSize
             val hashes = pickSonglistHashes(item.hash, baseSize, item.bitrate, item.relateGoods)
@@ -2395,17 +2377,68 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
                 },
             )
         }
-        val listVer = firstNonEmpty(
-            resp.data.listVer.numericString(),
-            resp.data.listVerLower.numericString(),
-            resp.listVer.numericString(),
-        ).toLongOrNull() ?: 0L
+        val playlist = Playlist(
+            id = kugouCloudlistId(listId),
+            source = "kugou",
+            trackCount = songs.size,
+        )
         return KugouCloudlistPage(
-            playlist = playlist.copy(trackCount = songs.size),
+            playlist = playlist,
             songs = songs,
             listVer = listVer,
             fileIds = fileIds,
         )
+    }
+
+    /** 云歌单一页；`page` 从 1 开始，[CLOUDLIST_PAGE_SIZE] 是服务端认的单页上限。 */
+    private suspend fun cloudlistRequest(
+        cookie: String,
+        listId: String,
+        dfid: String,
+        mid: String,
+        token: String,
+        userID: String,
+        page: Int,
+    ): KugouCloudlistResponse {
+        val clienttime = nowSeconds()
+        val data = buildJsonObject {
+            put("listid", listId)
+            put("userid", userID)
+            put("area_code", 1)
+            put("show_relate_goods", 1)
+            put("pagesize", CLOUDLIST_PAGE_SIZE)
+            put("allplatform", 1)
+            put("show_cover", 1)
+            put("type", 0)
+            put("token", token)
+            put("page", page)
+        }.toString()
+        val params = mapOf(
+            "dfid" to dfid,
+            "mid" to mid,
+            "uuid" to "-",
+            "appid" to KUGOU_LITE_APP_ID,
+            "clientver" to KUGOU_LITE_VER,
+            "clienttime" to clienttime,
+            "token" to token,
+            "userid" to userID,
+        )
+        val url = buildAndroidUrl("https://gateway.kugou.com/v4/get_list_all_file", params, data)
+        val body = NativeHttp.postJson(
+            url,
+            data,
+            headers = androidHeaders(dfid, mid, clienttime, "cloudlist.service.kugou.com"),
+            cookie = cookie,
+            randomIp = true,
+            userAgent = KUGOU_ANDROID_UA,
+        ).body
+        val resp = json.decodeFromString<KugouCloudlistResponse>(body)
+        if (resp.status != 1 || resp.errorCode != 0 || resp.errcode != 0) {
+            throw IllegalStateException(
+                "kugou cloudlist detail api error: status=${resp.status} error_code=${resp.errorCode} errcode=${resp.errcode} error=${resp.error}"
+            )
+        }
+        return resp
     }
 
     private suspend fun getUserPlaylistsGateway(
@@ -3450,6 +3483,10 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         const val KUGOU_CLOUD_SORT = "/v1/modify_song_sort"
         const val KUGOU_CLOUD_ROUTER = "cloudlist.service.kugou.com"
         const val KUGOU_CLOUD_APP_KEY = "LnT6xpN3khm36zse0QzvmgTZ3waWdRSA"
+        /** 云歌单单页上限（服务端认的 pagesize 上限），一千多首的歌单靠翻页拿全。 */
+        const val CLOUDLIST_PAGE_SIZE = 300
+        /** 翻页硬上限：60000 首，防服务端一直返回满页时死循环。 */
+        const val CLOUDLIST_MAX_PAGES = 200
         const val KUGOU_LITE_KEY = "185672dd44712f60bb1736df5a377e82"
         const val HOT_SONG_TOP_LIST_ID = "8888"
         const val KUGOU_SINGER_SONG_LIMIT = 500
@@ -3779,11 +3816,31 @@ private data class KugouCloudlistData(
     val info: List<KugouCloudlistItem> = emptyList(),
 )
 
+/**
+ * 按服务端给的全局位置排序，位置缺失或无效的沉底、同值保持原序。
+ *
+ * 酷狗云歌单的 `sort` 就是播放列表里的序号（0 在最前，加歌写的是 `sort=0`），但
+ * `get_list_all_file` 翻页回来的数组不按它连续排；跨页拼齐后必须按它归位，
+ * 直接拿数组顺序显示就会变成「最新加的歌沉在最后」。
+ * 一条位置都没有时（接口不给这个字段）原样返回，不猜方向。
+ */
+internal fun <T> List<T>.orderedByServerPosition(position: (T) -> Int?): List<T> {
+    val positions = map(position)
+    if (positions.none { it != null }) return this
+    return indices.sortedWith(Comparator { left, right ->
+        val a = positions[left] ?: Int.MAX_VALUE
+        val b = positions[right] ?: Int.MAX_VALUE
+        if (a != b) a.compareTo(b) else left.compareTo(right)
+    }).map { this[it] }
+}
+
 @Serializable
 private data class KugouCloudlistItem(
     @SerialName("ID") val id: JsonElement? = null,
     @SerialName("fileid") val fileId: JsonElement? = null,
     @SerialName("FileID") val fileIdLegacy: JsonElement? = null,
+    /** 服务端给的全局位置，0 在最前；跨页拼齐后按它排序。 */
+    @SerialName("sort") val sort: JsonElement? = null,
     @SerialName("type") val songType: Int = 0,
     val hash: String = "",
     @SerialName("FileHash") val fileHash: String = "",
