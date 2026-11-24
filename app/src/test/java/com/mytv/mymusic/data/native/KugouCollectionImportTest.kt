@@ -32,8 +32,34 @@ class KugouCollectionImportTest {
                     "&specialid=-2147483648&global_specialid=gcid_3ztmcse8z6z022&cType=0"
             ),
         )
+        // 自建歌单的官方分享页 / 短链跳转后带的是解好的 collection id，不是 gcid
+        assertNull(
+            KugouProvider().kugouLinkGcid(
+                "https://activity.kugou.com/share/v-a00a45b0/index.html?u=2159380325" +
+                    "&specialid=-2147483648&global_specialid=collection_3_2159380325_8_0&cType=0"
+            ),
+        )
         assertNull(KugouProvider().kugouLinkGcid("https://www.kugou.com/yy/special/single/5763404.html"))
         assertNull(KugouProvider().kugouLinkGcid("https://music.163.com/playlist?id=1"))
+    }
+
+    @Test
+    fun `share pages that already carry the collection id skip decoding`() {
+        val share = "https://activity.kugou.com/share/v-a00a45b0/index.html?u=2159380325" +
+            "&specialid=-2147483648&global_specialid=collection_3_2159380325_8_0&cType=0"
+        assertEquals("collection_3_2159380325_8_0", KugouProvider().kugouLinkCollectionId(share))
+        assertEquals(
+            "collection_3_2159380325_8_0",
+            KugouProvider().kugouLinkCollectionId("https://www.kugou.com/songlist/collection_3_2159380325_8_0/"),
+        )
+        assertEquals(
+            "collection_3_2159380325_8_0",
+            KugouProvider().kugouLinkCollectionId(
+                "https://www.kugou.com/songlist/?global_collection_id=collection_3_2159380325_8_0"
+            ),
+        )
+        assertNull(KugouProvider().kugouLinkCollectionId("https://t1.kugou.com/5ZcU352G7V2"))
+        assertNull(KugouProvider().kugouLinkCollectionId("https://www.kugou.com/songlist/gcid_3ztmcse8z6z022/"))
     }
 
     @Test
@@ -49,17 +75,6 @@ class KugouCollectionImportTest {
         )
         assertNull(KugouProvider().kugouLinkChain("https://www.kugou.com/songlist/gcid_3ztmcse8z6z022/"))
         assertNull(KugouProvider().kugouLinkChain("https://www.kugou.com/yy/special/single/5763404.html"))
-    }
-
-    @Test
-    fun `a link that already carries the collection id skips decoding`() {
-        assertEquals(
-            "collection_3_2159380325_8_0",
-            KugouProvider().kugouLinkCollectionId(
-                "https://www.kugou.com/songlist/collection_3_2159380325_8_0/"
-            ),
-        )
-        assertNull(KugouProvider().kugouLinkCollectionId("https://t1.kugou.com/5ZcU352G7V2"))
     }
 
     @Test

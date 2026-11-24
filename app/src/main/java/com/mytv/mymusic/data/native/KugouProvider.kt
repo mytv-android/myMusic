@@ -2157,8 +2157,7 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         // 可翻，所以先按 gcid 解出 global_collection_id，翻 get_other_list_file 的全量
         // 分页接口（匿名可拿，按 count 翻页，歌单里有多少就导多少——issue #35）。
         // 这条走不通（接口限流、gcid 解不出来）再退回 specialid，最后才是页面内嵌的那几首。
-        val fullByGcid = decodeGcid(firstNonEmpty(resp.globalCollectionId, id))
-            ?.let { globalId -> fetchCollectionFiles(globalId) }
+        val fullByGcid = fetchCollectionFiles(firstNonEmpty(resp.globalCollectionId, id))
         if (fullByGcid != null) {
             val embedded = resp.info.songs.mapNotNull { embedSonglistSong(it) }
             val merged = mergeSonglistSongs(fullByGcid, embedded)
@@ -2280,14 +2279,37 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         return resp.data.list.firstOrNull { it.globalCollectionId.isNotBlank() }?.globalCollectionId
     }
 
-    /** 概念版短链 `t1.kugou.com/<chain>` → `global_collection_id`；匿名可用。 */
+    /**
+     * 概念版短链 `t1.kugou.com/<chain>` → `global_collection_id`。
+     *
+     * 短链自己就是 302，`Location` 指向官方分享页，里面带着解好的
+     * `global_specialid=collection_xxx`——这是酷狗自己的映射，比猜 transfer 的参数稳。
+     * 跳不动（或跳到的地址不带这个参数）时退回 `schain/transfer`。
+     */
     private suspend fun resolveShareChain(chain: String): KugouShareChainInfo? {
         val id = chain.trim()
         if (id.isEmpty()) return null
+        val redirect = NativeHttp.getResponse(
+            KUGOU_SHORT_LINK_API + id,
+            cookie = "",
+            randomIp = true,
+            userAgent = KUGOU_GID_DECODE_UA,
+            followRedirects = false,
+            throwOnError = false,
+        )
+        val target = redirect.location.ifBlank { redirect.finalUrl }
+        KUGOU_SHARE_COLLECTION_REGEX.find(target)?.groupValues?.get(1)?.let { globalId ->
+            return KugouShareChainInfo(globalSpecialId = globalId)
+        }
+        return resolveShareChainByTransfer(id)
+    }
+
+    /** 短链没跳时退回 `schain/transfer`；匿名可用。 */
+    private suspend fun resolveShareChainByTransfer(chain: String): KugouShareChainInfo? {
         val url = KUGOU_SHARE_CHAIN_API + "?" + query(
             mapOf(
                 "pagesize" to COLLECTION_FILE_PAGE_SIZE.toString(),
-                "chain" to id,
+                "chain" to chain,
                 "su" to "1",
                 "page" to "1",
                 "n" to String.format(Locale.ROOT, "%.16f", Math.random()),
@@ -3697,9 +3719,13 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         KUGOU_SHARE_CHAIN_REGEX.find(link)?.groupValues?.get(1)
             ?: KUGOU_SHARE_CHAIN_PARAM_REGEX.find(link)?.groupValues?.get(1)
 
-    /** 链接里直接带着 `collection_xxx` 时不用再解一次。 */
+    /**
+     * 链接里已经带着解好的 `collection_xxx` 时不用再解一次：
+     * `songlist/collection_xxx/`、官方分享页和短链跳转后的 `global_specialid=collection_xxx`。
+     */
     internal fun kugouLinkCollectionId(link: String): String? =
         KUGOU_COLLECTION_ID_REGEX.find(link)?.groupValues?.get(1)
+            ?: KUGOU_SHARE_COLLECTION_REGEX.find(link)?.groupValues?.get(1)
 
     private fun joinCookies(cookies: Map<String, String>): String =
         cookies.entries
@@ -3790,6 +3816,8 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         const val MOBILE_REFERER = "http://m.kugou.com"
         const val KUGOU_SHARE_REFERER = "https://m3ws.kugou.com/share/index.php"
         /** 概念版 App 的短链分享（`t1.kugou.com/<chain>`）解出 global_collection_id；匿名可用。 */
+        const val KUGOU_SHORT_LINK_API = "https://t1.kugou.com/"
+        /** 概念版 App 的短链分享：`t1.kugou.com/<chain>`。 */
         const val KUGOU_SHARE_CHAIN_API = "http://m.kugou.com/schain/transfer"
         /** 歌单元数据（名称、封面、简介、创建者）。 */
         const val KUGOU_COLLECTION_INFO_API = "https://mobiles.kugou.com/api/v5/special/info_v2"
@@ -3840,8 +3868,10 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         val KUGOU_HASH_REGEX = Regex("""hash=([a-f0-9]{32})""", RegexOption.IGNORE_CASE)
         val KUGOU_SPECIAL_LINK_REGEX = Regex("""special/single/(\d+)\.html""")
         val KUGOU_SONGLIST_LINK_REGEX = Regex("""songlist/(gcid_[a-zA-Z0-9]+)""")
-        /** 概念版 App 的官方分享页，`global_specialid` 就是歌单的 gcid。 */
-        val KUGOU_SHARE_GID_REGEX = Regex("""global_specialid=([A-Za-z0-9_]+)""")
+        /** 概念版 App 的官方分享页，自建/收藏歌单的 `global_specialid` 是 gcid。 */
+        val KUGOU_SHARE_GID_REGEX = Regex("""global_specialid=(gcid_[A-Za-z0-9_]+)""")
+        /** 官方分享页 / 短链跳转后的 `global_specialid` 直接就是解好的 collection id。 */
+        val KUGOU_SHARE_COLLECTION_REGEX = Regex("""global_specialid=(collection_[A-Za-z0-9_]+)""")
         /** 概念版 App 的短链分享：`t1.kugou.com/<chain>`。 */
         val KUGOU_SHARE_CHAIN_REGEX = Regex("""t1\.kugou\.com/([A-Za-z0-9]+)""")
         /** 已经解出 chain 的地址：`m.kugou.com/schain/transfer?...&chain=<chain>`。 */
