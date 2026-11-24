@@ -32,7 +32,10 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      # 拉全量历史和标签：发布说明要按上一个标签列出这段时间的提交
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21, cache: gradle }
       - name: Install Android SDK packages
@@ -86,6 +89,29 @@ jobs:
             --arg note "$note" \
             '{schema:$schema,channel:$channel,versionCode:$versionCode,versionName:$versionName,tag:$tag,publishedAt:$publishedAt,minSdk:23,apk:{url:$url,size:$size,sha256:$sha},notes:[$note]}' > dist/update.json
           echo "$sha  $apk_name" > dist/update.apk.sha256
+          # 发布说明：列出自上一个发布标签以来的提交，说明这次更新改了什么
+          head_sha=$(git rev-parse HEAD)
+          prev=""
+          for t in $(git tag --list 'v*' --sort=-v:refname); do
+            # 同一个提交重复构建时标签已存在，往前再找一个
+            [ "$(git rev-parse "$t^{commit}")" = "$head_sha" ] || { prev="$t"; break; }
+          done
+          echo "上一个发布标签: ${prev:-（没有，列出全部提交）}"
+          {
+            echo "Android 6.0+ 通用安装包。versionCode ${code}。应用内更新会读取 update.json 并校验 SHA-256 与签名。"
+            echo
+            echo "## 更新内容"
+            echo
+            if [ -n "$prev" ]; then
+              git log --no-merges --pretty=format:'- %s (`%h`)' "$prev..HEAD"
+              echo
+              echo
+              echo "完整对比：[${prev}...${tag}](https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${tag})"
+            else
+              git log --no-merges --pretty=format:'- %s (`%h`)'
+            fi
+            echo
+          } > dist/release-notes.md
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
@@ -93,7 +119,7 @@ jobs:
         with:
           tag_name: ${{ steps.apk.outputs.tag }}
           name: myMusic ${{ steps.apk.outputs.version }} (${{ steps.apk.outputs.code }})
-          body: Android 6.0+ 通用安装包。versionCode ${{ steps.apk.outputs.code }}。应用内更新会读取 update.json 并校验 SHA-256 与签名。
+          body_path: dist/release-notes.md
           files: |
             dist/*.apk
             dist/update.json
