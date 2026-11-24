@@ -52,22 +52,22 @@ class VinylDiscTest {
     }
 
     @Test
-    fun tvDiscCentersWithinItsHalfAndIgnoresTheClocksExtraTopInset() {
+    fun tvDiscCentersWithinItsHalfOfTheStage() {
         val safe = Rect(72f, 104f, 888f, 484f)
         val left = vinylGeometry(
             safe, wide = true, discLeft = true, discSize = 0.62f, showArm = true, minDisc = 64f,
-            tv = true, stageHeight = 540f,
+            tv = true, stageWidth = 960f, stageHeight = 540f,
         )
-        assertEquals(safe.left + safe.width * 0.25f, left.disc.center.x, 0.01f)
+        assertEquals(240f, left.disc.center.x, 0.01f)
         assertEquals(270f, left.disc.center.y, 0.01f)
         assertInside(safe, left.disc, armReach = 0.125f)
         assertInside(safe, left.text)
 
         val right = vinylGeometry(
             safe, wide = true, discLeft = false, discSize = 0.62f, showArm = true, minDisc = 64f,
-            tv = true, stageHeight = 540f,
+            tv = true, stageWidth = 960f, stageHeight = 540f,
         )
-        assertEquals(safe.left + safe.width * 0.75f, right.disc.center.x, 0.01f)
+        assertEquals(720f, right.disc.center.x, 0.01f)
         assertEquals(270f, right.disc.center.y, 0.01f)
         assertInside(safe, right.disc, armReach = 0.125f)
         assertInside(safe, right.text)

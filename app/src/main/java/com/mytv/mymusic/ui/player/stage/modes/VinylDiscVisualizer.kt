@@ -170,6 +170,7 @@ private class VinylConfig(settings: SettingValues) {
         showArm = showArm,
         minDisc = with(density) { MIN_DISC.toPx() },
         tv = ctx.display.tv,
+        stageWidth = size.width,
         stageHeight = size.height,
     )
 }
@@ -467,7 +468,7 @@ internal class VinylGeometry(val disc: Rect, val text: Rect, val header: Boolean
  * 唱片和歌词区，都在安全区 [safe] 里。
  * - 横屏：直径 = 高 × [discSize]，最多宽的 42%、最少 [minDisc]，唱臂支点（直径的 12.5%）露在唱片上面也不出安全区；
  *   两边各留 15% 宽，唱片和歌词隔 3% 宽，唱片在左时再让出唱臂抬起后伸出的那一截；唱片竖向居中。
- *   电视上唱片改放到所在半区的水平中心；时钟给右侧文字多留的顶部空间不再带着唱片下移。
+ *   电视上唱片直接以所在半屏的几何中心为圆心；只有面板挤占空间时才收进剩余安全区。
  * - 竖屏：直径 = 宽 × [discSize]，最多宽 80%、高 46%；唱片水平居中贴顶，歌词区在下面，左右各留 8%。
  */
 internal fun vinylGeometry(
@@ -478,6 +479,7 @@ internal fun vinylGeometry(
     showArm: Boolean,
     minDisc: Float,
     tv: Boolean = false,
+    stageWidth: Float = safe.right,
     stageHeight: Float = safe.bottom,
 ): VinylGeometry {
     val w = safe.width
@@ -485,11 +487,17 @@ internal fun vinylGeometry(
     val reach = if (showArm) ARM_REACH_TOP else 0f
     if (wide) {
         val d = min(h * discSize, w * 0.42f).coerceAtLeast(minDisc).coerceAtMost(h / (1f + reach)).coerceAtLeast(0f)
-        val pad = if (tv) (w * 0.25f - d / 2f).coerceAtLeast(w * 0.04f) else w * 0.15f
         val gap = w * 0.03f + if (discLeft && showArm) d * ARM_OVERHANG else 0f
-        val topExtra = (safe.top - (stageHeight - safe.bottom)).coerceAtLeast(0f)
-        val centerY = if (tv) safe.center.y - topExtra / 2f else safe.center.y
-        val cy = max(centerY, safe.top + reach * d + d / 2f)
+        val minCenter = safe.left + w * 0.04f + d / 2f
+        val maxCenter = safe.right - w * 0.04f - d / 2f
+        val halfCenter = stageWidth * (if (discLeft) 0.25f else 0.75f)
+        val tvCenter = if (minCenter <= maxCenter) halfCenter.coerceIn(minCenter, maxCenter) else safe.center.x
+        val pad = if (tv) {
+            if (discLeft) tvCenter - d / 2f - safe.left else safe.right - tvCenter - d / 2f
+        } else {
+            w * 0.15f
+        }
+        val cy = if (tv) stageHeight / 2f else max(safe.center.y, safe.top + reach * d + d / 2f)
         val discX = if (discLeft) safe.left + pad else safe.right - pad - d
         val disc = Rect(discX, cy - d / 2f, discX + d, cy + d / 2f)
         val text = if (discLeft) {
