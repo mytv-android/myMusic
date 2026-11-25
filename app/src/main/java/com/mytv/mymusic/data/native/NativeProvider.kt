@@ -74,6 +74,12 @@ interface NativeProvider {
     }
 
     /**
+     * 丢掉这个平台上缓存的取流地址。地址被 CDN 拒了（403/401/404）时要重新取一遍才可能有救，
+     * 不然命中的还是同一条过期地址。默认没有缓存，什么都不做。
+     */
+    fun invalidateStreamUrls() {}
+
+    /**
      * 当前账号在这个平台上实际能选的音质档，从高到低。默认空表：界面只显示“自动”，
      * 不暴露平台其实不支持的档位。移植自 music-lib 的 `provider.AudioQualityProvider`。
      */

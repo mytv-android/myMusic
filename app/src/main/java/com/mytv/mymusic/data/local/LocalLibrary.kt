@@ -1554,12 +1554,18 @@ class LocalLibrary(
 }
 
 /**
- * 存进歌单、收藏、最近播放前去掉只在这台设备上有效的东西：本地地址、本机封面缓存路径。
- * 本地歌的地址一律不存：放的可能是云端副本的临时地址（网易云盘签名地址、WebDAV 地址），
- * 下次播放按解析链重新找，不能让它跟着歌单进同步文件。
+ * 存进歌单、收藏、最近播放前去掉只在这台设备上、或只在这一会儿有效的东西：本地地址、
+ * 本机封面缓存路径，以及平台的取流地址。
+ *
+ * 平台取流地址一律不存：它是短时效的签名地址（网易云 `expi` 只有 1200 秒、酷狗按
+ * clienttime 签名、QQ 的 vkey 也限时），上次播放存下来的那条下次多半已经过期。带着死地址
+ * 回来有两个后果：酷狗这类 `playableStream` 直接用 `song.url` 的源会拿过期地址去放，
+ * ExoPlayer 报 403；下载也是同一条地址，于是「下载失败：403 Forbidden」。
+ * 本地歌放云端副本时的临时地址（网易云盘签名地址、WebDAV 地址）同理。下次播放按解析链
+ * 重新找，不能让它跟着歌单进同步文件。
  */
 fun Song.forStorage(): Song {
-    val stripUrl = url.isNotEmpty() && (source == LOCAL_SOURCE || url.startsWith("file:") || url.startsWith("content:"))
+    val stripUrl = url.isNotEmpty()
     val stripCover = source == LOCAL_SOURCE && cover.isNotBlank() && !cover.startsWith("http")
     if (!stripUrl && !stripCover) return this
     return copy(url = if (stripUrl) "" else url, cover = if (stripCover) "" else cover)

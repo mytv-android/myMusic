@@ -44,6 +44,12 @@ open class MusicRepository(
     suspend fun downloadUrl(song: Song, cookie: String, quality: AudioQuality = AudioQuality.Auto): String =
         requireProvider(song.source).downloadUrl(cookie, song, quality)
 
+    /** 丢掉平台上缓存的取流地址；下载撞到 403 以后要重新取一遍才有意义。 */
+    fun invalidateStreamUrls(provider: String) {
+        // 洛雪这类自定义源没有对应的 NativeProvider，跳过就行，别让重新取流因此失败
+        NativeProviders.get(provider)?.invalidateStreamUrls()
+    }
+
     /** 统一的洛雪播放候选：脚本按自定义音源顺序跨平台尝试，原生接口不在这里兜底。 */
     open suspend fun playableLxStream(songs: List<Song>, quality: AudioQuality): LxPlaybackResult? =
         lxPlayback.resolve(songs, quality.id)

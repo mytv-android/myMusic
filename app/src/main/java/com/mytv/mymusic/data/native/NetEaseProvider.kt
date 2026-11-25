@@ -172,6 +172,11 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         return PlayableStream(stream.url, stream.ext, stream.bitrate, stream.level, preview = stream.preview, extra = stream.extra)
     }
 
+    /** 取流地址被 CDN 拒了以后重新取一遍：缓存里那条就是被拒的同一条。 */
+    override fun invalidateStreamUrls() {
+        urlCache.clear()
+    }
+
     /**
      * 探测当前账号实际能选的音质档。先用一首固定的热门曲目从最高档往下探，探不到再换成搜索
      * 结果里的前几首——单曲可能缺某一档（没上架无损、地区限制），换歌才有结论。

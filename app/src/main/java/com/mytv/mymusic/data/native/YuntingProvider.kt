@@ -93,10 +93,15 @@ class YuntingProvider : BaseNativeProvider(YUNTING_INFO) {
     /**
      * 直播地址里的 token 是签发时刻生成的，队列里放久了会失效：
      * 播放前按省重新拉一次列表换新地址，拉不到就退回原地址再试。
+     *
+     * 回听地址同理——它也不落库（见 `Song.forStorage`），歌单里带来的那条常常是空的或已过期，
+     * 按节目 id 从电台当天的节目单里重新取一遍。
      */
     override suspend fun playableStream(cookie: String, song: Song, workDir: File, quality: AudioQuality): PlayableStream {
         if (song.extra["live"] != "1") {
-            return PlayableStream(url = song.url, ext = song.ext.ifBlank { "m4a" })
+            val url = song.url.ifBlank { replayUrl(song) }
+            if (url.isBlank()) throw IllegalStateException("回听地址为空：${song.name}")
+            return PlayableStream(url = url, ext = song.ext.ifBlank { "m4a" })
         }
         val contentId = song.extra["content_id"] ?: song.id.removePrefix(LIVE_PREFIX)
         val provinceCode = song.extra["province"] ?: "0"
@@ -108,6 +113,18 @@ class YuntingProvider : BaseNativeProvider(YUNTING_INFO) {
         val url = fresh.ifBlank { song.url }
         if (url.isBlank()) throw IllegalStateException("直播地址为空：${song.name}")
         return PlayableStream(url = url, ext = "m3u8")
+    }
+
+    /** 按节目 id 从电台当天的节目单里重新取回听地址。 */
+    private suspend fun replayUrl(song: Song): String {
+        val contentId = song.extra["content_id"].orEmpty()
+        val programId = song.extra["program_id"].orEmpty()
+        if (contentId.isBlank() || programId.isBlank()) return ""
+        val program = runCatching { programs(contentId) }.getOrDefault(emptyList())
+            .firstOrNull { it.id == programId } ?: return ""
+        return program.playUrlHigh?.takeIf { it.isNotBlank() }
+            ?: program.playUrlLow?.takeIf { it.isNotBlank() }
+            .orEmpty()
     }
 
     // ---------------- 接口 ----------------

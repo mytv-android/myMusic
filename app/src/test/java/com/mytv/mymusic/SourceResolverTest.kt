@@ -187,6 +187,44 @@ class SourceResolverTest {
     }
 
     @Test
+    fun storedSongWithoutUrlStillResolves() = runBlocking {
+        // 歌单/收藏里存下来的歌不带取流地址（Song.forStorage 会剥掉），不能因此判成不可用
+        val stored = TrackSource("kugou", "酷狗音乐", song("k1", "kugou"))
+        val resolver = previewResolver(mapOf("kugou:k1" to PlayableStream(url = "https://example.com/kugou.mp3")))
+        val resolution = resolver.resolve(
+            track(listOf(stored)),
+            policy = SourcePolicy(priority = listOf("kugou")),
+        )
+        val ready = resolution as Resolution.Ready
+        assertEquals("kugou", ready.source.providerId)
+        assertEquals("https://example.com/kugou.mp3", ready.url)
+    }
+
+    @Test
+    fun invalidateForcesAFreshStreamOnRetry() = runBlocking {
+        // 下载撞到 403 时的重试：先 invalidate 再解析，否则命中的还是被拒的那条地址
+        var issued = "https://example.com/stale.mp3"
+        var calls = 0
+        val resolver = previewResolver(
+            emptyMap(),
+            onQuality = { _, _ -> calls++; PlayableStream(url = issued) },
+        )
+        val source = neteaseSource()
+        val first = resolver.resolve(track(listOf(source)), policy = SourcePolicy(priority = listOf("netease")))
+        assertEquals("https://example.com/stale.mp3", (first as Resolution.Ready).url)
+        // 不清缓存：同一条地址继续用，重试没有意义
+        val cached = resolver.resolve(track(listOf(source)), policy = SourcePolicy(priority = listOf("netease")))
+        assertEquals("https://example.com/stale.mp3", (cached as Resolution.Ready).url)
+        assertEquals(1, calls)
+        // 清掉以后再解析：重新取流拿到新地址
+        issued = "https://example.com/fresh.mp3"
+        resolver.invalidate(source)
+        val retried = resolver.resolve(track(listOf(source)), policy = SourcePolicy(priority = listOf("netease")))
+        assertEquals("https://example.com/fresh.mp3", (retried as Resolution.Ready).url)
+        assertEquals(2, calls)
+    }
+
+    @Test
     fun changingQualityPreferenceInvalidatesCachedUrl() = runBlocking {
         var preference = AudioQuality.Auto
         val requested = mutableListOf<AudioQuality>()

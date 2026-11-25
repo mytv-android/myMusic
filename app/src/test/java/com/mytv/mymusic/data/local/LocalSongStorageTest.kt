@@ -51,8 +51,35 @@ class LocalSongStorageTest {
         // 放云端副本时本地歌带着云端的临时地址（网易云盘签名地址、WebDAV 地址），也不能存下
         val fromCloud = playing.copy(url = "https://m801.music.126.net/cloud.flac?sign=1")
         assertEquals("", fromCloud.forStorage().url)
-        // 平台歌原样不动
-        val platform = Song(id = "1", name = "晴天", source = "netease", url = "https://m.example/1.mp3", cover = "https://c/1.jpg")
+    }
+
+    @Test
+    fun forStorageStripsShortLivedStreamUrls() {
+        // 平台取流地址是短时效签名地址：网易云 exapi 只给 20 分钟，酷狗按 clienttime 签名。
+        // 存下来下次播放/下载带着死地址去取，就是 403 Forbidden
+        val platform = Song(
+            id = "1",
+            name = "孤城",
+            artist = "洛先生",
+            album = "孤城",
+            source = "kugou",
+            url = "http://webfs.y.kugou.com/20261125/ab/cd.mp3?key=1",
+            cover = "https://c/1.jpg",
+        )
+        val stored = platform.forStorage()
+        assertEquals("", stored.url)
+        // 身份和展示字段原样留着，只有地址被剥掉
+        assertEquals(platform.key, stored.key)
+        assertEquals(platform.name, stored.name)
+        assertEquals(platform.artist, stored.artist)
+        assertEquals(platform.cover, stored.cover)
+        assertEquals(platform.source, stored.source)
+    }
+
+    @Test
+    fun forStorageKeepsSongsWithoutUrl() {
+        // 没有地址的歌（列表、搜索结果）不用复制一份
+        val platform = Song(id = "1", name = "晴天", source = "netease", cover = "https://c/1.jpg")
         assertSame(platform, platform.forStorage())
     }
 

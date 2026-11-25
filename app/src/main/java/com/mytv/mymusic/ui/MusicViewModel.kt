@@ -3234,7 +3234,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             libraryDao.replaceEntries(
                 target.id,
                 songs.distinctBy { it.key }.mapIndexed { index, song ->
-                    PlaylistEntryEntity(target.id, index, song.key, json.encodeToString(song))
+                    PlaylistEntryEntity(target.id, index, song.key, json.encodeToString(song.forStorage()))
                 },
             )
             libraryDao.markDirty(target.id, now)
@@ -3598,36 +3598,73 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         val subsonicDownload = ready.source.providerId.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX)
         // 只用这次取流拿到的真实后缀，不再拿搜索结果的元数据猜
-        val extension = listOf(
+        fun extensionOf(streamUrl: String) = listOf(
             ready.source.song.ext,
-            if (subsonicDownload) com.mytv.mymusic.data.native.extensionFromUrl(url)
-            else Uri.parse(url).path?.let { File(it).extension }.orEmpty(),
+            if (subsonicDownload) com.mytv.mymusic.data.native.extensionFromUrl(streamUrl)
+            else Uri.parse(streamUrl).path?.let { File(it).extension }.orEmpty(),
         ).firstOrNull { it.isNotBlank() }?.lowercase() ?: "mp3"
-        val file = targetFile(extension)
-        val temp = File(directory, "${file.name}.part")
-        val size = try {
-            withContext(Dispatchers.IO) {
-                temp.delete()
-                if (url.startsWith("file:")) {
-                    val cached = File(Uri.parse(url).path.orEmpty())
+        var streamUrl = url
+        var file = targetFile(extensionOf(streamUrl))
+        var temp = File(directory, "${file.name}.part")
+        // 把这条地址落到临时文件；地址被 CDN 拒绝时抛 StreamRejected，交给调用方重新取流
+        suspend fun fetchInto(target: File) = withContext(Dispatchers.IO) {
+            target.delete()
+            when {
+                streamUrl.startsWith("file:") -> {
+                    val cached = File(Uri.parse(streamUrl).path.orEmpty())
                     if (!cached.isFile) error("本地缓存文件不存在")
-                    cached.copyTo(temp, overwrite = true)
-                } else if (subsonicDownload) {
-                    val response = app.subsonic.openDownload(url) ?: error("服务器账号已变更，请重新下载")
-                    response.use {
-                        temp.outputStream().use { output -> it.body.byteStream().copyTo(output) }
+                    // 在线播放清单（Apple 整曲重写出来的 .m3u8）不是音频文件，存下来也放不了
+                    if (cached.extension.lowercase(Locale.ROOT) in PLAYLIST_EXTENSIONS) {
+                        error("这个音源只能在线播放，没有可下载的音频文件")
                     }
-                } else {
-                    // B 站的音频字节在 *.bilivideo.com 上，不带 Referer 和浏览器档 UA 就是 403
-                    // （播放侧那套工厂管不到这里，这次下载是自己发的请求）
-                    val builder = Request.Builder().url(url)
-                    BilibiliCdn.headers(url).forEach { (name, value) -> builder.header(name, value) }
-                    http.newCall(builder.build()).execute().use { response ->
-                        if (!response.isSuccessful) error("下载失败：${response.code} ${response.message}")
-                        temp.outputStream().use { output -> response.body.byteStream().copyTo(output) }
+                    cached.copyTo(target, overwrite = true)
+                }
+                subsonicDownload -> {
+                    val response = app.subsonic.openDownload(streamUrl) ?: error("服务器账号已变更，请重新下载")
+                    response.use {
+                        target.outputStream().use { output -> it.body.byteStream().copyTo(output) }
                     }
                 }
-                if (temp.length() <= 0L) error("下载到的文件为空")
+                else -> {
+                    // B 站的音频字节在 *.bilivideo.com 上，不带 Referer 和浏览器档 UA 就是 403
+                    // （播放侧那套工厂管不到这里，这次下载是自己发的请求）
+                    val builder = Request.Builder().url(streamUrl)
+                    BilibiliCdn.headers(streamUrl).forEach { (name, value) -> builder.header(name, value) }
+                    http.newCall(builder.build()).execute().use { response ->
+                        // 401/403/404/410 基本都是这条地址本身失效（签名地址过期、换过账号、
+                        // CDN 换了节点），不是这首歌不能下：重新取一遍地址再试
+                        if (response.code in STREAM_RETRY_CODES) {
+                            throw StreamRejected(response.code, response.message)
+                        }
+                        if (!response.isSuccessful) error("下载失败：${response.code} ${response.message}")
+                        target.outputStream().use { output -> response.body.byteStream().copyTo(output) }
+                    }
+                }
+            }
+            if (target.length() <= 0L) error("下载到的文件为空")
+        }
+        val size = try {
+            withContext(Dispatchers.IO) {
+                try {
+                    fetchInto(temp)
+                } catch (rejected: StreamRejected) {
+                    // 清掉解析器和平台两侧的地址缓存再取一次：不清的话命中的还是被拒的那条
+                    val fresh = runCatching {
+                        resolver.invalidate(ready.source)
+                        app.repository.invalidateStreamUrls(ready.source.providerId)
+                        resolvePlayable(canonicalForSong(song), forDownload = true)
+                    }.getOrNull()?.resolution as? Resolution.Ready
+                    val freshUrl = fresh?.url?.takeIf { it.isNotBlank() && it != streamUrl }
+                    if (freshUrl == null) {
+                        error("下载失败：${rejected.code} ${rejected.message}，这首歌可能已下架或需要会员")
+                    }
+                    streamUrl = freshUrl
+                    // 新地址的后缀可能和上一条不一样，文件名跟着换；上一个半成品文件别留着
+                    temp.delete()
+                    file = targetFile(extensionOf(freshUrl))
+                    temp = File(directory, "${file.name}.part")
+                    fetchInto(temp)
+                }
                 // 先写临时文件再改名：重下失败也不会把上一次下好的同名文件截断
                 if (!temp.renameTo(file)) error("无法保存文件")
                 file.length()
@@ -3644,12 +3681,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             message(text, error = true)
             return
         }
-        val stored = song.copy(url = "", ext = extension, bitrate = ready.source.song.bitrate, size = size)
+        val stored = song.copy(url = "", ext = extensionOf(streamUrl), bitrate = ready.source.song.bitrate, size = size)
         dao.saveDownload(
             DownloadRecord(song.key, json.encodeToString(stored), file.absolutePath, DOWNLOAD_DONE, System.currentTimeMillis())
         )
         if (previous != null && previous.path != file.absolutePath) File(previous.path).delete()
-        message("已下载「${song.title}」（${extension.uppercase(Locale.ROOT)}）")
+        message("已下载「${song.title}」（${extensionOf(streamUrl).uppercase(Locale.ROOT)}）")
     }
 
     /** 下载失败留下一条可见的记录，下载页能提示原因并直接重试；上一次已经下好的保持原样。 */
@@ -4950,7 +4987,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             sourceKey = source.song.key,
                             canonicalId = track.id,
                             providerId = source.providerId,
-                            payload = json.encodeToString(source.song),
+                            // 取流地址不落库：短时效签名地址，下次多半已过期，见 Song.forStorage
+                            payload = json.encodeToString(source.song.forStorage()),
                             matchScore = source.matchScore,
                             matchMethod = source.matchMethod.name,
                             availability = availabilityOf(source, cookieFor(source.providerId)).name,
@@ -7230,6 +7268,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 授权页最多打开两次还装不上，就认定这台设备走不通那条路，转手动安装。 */
         const val MAX_INSTALL_PERMISSION_ATTEMPTS = 2
+
+        /**
+         * 下载时这些状态码说明这条取流地址本身失效了（签名地址过期、CDN 换了节点、
+         * 账号换过），不是这首歌不能下：重新取一遍地址再试一次。
+         */
+        val STREAM_RETRY_CODES = setOf(401, 403, 404, 410)
+
+        /**
+         * 取流地址被 CDN 拒绝。抛出来让下载逻辑清掉缓存重新取流，别把原始状态码直接
+         * 当成交给用户的错误——「下载失败：403 Forbidden」对用户没有任何可操作的线索。
+         */
+        class StreamRejected(val code: Int, message: String) : Exception("$code $message")
+
+        /** 播放清单的后缀：这些文件是给播放器读的，不是音频本身，不能当下载结果。 */
+        val PLAYLIST_EXTENSIONS = setOf("m3u8", "m3u")
 
         /**
          * 切歌时必须重新走一遍解析的来源：这些平台列表里给的 url 不是能直接放的流。
