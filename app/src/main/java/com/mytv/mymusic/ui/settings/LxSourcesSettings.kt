@@ -89,6 +89,7 @@ internal fun LxSourcesSettingsScreen(
     state: MusicUiState,
     onBack: () -> Unit,
     embedded: Boolean = false,
+    onOpenInputPanel: (() -> Unit)? = null,
     model: LxSourcesViewModel = viewModel(),
 ) {
     val records by model.records.collectAsState()
@@ -218,6 +219,7 @@ internal fun LxSourcesSettingsScreen(
                 filePicker.launch(arrayOf("*/*"))
             },
             onOpenCatalog = { openUri("https://github.com/pdone/lx-music-source") },
+            onSendFromPhone = onOpenInputPanel,
         )
     }
     deleteFor?.let { record ->
@@ -400,6 +402,7 @@ private fun LxImportSheet(
     onImport: (String) -> Unit,
     onFile: () -> Unit,
     onOpenCatalog: () -> Unit,
+    onSendFromPhone: (() -> Unit)? = null,
 ) {
     var mode by rememberSaveable { mutableStateOf("online") }
     var url by rememberSaveable { mutableStateOf("") }
@@ -463,18 +466,32 @@ private fun LxImportSheet(
                     Text(if (busy) "下载并验证中…" else "下载并导入", Modifier.padding(start = 8.dp))
                 }
             } else {
-                ListRow(
-                    title = if (busy) "正在读取并验证…" else "选择 .js 脚本",
-                    index = 0,
-                    count = 1,
-                    onClick = if (busy) null else onFile,
-                    icon = Icons.Filled.FileOpen,
-                    summary = "UTF-8 编码 · 最大 2 MB",
-                    showChevron = !busy,
-                    trailing = if (busy) {
-                        { LoadingIndicator(Modifier.size(24.dp)) }
-                    } else null,
-                )
+                // 电视上常常没有文件管理器，本地选择会直接失败；给一条走手机面板的备用渠道。
+                val phoneChannel = onSendFromPhone != null && tv
+                SegmentedGroup {
+                    ListRow(
+                        title = if (busy) "正在读取并验证…" else "选择 .js 脚本",
+                        index = 0,
+                        count = if (phoneChannel) 2 else 1,
+                        onClick = if (busy) null else onFile,
+                        icon = Icons.Filled.FileOpen,
+                        summary = "UTF-8 编码 · 最大 2 MB",
+                        showChevron = !busy,
+                        trailing = if (busy) {
+                            { LoadingIndicator(Modifier.size(24.dp)) }
+                        } else null,
+                    )
+                    if (phoneChannel) {
+                        ListRow(
+                            title = "用手机发送脚本文件",
+                            index = 1,
+                            count = 2,
+                            onClick = onSendFromPhone,
+                            icon = Icons.Filled.PhoneAndroid,
+                            summary = "电视选不了文件时，扫码从手机里挑 .js 脚本发到这台电视",
+                        )
+                    }
+                }
             }
             if (error.isNotBlank()) {
                 Text(

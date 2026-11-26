@@ -3,6 +3,7 @@ package com.mytv.mymusic
 import com.mytv.mymusic.data.SyncAccountEntity
 import com.mytv.mymusic.data.lx.LxCapability
 import com.mytv.mymusic.data.lx.LxSourceRecord
+import com.mytv.mymusic.data.lx.MAX_SCRIPT_BYTES
 import com.mytv.mymusic.data.sync.SyncSetupPhase
 import com.mytv.mymusic.data.sync.SyncSetupSubmission
 import com.mytv.mymusic.data.sync.SyncStatus
@@ -20,6 +21,7 @@ import com.mytv.mymusic.data.sync.TvTextRequest
 import com.mytv.mymusic.data.sync.WebDavCheckUi
 import com.mytv.mymusic.data.webdav.WebDavAccount
 import com.mytv.mymusic.data.webdav.WebDavAccountInfo
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -167,9 +169,84 @@ class TvInputPanelServerTest {
         assertTrue(status.detail.contains("QQ"))
     }
 
+    /**
+     * 服务端按 Content-Type 里的 charset 解 body，缺 charset 会退成 US-ASCII 把中文变成替换字符；
+     * 面板的 fetch 原样发送自己设的 Content-Type，所以必须显式带 charset=utf-8。
+     */
     @Test
-    fun savedWebDavPasswordCanBeReusedButNeverRead() {
-        val saved = WebDavAccountInfo(
+    fun uploadedChineseTextSurvivesTheRoundTrip() {
+        val searches = CopyOnWriteArrayList<String>()
+        val (base, _) = start(TvInputPanelSnapshot(), TvInputPanelHandlers(search = { text, _ -> searches += text }))
+        post(base, "api/input", """{"target":"search","text":"方大同 · 月亮粑粑"}""").use { response ->
+            assertEquals(202, response.code)
+        }
+        assertEquals("方大同 · 月亮粑粑", searches.single())
+    }
+
+    /**
+     * 电视上没有文件管理器，本地文件改成手机在面板里挑好后整段上传；
+     * 上传的正文和电视本地选文件走同一条导入链路。
+     */
+    @Test
+    fun sourceFileUploadGoesThroughTheSameImportPath() {
+        val scripts = CopyOnWriteArrayList<String>()
+        var operation = 0L
+        val session = TvInputPanelSession(
+            snapshot = { TvInputPanelSnapshot() },
+            handlers = TvInputPanelHandlers(sourceScript = { script, id -> scripts += script; operation = id }),
+        )
+        val script = "// @name 手机上传的音源\n// @version 2.0\nlx.PLATFORM = 'wy';\n"
+        assertEquals(TvInputSubmitResult.Invalid, session.submitSourceScript("   \n  "))
+        assertEquals(
+            TvInputSubmitResult.Invalid,
+            session.submitSourceScript("x".repeat(MAX_SCRIPT_BYTES + 1)),
+        )
+        assertTrue(scripts.isEmpty())
+
+        assertEquals(TvInputSubmitResult.Accepted, session.submitSourceScript(script))
+        assertEquals(script, scripts.single())
+        session.finishSource(
+            operation,
+            LxSourceRecord(
+                name = "手机上传的音源", version = "2.0",
+                capabilities = mapOf("wy" to LxCapability(actions = listOf("musicUrl"))),
+            ),
+        )
+        val status = session.status()
+        assertEquals(SyncSetupPhase.Success, status.phase)
+        assertTrue(status.detail.contains("手机上传的音源"))
+        assertTrue(status.detail.contains("网易云"))
+
+        // 没开放设置的会话（字段级输入框）不允许导入音源
+        val fieldOnly = TvInputPanelSession(
+            snapshot = { TvInputPanelSnapshot(allowSettings = false) },
+            handlers = TvInputPanelHandlers(sourceScript = { uploaded, _ -> scripts += uploaded }),
+        )
+        assertEquals(TvInputSubmitResult.Forbidden, fieldOnly.submitSourceScript(script))
+        assertEquals(1, scripts.size)
+    }
+
+    @Test
+    fun uploadedScriptBodyPassesTheRaisedBodyLimit() {
+        val scripts = CopyOnWriteArrayList<String>()
+        val (base, _) = start(
+            TvInputPanelSnapshot(),
+            TvInputPanelHandlers(sourceScript = { script, _ -> scripts += script }),
+        )
+        // 文字输入只有 24 KB，脚本要放到 2 MB 才不误伤正常音源
+        val big = "// @name 大脚本\n" + "a".repeat(200 * 1024)
+        post(base, "api/source/file", Json.encodeToString(ScriptPayload(big))).use { response ->
+            assertEquals(202, response.code)
+        }
+        assertEquals(big, scripts.single())
+
+        post(base, "api/source/file", Json.encodeToString(ScriptPayload("x".repeat(MAX_SCRIPT_BYTES + 1))))
+            .use { response -> assertEquals(400, response.code) }
+        assertEquals(1, scripts.size)
+    }
+
+    @Test
+    fun savedWebDavPasswordCanBeReusedButNeverRead() {        val saved = WebDavAccountInfo(
             "https://nas.local/", "admin", "myMusic/", false, hasPassword = true,
             usedForStorage = true,
         )
@@ -322,13 +399,17 @@ class TvInputPanelServerTest {
         withHeader: Boolean = true,
         origin: String? = null,
         fetchSite: String = "same-origin",
+        contentType: String = "application/json",
     ): Response = client.newCall(
         Request.Builder()
             .url(base.resolve(path)!!)
-            .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .post(body.toRequestBody(contentType.toMediaType()))
             .apply { if (withHeader) header("X-MyMusic-Input", "1") }
             .header("Origin", origin ?: "http://${base.host}:${base.port}")
             .header("Sec-Fetch-Site", fetchSite)
             .build(),
     ).execute()
 }
+
+@Serializable
+private data class ScriptPayload(val script: String = "")

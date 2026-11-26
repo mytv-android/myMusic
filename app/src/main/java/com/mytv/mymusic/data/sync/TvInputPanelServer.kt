@@ -2,6 +2,7 @@ package com.mytv.mymusic.data.sync
 
 import com.mytv.mymusic.data.lx.LxPlatform
 import com.mytv.mymusic.data.lx.LxSourceRecord
+import com.mytv.mymusic.data.lx.MAX_SCRIPT_BYTES
 import com.mytv.mymusic.data.webdav.WebDavAccount
 import com.mytv.mymusic.data.webdav.WebDavPaths
 import fi.iki.elonen.NanoHTTPD
@@ -47,6 +48,8 @@ internal class TvInputPanelHandlers(
     val write: (TvInputWrite, Long) -> Unit = { _, _ -> },
     val search: (String, Long) -> Unit = { _, _ -> },
     val source: (String, Long) -> Unit = { _, _ -> },
+    /** 手机从面板上传本地 .js 脚本正文；电视端没有文件管理器时这是唯一的本地文件渠道。 */
+    val sourceScript: (String, Long) -> Unit = { _, _ -> },
     val sync: (SyncSetupSubmission) -> Unit = {},
     val testWebDav: (WebDavAccount, Long) -> Unit = { _, _ -> },
     val saveStorage: (WebDavAccount, Long) -> Unit = { _, _ -> },
@@ -72,7 +75,7 @@ internal class TvInputPanelSession(
 ) {
     val expiresAt: Long = clock() + sessionMillis
 
-    private enum class Kind { Input, Search, Source, Sync, SyncTest, StorageTest, StorageSave, Signer }
+    private enum class Kind { Input, Search, Source, SourceFile, Sync, SyncTest, StorageTest, StorageSave, Signer }
 
     private data class Operation(
         val id: Long,
@@ -158,6 +161,18 @@ internal class TvInputPanelSession(
         val operation = begin("source", Kind.Source, "音源已导入", "脚本已通过校验并启用。", "导入失败，未保存")
             ?: return lastBeginError ?: TvInputSubmitResult.Failed
         return run(operation) { handlers.source(trimmed, operation.id) }
+    }
+
+    /** 面板上传的脚本正文：和电视本地选文件走同一条导入链路，只是文件从手机存储里挑。 */
+    @Synchronized
+    fun submitSourceScript(script: String): TvInputSubmitResult {
+        if (!snapshot().allowSettings) return TvInputSubmitResult.Forbidden
+        if (script.isBlank() || script.toByteArray(Charsets.UTF_8).size > MAX_SCRIPT_BYTES) {
+            return TvInputSubmitResult.Invalid
+        }
+        val operation = begin("source", Kind.SourceFile, "音源已导入", "脚本已通过校验并启用。", "导入失败，未保存")
+            ?: return lastBeginError ?: TvInputSubmitResult.Failed
+        return run(operation) { handlers.sourceScript(script, operation.id) }
     }
 
     @Synchronized
@@ -367,18 +382,21 @@ internal class TvInputPanelServer private constructor(
 
     private fun post(http: IHTTPSession, route: String): Response {
         if (route !in WRITE_ROUTES) return errorResponse(Response.Status.NOT_FOUND, "接口不存在")
+        val limit = bodyLimits[route] ?: BodyLimit(MAX_BODY_BYTES, "请求内容为空或过大")
         http.checkWrite(
             customHeader = "x-mymusic-input",
             contentType = "application/json",
-            maxBytes = MAX_BODY_BYTES,
+            maxBytes = limit.bytes,
             crossSiteMessage = "请从电视提供的输入页面提交",
             badRequestMessage = "请使用输入页面中的发送按钮",
+            tooLargeMessage = limit.tooLarge,
         )?.let { return it }
-        val raw = readBody(http) ?: return errorResponse(Response.Status.BAD_REQUEST, "请求内容为空或过大")
+        val raw = readBody(http, limit.bytes) ?: return errorResponse(Response.Status.BAD_REQUEST, "请求内容为空或过大")
         val result = try {
             when (route) {
                 "api/input" -> session.submitText(json.decodeFromString<TvTextRequest>(raw))
                 "api/source" -> session.submitSource(json.decodeFromString<SourceRequest>(raw).url)
+                "api/source/file" -> session.submitSourceScript(json.decodeFromString<SourceScriptRequest>(raw).script)
                 "api/sync" -> session.submitSync(json.decodeFromString<PanelConnectRequest>(raw).toSubmission())
                 "api/sync/test" -> session.submitTest("sync", json.decodeFromString<DavRequest>(raw).account())
                 "api/storage" -> session.submitStorage(json.decodeFromString<DavRequest>(raw).account())
@@ -402,7 +420,7 @@ internal class TvInputPanelServer private constructor(
         }
     }
 
-    private fun readBody(http: IHTTPSession): String? {
+    private fun readBody(http: IHTTPSession, maxBytes: Long = MAX_BODY_BYTES): String? {
         val body = mutableMapOf<String, String>()
         try {
             http.parseBody(body)
@@ -410,7 +428,7 @@ internal class TvInputPanelServer private constructor(
             return null
         }
         val raw = body["postData"].orEmpty()
-        return raw.takeIf { it.isNotBlank() && it.toByteArray(Charsets.UTF_8).size <= MAX_BODY_BYTES }
+        return raw.takeIf { it.isNotBlank() && it.toByteArray(Charsets.UTF_8).size <= maxBytes }
     }
 
     private fun sessionJson(current: TvInputPanelSnapshot): JsonObject = buildJsonObject {
@@ -450,13 +468,23 @@ internal class TvInputPanelServer private constructor(
 
     companion object {
         const val MAX_BODY_BYTES = 24 * 1024L
+
+        /** 单个写接口放行的请求体大小；脚本走 JSON 字符串，转义后可能比原文大一倍。 */
+        private val bodyLimits = mapOf(
+            "api/source/file" to BodyLimit(
+                MAX_SCRIPT_BYTES * 2L + 8192,
+                "脚本太大，无法导入（最大 2 MB）",
+            ),
+        )
         val PROVIDERS = setOf("gist", "gitee", WebDavSyncProvider.ID)
         val WRITE_ROUTES = setOf(
-            "api/input", "api/source", "api/sync", "api/sync/test",
+            "api/input", "api/source", "api/source/file", "api/sync", "api/sync/test",
             "api/storage", "api/storage/test", "api/signer",
         )
     }
 }
+
+private data class BodyLimit(val bytes: Long, val tooLarge: String)
 
 private fun targetJson(target: TvInputTarget) = buildJsonObject {
     put("id", target.id)
@@ -477,6 +505,9 @@ internal data class TvTextRequest(
 
 @Serializable
 private data class SourceRequest(val url: String = "")
+
+@Serializable
+private data class SourceScriptRequest(val script: String = "")
 
 @Serializable
 private data class PanelConnectRequest(

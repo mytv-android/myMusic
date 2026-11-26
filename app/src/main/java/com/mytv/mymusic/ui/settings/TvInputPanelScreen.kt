@@ -114,6 +114,18 @@ internal fun TvInputPanelScreen(app: AppNav, onBack: () -> Unit, embedded: Boole
                     }
                 }
             },
+            sourceScript = { script, operationId ->
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val record = LxSources.importLocal(script)
+                        serverRef.get()?.finishSource(operationId, record)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        serverRef.get()?.finish(operationId, error.message ?: "脚本校验失败，未保存")
+                    }
+                }
+            },
             sync = { submission -> scope.launch { connectFromPanel(app, submission) } },
             testWebDav = { account, _ -> scope.launch { app.actions.testWebDav(account) } },
             saveStorage = { account, operationId ->
@@ -381,6 +393,7 @@ private fun rememberTvInputPanelSession(
                         write = { write, id -> currentHandlers.value.write(write, id) },
                         search = { text, id -> currentHandlers.value.search(text, id) },
                         source = { url, id -> currentHandlers.value.source(url, id) },
+                        sourceScript = { script, id -> currentHandlers.value.sourceScript(script, id) },
                         sync = { submission -> currentHandlers.value.sync(submission) },
                         testWebDav = { account, id -> currentHandlers.value.testWebDav(account, id) },
                         saveStorage = { account, id -> currentHandlers.value.saveStorage(account, id) },

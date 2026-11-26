@@ -16,6 +16,7 @@
     other: "",
   };
   const knownPresetUrls = Object.values(presetUrls);
+  const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
 
   let scene = "home";
   let target = "field";
@@ -31,6 +32,8 @@
   let finished = false;
   let provider = "gist";
   let signerMode = "custom";
+  let sourceMode = "online";
+  let sourceFileChosen = false;
   let writeMode = "replace";
   let operation = 0;
   let announcedOperation = 0;
@@ -81,7 +84,7 @@
 
   async function request(path, options = {}) {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 12000);
+    const timeout = window.setTimeout(() => controller.abort(), options.timeout || 12000);
     try {
       const response = await fetch(path, {
         ...options,
@@ -177,6 +180,85 @@
     updateButtons();
   }
 
+  function setSourceMode(next) {
+    sourceMode = next === "file" ? "file" : "online";
+    $$("[data-source-mode]", panel).forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.sourceMode === sourceMode));
+    });
+    $("#source-url-block").hidden = sourceMode !== "online";
+    $("#source-file-block").hidden = sourceMode !== "file";
+    $("#source-submit-label").textContent = sourceMode === "file" ? "发送脚本到电视" : "下载并导入到电视";
+    hideResults();
+    updateButtons();
+  }
+
+  function resetSourceFile() {
+    const input = $("#source-file");
+    if (input) input.value = "";
+    sourceFileChosen = false;
+    $("#source-file-name").textContent = "还没有选择文件";
+    $("#source-file-hint").textContent = "UTF-8 编码 · 最大 2 MB";
+  }
+
+  function formatSize(bytes) {
+    if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + " MB";
+    return Math.max(1, Math.round(bytes / 1024)) + " KB";
+  }
+
+  function readFileText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("无法读取这个文件，请换一个文件再试"));
+      reader.readAsText(file, "UTF-8");
+    });
+  }
+
+  function onSourceFileChange() {
+    const file = $("#source-file").files && $("#source-file").files[0];
+    if (!file) {
+      resetSourceFile();
+      updateButtons();
+      return;
+    }
+    $("#source-file-name").textContent = file.name;
+    if (file.size > MAX_SCRIPT_BYTES) {
+      sourceFileChosen = false;
+      $("#source-file-hint").textContent = formatSize(file.size) + " · 超过 2 MB 上限";
+      showResult("source", "error", "文件超过 2 MB", "落雪脚本最大 2 MB，请换一个小一点的文件。");
+      updateButtons();
+      return;
+    }
+    sourceFileChosen = true;
+    $("#source-file-hint").textContent = formatSize(file.size) + " · 发送后由电视校验";
+    hideResults();
+    updateButtons();
+  }
+
+  async function submitSourceFile() {
+    const file = $("#source-file").files && $("#source-file").files[0];
+    if (!file) {
+      showResult("source", "error", "还没有选择文件", "点上面的选择区域，从手机里挑一个 .js 脚本。");
+      return;
+    }
+    if (file.size > MAX_SCRIPT_BYTES) {
+      showResult("source", "error", "文件超过 2 MB", "落雪脚本最大 2 MB，请换一个小一点的文件。");
+      return;
+    }
+    let script = "";
+    try {
+      script = await readFileText(file);
+    } catch (error) {
+      showResult("source", "error", "读取失败", error.message);
+      return;
+    }
+    if (!script.trim()) {
+      showResult("source", "error", "文件内容为空", "这个文件里没有可导入的脚本内容。");
+      return;
+    }
+    post("api/source/file", { script }, "source", "import", null, 30000);
+  }
+
   function canReuseDav(prefix) {
     if ($(`#${prefix}-dav-password`).value) return true;
     return !!savedDav && savedDav.hasPassword &&
@@ -200,12 +282,13 @@
   function updateButtons() {
     const locked = busy || finished || !connected;
     $$("input, textarea", panel).forEach((element) => { element.disabled = locked; });
-    $$('[data-target], [data-provider], [data-preset], [data-reveal], [data-signer-mode], #clear-text, #write-mode, #paste-source', panel)
+    $$('[data-target], [data-provider], [data-preset], [data-reveal], [data-signer-mode], [data-source-mode], #clear-text, #write-mode, #paste-source', panel)
       .forEach((element) => { element.disabled = locked; });
     const fieldBlocked = target === "field" && (!targetAvailable || !targetId);
     $("#send-text").disabled = locked || fieldBlocked || !inputText.value.trim();
     $("#send-enter").disabled = locked || fieldBlocked || !inputText.value.trim() || !supportsEnter;
-    $("#source-form button[type=submit]").disabled = locked || !$("#source-url").value.trim();
+    const sourceReady = sourceMode === "file" ? sourceFileChosen : !!$("#source-url").value.trim();
+    $("#source-form button[type=submit]").disabled = locked || !sourceReady;
     const syncReady = provider === "webdav" ? validDav("sync") : $("#sync-token").value.trim();
     $("#sync-form button[type=submit]").disabled = locked || !syncReady;
     $("#sync-test").disabled = locked || !validDav("sync");
@@ -233,6 +316,7 @@
     }
     if (status.scene === "storage") $("#storage-dav-password").value = "";
     if (status.scene === "signer") $("#signer-token").value = "";
+    if (status.scene === "source") resetSourceFile();
   }
 
   function handleStatus(data, announce = true) {
@@ -276,7 +360,7 @@
     updateButtons();
   }
 
-  async function post(path, payload, where, kind, successfulDav = null) {
+  async function post(path, payload, where, kind, successfulDav = null, timeout = 12000) {
     if (busy || finished || !connected) return;
     pendingDav = successfulDav ? { scene: where, payload: successfulDav } : null;
     pendingScene = where;
@@ -290,8 +374,11 @@
     try {
       const data = await request(path, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-MyMusic-Input": "1" },
+        // charset 必须显式带上：fetch 原样发送这里设的 Content-Type（不会像测试用的 OkHttp 那样补 charset），
+        // 而服务端按 Content-Type 里的 charset 解 body，缺了就退成 US-ASCII，中文全变成替换字符。
+        headers: { "Content-Type": "application/json; charset=utf-8", "X-MyMusic-Input": "1" },
         body: JSON.stringify(payload),
+        timeout,
       });
       handleStatus(data);
     } catch (error) {
@@ -379,6 +466,8 @@
   }, "home", "enter"));
 
   $$("[data-provider]", panel).forEach((button) => button.addEventListener("click", () => setProvider(button.dataset.provider)));
+  $$("[data-source-mode]", panel).forEach((button) => button.addEventListener("click", () => setSourceMode(button.dataset.sourceMode)));
+  $("#source-file").addEventListener("change", onSourceFileChange);
   $$("[data-reveal]", panel).forEach((button) => button.addEventListener("click", () => {
     const input = document.getElementById(button.dataset.reveal);
     const reveal = input.type === "password";
@@ -400,6 +489,10 @@
 
   $("#source-form").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (sourceMode === "file") {
+      submitSourceFile();
+      return;
+    }
     const url = $("#source-url").value.trim();
     if (!/^https?:\/\//i.test(url)) {
       showResult("source", "error", "地址格式不正确", "请输入以 http:// 或 https:// 开头的脚本地址。");
@@ -461,6 +554,7 @@
       $("[data-target=search]").hidden = !allowSearch;
       $(".p-settings").hidden = !allowSettings;
       setProvider(session.provider || "gist");
+      setSourceMode("online");
       if (session.webdav) {
         savedDav = session.webdav;
         fillDav("sync", session.webdav);
