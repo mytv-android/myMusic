@@ -1,14 +1,18 @@
 package com.mytv.mymusic.data.sync
 
+import com.mytv.mymusic.data.lx.EmptyTvStorage
+import com.mytv.mymusic.data.lx.LxFolderPage
 import com.mytv.mymusic.data.lx.LxPlatform
 import com.mytv.mymusic.data.lx.LxSourceRecord
 import com.mytv.mymusic.data.lx.MAX_SCRIPT_BYTES
+import com.mytv.mymusic.data.lx.TvStorageProvider
 import com.mytv.mymusic.data.webdav.WebDavAccount
 import com.mytv.mymusic.data.webdav.WebDavPaths
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -48,8 +52,10 @@ internal class TvInputPanelHandlers(
     val write: (TvInputWrite, Long) -> Unit = { _, _ -> },
     val search: (String, Long) -> Unit = { _, _ -> },
     val source: (String, Long) -> Unit = { _, _ -> },
-    /** 手机从面板上传本地 .js 脚本正文；电视端没有文件管理器时这是唯一的本地文件渠道。 */
+    /** 手机从面板上传本地 .js 脚本正文：文件从手机存储里挑，电视侧不碰自己的文件系统。 */
     val sourceScript: (String, Long) -> Unit = { _, _ -> },
+    /** 面板在电视存储里挑了一个 .js，按路径导入。 */
+    val sourcePath: (String, Long) -> Unit = { _, _ -> },
     val sync: (SyncSetupSubmission) -> Unit = {},
     val testWebDav: (WebDavAccount, Long) -> Unit = { _, _ -> },
     val saveStorage: (WebDavAccount, Long) -> Unit = { _, _ -> },
@@ -69,6 +75,7 @@ internal data class TvInputPanelStatus(
 internal class TvInputPanelSession(
     private val snapshot: () -> TvInputPanelSnapshot,
     private val handlers: TvInputPanelHandlers,
+    private val storage: TvStorageProvider = EmptyTvStorage,
     private val clock: () -> Long = System::currentTimeMillis,
     sessionMillis: Long = SYNC_SETUP_SESSION_MILLIS,
     val accessToken: String = newPanelToken(),
@@ -173,6 +180,22 @@ internal class TvInputPanelSession(
         val operation = begin("source", Kind.SourceFile, "音源已导入", "脚本已通过校验并启用。", "导入失败，未保存")
             ?: return lastBeginError ?: TvInputSubmitResult.Failed
         return run(operation) { handlers.sourceScript(script, operation.id) }
+    }
+
+    /**
+     * 面板在电视存储里挑的 .js。路径由电视侧最终校验（[TvStorageProvider.resolveScript]）：
+     * 不在共享存储根下面、不是 .js 都不接受，所以面板只能挑到脚本，碰不到别的文件。
+     */
+    @Synchronized
+    fun submitSourcePath(path: String): TvInputSubmitResult {
+        if (!snapshot().allowSettings) return TvInputSubmitResult.Forbidden
+        val trimmed = path.trim()
+        if (trimmed.length > MAX_PATH_CHARS || storage.resolveScript(trimmed) == null) {
+            return TvInputSubmitResult.Invalid
+        }
+        val operation = begin("source", Kind.Source, "音源已导入", "脚本已通过校验并启用。", "导入失败，未保存")
+            ?: return lastBeginError ?: TvInputSubmitResult.Failed
+        return run(operation) { handlers.sourcePath(trimmed, operation.id) }
     }
 
     @Synchronized
@@ -329,6 +352,7 @@ internal class TvInputPanelSession(
 
     companion object {
         const val MAX_TEXT_CHARS = 4096
+        const val MAX_PATH_CHARS = 4096
         const val MAX_TOKEN_CHARS = 1024
         const val MAX_FIELD_CHARS = 512
         const val MAX_REMOTE_CHARS = 2048
@@ -341,16 +365,24 @@ internal class TvInputPanelServer private constructor(
     assets: (String) -> ByteArray?,
     private val snapshot: () -> TvInputPanelSnapshot,
     private val session: TvInputPanelSession,
+    private val storage: TvStorageProvider,
     bindHost: String?,
 ) : LanPanelServer(bindHost, assets, session.accessToken) {
     constructor(
         assets: (String) -> ByteArray?,
         snapshot: () -> TvInputPanelSnapshot,
         handlers: TvInputPanelHandlers = TvInputPanelHandlers(),
+        storage: TvStorageProvider = EmptyTvStorage,
         bindHost: String? = null,
         clock: () -> Long = System::currentTimeMillis,
         sessionMillis: Long = SYNC_SETUP_SESSION_MILLIS,
-    ) : this(assets, snapshot, TvInputPanelSession(snapshot, handlers, clock, sessionMillis), bindHost)
+    ) : this(
+        assets,
+        snapshot,
+        TvInputPanelSession(snapshot, handlers, storage, clock, sessionMillis),
+        storage,
+        bindHost,
+    )
 
     private val json = Json { ignoreUnknownKeys = true }
     override val expiresAt: Long get() = session.expiresAt
@@ -392,11 +424,22 @@ internal class TvInputPanelServer private constructor(
             tooLargeMessage = limit.tooLarge,
         )?.let { return it }
         val raw = readBody(http, limit.bytes) ?: return errorResponse(Response.Status.BAD_REQUEST, "请求内容为空或过大")
+        // 读电视存储是同步返回的，不走 operation 回执
+        if (route == "api/source/roots") return storageRoots()
+        if (route == "api/source/folders") {
+            val path = try {
+                json.decodeFromString<FolderRequest>(raw).path
+            } catch (_: Exception) {
+                return errorResponse(Response.Status.BAD_REQUEST, "内容格式不正确")
+            }
+            return storageFolders(path)
+        }
         val result = try {
             when (route) {
                 "api/input" -> session.submitText(json.decodeFromString<TvTextRequest>(raw))
                 "api/source" -> session.submitSource(json.decodeFromString<SourceRequest>(raw).url)
                 "api/source/file" -> session.submitSourceScript(json.decodeFromString<SourceScriptRequest>(raw).script)
+                "api/source/path" -> session.submitSourcePath(json.decodeFromString<SourcePathRequest>(raw).path)
                 "api/sync" -> session.submitSync(json.decodeFromString<PanelConnectRequest>(raw).toSubmission())
                 "api/sync/test" -> session.submitTest("sync", json.decodeFromString<DavRequest>(raw).account())
                 "api/storage" -> session.submitStorage(json.decodeFromString<DavRequest>(raw).account())
@@ -429,6 +472,64 @@ internal class TvInputPanelServer private constructor(
         }
         val raw = body["postData"].orEmpty()
         return raw.takeIf { it.isNotBlank() && it.toByteArray(Charsets.UTF_8).size <= maxBytes }
+    }
+
+    /** 电视上有哪些存储可翻；权限还没给时面板据此提示去电视设置里开。 */
+    private fun storageRoots(): Response {
+        if (!snapshot().allowSettings) return errorResponse(Response.Status.FORBIDDEN, "这个会话没有开放该功能")
+        return jsonResponse(
+            Response.Status.OK,
+            buildJsonObject {
+                put("needsPermission", storage.needsPermission())
+                put(
+                    "roots",
+                    buildJsonArray {
+                        storage.roots().forEach { root ->
+                            add(
+                                buildJsonObject {
+                                    put("id", root.id)
+                                    put("label", root.label)
+                                    put("path", root.path)
+                                },
+                            )
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    /** [path] 为空表示要存储根列表。权限没给或路径不被接受时不报错，交给面板画提示。 */
+    private fun storageFolders(path: String): Response {
+        if (!snapshot().allowSettings) return errorResponse(Response.Status.FORBIDDEN, "这个会话没有开放该功能")
+        if (storage.needsPermission()) {
+            return jsonResponse(Response.Status.OK, buildJsonObject { put("needsPermission", true) })
+        }
+        val page: LxFolderPage = storage.list(path)
+            ?: return errorResponse(Response.Status.BAD_REQUEST, "电视读不了这个路径")
+        return jsonResponse(
+            Response.Status.OK,
+            buildJsonObject {
+                put("needsPermission", false)
+                put("path", page.path)
+                put("parent", page.parent)
+                put(
+                    "entries",
+                    buildJsonArray {
+                        page.entries.forEach { entry ->
+                            add(
+                                buildJsonObject {
+                                    put("name", entry.name)
+                                    put("path", entry.path)
+                                    put("isDirectory", entry.isDirectory)
+                                    put("size", entry.size)
+                                },
+                            )
+                        }
+                    },
+                )
+            },
+        )
     }
 
     private fun sessionJson(current: TvInputPanelSnapshot): JsonObject = buildJsonObject {
@@ -478,7 +579,9 @@ internal class TvInputPanelServer private constructor(
         )
         val PROVIDERS = setOf("gist", "gitee", WebDavSyncProvider.ID)
         val WRITE_ROUTES = setOf(
-            "api/input", "api/source", "api/source/file", "api/sync", "api/sync/test",
+            "api/input", "api/source", "api/source/file", "api/source/path",
+            "api/source/roots", "api/source/folders",
+            "api/sync", "api/sync/test",
             "api/storage", "api/storage/test", "api/signer",
         )
     }
@@ -508,6 +611,12 @@ private data class SourceRequest(val url: String = "")
 
 @Serializable
 private data class SourceScriptRequest(val script: String = "")
+
+@Serializable
+private data class SourcePathRequest(val path: String = "")
+
+@Serializable
+private data class FolderRequest(val path: String = "")
 
 @Serializable
 private data class PanelConnectRequest(

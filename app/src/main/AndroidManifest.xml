@@ -26,6 +26,12 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- 自定义音源的「电视文件夹」渠道：手机在网页面板里翻这台电视的存储找 .js，Android 11 起
+         列共享存储的目录要「所有文件管理」，更早的系统用上面的读存储就够。只读，且只列目录
+         和 .js，不提供读任意文件的入口；用户不给权限时这条路不出现，另两条渠道照常可用 -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />

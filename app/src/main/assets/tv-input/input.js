@@ -181,14 +181,134 @@
   }
 
   function setSourceMode(next) {
-    sourceMode = next === "file" ? "file" : "online";
+    sourceMode = next === "phone" || next === "tv" ? next : "online";
     $$("[data-source-mode]", panel).forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.sourceMode === sourceMode));
     });
     $("#source-url-block").hidden = sourceMode !== "online";
-    $("#source-file-block").hidden = sourceMode !== "file";
-    $("#source-submit-label").textContent = sourceMode === "file" ? "发送脚本到电视" : "下载并导入到电视";
+    $("#source-file-block").hidden = sourceMode !== "phone";
+    $("#source-tv-block").hidden = sourceMode !== "tv";
+    // 电视文件夹是点一项导入一项，没有底部发送按钮
+    $("#source-actions").hidden = sourceMode === "tv";
+    $("#source-submit-label").textContent = sourceMode === "phone" ? "发送脚本到电视" : "下载并导入到电视";
     hideResults();
+    if (sourceMode === "tv") loadTvRoots();
+    updateButtons();
+  }
+
+  // ---- 电视文件夹：手机翻这台电视的存储，点 .js 直接导入 ----
+
+  let tvPath = "";
+  let tvParent = "";
+  let tvEntries = [];
+  let tvNeedsPermission = false;
+  let tvLoading = false;
+
+  function tvRequest(path, payload) {
+    return request(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8", "X-MyMusic-Input": "1" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  function tvShortPath(path) {
+    if (!path) return "电视存储";
+    const parts = path.split("/").filter(Boolean);
+    if (parts.length <= 2) return "/" + parts.join("/");
+    return "…/" + parts.slice(-2).join("/");
+  }
+
+  function tvRow(entry) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "tv-row";
+    row.dataset.path = entry.path;
+    row.dataset.dir = String(entry.isDirectory === true);
+    const icon = document.createElement("span");
+    icon.className = "tv-row-icon";
+    icon.innerHTML = '<svg class="icon"><use href="' + (entry.isDirectory ? "#i-folder" : "#i-code") + '"/></svg>';
+    const text = document.createElement("span");
+    text.className = "tv-row-text";
+    const name = document.createElement("b");
+    name.textContent = entry.name;
+    const hint = document.createElement("small");
+    hint.textContent = entry.isDirectory ? "文件夹" : "脚本 · 点这里导入";
+    text.append(name, hint);
+    const value = document.createElement("span");
+    value.className = "tv-row-value";
+    value.textContent = entry.isDirectory ? "" : formatSize(entry.size || 0);
+    row.append(icon, text, value);
+    row.addEventListener("click", () => {
+      if (busy || finished || !connected) return;
+      if (entry.isDirectory) loadTvFolders(entry.path);
+      else post("api/source/path", { path: entry.path }, "source", "import", null, 30000);
+    });
+    return row;
+  }
+
+  function renderTvFolders() {
+    const list = $("#tv-list");
+    list.textContent = "";
+    $("#tv-permission").hidden = !tvNeedsPermission;
+    $("#tv-up").hidden = !tvParent;
+    $("#tv-path").textContent = tvShortPath(tvPath);
+    const note = document.createElement("div");
+    if (tvLoading) {
+      note.className = "tv-empty";
+      note.textContent = "正在读电视上的文件夹…";
+      list.append(note);
+      return;
+    }
+    if (tvNeedsPermission) return;
+    if (!tvEntries.length) {
+      note.className = "tv-empty";
+      note.textContent = tvPath ? "这个文件夹里没有子文件夹，也没有 .js 脚本。" : "电视上没有找到可浏览的存储。";
+      list.append(note);
+      return;
+    }
+    tvEntries.forEach((entry) => list.append(tvRow(entry)));
+  }
+
+  async function loadTvRoots() {
+    tvLoading = true;
+    tvNeedsPermission = false;
+    tvPath = "";
+    tvParent = "";
+    tvEntries = [];
+    renderTvFolders();
+    try {
+      const data = await tvRequest("api/source/roots", {});
+      tvNeedsPermission = data.needsPermission === true;
+      tvEntries = tvNeedsPermission ? [] : (data.roots || []).map((root) => ({
+        name: root.label, path: root.path, isDirectory: true, size: 0,
+      }));
+    } catch (error) {
+      tvEntries = [];
+      if (error.status === 410) { handleError(error, "source"); return; }
+      showResult("source", "error", "读不了电视存储", error.message);
+    }
+    tvLoading = false;
+    renderTvFolders();
+    updateButtons();
+  }
+
+  async function loadTvFolders(path) {
+    tvLoading = true;
+    renderTvFolders();
+    try {
+      const data = await tvRequest("api/source/folders", { path: path || "" });
+      tvNeedsPermission = data.needsPermission === true;
+      tvPath = data.path || "";
+      tvParent = data.parent || "";
+      tvEntries = tvNeedsPermission ? [] : (data.entries || []);
+    } catch (error) {
+      tvEntries = [];
+      if (error.status === 410) { handleError(error, "source"); return; }
+      showResult("source", "error", "读不了这个文件夹", error.message);
+    }
+    tvLoading = false;
+    renderTvFolders();
     updateButtons();
   }
 
@@ -273,7 +393,11 @@
 
   function pendingButton() {
     if (pendingScene === "home") return pendingKind === "enter" ? $("#send-enter") : $("#send-text");
-    if (pendingScene === "source") return $("#source-form .p-action");
+    if (pendingScene === "source") {
+      // 电视文件夹没有底部按钮：进度看结果框
+      if (sourceMode === "tv") return null;
+      return $("#source-form .p-action");
+    }
     if (pendingScene === "sync") return pendingKind === "test" ? $("#sync-test") : $("#sync-form button[type=submit]");
     if (pendingScene === "storage") return pendingKind === "test" ? $("#storage-test") : $("#storage-form button[type=submit]");
     return $("#signer-form button[type=submit]");
@@ -282,12 +406,14 @@
   function updateButtons() {
     const locked = busy || finished || !connected;
     $$("input, textarea", panel).forEach((element) => { element.disabled = locked; });
-    $$('[data-target], [data-provider], [data-preset], [data-reveal], [data-signer-mode], [data-source-mode], #clear-text, #write-mode, #paste-source', panel)
+    $$('[data-target], [data-provider], [data-preset], [data-reveal], [data-signer-mode], [data-source-mode], #clear-text, #write-mode, #paste-source, #tv-up, #tv-refresh, #tv-permission-retry', panel)
       .forEach((element) => { element.disabled = locked; });
+    // 电视文件夹的列表项也是按钮：忙的时候别让人再点
+    $$(".tv-row", panel).forEach((row) => { row.disabled = locked; });
     const fieldBlocked = target === "field" && (!targetAvailable || !targetId);
     $("#send-text").disabled = locked || fieldBlocked || !inputText.value.trim();
     $("#send-enter").disabled = locked || fieldBlocked || !inputText.value.trim() || !supportsEnter;
-    const sourceReady = sourceMode === "file" ? sourceFileChosen : !!$("#source-url").value.trim();
+    const sourceReady = sourceMode === "phone" ? sourceFileChosen : !!$("#source-url").value.trim();
     $("#source-form button[type=submit]").disabled = locked || !sourceReady;
     const syncReady = provider === "webdav" ? validDav("sync") : $("#sync-token").value.trim();
     $("#sync-form button[type=submit]").disabled = locked || !syncReady;
@@ -467,6 +593,9 @@
 
   $$("[data-provider]", panel).forEach((button) => button.addEventListener("click", () => setProvider(button.dataset.provider)));
   $$("[data-source-mode]", panel).forEach((button) => button.addEventListener("click", () => setSourceMode(button.dataset.sourceMode)));
+  $("#tv-up").addEventListener("click", () => loadTvFolders(tvParent));
+  $("#tv-refresh").addEventListener("click", () => loadTvFolders(tvPath));
+  $("#tv-permission-retry").addEventListener("click", () => loadTvRoots());
   $("#source-file").addEventListener("change", onSourceFileChange);
   $$("[data-reveal]", panel).forEach((button) => button.addEventListener("click", () => {
     const input = document.getElementById(button.dataset.reveal);
@@ -489,7 +618,9 @@
 
   $("#source-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    if (sourceMode === "file") {
+    // 电视文件夹：只有点列表里的脚本才导入，底部按钮藏起来了
+    if (sourceMode === "tv") return;
+    if (sourceMode === "phone") {
       submitSourceFile();
       return;
     }

@@ -2,8 +2,14 @@ package com.mytv.mymusic
 
 import com.mytv.mymusic.data.SyncAccountEntity
 import com.mytv.mymusic.data.lx.LxCapability
+import com.mytv.mymusic.data.lx.LxFolderEntry
+import com.mytv.mymusic.data.lx.LxFolderPage
 import com.mytv.mymusic.data.lx.LxSourceRecord
+import com.mytv.mymusic.data.lx.LxStorageRoot
 import com.mytv.mymusic.data.lx.MAX_SCRIPT_BYTES
+import com.mytv.mymusic.data.lx.EmptyTvStorage
+import com.mytv.mymusic.data.lx.TvStorageProvider
+import com.mytv.mymusic.data.lx.confineToRoots
 import com.mytv.mymusic.data.sync.SyncSetupPhase
 import com.mytv.mymusic.data.sync.SyncSetupSubmission
 import com.mytv.mymusic.data.sync.SyncStatus
@@ -23,6 +29,8 @@ import com.mytv.mymusic.data.webdav.WebDavAccount
 import com.mytv.mymusic.data.webdav.WebDavAccountInfo
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl
@@ -36,7 +44,10 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
+import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -226,6 +237,12 @@ class TvInputPanelServerTest {
         assertEquals(1, scripts.size)
     }
 
+    /**
+     * 脚本上传要放到 2 MB 才不误伤正常音源，所以这一个接口的请求体上限比文字输入宽；
+     * 超限本身在会话层验（见 [sourceFileUploadGoesThroughTheSameImportPath]），
+     * 这里不再真发一份超大 body——同一批单测共用一个 JVM，几 MB 的字符串会把计时敏感的
+     * 音律测试挤超时。
+     */
     @Test
     fun uploadedScriptBodyPassesTheRaisedBodyLimit() {
         val scripts = CopyOnWriteArrayList<String>()
@@ -233,16 +250,82 @@ class TvInputPanelServerTest {
             TvInputPanelSnapshot(),
             TvInputPanelHandlers(sourceScript = { script, _ -> scripts += script }),
         )
-        // 文字输入只有 24 KB，脚本要放到 2 MB 才不误伤正常音源
-        val big = "// @name 大脚本\n" + "a".repeat(200 * 1024)
+        // 文字输入只有 24 KB，脚本至少放到 40 KB
+        val big = "// @name 大脚本\n" + "a".repeat(40 * 1024)
         post(base, "api/source/file", Json.encodeToString(ScriptPayload(big))).use { response ->
             assertEquals(202, response.code)
         }
         assertEquals(big, scripts.single())
+    }
 
-        post(base, "api/source/file", Json.encodeToString(ScriptPayload("x".repeat(MAX_SCRIPT_BYTES + 1))))
-            .use { response -> assertEquals(400, response.code) }
-        assertEquals(1, scripts.size)
+    /**
+     * 「电视文件夹」渠道：手机翻电视的存储，点 .js 直接导入。只列目录和 .js，
+     * 路径必须落在存储根自身或子孙里，别的文件、根以外的路径一律 400。
+     */
+    @Test
+    fun tvFolderChannelImportsOnlyScriptsInsideStorageRoots() {
+        val root = Files.createTempDirectory("tvstore").toFile()
+        val sub = File(root, "scripts").apply { mkdirs() }
+        File(sub, "b.js").writeText("// @name B\n")
+        File(sub, "a.js").writeText("// @name A\n")
+        File(sub, "notes.txt").writeText("不是脚本")
+        val outside = Files.createTempDirectory("outside").toFile()
+        File(outside, "evil.js").writeText("// @name Evil\n")
+        val imports = CopyOnWriteArrayList<String>()
+        val (base, _) = start(
+            TvInputPanelSnapshot(),
+            TvInputPanelHandlers(sourcePath = { path, _ -> imports += path }),
+            storage = FakeTvStorage(root),
+        )
+
+        post(base, "api/source/roots", "{}").use { response ->
+            assertEquals(200, response.code)
+            val body = response.body.string()
+            assertTrue(body.contains("内部存储"))
+            assertFalse(body.contains("needsPermission\":true"))
+        }
+        // 目录里只列文件夹和 .js，别的文件不出现
+        assertEquals(listOf("a.js", "b.js"), folderNames(base, sub.path))
+        assertEquals(listOf("scripts"), folderNames(base, root.path))
+        // 上一级：存储根的上一级是根列表（空串），里面的目录回到它的父目录
+        assertEquals("", folderPage(base, root.path)["parent"]!!.jsonPrimitive.content)
+        assertEquals(root.path, folderPage(base, sub.path)["parent"]!!.jsonPrimitive.content)
+
+        post(base, "api/source/path", Json.encodeToString(PathPayload(File(sub, "a.js").path)))
+            .use { assertEquals(202, it.code) }
+        post(base, "api/source/path", Json.encodeToString(PathPayload(File(sub, "notes.txt").path)))
+            .use { assertEquals(400, it.code) }
+        post(base, "api/source/path", Json.encodeToString(PathPayload(File(outside, "evil.js").path)))
+            .use { assertEquals(400, it.code) }
+        post(
+            base,
+            "api/source/path",
+            Json.encodeToString(PathPayload("${sub.path}${File.separator}..${File.separator}outside${File.separator}evil.js")),
+        ).use { assertEquals(400, it.code) }
+        post(base, "api/source/folders", Json.encodeToString(PathPayload(outside.path)))
+            .use { assertEquals(400, it.code) }
+        assertEquals(1, imports.size)
+        assertTrue(imports.single().endsWith("a.js"))
+    }
+
+    /** 电视还没给「所有文件管理」时：面板看得到提示，也导不进任何东西。 */
+    @Test
+    fun tvFolderChannelReportsMissingStoragePermission() {
+        val (base, _) = start(
+            TvInputPanelSnapshot(),
+            TvInputPanelHandlers(sourcePath = { _, _ -> fail("没有权限不应该走到导入") }),
+            storage = LockedTvStorage,
+        )
+        post(base, "api/source/roots", "{}").use { response ->
+            assertEquals(200, response.code)
+            assertTrue(response.body.string().contains("needsPermission\":true"))
+        }
+        post(base, "api/source/folders", Json.encodeToString(PathPayload("/storage/emulated/0"))).use { response ->
+            assertEquals(200, response.code)
+            assertTrue(response.body.string().contains("needsPermission\":true"))
+        }
+        post(base, "api/source/path", Json.encodeToString(PathPayload("/storage/emulated/0/a.js")))
+            .use { assertEquals(400, it.code) }
     }
 
     @Test
@@ -368,6 +451,7 @@ class TvInputPanelServerTest {
     private fun start(
         snapshot: TvInputPanelSnapshot,
         handlers: TvInputPanelHandlers = TvInputPanelHandlers(),
+        storage: TvStorageProvider = EmptyTvStorage,
         clock: () -> Long = System::currentTimeMillis,
         sessionMillis: Long = 60_000,
     ): Pair<HttpUrl, TvInputPanelServer> {
@@ -380,12 +464,23 @@ class TvInputPanelServerTest {
             assets = { name -> assets[name]?.toByteArray() },
             snapshot = { snapshot },
             handlers = handlers,
+            storage = storage,
             bindHost = "127.0.0.1",
             clock = clock,
             sessionMillis = sessionMillis,
         )
         servers += server
         return server.startPanel().url.toHttpUrl() to server
+    }
+
+    private fun folderNames(base: HttpUrl, path: String): List<String> =
+        folderPage(base, path)["entries"]!!.jsonArray.map { it.jsonObject["name"]!!.jsonPrimitive.content }
+
+    private fun folderPage(base: HttpUrl, path: String): JsonObject {
+        post(base, "api/source/folders", Json.encodeToString(PathPayload(path))).use { response ->
+            assertEquals(200, response.code)
+            return Json.parseToJsonElement(response.body.string()).jsonObject
+        }
     }
 
     private fun get(base: HttpUrl, path: String): Response = client.newCall(
@@ -413,3 +508,38 @@ class TvInputPanelServerTest {
 
 @Serializable
 private data class ScriptPayload(val script: String = "")
+
+@Serializable
+private data class PathPayload(val path: String = "")
+
+/** 用临时目录当「内部存储」，路径收敛走真实的 [confineToRoots]。 */
+private class FakeTvStorage(private val root: File) : TvStorageProvider {
+    private val roots = listOf(LxStorageRoot("0", "内部存储", root.canonicalPath))
+
+    override fun needsPermission(): Boolean = false
+
+    override fun roots(): List<LxStorageRoot> = roots
+
+    override fun list(path: String): LxFolderPage? {
+        val dir = if (path.isBlank()) root else confineToRoots(path, roots)?.takeIf { it.isDirectory } ?: return null
+        val children = dir.listFiles() ?: return null
+        val folders = children.filter { it.isDirectory }
+            .map { LxFolderEntry(it.name, it.path, true, 0L) }
+            .sortedBy { it.name.lowercase() }
+        val scripts = children.filter { it.isFile && it.name.endsWith(".js", ignoreCase = true) }
+            .map { LxFolderEntry(it.name, it.path, false, it.length()) }
+            .sortedBy { it.name.lowercase() }
+        val atRoot = dir.canonicalPath == root.canonicalPath
+        return LxFolderPage(dir.path, if (atRoot) "" else dir.parent.orEmpty(), folders + scripts)
+    }
+
+    override fun resolveScript(path: String): File? =
+        confineToRoots(path, roots)?.takeIf { it.isFile && it.name.endsWith(".js", ignoreCase = true) }
+}
+
+private object LockedTvStorage : TvStorageProvider {
+    override fun needsPermission(): Boolean = true
+    override fun roots(): List<LxStorageRoot> = emptyList()
+    override fun list(path: String): LxFolderPage? = null
+    override fun resolveScript(path: String): File? = null
+}

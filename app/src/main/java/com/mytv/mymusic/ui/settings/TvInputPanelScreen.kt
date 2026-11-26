@@ -44,6 +44,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mytv.mymusic.MyMusicApp
 import com.mytv.mymusic.data.cloud.CloudProvider
 import com.mytv.mymusic.data.lx.LxSources
+import com.mytv.mymusic.data.lx.LxTvStorage
+import com.mytv.mymusic.data.lx.storageErrorMessage
 import com.mytv.mymusic.data.sync.SyncSetupPhase
 import com.mytv.mymusic.data.sync.SyncSetupSubmission
 import com.mytv.mymusic.data.sync.TvInputPanelHandlers
@@ -85,6 +87,8 @@ internal fun TvInputPanelScreen(app: AppNav, onBack: () -> Unit, embedded: Boole
     val musicApp = context as MyMusicApp
     val scope = rememberCoroutineScope()
     val serverRef = remember { AtomicReference<TvInputPanelServer?>(null) }
+    // 面板「电视文件夹」渠道：手机翻这台电视的存储，权限状态跟着系统设置变
+    val storage = remember(context) { LxTvStorage(context) }
     var generation by rememberSaveable { mutableIntStateOf(0) }
     val snapshot = TvInputPanelSnapshot(
         theme = currentSyncSetupTheme(),
@@ -93,7 +97,7 @@ internal fun TvInputPanelScreen(app: AppNav, onBack: () -> Unit, embedded: Boole
         signerUrl = state.sodaSignerUrl,
         signerEnabled = state.sodaSignerEnabled,
     )
-    val handlers = remember(app, scope, musicApp, serverRef) {
+    val handlers = remember(app, scope, musicApp, serverRef, storage) {
         TvInputPanelHandlers(
             search = { text, operationId ->
                 scope.launch {
@@ -123,6 +127,18 @@ internal fun TvInputPanelScreen(app: AppNav, onBack: () -> Unit, embedded: Boole
                         throw error
                     } catch (error: Exception) {
                         serverRef.get()?.finish(operationId, error.message ?: "脚本校验失败，未保存")
+                    }
+                }
+            },
+            sourcePath = { path, operationId ->
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val record = storage.importScript(path)
+                        serverRef.get()?.finishSource(operationId, record)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        serverRef.get()?.finish(operationId, storageErrorMessage(error))
                     }
                 }
             },
@@ -389,11 +405,13 @@ private fun rememberTvInputPanelSession(
                         runCatching { context.assets.open("tv-input/$name").use { it.readBytes() } }.getOrNull()
                     },
                     snapshot = { currentSnapshot.value },
+                    storage = LxTvStorage(context),
                     handlers = TvInputPanelHandlers(
                         write = { write, id -> currentHandlers.value.write(write, id) },
                         search = { text, id -> currentHandlers.value.search(text, id) },
                         source = { url, id -> currentHandlers.value.source(url, id) },
                         sourceScript = { script, id -> currentHandlers.value.sourceScript(script, id) },
+                        sourcePath = { path, id -> currentHandlers.value.sourcePath(path, id) },
                         sync = { submission -> currentHandlers.value.sync(submission) },
                         testWebDav = { account, id -> currentHandlers.value.testWebDav(account, id) },
                         saveStorage = { account, id -> currentHandlers.value.saveStorage(account, id) },

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
@@ -47,15 +48,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mytv.mymusic.data.lx.LxDesktopLibraries
 import com.mytv.mymusic.data.lx.LxPlatform
 import com.mytv.mymusic.data.lx.LxSourceRecord
 import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.data.lx.MAX_LX_SOURCES
+import com.mytv.mymusic.data.lx.canBrowseStorage
+import com.mytv.mymusic.data.lx.requestStorageAccess
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.components.AdaptiveSheet
 import com.mytv.mymusic.ui.components.ConnectedToggleGroup
@@ -408,6 +414,7 @@ private fun LxImportSheet(
     var url by rememberSaveable { mutableStateOf("") }
     var remoteInput by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     val tv = LocalAppWindow.current.isTv
     if (remoteInput) {
         TvFieldInputDialog(
@@ -466,13 +473,18 @@ private fun LxImportSheet(
                     Text(if (busy) "下载并验证中…" else "下载并导入", Modifier.padding(start = 8.dp))
                 }
             } else {
-                // 电视上常常没有文件管理器，本地选择会直接失败；给一条走手机面板的备用渠道。
+                // 电视上常常没有文件管理器，本地选择会直接失败；扫码面板是能用的那条路。
                 val phoneChannel = onSendFromPhone != null && tv
+                // 面板翻电视存储要「所有文件管理」；用户可能正在电视设置里开，回前台重新查
+                var storageGranted by remember { mutableStateOf(canBrowseStorage(context)) }
+                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { storageGranted = canBrowseStorage(context) }
+                val grantRow = tv && !storageGranted
+                val rows = 1 + (if (phoneChannel) 1 else 0) + (if (grantRow) 1 else 0)
                 SegmentedGroup {
                     ListRow(
                         title = if (busy) "正在读取并验证…" else "选择 .js 脚本",
                         index = 0,
-                        count = if (phoneChannel) 2 else 1,
+                        count = rows,
                         onClick = if (busy) null else onFile,
                         icon = Icons.Filled.FileOpen,
                         summary = "UTF-8 编码 · 最大 2 MB",
@@ -483,12 +495,22 @@ private fun LxImportSheet(
                     )
                     if (phoneChannel) {
                         ListRow(
-                            title = "用手机发送脚本文件",
+                            title = "用手机选择脚本文件",
                             index = 1,
-                            count = 2,
+                            count = rows,
                             onClick = onSendFromPhone,
                             icon = Icons.Filled.PhoneAndroid,
-                            summary = "电视选不了文件时，扫码从手机里挑 .js 脚本发到这台电视",
+                            summary = "扫码后在手机上翻这台电视的文件夹，或从手机存储上传",
+                        )
+                    }
+                    if (grantRow) {
+                        ListRow(
+                            title = "授权浏览电视存储",
+                            index = if (phoneChannel) 2 else 1,
+                            count = rows,
+                            onClick = { requestStorageAccess(context) },
+                            icon = Icons.Filled.Lock,
+                            summary = "翻电视文件夹需要系统设置里的「所有文件管理」权限",
                         )
                     }
                 }
