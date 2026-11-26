@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -83,15 +84,26 @@ object LxSources : LxPlayback {
             failures[songKey]?.contains(recordId) == true
         }
         var lastError: Throwable? = null
-        for ((record, song) in attempts) {
-            try {
-                return LxPlaybackResult(song, resolveFrom(record, song, quality).stream)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                // 当前脚本无法处理这首歌时，先让它尝试其余匹配歌曲，再进入下一个脚本。
-                lastError = error
+        var completed = false
+        // 整轮尝试加总时限：脚本可能一个接一个卡在网络请求上，不能让换源一直等
+        val result = withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
+            for ((record, song) in attempts) {
+                try {
+                    return@withTimeoutOrNull LxPlaybackResult(song, resolveFrom(record, song, quality).stream)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    // 当前脚本无法处理这首歌时，先让它尝试其余匹配歌曲，再进入下一个脚本。
+                    lastError = error
+                }
             }
+            completed = true
+            null
+        }
+        if (result != null) return result
+        if (!completed) {
+            lastFailure = "脚本取流超时"
+            return null
         }
         if (attempts.isEmpty()) {
             lastFailure = "没有可尝试的脚本：已启用的脚本都不声明支持这个平台，或这首之前已失败过"
@@ -104,6 +116,9 @@ object LxSources : LxPlayback {
     /** 最近一次洛雪取流失败的原因，换源失败时给用户看的提示用。 */
     @Volatile
     var lastFailure: String = ""
+
+    /** 整轮脚本尝试的总时限：超时让 SourceResolver 继续下一个候选，而不是整首卡住。 */
+    private const val RESOLVE_TIMEOUT_MS = 30_000L
 
     suspend fun importOnline(url: String): LxSourceRecord {
         val normalized = normalizeUrl(url)
@@ -234,12 +249,13 @@ object LxSources : LxPlayback {
                         importedAt = existing?.importedAt ?: System.currentTimeMillis(),
                         updatedAt = System.currentTimeMillis(),
                     )
-                    // 能力表不进同步文件：写回后现场跑一遍脚本，换源时才知道它能给哪些平台取流
+                    // 能力表不进同步文件：写回后现场跑一遍脚本，换源时才知道它能给哪些平台取流；
+                    // 探测失败保留上次的能力表，别用空表把已有平台能力永久抹掉
                     val capabilities = runCatching { probeCapabilities(record, source.script) }
                         .onFailure { error ->
                             AppLog.w("LxSources", "同步来的脚本探测失败：${source.name}: ${error.readableMessage()}")
                         }
-                        .getOrDefault(emptyMap())
+                        .getOrElse { existing?.capabilities ?: emptyMap() }
                     sourceStore.save(record.copy(capabilities = capabilities), source.script)
                     closeEngine(record.id)
                 }

@@ -41,4 +41,31 @@ class LxAttemptOrderTest {
             attempts.map { (record, song) -> "${record.id}:${song.source}" },
         )
     }
+
+    @Test
+    fun desktopRecordAttemptsSongsFromAnyPlatform() {
+        val apple = Song(id = "a", name = "晴天", source = "apple")
+        val kg = Song(id = "kg", name = "晴天", source = "kugou")
+        val desktop = LxSourceRecord(id = "D", name = "D", desktop = true)
+        val attempts = orderedLxAttempts(records = listOf(desktop), songs = listOf(apple, kg))
+        assertEquals(
+            listOf("D:apple", "D:kugou"),
+            attempts.map { (record, song) -> "${record.id}:${song.source}" },
+        )
+    }
+
+    @Test
+    fun nonDesktopRecordOnlyUsesDeclaredMusicUrlPlatforms() {
+        val apple = Song(id = "a", name = "晴天", source = "apple")
+        val kg = Song(id = "kg", name = "晴天", source = "kugou")
+        val wy = Song(id = "wy", name = "晴天", source = "netease")
+        val attempts = orderedLxAttempts(
+            records = listOf(record("A", "kg"), LxSourceRecord(id = "B", name = "B")),
+            songs = listOf(apple, kg, wy),
+        )
+        assertEquals(
+            listOf("A:kugou"),
+            attempts.map { (record, song) -> "${record.id}:${song.source}" },
+        )
+    }
 }

@@ -5,6 +5,7 @@ import androidx.media3.exoplayer.source.ShuffleOrder
 import com.mytv.mymusic.playback.QueueShuffleOrder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
 
@@ -115,6 +116,30 @@ class QueueShuffleOrderTest {
     @Test
     fun `clearing empties the order`() {
         assertEquals(0, start(5, 1).cloneAndClear().length)
+    }
+
+    @Test
+    fun `indexes outside the queue return unset instead of throwing`() {
+        val order = start(5, 2)
+        assertEquals(C.INDEX_UNSET, order.getNextIndex(-1))
+        assertEquals(C.INDEX_UNSET, order.getNextIndex(5))
+        assertEquals(C.INDEX_UNSET, order.getPreviousIndex(-1))
+        assertEquals(C.INDEX_UNSET, order.getPreviousIndex(5))
+    }
+
+    @Test
+    fun `inserting into an empty order covers the insertion position`() {
+        val order = QueueShuffleOrder(Random(3)).cloneAndInsert(3, 2)
+        assertEquals(5, order.length)
+        assertPermutation(order)
+    }
+
+    @Test
+    fun `the last song has no next song`() {
+        val order = start(6, 1)
+        val last = order.lastIndex
+        assertTrue(last != C.INDEX_UNSET)
+        assertEquals(C.INDEX_UNSET, order.getNextIndex(last))
     }
 
     @Test

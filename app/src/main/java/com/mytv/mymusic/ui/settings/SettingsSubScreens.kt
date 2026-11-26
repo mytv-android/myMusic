@@ -687,8 +687,8 @@ internal fun PlaybackSettingsScreen(
         item(key = "modeNote", contentType = "note") {
             SettingsNote(
                 when (aggregation.playbackMode) {
-                    PlaybackMode.Auto -> "完整音源优先，其次按下面的平台顺序和码率选择。当前音源失败时自动换到下一个，播放页的音源标签会说明。"
-                    PlaybackMode.Priority -> "先尝试排在前面的平台，不可用时再依次向后回退。"
+                    PlaybackMode.Auto -> "只用已启用的音乐源：歌曲来源平台已启用时优先，未启用则按启用顺序换源；完整音源优先，其次看码率。播放页的音源标签会说明。"
+                    PlaybackMode.Priority -> "只用已启用的音乐源：歌曲来源平台已启用时优先，未启用则按启用顺序换源；排在前面的平台不可用再向后回退。"
                     PlaybackMode.Pinned -> "优先使用指定平台；它没有返回地址时仍会回退，并提示实际播放源。"
                 },
             )

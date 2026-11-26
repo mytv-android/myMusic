@@ -24,9 +24,15 @@ class QueueShuffleOrder private constructor(
 
     override fun getLength() = shuffled.size
 
-    override fun getNextIndex(index: Int) = shuffled.getOrElse(indexInShuffled[index] + 1) { C.INDEX_UNSET }
+    override fun getNextIndex(index: Int): Int {
+        val at = indexInShuffled.getOrNull(index) ?: return C.INDEX_UNSET
+        return shuffled.getOrElse(at + 1) { C.INDEX_UNSET }
+    }
 
-    override fun getPreviousIndex(index: Int) = shuffled.getOrElse(indexInShuffled[index] - 1) { C.INDEX_UNSET }
+    override fun getPreviousIndex(index: Int): Int {
+        val at = indexInShuffled.getOrNull(index) ?: return C.INDEX_UNSET
+        return shuffled.getOrElse(at - 1) { C.INDEX_UNSET }
+    }
 
     override fun getLastIndex() = shuffled.lastOrNull() ?: C.INDEX_UNSET
 
@@ -39,7 +45,8 @@ class QueueShuffleOrder private constructor(
     }
 
     override fun cloneAndInsert(insertionIndex: Int, insertionCount: Int): ShuffleOrder {
-        if (shuffled.isEmpty()) return cloneAndSet(insertionCount, C.INDEX_UNSET)
+        // 空顺序要覆盖到插入位置：长度是「前 <insertionIndex> 首 + 新插入的」，不能只排新插入的几首
+        if (shuffled.isEmpty()) return cloneAndSet(insertionIndex + insertionCount, C.INDEX_UNSET)
         val order = shuffled.map { if (it >= insertionIndex) it + insertionCount else it }.toMutableList()
         if (insertionCount == 1) {
             order.placeAfter(insertionIndex - 1, insertionIndex)

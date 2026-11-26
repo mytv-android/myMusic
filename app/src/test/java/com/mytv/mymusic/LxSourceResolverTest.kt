@@ -142,4 +142,59 @@ class LxSourceResolverTest {
         val resolved = resolver.resolve(track, policy = policy("lx", "kugou"))
         assertTrue(resolved is Resolution.Ready)
     }
+
+    // ---------- 候选白名单：洛雪没启用时即使有候选也不合成 ----------
+
+    private fun nativeSource(provider: String, id: String) =
+        TrackSource(provider, provider, Song(id = id, name = "晴天", source = provider))
+
+    @Test
+    fun disabledLxIsNotSynthesizedEvenWithCandidates() {
+        val kg = nativeSource("kugou", "kg")
+        val target = TrackMatcher.singleSource(kg.song, "酷狗音乐", "kugou").copy(sources = listOf(kg))
+        val candidates = resolver(CustomRepository()).orderCandidates(
+            track = target,
+            pinnedProvider = null,
+            excludeProviders = emptySet(),
+            policy = SourcePolicy(priority = listOf("kugou", "lx"), allowedProviders = setOf("kugou")),
+        )
+        assertEquals(listOf("kugou"), candidates.map { it.providerId })
+    }
+
+    @Test
+    fun allowedLxIsSynthesizedWhenCandidatesExist() {
+        val kg = nativeSource("kugou", "kg")
+        val target = TrackMatcher.singleSource(kg.song, "酷狗音乐", "kugou").copy(sources = listOf(kg))
+        val candidates = resolver(CustomRepository()).orderCandidates(
+            track = target,
+            pinnedProvider = null,
+            excludeProviders = emptySet(),
+            policy = SourcePolicy(priority = listOf("lx", "kugou"), allowedProviders = setOf("kugou", "lx")),
+        )
+        assertEquals(listOf("lx", "kugou"), candidates.map { it.providerId })
+    }
+
+    @Test
+    fun expandedCandidatesBypassOldNegativeCache() = runBlocking {
+        val repository = CustomRepository().apply {
+            supported = setOf("kugou", "netease")
+            fail = true
+            songSelector = { songs -> songs.first { it.source == "netease" } }
+        }
+        val resolver = resolver(repository)
+        val kg = nativeSource("kugou", "kg")
+        val first = TrackMatcher.singleSource(kg.song, "酷狗音乐", "kugou").copy(id = "track-1", sources = listOf(kg))
+        val lxOnly = SourcePolicy(priority = listOf("lx"), pinnedProvider = "lx", allowedProviders = setOf("lx"))
+        // 第一次只有酷狗候选：洛雪失败进负缓存
+        assertTrue(resolver.resolve(first, pinnedProvider = "lx", policy = lxOnly) is Resolution.None)
+        assertEquals(1, repository.lxCalls)
+
+        // expand 补配出网易云变体：候选指纹变了，旧负缓存不能挡住重新尝试
+        repository.fail = false
+        val wy = nativeSource("netease", "wy")
+        val expanded = first.copy(sources = listOf(kg, wy))
+        val ready = resolver.resolve(expanded, pinnedProvider = "lx", policy = lxOnly) as Resolution.Ready
+        assertEquals("lx", ready.source.providerId)
+        assertEquals(2, repository.lxCalls)
+    }
 }

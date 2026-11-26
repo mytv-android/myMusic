@@ -3,6 +3,7 @@ package com.mytv.mymusic.aggregate
 import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.data.local.LOCAL_SOURCE
 import com.mytv.mymusic.data.lx.LxPlatform
 import com.mytv.mymusic.data.native.AudioQuality
 import kotlinx.coroutines.CancellationException
@@ -39,17 +40,20 @@ class SourceResolver(
 
     fun buildPolicy(track: CanonicalTrack, pinnedProvider: String? = null): SourcePolicy {
         val current = settings()
-        val cookieMap = cookies()
         val available = buildList {
             track.sources.mapTo(this) { it.providerId }
-            if (lxCandidates(track, cookieMap).isNotEmpty()) add(LxPlatform.PROVIDER_ID)
+            if (lxCandidates(track).isNotEmpty()) add(LxPlatform.PROVIDER_ID)
         }.distinct()
-        val configuredPinned = if (current.playbackMode == PlaybackMode.Pinned) current.pinnedProvider else null
+        val pinned = pinnedProvider
+            ?: current.pinnedProvider.takeIf { current.playbackMode == PlaybackMode.Pinned }
+        // 自动播放只允许已启用的音乐源；用户显式固定的平台和本地源永远允许
+        val allowed = (available.filter { it in current.enabledProviders } + listOfNotNull(pinned) + LOCAL_SOURCE).toSet()
         return SourcePolicy(
             mode = current.playbackMode,
-            priority = current.priorityFor(available),
-            pinnedProvider = pinnedProvider ?: configuredPinned,
+            priority = current.playbackOrder(available, track.sources.firstOrNull()?.providerId, pinned),
+            pinnedProvider = pinned,
             allowPreview = current.allowPreview,
+            allowedProviders = allowed,
         )
     }
 
@@ -61,10 +65,20 @@ class SourceResolver(
     ): List<TrackSource> {
         val cookieMap = cookies()
         val pinned = pinnedProvider ?: policy.pinnedProvider
-        val nativeSources = track.sources.filterNot { it.providerId in excludeProviders }
-        val sources = nativeSources + listOfNotNull(unifiedLxSource(track, excludeProviders, cookieMap))
+        val allowed = policy.allowedProviders
+        val nativeSources = track.sources
+            .filterNot { it.providerId in excludeProviders }
+            .filter { allowed == null || it.providerId in allowed || it.providerId == pinned }
+        // 洛雪伪源只有被允许（或用户显式固定）时才合成：有候选不等于能用
+        val lxAllowed = allowed == null || LxPlatform.PROVIDER_ID in allowed || pinned == LxPlatform.PROVIDER_ID
+        val sources = nativeSources + listOfNotNull(unifiedLxSource(track, excludeProviders).takeIf { lxAllowed })
         val statuses = sources.associateWith { availabilityOf(it, cookieMap[it.providerId].orEmpty()) }
-        val priority = if (policy.priority.isEmpty()) sources.map { it.providerId }.distinct() else policy.priority
+        // 手写策略没给顺序时沿用 sources 顺序；buildPolicy 生成的策略不这样回落，免得把未启用的平台带回来
+        val priority = if (policy.priority.isEmpty() && allowed == null) {
+            sources.map { it.providerId }.distinct()
+        } else {
+            policy.priority
+        }
         fun priorityIndex(source: TrackSource): Int {
             val index = priority.indexOf(source.providerId)
             return if (index < 0) Int.MAX_VALUE else index
@@ -102,26 +116,25 @@ class SourceResolver(
     }
 
     /** 一个洛雪候选代表整个脚本集合；锚点只用于列表展示，实际歌曲由脚本解析结果决定。 */
-    private fun unifiedLxSource(
-        track: CanonicalTrack,
-        excludeProviders: Set<String>,
-        cookieMap: Map<String, String>,
-    ): TrackSource? {
+    private fun unifiedLxSource(track: CanonicalTrack, excludeProviders: Set<String>): TrackSource? {
         if (LxPlatform.PROVIDER_ID in excludeProviders) return null
-        val anchor = lxCandidates(track, cookieMap).firstOrNull() ?: return null
+        val candidates = lxCandidates(track)
+        val anchor = candidates.firstOrNull() ?: return null
         return anchor.copy(
             providerId = LxPlatform.PROVIDER_ID,
             providerName = LxPlatform.PROVIDER_NAME,
             availability = Availability.Playable,
             isPreview = false,
-            resolutionKey = "${LxPlatform.PROVIDER_ID}:${track.id}",
+            // 候选指纹进缓存键：expand 补配出新平台变体后要能重新尝试洛雪，别被旧负缓存挡住
+            resolutionKey = "${LxPlatform.PROVIDER_ID}:${track.id}:" +
+                candidates.map { it.song.key }.sorted().joinToString(","),
         )
     }
 
-    private fun lxCandidates(track: CanonicalTrack, cookieMap: Map<String, String>): List<TrackSource> =
+    /** 能交给洛雪脚本处理的平台变体；脚本能不能播与原生源当前的可用性无关，不在这里过滤。 */
+    private fun lxCandidates(track: CanonicalTrack): List<TrackSource> =
         track.sources.asSequence()
             .filter { repository.supportsCustomSource(it.providerId) }
-            .filter { availabilityOf(it, cookieMap[it.providerId].orEmpty()) != Availability.Unavailable }
             .sortedWith(compareByDescending<TrackSource> { it.matchScore }.thenByDescending { it.song.bitrate })
             .distinctBy { it.song.key }
             .toList()
@@ -137,7 +150,7 @@ class SourceResolver(
         val cookieMap = cookies()
         val explicitProvider = pinnedProvider ?: policy.pinnedProvider
         val customGeneration = repository.customSourceGeneration()
-        val customSongs by lazy { lxCandidates(track, cookieMap).map { it.song } }
+        val customSongs by lazy { lxCandidates(track).map { it.song } }
 
         for (source in ordered) {
             val cookie = cookieMap[source.providerId].orEmpty()
@@ -175,7 +188,9 @@ class SourceResolver(
             if (cached != null) synchronized(lock) { urlCache.remove(cacheKey) }
 
             val cachedFailure = synchronized(lock) { negativeCache[cacheKey] }
-            if (cachedFailure != null && cachedFailure.generation == customGeneration && now - cachedFailure.at < NEGATIVE_TTL_MS) {
+            // 洛雪脚本失败多半是临时性风控/上游抖动：负缓存短一些，兜底能尽快重试
+            val negativeTtl = if (custom) CUSTOM_NEGATIVE_TTL_MS else NEGATIVE_TTL_MS
+            if (cachedFailure != null && cachedFailure.generation == customGeneration && now - cachedFailure.at < negativeTtl) {
                 attempts += Attempt(source, "近期解析失败")
                 continue
             }
@@ -296,5 +311,6 @@ class SourceResolver(
     private companion object {
         const val URL_TTL_MS = 3 * 60_000L
         const val NEGATIVE_TTL_MS = 10 * 60_000L
+        const val CUSTOM_NEGATIVE_TTL_MS = 60_000L
     }
 }

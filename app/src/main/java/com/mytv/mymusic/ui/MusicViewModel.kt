@@ -4318,39 +4318,101 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (sleeping != null && (controller?.mediaItemCount ?: 0) == 0) {
             // 从磁盘接上的队列还没装进播放器：播放、切歌都先解析这一首再装
             when (action) {
-                "play" -> launchResume()
-                "next" -> if (sleeping.index < sleeping.songs.lastIndex) launchResume(sleeping.index + 1, 0L)
-                "previous" -> launchResume((sleeping.index - 1).coerceAtLeast(0), 0L)
-                else -> controller?.let { toggleMode(it, action) }
+                "play" -> watchResume(launchResume())
+                "next", "previous" -> {
+                    val forward = action == "next"
+                    val target = dormantTargetIndex(sleeping.index, sleeping.songs.size, forward, base.value.repeat)
+                    if (target != null) {
+                        watchResume(launchResume(target, 0L))
+                    } else {
+                        base.update { it.copy(playbackNotice = if (forward) "已经是最后一首" else "已经是第一首") }
+                    }
+                }
+                else -> toggleMode(controller, action)
             }
             return
         }
-        val player = controller ?: return
+        val player = controller
+        if (player == null) {
+            // 队列还在、控制器却没了（比如服务刚被回收）：同样接着恢复，别静默不动
+            if (base.value.queue.isNotEmpty()) {
+                watchResume(launchResume())
+            } else {
+                base.update { it.copy(playbackNotice = "队列还是空的，先挑一首歌播放") }
+            }
+            return
+        }
         when (action) {
             "play" -> if (player.isPlaying) player.pause() else player.play()
             "next" -> {
                 // 上报要知道上一首是被「下一首」切走的，不是自己播完的
                 base.value.current?.let { PlayReportHub.userAction(it.source, PlayEndReason.Next) }
-                player.seekToNextMediaItem()
+                if (!navigate(player, forward = true)) {
+                    base.update { it.copy(playbackNotice = "已经是最后一首") }
+                }
             }
             "previous" -> {
                 base.value.current?.let { PlayReportHub.userAction(it.source, PlayEndReason.Previous) }
-                player.seekToPreviousMediaItem()
+                if (!navigate(player, forward = false)) {
+                    base.update { it.copy(playbackNotice = "已经是第一首") }
+                }
             }
             else -> toggleMode(player, action)
         }
     }
 
-    /** 随机、循环：播放器空着也能设，装进队列后照样生效。 */
-    private fun toggleMode(player: MediaController, action: String) {
-        when (action) {
-            "shuffle" -> player.shuffleModeEnabled = !player.shuffleModeEnabled
-            "repeat" -> player.repeatMode = when (player.repeatMode) {
-                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
-                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-                else -> Player.REPEAT_MODE_OFF
-            }
+    /** 下一首 / 上一首：到队列头尾且开了循环就回绕；没歌、或到边界又不循环时返回 false，界面据此给提示。 */
+    private fun navigate(player: MediaController, forward: Boolean): Boolean {
+        if (player.mediaItemCount == 0) return false
+        val target = if (forward) player.nextMediaItemIndex else player.previousMediaItemIndex
+        if (target != C.INDEX_UNSET) {
+            if (forward) player.seekToNextMediaItem() else player.seekToPreviousMediaItem()
+            return true
         }
+        // 到队列末尾时 Media3 的 seekToNextMediaItem 会静默不切；循环开着就按下标跳到另一头兜底
+        if (base.value.repeat == RepeatMode.Off) return false
+        player.seekTo(if (forward) 0 else player.mediaItemCount - 1, 0)
+        return true
+    }
+
+    /** 恢复失败要给用户看得见的反馈，不能静默；被后来的切歌取消则不算失败。 */
+    private fun watchResume(job: Deferred<Boolean>) {
+        viewModelScope.launch {
+            val ok = try {
+                job.await()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                false
+            }
+            if (!ok) base.update { it.copy(playbackNotice = "暂时连不上播放器，请稍后再试") }
+        }
+    }
+
+    /** 随机、循环：播放器空着也能翻（先记进 state，装队列时再应用），并立刻落盘，不等 onEvents 回传。 */
+    private fun toggleMode(player: MediaController?, action: String) {
+        val state = base.value
+        // 播放器里没歌时它的默认值（Off）不是用户看到的状态：以界面状态为准，不然休眠恢复后会翻不动
+        val live = player != null && player.mediaItemCount > 0
+        when (action) {
+            "shuffle" -> {
+                val next = if (live) !player.shuffleModeEnabled else !state.shuffle
+                player?.shuffleModeEnabled = next
+                base.value = state.copy(shuffle = next)
+            }
+            "repeat" -> {
+                val current = if (live) player.repeatMode.toRepeatMode() else state.repeat
+                val next = when (current) {
+                    RepeatMode.Off -> RepeatMode.All
+                    RepeatMode.All -> RepeatMode.One
+                    RepeatMode.One -> RepeatMode.Off
+                }
+                player?.repeatMode = next.toPlayerRepeatMode()
+                base.value = state.copy(repeat = next)
+            }
+            else -> return
+        }
+        persistCursor()
     }
 
     fun seek(position: Long) {
@@ -4714,7 +4776,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         val policy = resolver.buildPolicy(track, null)
         val source = resolver.orderCandidates(track, null, emptySet(), policy).firstOrNull()
-        val song = source?.song ?: track.sources.first().song
+        if (source == null) {
+            // 来源平台被关掉、又没有允许的候选：清掉地址，让 onMediaItemTransition 走
+            // resolveQueueItem → resolvePlayable 的自动匹配/洛雪兜底，而不是直接放来源平台的地址
+            val fallback = track.sources.first().song
+            return if (fallback.source != LOCAL_SOURCE) fallback.copy(url = "") else fallback
+        }
+        val song = source.song
         // 列表里的 url 不一定能直接放，切歌时交回解析器重新取流：
         //  - 汽水：可能是试听或加密流，要签名/解密；
         //  - Apple：url 恒为 30 秒试听片段（`previews[0]`），整曲是 Widevine 加密的 HLS，
@@ -4774,23 +4842,39 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val notice: String = "",
     )
 
-    /** 洛雪要的平台变体轨道里没有时，按歌曲信息逐个平台补配；配不到或超时就用已有的。 */
+    /**
+     * 洛雪要的平台变体轨道里没有时，按歌曲信息并发补配（只补缺失的平台）；
+     * 配不到、单个平台或总时限超时就丢掉对应结果，用已有的。
+     */
     private suspend fun expandTrackForLx(track: CanonicalTrack): CanonicalTrack {
         val original = track.sources.firstOrNull()?.song ?: return track
-        var current = track
-        withTimeoutOrNull(LX_EXPAND_TIMEOUT_MS) {
-            for (providerId in LX_SCRIPT_PROVIDERS) {
-                if (current.sources.any { it.providerId == providerId }) continue
-                if (!app.repository.supportsCustomSource(providerId)) continue
-                val result = withTimeoutOrNull(AUTO_MATCH_TIMEOUT_MS) {
-                    runCatching { matchJob.matchOne(original, providerId) }.getOrNull()
-                } ?: continue
-                val song = result.song ?: continue
-                current = TrackMatcher.withSource(
-                    current,
-                    TrackSource(providerId, providerName(providerId), song, result.score, result.method),
-                )
+        val missing = LX_SCRIPT_PROVIDERS.filter { providerId ->
+            track.sources.none { it.providerId == providerId } && app.repository.supportsCustomSource(providerId)
+        }
+        if (missing.isEmpty()) return track
+        val matched = withTimeoutOrNull(LX_EXPAND_TIMEOUT_MS) {
+            coroutineScope {
+                missing.map { providerId ->
+                    async {
+                        withTimeoutOrNull(AUTO_MATCH_TIMEOUT_MS) {
+                            runCatching { matchJob.matchOne(original, providerId) }.getOrElse { error ->
+                                if (error is CancellationException) throw error
+                                null
+                            }
+                        }
+                    }
+                }.map { it.await() }
             }
+        } ?: return track
+        var current = track
+        // 按 LX_SCRIPT_PROVIDERS 的顺序合并，并发完成先后不影响结果
+        missing.forEachIndexed { index, providerId ->
+            val result = matched[index] ?: return@forEachIndexed
+            val song = result.song ?: return@forEachIndexed
+            current = TrackMatcher.withSource(
+                current,
+                TrackSource(providerId, providerName(providerId), song, result.score, result.method),
+            )
         }
         return current
     }
@@ -4804,7 +4888,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (track.sources.any { it.providerId == LOCAL_SOURCE }) return resolveLocal(track, excludeProviders)
         // 洛雪按平台递歌：点了或固定了洛雪，而轨道里缺脚本声明的平台时，先按歌曲信息把变体
         // 配出来（MatchJob 带 30 天缓存），不然单平台的歌递不进脚本，只会静默回退到原平台
-        val settingsPinned = settingsState.value.aggregation
+        val aggregation = settingsState.value.aggregation
+        val settingsPinned = aggregation
             .takeIf { it.playbackMode == PlaybackMode.Pinned }?.pinnedProvider
         val lxPinned = pinnedProvider == LxPlatform.PROVIDER_ID ||
             (pinnedProvider == null && settingsPinned == LxPlatform.PROVIDER_ID)
@@ -4826,11 +4911,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return AutoResolution(effective, initial, autoMatched = false, notice = notice)
         }
 
-        val original = effective.sources.firstOrNull()?.song
-            ?: return AutoResolution(effective, initial, autoMatched = false)
-        val attempted = (effective.sources.map { it.providerId } + excludeProviders).toMutableSet()
         var current = effective
-        var last = initial
+        var last: Resolution = initial
+        // 洛雪万能兜底：单平台歌（Apple/Spotify/汽水/B站等）原生解析失败后，按歌曲信息补配洛雪
+        // 平台变体，再让洛雪伪源单独试一次——否则这些歌单永远轮不到脚本
+        val lxEnabled = LxPlatform.PROVIDER_ID in aggregation.enabledProviders
+        if (lxEnabled && !lxPinned) {
+            val expanded = expandTrackForLx(effective)
+            if (expanded.sources.size > effective.sources.size) {
+                // 排除所有原生变体（含刚补配的平台），让洛雪伪源成为唯一候选，只试脚本；
+                // 洛雪内部仍能拿到全部平台变体，脚本失败再回退原生自动匹配
+                val nativeExclude = excludeProviders + expanded.sources.map { it.providerId }
+                val lxResolution = resolver.resolve(expanded, pinnedProvider, nativeExclude, policyFor(expanded))
+                if (lxResolution is Resolution.Ready) {
+                    return AutoResolution(expanded, lxResolution, autoMatched = true, notice = "原音源不可用，已用洛雪播放")
+                }
+                if ((lxResolution as? Resolution.None)?.attempts?.isNotEmpty() == true) last = lxResolution
+            }
+        }
+
+        val original = effective.sources.firstOrNull()?.song
+            ?: return AutoResolution(effective, last, autoMatched = false)
+        // 自动匹配的排除集合只看原始轨道：expand 补配出来的变体只是给洛雪的，不能把原生平台误排除
+        val attempted = (effective.sources.map { it.providerId } + excludeProviders).toMutableSet()
         for (providerId in autoMatchProviders(attempted)) {
             val result = withTimeoutOrNull(AUTO_MATCH_TIMEOUT_MS) {
                 runCatching { matchJob.matchOne(original, providerId) }.getOrNull()
@@ -5445,11 +5548,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 playing = player.isPlaying,
                 duration = duration,
                 shuffle = player.shuffleModeEnabled,
-                repeat = when (player.repeatMode) {
-                    Player.REPEAT_MODE_ONE -> RepeatMode.One
-                    Player.REPEAT_MODE_ALL -> RepeatMode.All
-                    else -> RepeatMode.Off
-                },
+                repeat = player.repeatMode.toRepeatMode(),
             )
         }
     }
@@ -5800,11 +5899,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // 服务那边已经装好了队列（系统媒体控件的继续播放先到）：界面状态由 buildResumption 写好了
             dormant = null
             WidgetHub.authoritative.value = true
+            syncModesFromPlayer(player)
             startPersistence()
             return
         }
         if (restoreJob?.isActive == true) return
+        // 空播放器没有任何后续事件，这里不主动同步的话界面会一直停在旧模式；
+        // 有 dormant 时别覆盖——SavedCursor 里的模式要等 resumeDormant 装队列时再应用
+        if (dormant == null) syncModesFromPlayer(player)
         restoreJob = viewModelScope.async { restoreDormant() }
+    }
+
+    private fun syncModesFromPlayer(player: MediaController) {
+        base.update { it.copy(shuffle = player.shuffleModeEnabled, repeat = player.repeatMode.toRepeatMode()) }
     }
 
     /** 播放服务停了（被回收或出错）：队列转成 [dormant]，下次按播放时重新连上、从这里接着放。 */
@@ -5847,7 +5954,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val shape = NowPlayingShape.current.value.takeIf { it.songKey == current.key }?.shape?.name.orEmpty()
         dormant = SavedPlayback(
             songs = state.queue,
-            cursor = SavedCursor(current.key, at.coerceAtLeast(0), positionMs.coerceAtLeast(0), state.duration, shape),
+            cursor = SavedCursor(
+                current.key,
+                at.coerceAtLeast(0),
+                positionMs.coerceAtLeast(0),
+                state.duration,
+                shape,
+                shuffle = state.shuffle,
+                repeat = state.repeat.name,
+            ),
             origin = state.playbackOrigin,
         )
         base.update { it.copy(playing = false) }
@@ -5886,6 +6001,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 currentSource = track?.sources?.find { source -> source.song.key == current.key },
                 duration = saved.cursor.durationMs.takeIf { duration -> duration > 0 } ?: current.duration * 1000L,
                 playing = false,
+                shuffle = saved.cursor.shuffle,
+                repeat = saved.cursor.repeatMode,
             )
         }
         _position.value = saved.cursor.positionMs
@@ -5923,16 +6040,38 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             else -> return
         }
         val shape = NowPlayingShape.current.value.takeIf { it.songKey == song.key }?.shape?.name.orEmpty()
-        val cursor = SavedCursor(song.key, index, position.coerceAtLeast(0), state.duration, shape)
+        val cursor = SavedCursor(
+            song.key,
+            index,
+            position.coerceAtLeast(0),
+            state.duration,
+            shape,
+            shuffle = state.shuffle,
+            repeat = state.repeat.name,
+        )
         viewModelScope.launch { app.queueStore.saveCursor(cursor) }
     }
 
     private var resumeJob: Deferred<Boolean>? = null
+    private var resumeTarget: Pair<Int?, Long?>? = null
 
-    /** 界面或组件上按播放 / 切歌，而播放器还是空的：把 [dormant] 解析好装进去开播。连点只跑一次。 */
+    /**
+     * 界面或组件上按播放 / 切歌，而播放器还是空的：把 [dormant] 解析好装进去开播。
+     * 同一个目标连点只跑一次；目标变了（用户在解析途中又按了别的歌）就取消旧的、按新目标重来。
+     */
     private fun launchResume(index: Int? = null, positionMs: Long? = null): Deferred<Boolean> {
-        resumeJob?.takeIf { it.isActive }?.let { return it }
-        return viewModelScope.async { resumeDormant(index, positionMs) }.also { resumeJob = it }
+        val target = index to positionMs
+        val running = resumeJob?.takeIf { it.isActive }
+        if (running != null && resumeTarget == target) return running
+        running?.cancel()
+        resumeTarget = target
+        return viewModelScope.async {
+            try {
+                resumeDormant(index, positionMs)
+            } finally {
+                if (resumeTarget === target) resumeTarget = null
+            }
+        }.also { resumeJob = it }
     }
 
     private suspend fun resumeDormant(index: Int?, positionMs: Long?): Boolean {
@@ -5949,6 +6088,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             ?: return false
         if (player.mediaItemCount > 0) return true
         player.setMediaItems(items.mediaItems, items.startIndex, items.startPositionMs)
+        // 休眠期间用户可能翻过随机 / 循环：以界面状态为准，装好队列后应用
+        player.shuffleModeEnabled = base.value.shuffle
+        player.repeatMode = base.value.repeat.toPlayerRepeatMode()
         player.prepare()
         player.play()
         return true
@@ -6032,6 +6174,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         dormant = null
         if (player.mediaItemCount > 0) return
         player.setMediaItems(base.value.queue.map(::mediaItem), saved.index, saved.cursor.positionMs)
+        // 和 resumeDormant 一样：休眠时翻的随机 / 循环不能因为装队列丢掉
+        player.shuffleModeEnabled = base.value.shuffle
+        player.repeatMode = base.value.repeat.toPlayerRepeatMode()
     }
 
     /** 等播放真正开始（缓冲或在放）。组件的广播接收器等到这时候才结束，前台服务在点击给的豁免窗口里起来。 */
@@ -6117,12 +6262,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         restoreJob?.await()
         val sleeping = dormant
         if (sleeping != null && player.mediaItemCount == 0) {
-            val job = when (action) {
-                "next" -> launchResume((sleeping.index + 1).coerceAtMost(sleeping.songs.lastIndex), 0L)
-                "previous" -> launchResume((sleeping.index - 1).coerceAtLeast(0), 0L)
-                else -> launchResume()
+            val target = when (action) {
+                "next" -> dormantTargetIndex(sleeping.index, sleeping.songs.size, forward = true, base.value.repeat)
+                "previous" -> dormantTargetIndex(sleeping.index, sleeping.songs.size, forward = false, base.value.repeat)
+                else -> null
             }
-            return job.await() && awaitPlaybackStart()
+            if (action == "next" || action == "previous") {
+                if (target == null) return false
+                return launchResume(target, 0L).await() && awaitPlaybackStart()
+            }
+            return launchResume().await() && awaitPlaybackStart()
         }
         if (player.mediaItemCount == 0) return false
         when (action) {
@@ -6132,8 +6281,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 player.play()
             }
-            "next" -> player.seekToNextMediaItem()
-            "previous" -> player.seekToPreviousMediaItem()
+            "next" -> if (!navigate(player, forward = true)) return false
+            "previous" -> if (!navigate(player, forward = false)) return false
         }
         // 暂停时切歌只换曲目，不等开播
         return if (player.playWhenReady) awaitPlaybackStart() else true
@@ -7342,8 +7491,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 }
 
 private const val AUTO_MATCH_TIMEOUT_MS = 8_000L
-/** 洛雪补配平台变体的总时限：宁可少配两个平台也别让点击换源卡太久。 */
-private const val LX_EXPAND_TIMEOUT_MS = 20_000L
+/** 洛雪补配平台变体的总时限：并发跑各平台，宁可少配两个也别让换源卡太久。 */
+private const val LX_EXPAND_TIMEOUT_MS = 10_000L
 /** 洛雪脚本认识的平台（本地除外），补配变体时按这个顺序试。 */
 private val LX_SCRIPT_PROVIDERS = LxPlatform.labels.keys.mapNotNull(LxPlatform::providerId).filter { it != LOCAL_SOURCE }
 private const val MAX_UNPLAYABLE_SKIPS = 10
@@ -7357,6 +7506,30 @@ private const val UPDATE_RECHECK_INTERVAL_MS = 30L * 60 * 1000
 
 /** 扫码登录的轮询窗口：要盖住二维码自己的有效期（实测 3～5 分钟），否则后到的扫码没人接。 */
 private const val QR_POLL_WINDOW_MS = 310_000L
+
+private fun RepeatMode.toPlayerRepeatMode(): Int = when (this) {
+    RepeatMode.Off -> Player.REPEAT_MODE_OFF
+    RepeatMode.All -> Player.REPEAT_MODE_ALL
+    RepeatMode.One -> Player.REPEAT_MODE_ONE
+}
+
+private fun Int.toRepeatMode(): RepeatMode = when (this) {
+    Player.REPEAT_MODE_ONE -> RepeatMode.One
+    Player.REPEAT_MODE_ALL -> RepeatMode.All
+    else -> RepeatMode.Off
+}
+
+/**
+ * 播放器还空着（休眠）时「下一首 / 上一首」该接第几首：到队列头尾时循环开着就回绕，
+ * 不循环返回 null（界面提示已经到头了）。[index] 越界时按边界算。
+ */
+internal fun dormantTargetIndex(index: Int, size: Int, forward: Boolean, repeat: RepeatMode): Int? {
+    if (size <= 0) return null
+    val current = index.coerceIn(0, size - 1)
+    val target = if (forward) current + 1 else current - 1
+    if (target in 0 until size) return target
+    return if (repeat != RepeatMode.Off) (target + size) % size else null
+}
 
 /**
  * “下一首播放”要把第 [from] 首挪到哪一位（播放器 moveMediaItem 的 newIndex，即挪完后的位置）。

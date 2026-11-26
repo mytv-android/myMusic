@@ -70,6 +70,8 @@ data class SourcePolicy(
     val priority: List<String> = emptyList(),
     val pinnedProvider: String? = null,
     val allowPreview: Boolean = false,
+    /** 自动播放的候选白名单；null 表示不限制，兼容手写策略与现有单测。 */
+    val allowedProviders: Set<String>? = null,
 )
 
 data class Attempt(val source: TrackSource, val reason: String)
@@ -161,5 +163,19 @@ data class AggregationSettings(
     fun priorityFor(available: List<String>): List<String> {
         val ordered = (enabledProviders + providerPriority).distinct().filter { it in available }
         return ordered + available.filter { it !in ordered }
+    }
+
+    /**
+     * 自动播放的候选顺序：pinned（用户显式固定）在最前，来源平台已启用时紧随其后，
+     * 其余按 [enabledProviders] 的启用顺序。未启用的平台不会出现在结果里——
+     * 这里不能再拿 [providerPriority] 或 available 的剩余 id 兜底，否则关掉的来源平台又会被排回来。
+     */
+    fun playbackOrder(available: List<String>, origin: String?, pinned: String?): List<String> {
+        val enabled = enabledProviders.distinct().filter { it in available }
+        return buildList {
+            pinned?.takeIf { it.isNotBlank() }?.let { add(it) }
+            origin?.takeIf { it in enabled }?.let { add(it) }
+            addAll(enabled)
+        }.distinct()
     }
 }

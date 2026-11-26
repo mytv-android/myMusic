@@ -8,15 +8,21 @@ internal fun orderedLxAttempts(
     songs: List<Song>,
     isFailed: (songKey: String, recordId: String) -> Boolean = { _, _ -> false },
 ): List<Pair<LxSourceRecord, Song>> {
-    val candidates = songs.filter { LxPlatform.sourceKey(it.source) != null }.distinctBy { it.key }
+    // 桌面版插件没有平台能力表：任何平台的歌都让它试一次，不能只喂洛雪平台歌曲
+    val platformSongs = songs.filter { LxPlatform.sourceKey(it.source) != null }.distinctBy { it.key }
+    val allSongs = songs.distinctBy { it.key }
     return buildList {
         for (record in records) {
             if (!record.enabled) continue
+            val candidates = if (record.desktop) allSongs else platformSongs
             for (song in candidates) {
-                val source = LxPlatform.sourceKey(song.source) ?: continue
                 if (isFailed(song.key, record.id)) continue
-                // 桌面版插件没有平台能力表：任何平台的歌都让它试一次
-                if (record.desktop || record.capabilities[source]?.actions?.contains("musicUrl") == true) {
+                if (record.desktop) {
+                    add(record to song)
+                    continue
+                }
+                val source = LxPlatform.sourceKey(song.source) ?: continue
+                if (record.capabilities[source]?.actions?.contains("musicUrl") == true) {
                     add(record to song)
                 }
             }

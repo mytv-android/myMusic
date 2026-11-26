@@ -333,4 +333,47 @@ class SourceResolverTest {
         assertEquals("netease", ready.source.providerId)
         assertFalse(ready.isPreview)
     }
+
+    // ---------- buildPolicy：自动播放只走已启用的音乐源 ----------
+
+    private fun policyResolver(settings: AggregationSettings) = SourceResolver(
+        repository = MusicRepository(),
+        cookies = { emptyMap() },
+        settings = { settings },
+        workDir = { File(".") },
+    )
+
+    @Test
+    fun buildPolicyAllowsOnlyEnabledProvidersAndLocal() {
+        val netease = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/a.mp3"))
+        val apple = TrackSource("apple", "Apple Music", song("a1", "apple", url = "https://example.com/b.mp3"))
+        // 来源平台 Apple 没有启用：候选里不能出现它
+        val target = track(listOf(apple, netease))
+        val resolver = policyResolver(AggregationSettings(enabledProviders = listOf("qq", "netease")))
+        val policy = resolver.buildPolicy(target)
+        assertEquals(setOf("netease", "local"), policy.allowedProviders)
+        assertEquals(listOf("netease"), policy.priority)
+        assertEquals(listOf("netease"), resolver.orderCandidates(target, null, emptySet(), policy).map { it.providerId })
+    }
+
+    @Test
+    fun disabledOriginIsNotReturnedByOrderCandidates() {
+        val apple = TrackSource("apple", "Apple Music", song("a1", "apple", url = "https://example.com/b.mp3"))
+        val target = track(listOf(apple))
+        val resolver = policyResolver(AggregationSettings(enabledProviders = listOf("qq")))
+        val policy = resolver.buildPolicy(target)
+        assertTrue(policy.priority.isEmpty())
+        assertTrue(resolver.orderCandidates(target, null, emptySet(), policy).isEmpty())
+    }
+
+    @Test
+    fun enabledOriginIsPlacedFirstByBuildPolicy() {
+        val netease = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/a.mp3"))
+        val kugou = TrackSource("kugou", "酷狗音乐", song("k1", "kugou", url = "https://example.com/c.mp3"))
+        val target = track(listOf(kugou, netease))
+        val resolver = policyResolver(AggregationSettings(enabledProviders = listOf("netease", "kugou")))
+        val policy = resolver.buildPolicy(target)
+        assertEquals(listOf("kugou", "netease"), policy.priority)
+        assertEquals(listOf("kugou", "netease"), resolver.orderCandidates(target, null, emptySet(), policy).map { it.providerId })
+    }
 }

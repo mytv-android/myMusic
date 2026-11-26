@@ -2,6 +2,7 @@ package com.mytv.mymusic.playback
 
 import android.content.Context
 import com.mytv.mymusic.data.CoverShapeChoice
+import com.mytv.mymusic.data.RepeatMode
 import com.mytv.mymusic.data.Song
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -32,7 +33,7 @@ data class PlaybackOrigin(
     val title: String = "",
 )
 
-/** 落盘的播放位置：第几首、听到哪儿、那首的封面形状。和队列分开存，播放中每隔一阵写一次也只有几十个字节。 */
+/** 落盘的播放位置：第几首、听到哪儿、那首的封面形状，以及随机 / 循环。和队列分开存，播放中每隔一阵写一次也只有几十个字节。 */
 @Serializable
 data class SavedCursor(
     val key: String = "",
@@ -41,9 +42,15 @@ data class SavedCursor(
     val durationMs: Long = 0L,
     val shape: String = "",
     val savedAt: Long = 0L,
+    // 用 String 存，旧文件的缺省值由 kotlinx 补齐（false / Off），不给枚举加序列化依赖
+    val shuffle: Boolean = false,
+    val repeat: String = RepeatMode.Off.name,
 ) {
     val shapeChoice: CoverShapeChoice?
         get() = CoverShapeChoice.entries.find { it.name == shape }?.takeIf { it != CoverShapeChoice.Random }
+
+    val repeatMode: RepeatMode
+        get() = RepeatMode.entries.firstOrNull { it.name == repeat } ?: RepeatMode.Off
 }
 
 /** 一次能续播的快照：队列和位置对得上才算数。 */
