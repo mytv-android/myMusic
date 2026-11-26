@@ -12,7 +12,6 @@ import kotlin.random.Random
 
 object NativeCrypto {
     private val secureRandom = SecureRandom()
-    private const val LINUX_API_KEY = "7246674226682325323F5E6544673A51"
     private const val WEAPI_NONCE = "0CoJUm6Qyw8W8jud"
     private const val WEAPI_IV = "0102030405060708"
     private const val WEAPI_PUB_KEY = "010001"
@@ -117,11 +116,6 @@ object NativeCrypto {
         val exponent = BigInteger(pubKeyHex, 16)
         val modulus = BigInteger(modulusHex, 16)
         return value.modPow(exponent, modulus).toString(16).padStart(256, '0')
-    }
-
-    fun encryptLinux(data: String): String {
-        val key = hexToBytes(LINUX_API_KEY)
-        return bytesToHex(aesEcbEncrypt(data.toByteArray(Charsets.UTF_8), key), upper = true)
     }
 
     fun encryptWeApi(text: String): Pair<String, String> {

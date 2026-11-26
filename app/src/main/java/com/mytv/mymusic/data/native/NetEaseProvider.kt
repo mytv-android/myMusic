@@ -905,6 +905,13 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         )
     }
 
+    /**
+     * 搜索：歌曲、歌手、专辑、歌单四类都走这里。
+     *
+     * 老的 Linux 客户端转发口（`music.163.com/api/linux/forward`）已经整体 502，
+     * 换成的网页 eapi `/eapi/cloudsearch/pc`，参数和响应结构与原来一致
+     * （`result.songs` / `result.artists` / `result.albums` / `result.playlists`）。
+     */
     private suspend fun cloudSearch(
         cookie: String,
         keyword: String,
@@ -912,19 +919,17 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         limit: Int,
         offset: Int = 0,
     ): NativeResponse {
-        val eparams = buildJsonObject {
-            put("method", "POST")
-            put("url", "http://music.163.com/api/cloudsearch/pc")
-            putJsonObject("params") {
-                put("s", keyword)
-                put("type", type)
-                put("offset", offset)
-                put("limit", limit)
-            }
-        }
+        val header = """{"os":"pc","appver":"","osver":"","deviceId":"pyncm!","requestId":"${NativeCrypto.randomString(16)}"}"""
+        val payload = buildJsonObject {
+            put("s", keyword)
+            put("type", type)
+            put("offset", offset)
+            put("limit", limit)
+            put("header", header)
+        }.toString()
         return NativeHttp.postForm(
-            SEARCH_API,
-            mapOf("eparams" to NativeCrypto.encryptLinux(eparams.toString())),
+            SEARCH_EAPI,
+            mapOf("params" to NativeCrypto.encryptEApi(SEARCH_EAPI, payload)),
             headers = mapOf("Referer" to REFERER),
             cookie = cookie,
             randomIp = true,
@@ -1312,7 +1317,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     private companion object {
         const val SHORT_LINK_HOST = "163cn.tv"
         const val REFERER = "http://music.163.com/"
-        const val SEARCH_API = "http://music.163.com/api/linux/forward"
+        const val SEARCH_EAPI = "https://music.163.com/eapi/cloudsearch/pc"
         const val AUDIO_MATCH_API = "https://interface.music.163.com/api/music/audio/match"
         const val MATCH_ORIGIN = "chrome-extension://pgphbbekcgpfaekhcbjamjjkegcclhhd"
         const val MATCH_USER_AGENT =

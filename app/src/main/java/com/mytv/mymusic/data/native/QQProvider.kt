@@ -813,43 +813,57 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     }
 
     override suspend fun searchArtists(cookie: String, keyword: String): List<Playlist> {
-        // search_for_qq_cp 的 t=9 会被忽略并退回单曲结果，歌手走 client_search_cp
-        val url = QQ_CLIENT_SEARCH_API + "?" + qqQuery(
+        // 歌手分类接口（client_search_cp 的 t=9）已经整体 500，改从单曲搜索结果里取歌手，
+        // 见 [qqArtistsFromSongs]
+        val url = QQ_SEARCH_API + "?" + qqQuery(
+            "w" to keyword,
             "format" to "json",
             "p" to "1",
-            "n" to "10",
-            "w" to keyword,
-            "t" to "9",
-            "cr" to "1",
-            "g_tk" to "5381",
+            "n" to QQ_ARTIST_SEARCH_SONGS.toString(),
         )
         val body = NativeHttp.get(
             url,
-            headers = mapOf("Referer" to "https://y.qq.com/portal/search.html"),
+            headers = mapOf("Referer" to QQ_SEARCH_REFERER),
             cookie = cookie,
             randomIp = true,
-            userAgent = QQ_WINDOWS_USER_AGENT,
+            userAgent = QQ_USER_AGENT,
         )
-        val response = json.decodeFromString<QQSingerSearchResponse>(body)
-        val artists = response.data.singer.list.mapNotNull { item ->
-            if (item.singerMID.isBlank()) return@mapNotNull null
-            Playlist(
-                id = item.singerMID,
-                name = item.singerName,
-                cover = toHttps(item.singerPic),
-                trackCount = item.songNum,
-                creator = "",
-                description = "",
-                source = "qq",
-                link = "https://y.qq.com/n/ryqq/singer/${item.singerMID}",
-                extra = mapOf(
-                    "type" to "artist",
-                    "album_count" to item.albumNum.toString(),
-                ),
-            )
-        }
+        val artists = qqArtistsFromSongs(
+            json.decodeFromString<QQSearchResponse>(body).data.song.list.flatMap { it.singer },
+        )
         if (artists.isEmpty()) throw IllegalStateException("no artists found")
         return artists
+    }
+
+    /**
+     * 单曲搜索结果里出现的歌手：每条结果的 singer 数组带 mid 和名字，按出现次数排。
+     * 关键词命中的那位几乎条条都在，合作歌手只出现一两次，排不到前面去；名字精确匹配仍然由
+     * `pickArtist` 先做一遍。曲目数这里拿不到，交给歌手资料接口（artistDetail）补。
+     */
+    internal fun qqArtistsFromSongs(singers: List<QQSinger>): List<Playlist> {
+        val unique = LinkedHashMap<String, QQSinger>()
+        val hits = HashMap<String, Int>()
+        singers.forEach { singer ->
+            if (singer.mid.isBlank() || singer.name.isBlank()) return@forEach
+            if (singer.mid !in unique) unique[singer.mid] = singer
+            hits[singer.mid] = (hits[singer.mid] ?: 0) + 1
+        }
+        return unique.values
+            .sortedByDescending { hits[it.mid] ?: 0 }
+            .take(QQ_ARTIST_SEARCH_LIMIT)
+            .map { singer ->
+                Playlist(
+                    id = singer.mid,
+                    name = singer.name,
+                    cover = "$QQ_SINGER_AVATAR_PREFIX${singer.mid}.jpg",
+                    trackCount = 0,
+                    creator = "",
+                    description = "",
+                    source = "qq",
+                    link = "https://y.qq.com/n/ryqq/singer/${singer.mid}",
+                    extra = mapOf("type" to "artist"),
+                )
+            }
     }
 
     override suspend fun artistSongs(cookie: String, id: String): List<Song> =
@@ -3092,7 +3106,10 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
 
         const val QQ_MUSICU_API = "https://u.y.qq.com/cgi-bin/musicu.fcg"
         const val QQ_SEARCH_API = "http://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp"
-        const val QQ_CLIENT_SEARCH_API = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
+        /** 按名字搜歌手时先捞这么多条单曲，从它们的 singer 数组里归并歌手。 */
+        const val QQ_ARTIST_SEARCH_SONGS = 20
+        /** 归并出来的歌手最多留几个，合作歌手排后面直接截掉。 */
+        const val QQ_ARTIST_SEARCH_LIMIT = 10
         const val QQ_SINGER_SONG_LIMIT = 500
         const val QQ_SONG_DETAIL_API = "https://c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg"
         const val VOLUME_TTL_MS = 6 * 60 * 60 * 1000L
@@ -3244,31 +3261,13 @@ private data class QQSearchItem(
 )
 
 @Serializable
-private data class QQSinger(val name: String = "", val mid: String = "")
+internal data class QQSinger(val name: String = "", val mid: String = "")
 
 @Serializable
 private data class QQPay(
     val paydownload: Int = 0,
     val payplay: Int = 0,
     val paytrackprice: Int = 0,
-)
-
-@Serializable
-private data class QQSingerSearchResponse(val data: QQSingerSearchData = QQSingerSearchData())
-
-@Serializable
-private data class QQSingerSearchData(val singer: QQSingerSearchList = QQSingerSearchList())
-
-@Serializable
-private data class QQSingerSearchList(val list: List<QQSingerSearchItem> = emptyList())
-
-@Serializable
-private data class QQSingerSearchItem(
-    @SerialName("singerMID") val singerMID: String = "",
-    @SerialName("singerName") val singerName: String = "",
-    @SerialName("singerPic") val singerPic: String = "",
-    @SerialName("songNum") val songNum: Int = 0,
-    @SerialName("albumNum") val albumNum: Int = 0,
 )
 
 @Serializable

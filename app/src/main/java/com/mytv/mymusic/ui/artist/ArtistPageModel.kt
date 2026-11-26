@@ -153,24 +153,48 @@ internal class ArtistPages(
         scope.launch { loadAlbumPage(key, state.source, state.id, state.albumsPage + 1) }
     }
 
+    /**
+     * 按名字在平台上找歌手：先歌曲所在平台，再其余能查歌手的平台。
+     * 某个平台的歌手搜索整个挂了（接口 500/502 那种）就换下一个——否则整页只有一句“没有找到”，
+     * 而从洛雪、本地这类没有歌手接口的歌进来时，第一个平台恰好就是挂掉的那个。
+     */
     private fun resolve(key: String, name: String, cover: String) {
         val state = _pages.value[key] ?: return
         jobs[key]?.cancel()
         jobs[key] = scope.launch {
-            val found = runCatching {
-                pickArtist(name, repository.searchArtists(state.source, cookieFor(state.source), name))
-            }.getOrElse {
-                if (it is CancellationException) throw it
-                null
+            val order = resolveOrder(state.source)
+            var found: Playlist? = null
+            var source = state.source
+            for (candidate in order) {
+                found = runCatching {
+                    pickArtist(name, repository.searchArtists(candidate, cookieFor(candidate), name))
+                }.getOrElse {
+                    if (it is CancellationException) throw it
+                    null
+                }
+                if (found != null) {
+                    source = candidate
+                    break
+                }
             }
             if (found == null) {
+                val tried = order.map { providerName(it).ifBlank { it } }.distinct()
                 update(key) {
-                    it.copy(resolving = false, resolveError = "没有在${it.sourceName.ifBlank { "当前平台" }}找到“$name”")
+                    it.copy(
+                        resolving = false,
+                        resolveError = if (tried.isEmpty()) {
+                            "没有可以查歌手的平台"
+                        } else {
+                            "没有在${tried.joinToString("、")}找到“$name”"
+                        },
+                    )
                 }
                 return@launch
             }
             update(key) {
                 it.copy(
+                    source = source,
+                    sourceName = if (source == state.source) it.sourceName else providerName(source),
                     id = found.id,
                     name = found.name.ifBlank { name },
                     avatar = found.cover.ifBlank { cover },
@@ -182,6 +206,15 @@ internal class ArtistPages(
             }
             load(key)
         }
+    }
+
+    /** 歌曲所在平台在前，其余能查歌手的平台按启用顺序跟上；最多试 [MAX_RESOLVE_ATTEMPTS] 个。 */
+    private fun resolveOrder(preferred: String): List<String> {
+        val providers = artistProviders().map { it.id }
+        if (preferred.isNotBlank() && preferred in providers) {
+            return (listOf(preferred) + providers.filter { it != preferred }).take(MAX_RESOLVE_ATTEMPTS)
+        }
+        return providers.take(MAX_RESOLVE_ATTEMPTS)
     }
 
     private fun load(key: String) {
@@ -303,6 +336,7 @@ internal class ArtistPages(
     companion object {
         const val ALBUM_PAGE_SIZE = 30
         private const val MAX_PAGES = 16
+        private const val MAX_RESOLVE_ATTEMPTS = 3
     }
 }
 

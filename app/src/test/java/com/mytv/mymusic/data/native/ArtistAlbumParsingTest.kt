@@ -105,6 +105,25 @@ class ArtistAlbumParsingTest {
     }
 
     @Test
+    fun `qq artists merged from song search singers`() {
+        // 样本：搜「鹿晗」拿回的单曲，前几条都是鹿晗，合作的那几条带上对方
+        val singers = List(6) { QQSinger("鹿晗", "001SqkF53OEhdO") } +
+            QQSinger("队长", "002rHyN14UyyaW") +
+            // 没有 mid 的进不了歌手页（artistDetail / artistSongs 都认 mid）
+            QQSinger("只有名字", "") +
+            QQSinger("", "0025NhlN2yWrP4")
+        val artists = QQProvider().qqArtistsFromSongs(singers)
+        assertEquals(listOf("001SqkF53OEhdO", "002rHyN14UyyaW"), artists.map { it.id })
+        assertEquals(listOf("鹿晗", "队长"), artists.map { it.name })
+        assertEquals("qq", artists[0].source)
+        assertEquals("https://y.qq.com/n/ryqq/singer/001SqkF53OEhdO", artists[0].link)
+        assertEquals("artist", artists[0].extra["type"])
+        assertEquals("https://y.gtimg.cn/music/photo_new/T001R800x800M000001SqkF53OEhdO.jpg", artists[0].cover)
+        assertTrue(QQProvider().qqArtistsFromSongs(emptyList()).isEmpty())
+        assertTrue(QQProvider().qqArtistsFromSongs(listOf(QQSinger("", ""))).isEmpty())
+    }
+
+    @Test
     fun `kuwo single quoted album list`() {
         val body = "{'albumlist':[{'PAY':'1','aartist':'Jay&nbsp;Chou','albumid':'87758985','artist':'周杰伦'," +
             "'artistid':'336','company':'杰威尔音乐有限公司','hts_img':'https://img1.kuwo.cn/star/albumcover/240/s4s86/95/3059703046.jpg'," +

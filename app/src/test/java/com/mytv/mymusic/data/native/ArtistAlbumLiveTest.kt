@@ -17,6 +17,24 @@ class ArtistAlbumLiveTest {
         Triple(KuwoProvider(), "336", "kuwo"),
     )
 
+    /**
+     * 按名字搜歌手：歌手页从播放页、歌曲菜单进来时只有名字，先在这步找到歌手 id。
+     * 网易云走 eapi cloudsearch（老的 linux/forward 已经 502），QQ 从单曲结果的 singer 数组里取
+     * （client_search_cp 的歌手分类已经 500）。
+     */
+    @Test
+    fun `search artists by name`() = runBlocking {
+        assumeTrue(System.getenv("MYMUSIC_LIVE_TEST") == "1")
+        val searchers = listOf(NetEaseProvider() to "netease", QQProvider() to "qq")
+        for ((provider, name) in searchers) {
+            for (keyword in listOf("周杰伦", "邓紫棋")) {
+                val artists = provider.searchArtists("", keyword)
+                println("[$name search:$keyword] ${artists.take(3).map { it.id + "/" + it.name + "/" + it.trackCount }}")
+                assertTrue("$name 搜不到歌手「$keyword」", artists.isNotEmpty())
+            }
+        }
+    }
+
     @Test
     fun `jay chou artist and album pages`() = runBlocking {
         assumeTrue(System.getenv("MYMUSIC_LIVE_TEST") == "1")
