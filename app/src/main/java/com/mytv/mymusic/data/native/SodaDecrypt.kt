@@ -1,6 +1,7 @@
 package com.mytv.mymusic.data.native
 
 import java.io.ByteArrayOutputStream
+import java.io.OutputStream
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -8,7 +9,13 @@ import javax.crypto.spec.SecretKeySpec
 /**
  * 汽水整曲流的本地解密：play_auth（spade）还原 AES 密钥，再按 MP4 CENC 的
  * senc/tenc 逐样本做 AES-CTR。逻辑移植自 music-lib 的 soda/crypto.go 与
- * libresoda 的 soda/crypto.rs（sodam 的取流实现），只处理整文件。
+ * libresoda 的 soda/crypto.rs（sodam 的取流实现）。
+ *
+ * 两个入口：
+ * - [decryptAudio] 纯函数，整文件进出，逐字节回归测试以它为基准；
+ * - [decryptAudioTo] 把同样的字节写进流，明文不整份驻留内存。无损整曲几十 MB，
+ *   整文件处理时「密文 + 整文件副本 + 明文缓冲」三份同时在堆里，低内存设备会 OOM
+ *   （对齐 libresoda `crypto.rs::decrypt_stream` 的思路，那里是边读边解边写）。
  */
 object SodaDecrypt {
     // 损坏文件可能声明几十亿个样本，按声明值分配会直接 OOM
@@ -16,6 +23,35 @@ object SodaDecrypt {
     private const val AES_BLOCK_SIZE = 16
 
     fun decryptAudio(data: ByteArray, playAuth: String): ByteArray {
+        val plan = parsePlan(data, playAuth)
+        val out = ByteArrayOutputStream(data.size)
+        emit(plan, out)
+        return out.toByteArray()
+    }
+
+    /**
+     * 解密后直接写进 [out]（调用方负责关闭）。输出与 [decryptAudio] 逐字节一致，
+     * 但只有「一个样本」大小的明文缓冲，整曲不再额外占两份内存。
+     */
+    fun decryptAudioTo(data: ByteArray, playAuth: String, out: OutputStream) {
+        emit(parsePlan(data, playAuth), out)
+    }
+
+    /** 解析阶段与写出台阶段共用的一份计划：盒位置、密钥、每样本大小与 IV。 */
+    private class Plan(
+        val data: ByteArray,
+        val key: ByteArray,
+        val sampleSizes: IntArray,
+        val sencSamples: List<SencSample>,
+        val mdat: Box,
+        val payloadSize: Int,
+        /** stsd 里 `enca` 的位置与要写回的原始编码（播放器只认 frma 指向的那个）。 */
+        val stsdPatch: Pair<Int, ByteArray>?,
+    ) {
+        val payloadStart: Int get() = mdat.offset + 8
+    }
+
+    private fun parsePlan(data: ByteArray, playAuth: String): Plan {
         val keyHex = extractKey(playAuth)
         val key = NativeCrypto.hexToBytes(keyHex)
         require(key.size == AES_BLOCK_SIZE) { "invalid soda aes key" }
@@ -36,34 +72,52 @@ object SodaDecrypt {
         val mdat = findBox(data, "mdat", 0, data.size)
             ?: throw IllegalStateException("soda 音频缺少 mdat box")
 
-        val result = data.copyOf()
         val payloadSize = (mdat.size - 8).coerceAtLeast(0)
-        // box 头声明的大小不可信，容量按真实文件长度封顶
-        val decrypted = ByteArrayOutputStream(minOf(payloadSize, data.size))
-        var readPtr = mdat.offset + 8
-        for (index in sampleSizes.indices) {
-            val size = sampleSizes[index]
-            if (size <= 0 || readPtr + size > result.size) break
-            val chunk = result.copyOfRange(readPtr, readPtr + size)
-            val plain = if (index < sencSamples.size) decryptSample(key, chunk, sencSamples[index]) else chunk
-            decrypted.write(plain)
-            readPtr += size
+        // 先把「能解出多少字节」算清楚再动手：和上游一样，长度对不上就是坏文件，
+        // 不能把半截明文写进输出（流式入口尤其不能先写后验）
+        var ptr = mdat.offset + 8
+        var decryptable = 0
+        for (size in sampleSizes) {
+            if (size <= 0 || ptr + size > data.size) break
+            decryptable += size
+            ptr += size
         }
-        val plainBytes = decrypted.toByteArray()
-        if (plainBytes.size != payloadSize) throw IllegalStateException("soda 音频解密长度不一致")
-        plainBytes.copyInto(result, mdat.offset + 8)
+        if (decryptable != payloadSize) throw IllegalStateException("soda 音频解密长度不一致")
 
-        // 把 stsd 里的 enca 改回 frma 指向的原始编码，播放器才认识
+        // stsd 的 enca 改回 frma 指向的原始编码，播放器才认识；位置按原始数据找
+        var patch: Pair<Int, ByteArray>? = null
         val stsd = findBox(data, "stsd", stbl.offset + 8, stbl.offset + stbl.size)
         if (stsd != null) {
-            val end = minOf(stsd.offset + stsd.size, result.size)
-            val enca = indexOf(result, "enca", stsd.offset, end)
-            if (enca >= 0) {
-                encryptedSampleOriginalFormat(result, stsd.offset, end)
-                    .copyInto(result, enca)
-            }
+            val end = minOf(stsd.offset + stsd.size, data.size)
+            val enca = indexOf(data, "enca", stsd.offset, end)
+            if (enca >= 0) patch = enca to encryptedSampleOriginalFormat(data, stsd.offset, end)
         }
-        return result
+        return Plan(data, key, sampleSizes, sencSamples, mdat, payloadSize, patch)
+    }
+
+    /** 写「头部（含 stsd 修补）+ 逐样本明文 + 尾部」，两个入口共用。 */
+    private fun emit(plan: Plan, out: OutputStream) {
+        val data = plan.data
+        val payloadStart = plan.payloadStart
+        // 头部只有几十 KB（moov/stbl 那一堆盒），拷一份改 enca 比在流里回seek便宜
+        val header = data.copyOfRange(0, payloadStart)
+        plan.stsdPatch?.let { (enca, replacement) -> replacement.copyInto(header, enca) }
+        out.write(header)
+
+        var readPtr = payloadStart
+        for (index in plan.sampleSizes.indices) {
+            val size = plan.sampleSizes[index]
+            if (size <= 0 || readPtr + size > data.size) break
+            val chunk = data.copyOfRange(readPtr, readPtr + size)
+            val plain = if (index < plan.sencSamples.size) {
+                decryptSample(plan.key, chunk, plan.sencSamples[index])
+            } else {
+                chunk
+            }
+            out.write(plain)
+            readPtr += size
+        }
+        if (readPtr < data.size) out.write(data, readPtr, data.size - readPtr)
     }
 
     private fun findStblDeep(data: ByteArray, moov: Box): Box? {

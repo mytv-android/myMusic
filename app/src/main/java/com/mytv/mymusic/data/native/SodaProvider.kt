@@ -205,6 +205,14 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
                 TAG,
                 "账号资料取不到，Cookie 可能不是完整登录态 cookie=${describeCookie(cookie)}：${error.message}",
             )
+            // 登录态失效要把原因抛出去：设置页据此显示「登录已过期，请重新扫码」，
+            // 不然一行「已登录」挂在那里，用户不知道该去重新登录。
+            // HTTP 401/403 那条路 NativeHttp 只给文案，这里补一个类型化异常。
+            val detail = error.message.orEmpty()
+            if (error is SodaLoginExpiredException) throw error
+            if (sodaLoginExpiredHttp(detail)) {
+                throw SodaLoginExpiredException("${SODA_LOGIN_EXPIRED_MARK}（$detail）")
+            }
             return null
         }
         val nickname = firstNonEmpty(me.myInfo.nickname, me.myInfo.publicName)
@@ -217,7 +225,17 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         return AccountInfo(
             nickname = nickname,
             avatar = buildImageUrl(me.myInfo.avatar, ""),
+            // 账号卡的会员等级槽：汽水只有 VIP / SVIP 两档，非会员留空
+            detail = sodaVipLabel(me.myInfo.isVip, me.myInfo.vipStage),
         )
+    }
+
+    /** 会员等级文案：`vip_stage` 优先，只有 `is_vip` 时回落到「VIP」（对齐 libresoda account.rs）。 */
+    private fun sodaVipLabel(isVip: Boolean, vipStage: String): String = when {
+        vipStage.trim().equals("svip", ignoreCase = true) -> "SVIP"
+        vipStage.trim().equals("vip", ignoreCase = true) -> "VIP"
+        isVip -> "VIP"
+        else -> ""
     }
 
     // ---------------------------------------------------------------------
@@ -240,9 +258,11 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
     override suspend fun createLogin(type: String): QRCreateResult {
         pruneLoginSessions()
-        // 新二维码 = 新会话：设备身份、cookie、通道全部重来
+        // 新二维码 = 新会话：cookie 与通道全部重来，但**设备身份不换**（落盘的那一份），
+        // 否则每个二维码都是服务眼里的新设备，扫码后容易 error_code=7、会话也短命。
         loginSessions.values.forEach { it.gateway.close() }
-        val session = SodaQrSession()
+        val (deviceId, installId) = loginDeviceOrGenerate()
+        val session = SodaQrSession(deviceId = deviceId, installId = installId)
         val entry = SodaLoginSession(session)
         val created = try {
             SodaQrLogin.create(entry.gateway, session)
@@ -805,9 +825,12 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     }
 
     private fun pcAppParams(): MutableMap<String, String> {
-        val now = System.currentTimeMillis()
-        val deviceId = now.toString()
-        val iid = (now + 1).toString()
+        // 设备身份必须跨请求、跨启动稳定：签名器配了用它回传的那份，否则用落盘的上报设备号。
+        // 曾经这里每次调用都取当前时间戳，等于**每个请求都是服务端眼里的一台新设备**
+        // （对齐 sodam config.rs 的口径：服务端按 device_id 做风控，身份一直换就攒不起信任，
+        // 会话也短命）。带签名的读写链路（pcGet / businessPost）下面还会用同一份覆盖一遍。
+        val deviceId = signerCredentials?.deviceId
+            ?: fallbackDeviceId.ifEmpty { System.currentTimeMillis().toString() }
         return mutableMapOf(
             "aid" to "386088",
             "app_name" to "luna_pc",
@@ -817,7 +840,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             "sim_region" to "",
             "device_id" to deviceId,
             "cdid" to "",
-            "iid" to iid,
+            "iid" to deviceId,
             "version_name" to "3.3.0",
             "version_code" to "30030000",
             "channel" to "official",
@@ -920,9 +943,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         if (resp.statusCode != 0) {
             val message = resp.statusInfo.statusMsg.trim().ifEmpty { "unknown error" }
             AppLog.w(TAG, "track_v2 返回错误 status_code=${resp.statusCode} status_msg=$message")
-            throw IllegalStateException(
-                "soda track_v2 api error: status_code=${resp.statusCode} status_msg=$message"
-            )
+            throw sodaApiError("track_v2", resp.statusCode.toLong(), message)
         }
         return resp
     }
@@ -932,9 +953,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val seo = decodeSodaJson<SodaSeoTrackResponse>(body, "soda seo_track json parse error")
         if (seo.statusCode != 0) {
             val message = seo.statusInfo.statusMsg.trim().ifEmpty { "unknown error" }
-            throw IllegalStateException(
-                "soda seo_track api error: status_code=${seo.statusCode} status_msg=$message"
-            )
+            throw sodaApiError("seo_track", seo.statusCode.toLong(), message)
         }
         val seoTrack = seo.seoTrack ?: SodaSeoTrack()
         val track = seoTrack.track
@@ -1434,12 +1453,12 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     private fun ensureSignerCredentials(): SodaAppCredentials {
         signerCredentials?.let { return it }
         // 用落盘的那份：每次启动重新生成的话，服务端（埋点、播放计数、推荐口味的
-        // played_media）永远攒不起同一个人的历史
-        val now = System.currentTimeMillis()
-        val deviceId = fallbackDeviceId.ifEmpty { now.toString() }
+        // played_media）永远攒不起同一个人的历史；安装号跟设备号同一条口径
+        // （和 localAppCredentials 一致），不再每次重建都换一个新的
+        val deviceId = fallbackDeviceId.ifEmpty { System.currentTimeMillis().toString() }
         val credentials = SodaAppCredentials(
             deviceId = deviceId,
-            iid = (now + 1).toString(),
+            iid = deviceId,
             fp = deviceId,
         )
         signerCredentials = credentials
@@ -2330,9 +2349,16 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             AppLog.i(TAG, "续传生效 trackId=$trackId 接上=${downloaded.report.resumedFrom}B " +
                 "本次=${downloaded.report.transferred}B 共=${downloaded.report.onDisk}B")
         }
-        val plain = SodaDecrypt.decryptAudio(downloaded.bytes, info.playAuth)
+        // 解密直接写文件：明文不再整份驻留内存（密文 + 副本 + 明文三份同时在堆里会 OOM）
         val tmp = File(dir, "$name.tmp")
-        tmp.writeBytes(plain)
+        try {
+            tmp.outputStream().buffered(DECRYPT_BUFFER_BYTES).use { out ->
+                SodaDecrypt.decryptAudioTo(downloaded.bytes, info.playAuth, out)
+            }
+        } catch (error: Exception) {
+            tmp.delete()
+            throw error
+        }
         if (!tmp.renameTo(file)) {
             tmp.delete()
             throw IllegalStateException("soda 缓存写入失败")
@@ -2606,9 +2632,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val resp = decodeSodaJson<SodaPlaylistDetailResponse>(body, "soda playlist detail json error")
         if (resp.statusCode != 0) {
             val message = resp.statusInfo.statusMsg.trim().ifEmpty { "unknown error" }
-            throw IllegalStateException(
-                "soda playlist detail api error: status_code=${resp.statusCode} status_msg=$message"
-            )
+            throw sodaApiError("playlist detail", resp.statusCode.toLong(), message)
         }
         return resp
     }
@@ -3181,9 +3205,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val resp = decodeSodaJson<SodaChartResponse>(body, "soda toplist json parse error")
         if (resp.statusCode != 0) {
             val message = resp.statusInfo.statusMsg.trim().ifEmpty { "unknown error" }
-            throw IllegalStateException(
-                "soda toplist api error: status_code=${resp.statusCode} status_msg=$message"
-            )
+            throw sodaApiError("toplist", resp.statusCode.toLong(), message)
         }
         if (resp.chart.trackRanks.isEmpty()) throw IllegalStateException("soda toplist has no tracks")
         return resp
@@ -3254,7 +3276,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val resp = decodeSodaJson<SodaPcMeResponse>(body, "soda me json parse error")
         if (resp.statusCode != 0) {
             val message = resp.statusInfo.statusMsg.trim().ifEmpty { "unknown error" }
-            throw IllegalStateException("soda me api error: status_code=${resp.statusCode} status_msg=$message")
+            throw sodaApiError("me", resp.statusCode.toLong(), message)
         }
         return resp
     }
@@ -3279,9 +3301,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         val resp = decodeSodaJson<SodaUserPlaylistResponse>(body, "soda user playlist json parse error")
         if (resp.statusCode != 0) {
             val message = resp.statusInfo.statusMsg.trim().ifEmpty { "unknown error" }
-            throw IllegalStateException(
-                "soda user playlist api error: status_code=${resp.statusCode} status_msg=$message"
-            )
+            throw sodaApiError("user playlist", resp.statusCode.toLong(), message)
         }
         return resp
     }
@@ -3970,9 +3990,44 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             signerCredentials = null
         }
 
+        /**
+         * 扫码登录的护照设备身份（`device_id` / `install_id`），由设置里落盘的那一份注入。
+         * 所有二维码共用它：汽水按 `device_id` 做风控，持续使用同一个身份才会补发
+         * `odin_tt`，每次换新设备会被当成新设备（`error_code=7`，会话也短命）。
+         * 见 libresoda `docs/QR-LOGIN.md` 与 sodam config 的 `login_device_id`。
+         */
+        @Volatile private var loginDeviceId = ""
+        @Volatile private var loginInstallId = ""
+
+        fun configureLoginDevice(deviceId: String, installId: String) {
+            val nextId = deviceId.trim()
+            val nextInstall = installId.trim()
+            if (nextId == loginDeviceId && nextInstall == loginInstallId) return
+            loginDeviceId = nextId
+            loginInstallId = nextInstall
+            AppLog.i(TAG, "登录设备身份更新 device_id=$nextId install_id=$nextInstall")
+        }
+
+        /** 生效的登录设备身份；设置还没落盘时当场生成一份合法的（首位非 0）。 */
+        private fun loginDeviceOrGenerate(): Pair<String, String> {
+            val id = loginDeviceId
+            val install = loginInstallId
+            if (SodaQrLogin.deviceIdentityValid(id, install)) return id to install
+            val generated = SodaQrLogin.newLoginDevice()
+            loginDeviceId = generated.first
+            loginInstallId = generated.second
+            return generated
+        }
+
         private const val SODA_SOURCE = "soda"
         /** 平台 id，和 [SODA_INFO] 的 id 一致；播放上报按它路由。 */
         const val SODA_PROVIDER_ID = "soda"
+
+        /**
+         * 登录态失效的文案标记：接口错误带上它，上层（设置页账号卡、播放失败原因）
+         * 就能提示重新扫码，而不是笼统一句「没有返回播放地址」。
+         */
+        const val SODA_LOGIN_EXPIRED_MARK = "汽水登录已过期，请重新扫码登录"
         const val SODA_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
         const val PC_APP_USER_AGENT = "LunaPC/3.3.0(359450208)"
@@ -4032,6 +4087,9 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         const val HEX_UPPER = "0123456789ABCDEF"
         const val SODA_CACHE_DIR = "soda"
         const val SODA_CACHE_FILE_LIMIT = 24
+
+        /** 解密写盘的缓冲：256KB，逐样本明文不整份驻留内存。 */
+        private const val DECRYPT_BUFFER_BYTES = 256 * 1024
     }
 }
 
@@ -4040,6 +4098,40 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 // -------------------------------------------------------------------------
 
 private val SODA_JSON = NativeHttp.json
+
+/**
+ * 汽水登录态失效（业务码 7/401/403，或 HTTP 401/403）。扫码会话几天后就会过期，
+ * 之后接口就是这么回的。设置页与播放失败原因按**类型**识别它，提示重新扫码；
+ * 对齐 sodam `failure.rs` 的 `RecoveryAction::Relogin` 判定。
+ */
+internal class SodaLoginExpiredException(message: String) : IllegalStateException(message)
+
+/**
+ * 汽水业务码里的「登录态失效」：`7` / `401` / `403`（对齐 sodam `failure.rs` 的
+ * `RecoveryAction::Relogin` 判定——业务码语义上游同样没实测过，但扫码登录的会话
+ * 过期后接口就是这么回的）。命中时错误文案带「登录已过期」，上层据此提示重新扫码，
+ * 不然用户只看到一句「没有返回播放地址」，不知道该去重新登录。
+ */
+private fun sodaLoginExpiredCode(statusCode: Long): Boolean =
+    statusCode == 7L || statusCode == 401L || statusCode == 403L
+
+/** HTTP 401 同样是登录态失效（NativeHttp 的非 2xx 是 `IOException("HTTP 401 ...")`）。 */
+private fun sodaLoginExpiredHttp(message: String): Boolean =
+    message.contains("HTTP 401") || message.contains("HTTP 403")
+
+/**
+ * 接口报错时统一过一遍登录态判定：失效就把人话提到前面，技术原文留给日志。
+ * 返回的异常直接抛；失效时是 [SodaLoginExpiredException]，上层可以按类型判断，
+ * 不用在每个调用点匹配异常文案。
+ */
+private fun sodaApiError(tag: String, statusCode: Long, statusMsg: String): IllegalStateException {
+    val detail = "soda $tag api error: status_code=$statusCode status_msg=$statusMsg"
+    return if (sodaLoginExpiredCode(statusCode)) {
+        SodaLoginExpiredException("${SodaProvider.SODA_LOGIN_EXPIRED_MARK}（$detail）")
+    } else {
+        IllegalStateException(detail)
+    }
+}
 
 /** 探测账号音质用的会员曲（music-lib soda/quality.go 同款）。 */
 private const val SODA_QUALITY_PROBE_TRACK_ID = "7304719759323564095"
@@ -4540,6 +4632,12 @@ private data class SodaMyInfo(
     val nickname: String = "",
     @SerialName("public_name") val publicName: String = "",
     @SerialName("larger_avatar_url") val avatar: SodaImage = SodaImage(),
+    /**
+     * 账号自身的会员标记。优先看这两个字段而不是「探测曲目能不能拿整曲」：
+     * 后者会把 SVIP 误判成非会员（对齐 libresoda `account.rs::is_vip_account`）。
+     */
+    @SerialName("is_vip") val isVip: Boolean = false,
+    @SerialName("vip_stage") val vipStage: String = "",
 )
 
 @Serializable

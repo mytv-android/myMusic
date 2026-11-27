@@ -337,6 +337,9 @@ class MusicActions(private val model: MusicViewModel) {
     fun saveSodaSigner(url: String, token: String, enabled: Boolean = true) =
         model.saveSodaSigner(url, token, enabled)
 
+    /** 重置汽水扫码登录的设备身份，见 MusicViewModel.resetSodaLoginDevice。 */
+    fun resetSodaLoginDevice() = model.resetSodaLoginDevice()
+
     /** Apple Music 匿名歌词中转总开关，见 MusicViewModel.setThirdPartyLyrics。 */
     fun setThirdPartyLyrics(value: Boolean) = model.setThirdPartyLyrics(value)
     fun setMetadataFallback(value: Boolean) = model.setMetadataFallback(value)

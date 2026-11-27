@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -1115,6 +1116,7 @@ internal fun AccountsSettingsScreen(
     var qrFor by remember { mutableStateOf<ProviderInfo?>(null) }
     var passwordFor by remember { mutableStateOf<ProviderInfo?>(null) }
     var signerOpen by remember { mutableStateOf(false) }
+    var resetDeviceOpen by remember { mutableStateOf(false) }
     val providers = state.providers.filterNot { it.id.startsWith(com.mytv.mymusic.data.subsonic.SUBSONIC_PROVIDER_PREFIX) }
     val loggedCount = providers.count { !state.cookies[it.id].isNullOrBlank() }
     SettingsPage(
@@ -1141,6 +1143,7 @@ internal fun AccountsSettingsScreen(
                 AccountRow(
                     provider = provider,
                     loggedIn = !state.cookies[provider.id].isNullOrBlank(),
+                    loginExpired = provider.id in state.loginExpiredProviders,
                     profile = state.accountProfiles[provider.id],
                     index = index,
                     count = providers.size,
@@ -1182,7 +1185,7 @@ internal fun AccountsSettingsScreen(
                     ListRow(
                         title = "汽水播放签名器",
                         index = 0,
-                        count = 1,
+                        count = 2,
                         onClick = { signerOpen = true },
                         // 图标用 SodaM 官方 logo：默认连的就是它的公共签名服务
                         leading = {
@@ -1195,6 +1198,14 @@ internal fun AccountsSettingsScreen(
                             ) { SodamLogo(40.dp, Modifier.clip(CircleShape)) }
                         },
                         summary = signerSummary(state),
+                    )
+                    ListRow(
+                        title = "重置登录设备",
+                        index = 1,
+                        count = 2,
+                        onClick = { resetDeviceOpen = true },
+                        icon = Icons.Filled.Devices,
+                        summary = "扫码总被限制、或登录几天就失效时换一份新设备身份",
                     )
                 }
             }
@@ -1218,6 +1229,27 @@ internal fun AccountsSettingsScreen(
                 signerOpen = false
             },
             onDismiss = { signerOpen = false },
+        )
+    }
+    if (resetDeviceOpen) {
+        AlertDialog(
+            onDismissRequest = { resetDeviceOpen = false },
+            title = { Text("重置汽水登录设备") },
+            text = {
+                Text(
+                    "汽水按设备身份做风控：同一个身份用久了服务端才会认。重置后下次扫码用新的身份，" +
+                        "当前的登录状态可能随之失效，需要重新扫码。只在扫码总是失败或登录几天就过期时用。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    actions.resetSodaLoginDevice()
+                    resetDeviceOpen = false
+                }) { Text("重置") }
+            },
+            dismissButton = {
+                TextButton(onClick = { resetDeviceOpen = false }) { Text("取消") }
+            },
         )
     }
     qrFor?.let { provider ->
@@ -1266,6 +1298,7 @@ internal fun AccountsSettingsScreen(
 private fun AccountRow(
     provider: ProviderInfo,
     loggedIn: Boolean,
+    loginExpired: Boolean = false,
     profile: AccountProfile?,
     index: Int,
     count: Int,
@@ -1281,6 +1314,8 @@ private fun AccountRow(
     // 已登录且拿到资料时展示账号卡片：头像、昵称、会员/等级；拿不到资料就保持原来的平台行
     val avatar = profile?.avatar.orEmpty()
     val summary = when {
+        // 扫码会话几天后就会过期：接口确认失效时直接说该重新扫码，别挂着一行「已登录」
+        loggedIn && loginExpired -> "登录已过期 · 请重新扫码"
         loggedIn -> {
             val info = profile?.let { p -> listOf(p.nickname, p.detail).filter { it.isNotBlank() }.joinToString(" · ") }.orEmpty()
             info.ifBlank { "已登录" }

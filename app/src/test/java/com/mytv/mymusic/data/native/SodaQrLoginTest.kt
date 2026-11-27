@@ -2,6 +2,7 @@ package com.mytv.mymusic.data.native
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import kotlinx.coroutines.runBlocking
@@ -242,9 +243,9 @@ class SodaQrLoginTest {
         val (method, url, body) = gateway.requests.single()
         assertEquals("POST", method)
         assertTrue(url.startsWith("https://api.qishui.com/passport/web/check_qrconnect/"))
-        // 表单按 key 排序编码
+        // 表单按 key 排序编码；is_frontier 默认 false（服务端没说是 frontier 会话）
         val expected = listOf(
-            "is_frontier=true",
+            "is_frontier=false",
             "is_new_login=1",
             "need_logo=false",
             "need_short_url=false",
@@ -257,6 +258,21 @@ class SodaQrLoginTest {
         assertTrue(headers["x-tt-passport-trace-id"]!!.length == 8)
         assertEquals("application/x-www-form-urlencoded", headers["Content-Type"])
         assertEquals(NativeCrypto.md5Hex(expected).uppercase(), headers["x-ss-stub"])
+    }
+
+    @Test
+    fun isFrontierFromCreateIsEchoedInCheck() = runBlocking {
+        val gateway = FakeGateway()
+        gateway.responses += qrBody(
+            """{"token":"tok123","error_code":0,"is_frontier":true,"qrcode_index_url":"https://bff-pc.qishui.com/x?token=abc"}""",
+        )
+        val session = SodaQrSession()
+        SodaQrLogin.create(gateway, session)
+        assertTrue(session.isFrontier)
+        gateway.responses += qrBody("""{"error_code":0,"status":1}""")
+        SodaQrLogin.check(gateway, session)
+        // 第二次请求是 check_qrconnect，表单里要带回创建时那个 is_frontier
+        assertTrue(gateway.requests[1].third!!.contains("is_frontier=true"))
     }
 
     @Test
@@ -298,5 +314,45 @@ class SodaQrLoginTest {
         assertEquals(16, SodaQrLogin.randomDigits(16).length)
         assertTrue(SodaQrLogin.randomDigits(16).all { it.isDigit() })
         assertEquals(8, SodaQrLogin.randomHex(8).length)
+    }
+
+    @Test
+    fun deviceIdsNeverStartWithZero() = runBlocking {
+        // 对齐 libresoda Rng::digits：首位 (byte % 8) + 1，服务端不认首位 0 的身份
+        repeat(50) {
+            val deviceId = SodaQrLogin.randomDigits(16)
+            val installId = SodaQrLogin.randomDigits(15)
+            assertNotEquals('0', deviceId.first())
+            assertNotEquals('0', installId.first())
+            assertTrue(deviceId.all { it.isDigit() })
+            assertTrue(installId.all { it.isDigit() })
+            assertTrue(SodaQrLogin.deviceIdentityValid(deviceId, installId))
+        }
+    }
+
+    @Test
+    fun deviceIdentityValidationRejectsBadShapes() = runBlocking {
+        assertTrue(SodaQrLogin.deviceIdentityValid("1234567890123456", "123456789012345"))
+        assertFalse(SodaQrLogin.deviceIdentityValid("0234567890123456", "123456789012345"))
+        assertFalse(SodaQrLogin.deviceIdentityValid("123456789012345", "123456789012345"))
+        assertFalse(SodaQrLogin.deviceIdentityValid("123456789012345a", "123456789012345"))
+        assertFalse(SodaQrLogin.deviceIdentityValid("1234567890123456", "12345678901234"))
+        assertFalse(SodaQrLogin.deviceIdentityValid("", ""))
+    }
+
+    @Test
+    fun injectedDeviceIdentityReachesQrCreate() = runBlocking {
+        val gateway = FakeGateway()
+        gateway.responses += qrBody(
+            """{"token":"tok123","error_code":0,"qrcode_index_url":"https://bff-pc.qishui.com/x?token=abc"}""",
+        )
+        // 落盘的那一份身份必须原样进请求：换了就等于服务端眼里的新设备
+        val session = SodaQrSession(deviceId = "9182736455463728", installId = "123456789012345").apply { token = "tok123" }
+        SodaQrLogin.create(gateway, session)
+        val url = gateway.requests.single().second
+        assertTrue(url.contains("device_id=9182736455463728"))
+        assertTrue(url.contains("install_id=123456789012345"))
+        assertTrue(url.contains("did=9182736455463728"))
+        assertTrue(url.contains("iid=123456789012345"))
     }
 }

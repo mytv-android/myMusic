@@ -204,12 +204,22 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         // 和签名器一样改设置即时生效，不需要重启
         var reportDeviceIdReady = false
         var sodaDiagLogged = false
+        // 汽水扫码登录的护照设备身份：落盘后所有二维码复用同一个（服务端按它补发 odin_tt）
+        var sodaLoginDeviceReady = false
         appScope.launch(Dispatchers.IO) {
             settings.state.collect { values ->
                 PlayReportHub.setEnabled(values.playReportEnabled)
                 PlayReportHub.updateCookies(values.cookies)
                 AppleSession.update(values.cookies)
                 SodaProvider.configureFallbackDeviceId(values.sodaReportDeviceId)
+                // 登录设备身份还没落盘：先生成一份写进去，之后一直复用（换设备身份等于换账号的新设备）
+                if (values.sodaLoginDeviceId.isBlank() && !sodaLoginDeviceReady) {
+                    sodaLoginDeviceReady = true
+                    val (deviceId, installId) = settings.sodaLoginDevice()
+                    SodaProvider.configureLoginDevice(deviceId, installId)
+                } else {
+                    SodaProvider.configureLoginDevice(values.sodaLoginDeviceId, values.sodaLoginInstallId)
+                }
                 // 第一次开启：先把设备指纹落盘，之后每次启动都用同一个
                 if (values.playReportEnabled && values.sodaReportDeviceId.isBlank() && !reportDeviceIdReady) {
                     reportDeviceIdReady = true

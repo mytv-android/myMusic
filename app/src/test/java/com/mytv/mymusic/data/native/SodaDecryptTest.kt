@@ -24,6 +24,18 @@ class SodaDecryptTest {
         assertArrayEquals(expected, payload)
     }
 
+    @Test
+    fun streamVariantMatchesWholeFileVariant() {
+        val encrypted = plain.mapIndexed { index, sample -> ctr(ivs[index]) { it.update(sample) } }
+        val input = mp4(encrypted)
+        val whole = SodaDecrypt.decryptAudio(input, playAuth)
+        val streamed = java.io.ByteArrayOutputStream(input.size).also { out ->
+            SodaDecrypt.decryptAudioTo(input, playAuth, out)
+        }.toByteArray()
+        // 流式入口是给整曲下载用的：输出必须和纯函数版逐字节一致，否则缓存里就是坏文件
+        assertArrayEquals(whole, streamed)
+    }
+
     private fun mp4(samples: List<ByteArray>): ByteArray {
         val sizes = samples.map { it.size }
         val stsz = ByteArray(4) + u32(0) + u32(sizes.size) + sizes.map(::u32).fold(ByteArray(0)) { a, b -> a + b }

@@ -3,6 +3,7 @@ package com.mytv.mymusic.data.native
 import com.mytv.mymusic.data.QRCheckResult
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import java.security.SecureRandom
 import java.util.UUID
 
@@ -20,6 +21,14 @@ import java.util.UUID
  */
 internal class SodaQrSession(
     var token: String = "",
+    /**
+     * 护照设备身份：**跨登录持久化**，不要每次扫码都换新的。汽水服务端按
+     * `device_id` 做风控，同一个身份持续使用后才补发 `odin_tt`；每次换随机设备
+     * 会被当成新设备，扫码后容易 `error_code=7`，会话也短命
+     * （libresoda `docs/QR-LOGIN.md`；sodam 存 `login_device_id`，退出登录不清除）。
+     * 生产环境由 [SodaProvider.configureLoginDevice] 注入落盘的那一份，
+     * 默认值只给单测和库独立使用。
+     */
     val deviceId: String = SodaQrLogin.randomDigits(16),
     val installId: String = SodaQrLogin.randomDigits(15),
     val msToken: String = SodaQrLogin.randomMsToken(),
@@ -30,6 +39,11 @@ internal class SodaQrSession(
     @Volatile var cooldownUntilMs: Long = 0,
     @Volatile var lastResult: QRCheckResult? = null,
     @Volatile var everScanned: Boolean = false,
+    /**
+     * 创建二维码时服务端下发的 `is_frontier`，轮询与二次验证重发要原样带回
+     * （对齐 libresoda `create_qr` → `check_qr`；本地以前写死 true）。
+     */
+    @Volatile var isFrontier: Boolean = false,
 )
 
 /** 登录流程要用的签名页能力；生产实现是 [SodaQrSigner]，测试用假网关。 */
@@ -88,6 +102,8 @@ internal object SodaQrLogin {
         }
         val indexUrl = (data["qrcode_index_url"] as? JsonPrimitive)?.content.orEmpty()
         session.token = token
+        // 服务端说是不是 frontier 会话，轮询时原样带回
+        session.isFrontier = (data["is_frontier"] as? JsonPrimitive)?.booleanOrNull ?: false
         val scanUrl = officialScanUrl(indexUrl)
         return SodaQrCreateResult(
             token = token,
@@ -112,7 +128,7 @@ internal object SodaQrLogin {
             listOf(
                 "need_logo" to "false",
                 "need_short_url" to "false",
-                "is_frontier" to "true",
+                "is_frontier" to if (session.isFrontier) "true" else "false",
                 "token" to session.token,
                 "is_new_login" to "1",
                 "next" to API_BASE,
@@ -192,7 +208,7 @@ internal object SodaQrLogin {
             buildList {
                 add("need_logo" to "false")
                 add("need_short_url" to "false")
-                add("is_frontier" to "true")
+                add("is_frontier" to if (session.isFrontier) "true" else "false")
                 add("token" to session.token)
                 add("is_new_login" to "1")
                 add("next" to API_BASE)
@@ -426,9 +442,27 @@ internal object SodaQrLogin {
         }
     }
 
+    /**
+     * 设备身份数字串：纯数字且**首位非 0**（对齐 libresoda `Rng::digits`，
+     * 首位 `(byte % 8) + 1`）。首位 0 的 `device_id` 服务端不当合法身份。
+     */
     internal fun randomDigits(count: Int): String = buildString {
-        repeat(count) { append(('0' + random.nextInt(10))) }
+        append(('1' + random.nextInt(8)))
+        repeat(count - 1) { append(('0' + random.nextInt(10))) }
     }
+
+    /** 生成一份新的登录设备身份（16 位 / 15 位）；落盘那份由 AppStore 负责。 */
+    internal fun newLoginDevice(): Pair<String, String> = randomDigits(16) to randomDigits(15)
+
+    /**
+     * 落盘的身份能不能用：长度、纯数字、首位非 0（对齐 libresoda `QrDevice::is_valid`
+     * 加上 `generate()` 的首位约束）。不合法就重新生成，别把坏身份发给护照服务。
+     */
+    internal fun deviceIdentityValid(deviceId: String, installId: String): Boolean =
+        digitsValid(deviceId, 16) && digitsValid(installId, 15)
+
+    private fun digitsValid(value: String, length: Int): Boolean =
+        value.length == length && value.all { it in '0'..'9' } && value.first() != '0'
 
     /** msToken：88 字节 base64url（无填充）再补 "=="，对齐上游形态。纯 Kotlin 编码，单测可跑。 */
     internal fun randomMsToken(): String {

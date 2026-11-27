@@ -52,6 +52,7 @@ import com.mytv.mymusic.data.DOWNLOAD_FAILED
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.ListenTaskState
 import com.mytv.mymusic.data.native.SodaApplyFreeVipResult
+import com.mytv.mymusic.data.native.SodaLoginExpiredException
 import com.mytv.mymusic.data.native.SodaWelfareInfo
 import com.mytv.mymusic.data.native.SodaProvider
 import com.mytv.mymusic.data.native.SodaWelfare
@@ -350,6 +351,11 @@ data class MusicUiState(
     val loginStatus: String = "",
     val loginProviderId: String = "",
     val accountProfiles: Map<String, AccountProfile> = emptyMap(),
+    /**
+     * 登录态已失效的平台（汽水扫码会话过期后会出现在这里）：账号卡显示
+     * 「登录已过期，请重新扫码」，别让一行「已登录」挂在那儿。
+     */
+    val loginExpiredProviders: Set<String> = emptySet(),
     val sourcePickerTrack: CanonicalTrack? = null,
     val sourcePickerQueue: List<CanonicalTrack> = emptyList(),
     val sourcePickerBusy: String = "",
@@ -517,6 +523,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _accountProfiles = MutableStateFlow<Map<String, AccountProfile>>(emptyMap())
     val accountProfiles: StateFlow<Map<String, AccountProfile>> = _accountProfiles
     private val accountInfoJobs = ConcurrentHashMap<String, Job>()
+    /**
+     * 账号资料读取失败且原因是登录态失效的平台（汽水扫码会话几天后就会过期）。
+     * 设置页的账号卡据此显示「登录已过期，请重新扫码」；重新登上或换 Cookie 后清除。
+     */
+    private val _loginExpired = MutableStateFlow<Set<String>>(emptySet())
     /** 上次成功拉到的账号资料（落盘那份），用来判断要不要重新拉；内存里留一份不反复读盘。 */
     private var accountProfileCache: Map<String, CachedAccountProfile> = emptyMap()
 
@@ -625,10 +636,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         base,
         settingsState,
         _accountProfiles,
+        _loginExpired,
         com.mytv.mymusic.playback.CrossfadeStatus.report,
-    ) { ui, settings, profiles, report ->
+    ) { ui, settings, profiles, loginExpired, report ->
         ui.copy(
             crossfadeReport = report,
+            loginExpiredProviders = loginExpired,
             providerId = settings.provider,
             chartsSource = settings.chartsSource,
             playlistsSource = settings.playlistsSource,
@@ -778,6 +791,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     if (cookie.isBlank()) {
                         accountInfoJobs.remove(id)?.cancel()
                         _accountProfiles.update { it - id }
+                        _loginExpired.update { it - id }
                         accountProfileCache = accountProfileCache - id
                         viewModelScope.launch { app.accountProfiles.remove(id) }
                     } else {
@@ -4829,6 +4843,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             app.repository.customSourceFailure().takeIf { it.isNotBlank() }?.let { return "洛雪：$it" }
         }
         return when {
+            // 汽水扫码会话过期：把「请重新扫码」说到前面，技术原文只在日志里
+            reasons.any { it.contains("登录已过期") } ->
+                reasons.first { it.contains("登录已过期") }.substringBefore("（")
             reasons.any { it.contains("签名器") } -> reasons.first { it.contains("签名器") }
             reasons.any { it.contains("登录") || it.contains("会员") } -> "这首歌需要登录或会员后才能播放"
             reasons.any { it.contains("试听") } -> "只有试听片段可用，请在设置中允许试听"
@@ -6614,6 +6631,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (cookie.isBlank()) {
             accountInfoJobs.remove(providerId)?.cancel()
             _accountProfiles.update { it - providerId }
+            _loginExpired.update { it - providerId }
             accountProfileCache = accountProfileCache - providerId
             app.accountProfiles.remove(providerId)
         } else {
@@ -6640,7 +6658,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val cached = accountProfileCache[providerId]
             if (!force && cached != null && !cached.isStale()) return@launch
             repeat(ACCOUNT_INFO_ATTEMPTS) { attempt ->
-                val info = runCatching { app.repository.accountInfo(providerId, cookie) }.getOrNull()
+                // 直接找平台要：repository 那层把异常吞成 null，分不出「网络不通」和「登录已过期」
+                val result = runCatching {
+                    com.mytv.mymusic.data.native.NativeProviders.get(providerId)?.accountInfo(cookie)
+                }
+                val info = result.getOrNull()
+                val expired = result.exceptionOrNull() is SodaLoginExpiredException
+                // 只在「确定失效」时置位、「确定还好」时清除：网络不通不该把失效标记擦掉
+                if (expired) {
+                    _loginExpired.update { it + providerId }
+                } else if (info != null) {
+                    _loginExpired.update { it - providerId }
+                }
                 // 只要接口通了就算成功：Apple 只给订阅状态，昵称和头像是空的，
                 // 那种平台的昵称退回平台名，会员等级照样要显示出来
                 if (info != null) {
@@ -6682,6 +6711,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 else -> "汽水签名器已保存"
             },
         )
+    }
+
+    /**
+     * 重置汽水扫码登录的设备身份（passport 的 `device_id` / `install_id`）。
+     * 身份被服务端风控盯上时（扫码后一路 `error_code=7`、会话几天就失效）换一份新的；
+     * 换了之后当前登录态多半会失效，要重新扫码。
+     */
+    fun resetSodaLoginDevice() = viewModelScope.launch {
+        val (deviceId, installId) = app.settings.resetSodaLoginDevice()
+        SodaProvider.configureLoginDevice(deviceId, installId)
+        message("已重置汽水登录设备，下次扫码用新设备身份")
     }
 
     /**

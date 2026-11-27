@@ -344,6 +344,9 @@ class SettingsStore(private val context: Context) {
     private val playReportEnabledKey = booleanPreferencesKey("play_report_enabled")
     // 汽水上报用的设备标识：每次启动重新生成就没法积累口味，所以落盘
     private val sodaReportDeviceIdKey = stringPreferencesKey("soda_report_device_id")
+    // 汽水扫码登录的护照设备身份：和设备指纹是两套东西，落盘后所有二维码复用同一个
+    private val sodaLoginDeviceIdKey = stringPreferencesKey("soda_login_device_id")
+    private val sodaLoginInstallIdKey = stringPreferencesKey("soda_login_install_id")
     // 酷狗概念版「听歌领会员」：启动时自动领一天的开关，和上次自动领取的日期（只用来去重）
     private val kugouWelfareAutoKey = booleanPreferencesKey("kugou_welfare_auto")
     private val kugouWelfareLastDateKey = stringPreferencesKey("kugou_welfare_last_date")
@@ -418,6 +421,8 @@ class SettingsStore(private val context: Context) {
             miniPlayerTarget = values[miniPlayerTargetKey].toMiniPlayerTarget(),
             playReportEnabled = values[playReportEnabledKey] ?: true,
             sodaReportDeviceId = values[sodaReportDeviceIdKey] ?: "",
+            sodaLoginDeviceId = values[sodaLoginDeviceIdKey] ?: "",
+            sodaLoginInstallId = values[sodaLoginInstallIdKey] ?: "",
             kugouWelfareAuto = values[kugouWelfareAutoKey] ?: true,
             kugouWelfareLastClaimDate = values[kugouWelfareLastDateKey] ?: "",
             lyricStage = lyricStagePrefs(values),
@@ -518,6 +523,47 @@ class SettingsStore(private val context: Context) {
         val generated = java.util.UUID.randomUUID().toString().replace("-", "")
         context.dataStore.edit { it[sodaReportDeviceIdKey] = generated }
         return generated
+    }
+
+    /**
+     * 汽水扫码登录的护照设备身份（`device_id` 16 位 / `install_id` 15 位纯数字）：
+     * 第一次用随机值落盘，之后所有二维码复用同一个。
+     *
+     * 为什么必须持久化：汽水服务端按 `device_id` 做风控，同一个身份持续使用后才补发
+     * `odin_tt`；每次登录都换新设备会被当成新设备，扫码后容易 `error_code=7`，
+     * 拿到的会话也短命（对齐 libresoda `docs/QR-LOGIN.md` 与 sodam config 的
+     * `login_device_id`：退出登录不清除，只有显式重置才轮换）。
+     */
+    suspend fun sodaLoginDevice(): Pair<String, String> {
+        val current = context.dataStore.data.first()
+        val deviceId = current[sodaLoginDeviceIdKey]?.takeIf { it.isNotBlank() }
+        val installId = current[sodaLoginInstallIdKey]?.takeIf { it.isNotBlank() }
+        if (deviceId != null && installId != null) return deviceId to installId
+        val generated = randomLoginDeviceId(16) to randomLoginDeviceId(15)
+        context.dataStore.edit {
+            it[sodaLoginDeviceIdKey] = generated.first
+            it[sodaLoginInstallIdKey] = generated.second
+        }
+        return generated
+    }
+
+    /** 轮换登录设备身份：只在用户显式重置登录设备时调（风控被盯上时的一条出路）。 */
+    suspend fun resetSodaLoginDevice(): Pair<String, String> {
+        val generated = randomLoginDeviceId(16) to randomLoginDeviceId(15)
+        context.dataStore.edit {
+            it[sodaLoginDeviceIdKey] = generated.first
+            it[sodaLoginInstallIdKey] = generated.second
+        }
+        return generated
+    }
+
+    /** 纯数字、首位非 0（对齐 libresoda `QrDevice::generate` 的 `digits()`）。 */
+    private fun randomLoginDeviceId(length: Int): String {
+        val random = java.security.SecureRandom()
+        return buildString(length) {
+            append(1 + random.nextInt(8))
+            repeat(length - 1) { append(random.nextInt(10)) }
+        }
     }
     suspend fun lastSeed(value: Int) = context.dataStore.edit { it[lastSeedKey] = value }
     suspend fun sleepFade(value: Boolean) = context.dataStore.edit { it[sleepFadeKey] = value }
@@ -895,6 +941,12 @@ data class AppSettings(
     val playReportEnabled: Boolean = true,
     /** 汽水上报用的设备标识，空表示还没生成过（见 SettingsStore.sodaReportDeviceId）。 */
     val sodaReportDeviceId: String = "",
+    /**
+     * 汽水扫码登录的护照设备身份（`device_id` / `install_id`），空表示还没生成过
+     * （见 SettingsStore.sodaLoginDevice）。和设备指纹 [sodaReportDeviceId] 是两套东西。
+     */
+    val sodaLoginDeviceId: String = "",
+    val sodaLoginInstallId: String = "",
     /** 酷狗概念版「听歌领会员」是否在启动时自动领一天。 */
     val kugouWelfareAuto: Boolean = true,
     /** 上次自动领取的日期（北京时间 yyyy-MM-dd），空表示还没自动领过。 */
