@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
@@ -23,6 +22,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.mytv.mymusic.MyMusicApp
+import com.mytv.mymusic.ui.player.LyricFontRuntime
+import com.mytv.mymusic.ui.player.LyricFonts
+import com.mytv.mymusic.ui.player.styledLyricTypeface
 import com.mytv.mymusic.ui.theme.isTelevision
 import com.mytv.mymusic.widget.PlaybackSnapshot
 import com.mytv.mymusic.widget.WidgetHub
@@ -34,6 +36,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,6 +61,8 @@ class FloatingLyricsService : Service() {
     private var snapshot: PlaybackSnapshot? = null
     private var shown: FloatingLyricsContent? = null
     private var observersStarted = false
+    /** 设置里导入的歌词字体；换字体时跟着刷新。 */
+    private var lyricFont: LyricFontRuntime? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -99,6 +105,19 @@ class FloatingLyricsService : Service() {
                 delay(if (next == null) 500L else (next - now).coerceIn(40L, 500L))
             }
         }
+        val app = application as? MyMusicApp ?: return
+        scope.launch {
+            app.settings.state.map { it.lyricFonts }.distinctUntilChanged().collect { prefs ->
+                val font = withContext(Dispatchers.IO) { LyricFonts.resolve(this@FloatingLyricsService, prefs) }
+                lyricFont = font
+                applyLyricFont()
+            }
+        }
+    }
+
+    private fun applyLyricFont() {
+        primaryText?.typeface = styledLyricTypeface(lyricFont, 700)
+        secondaryText?.typeface = styledLyricTypeface(lyricFont, 400)
     }
 
     private fun showOverlay(): Boolean {
@@ -119,7 +138,7 @@ class FloatingLyricsService : Service() {
         val primary = TextView(this).apply {
             textSize = 20f
             setTextColor(Color.WHITE)
-            setTypeface(typeface, Typeface.BOLD)
+            setTypeface(styledLyricTypeface(lyricFont, 700))
             setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), TEXT_SHADOW)
             gravity = Gravity.CENTER_HORIZONTAL
             textAlignment = View.TEXT_ALIGNMENT_CENTER
@@ -129,6 +148,7 @@ class FloatingLyricsService : Service() {
         val secondary = TextView(this).apply {
             textSize = 13f
             setTextColor(SECONDARY)
+            setTypeface(styledLyricTypeface(lyricFont, 400))
             setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), TEXT_SHADOW)
             gravity = Gravity.CENTER_HORIZONTAL
             textAlignment = View.TEXT_ALIGNMENT_CENTER

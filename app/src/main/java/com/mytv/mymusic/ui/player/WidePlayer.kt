@@ -133,6 +133,7 @@ internal fun WidePlayer(
     notice: String,
     deepLink: String,
     actions: MusicActions,
+    floatingLyrics: Boolean,
     idle: IdleState,
     lyricsMode: Boolean,
     onLyricsMode: (Boolean) -> Unit,
@@ -195,7 +196,7 @@ internal fun WidePlayer(
                 {
                     if (showDefault) {
                         WideGuard(idle, lyricsMode, Modifier.graphicsLayer { alpha = defaultChrome() }) {
-                            MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
+                            MoreMenu(song, deepLink, actions, floatingLyrics, onOpenSource, onLyricsMode, onAddToPlaylist)
                         }
                     }
                 },
@@ -237,7 +238,7 @@ internal fun WidePlayer(
                                 ToolbarQueueButton(onOpenQueue)
                                 ToolbarSleepButton(sleep, onOpenTimer)
                                 ToolbarSourceButton(onOpenSource)
-                                MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
+                                MoreMenu(song, deepLink, actions, floatingLyrics, onOpenSource, onLyricsMode, onAddToPlaylist)
                             }
                         }
                     }

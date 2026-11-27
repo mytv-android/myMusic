@@ -255,6 +255,7 @@ class MusicActions(private val model: MusicViewModel) {
     val boundAccess: kotlinx.coroutines.flow.StateFlow<Map<String, BoundPlaylistAccess>>
         get() = model.boundAccess
     fun playDownload(record: DownloadRecord) = model.playDownloaded(record)
+    fun playDownloads(records: List<DownloadRecord>) = model.playDownloaded(records)
     fun deleteDownload(record: DownloadRecord) = model.deleteDownload(record)
     fun restoreEntry(entry: com.mytv.mymusic.data.PlaylistEntryEntity) =
         model.insertPlaylistEntry(entry.playlistId, entry.position, entry.songKey, entry.payload)

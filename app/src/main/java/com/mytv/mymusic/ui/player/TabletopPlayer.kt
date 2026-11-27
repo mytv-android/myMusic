@@ -108,6 +108,7 @@ internal fun TabletopPlayer(
     notice: String,
     deepLink: String,
     actions: MusicActions,
+    floatingLyrics: Boolean,
     top: TabletopTop,
     lyricsMode: Boolean,
     onLyricsMode: (Boolean) -> Unit,
@@ -151,7 +152,7 @@ internal fun TabletopPlayer(
         val policy = remember(frame, bottomChrome) { TabletopPolicy(frame, bottomChrome) }
         Layout(
             contents = listOf<@Composable () -> Unit>(
-                { TabletopTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, onClose, onOpenSource, onLyricsMode, onAddToPlaylist) },
+                { TabletopTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, floatingLyrics, onClose, onOpenSource, onLyricsMode, onAddToPlaylist) },
                 {
                     TabletopStage(
                         shown = shown,
@@ -190,7 +191,7 @@ internal fun TabletopPlayer(
                         ToolbarQueueButton(onOpenQueue)
                         ToolbarSleepButton(sleep, onOpenTimer)
                         ToolbarSourceButton(onOpenSource)
-                        MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
+                        MoreMenu(song, deepLink, actions, floatingLyrics, onOpenSource, onLyricsMode, onAddToPlaylist)
                     }
                 },
             ),
@@ -209,6 +210,7 @@ private fun TabletopTopBar(
     playbackMode: String,
     deepLink: String,
     actions: MusicActions,
+    floatingLyrics: Boolean,
     onClose: () -> Unit,
     onOpenSource: () -> Unit,
     onLyricsMode: (Boolean) -> Unit,
@@ -222,7 +224,7 @@ private fun TabletopTopBar(
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             SourcePill(song, sourceProvider, sourceDetail, playbackMode, onOpenSource)
         }
-        MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
+        MoreMenu(song, deepLink, actions, floatingLyrics, onOpenSource, onLyricsMode, onAddToPlaylist)
     }
 }
 

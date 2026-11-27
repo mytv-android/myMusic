@@ -110,6 +110,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
     composable("downloads") {
         val state by app.model.state.collectAsState()
         val downloads by app.model.downloads.collectAsState()
+        val localPlaylists by app.model.localPlaylists.collectAsState()
         // mediaCacheSize 会扫描缓存目录；用 produceState 放到后台，记录变化后再刷新
         val cacheBytes by produceState(initialValue = 0L, downloads) {
             value = app.model.mediaCacheSize()
@@ -118,6 +119,7 @@ fun NavGraphBuilder.libraryRoutes(app: AppNav) {
             state = state,
             downloads = downloads,
             cacheBytes = cacheBytes,
+            playlists = localPlaylists,
             actions = app.actions,
             onBack = app::back,
         )

@@ -6,7 +6,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import java.nio.charset.Charset
+import java.nio.file.Files
 
 class LocalLrcTest {
     private val lrc = "[ti:晴天]\n[ar:周杰伦]\n[00:12.30]故事的小黄花\n[00:15.80]从出生那年就飘着\n"
@@ -47,6 +49,21 @@ class LocalLrcTest {
         assertTrue(LocalLrc.looksLikeLrc("[1:02]x"))
         assertFalse(LocalLrc.looksLikeLrc("故事的小黄花\n从出生那年就飘着"))
         assertFalse(LocalLrc.looksLikeLrc("[ti:晴天]\n[ar:周杰伦]"))
+    }
+
+    @Test
+    fun writesAndReadsSidecarNextToAudio() {
+        val dir = Files.createTempDirectory("lyric-sidecar").toFile()
+        try {
+            val audio = File(dir, "Song[netease].flac").apply { writeText("audio") }
+            LocalLrc.writeSidecar(audio, lrc)
+            assertEquals(lrc, LocalLrc.readSidecar(audio))
+            // 重新下载却没拿到歌词：旧的那份要一起清掉，别让上一版的词继续出现
+            LocalLrc.writeSidecar(audio, "")
+            assertNull(LocalLrc.readSidecar(audio))
+        } finally {
+            dir.deleteRecursively()
+        }
     }
 
     @Test

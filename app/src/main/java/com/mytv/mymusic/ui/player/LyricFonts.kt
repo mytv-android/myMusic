@@ -19,7 +19,8 @@ internal class LyricFontRuntime(val family: FontFamily, val typeface: Typeface)
 internal val LocalLyricFont = staticCompositionLocalOf<LyricFontRuntime?> { null }
 
 internal object LyricFontRules {
-    const val MAX_BYTES = 30 * 1024 * 1024
+    /** 中日韩字体动辄二三十 MB，上限放宽到 128 MB；再大的多半不是字体文件。 */
+    const val MAX_BYTES = 128 * 1024 * 1024
     private val extensions = setOf("ttf", "otf", "ttc", "otc")
     fun supportedName(name: String): Boolean = name.substringAfterLast('.', "").lowercase() in extensions
 }
@@ -43,7 +44,7 @@ internal object LyricFonts {
                         val count = input.read(buffer)
                         if (count < 0) break
                         total += count
-                        if (total > LyricFontRules.MAX_BYTES) throw IllegalArgumentException("字体文件不能超过 30 MB")
+                        if (total > LyricFontRules.MAX_BYTES) throw IllegalArgumentException("字体文件不能超过 128 MB")
                         output.write(buffer, 0, count)
                     }
                 }

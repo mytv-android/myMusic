@@ -21,7 +21,7 @@ class LyricFontRulesTest {
     }
 
     @Test
-    fun importLimitIsThirtyMebibytes() {
-        assertEquals(30 * 1024 * 1024, LyricFontRules.MAX_BYTES)
+    fun importLimitAllowsLargeCjkFonts() {
+        assertEquals(128 * 1024 * 1024, LyricFontRules.MAX_BYTES)
     }
 }

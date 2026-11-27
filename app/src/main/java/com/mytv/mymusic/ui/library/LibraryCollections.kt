@@ -1,5 +1,6 @@
 package com.mytv.mymusic.ui.library
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,10 +26,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.Button
@@ -79,6 +82,7 @@ import com.mytv.mymusic.ui.EmptyState
 import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
+import com.mytv.mymusic.ui.PlaylistPickerSheet
 import com.mytv.mymusic.ui.TrackActionsSheet
 import com.mytv.mymusic.ui.adaptive.FoldRow
 import com.mytv.mymusic.ui.adaptive.LocalFoldPane
@@ -86,9 +90,14 @@ import com.mytv.mymusic.ui.adaptive.bottom
 import com.mytv.mymusic.ui.adaptive.top
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.PageScaffold
+import com.mytv.mymusic.ui.components.SelectionBar
+import com.mytv.mymusic.ui.components.SelectionMenu
+import com.mytv.mymusic.ui.components.SelectionPredictiveBack
+import com.mytv.mymusic.ui.components.SelectionState
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.SkeletonRows
 import com.mytv.mymusic.ui.components.SongRow
+import com.mytv.mymusic.ui.components.selectionBackPreview
 import com.mytv.mymusic.ui.components.SwipeDelete
 import com.mytv.mymusic.ui.components.rememberRowSwipe
 import com.mytv.mymusic.ui.local.LocalSongBadge
@@ -109,6 +118,7 @@ import java.io.File
 
 private enum class FavFilter(val label: String) { All("全部"), Downloaded("已下载"), Playable("可播放"), Recent("最近添加") }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FavoritesScreen(
     state: MusicUiState,
@@ -145,6 +155,7 @@ fun FavoritesScreen(
         }
     }
     val songs = remember(shown) { shown.map { it.second } }
+    val order = remember(songs) { songs.map { it.key } }
     // 摘要按输入缓存：不在每次重组时重新遍历收藏或计算已下载数量
     val latest = remember(favorites) { favorites.maxOfOrNull { it.updatedAt } ?: 0L }
     val downloadedCount = remember(all, downloaded) { all.count { it.second.key in downloaded } }
@@ -154,20 +165,53 @@ fun FavoritesScreen(
     }
     TvDefaultFocus(playFocus, favorites.isEmpty())
 
+    val selection = remember { SelectionState() }
+    LaunchedEffect(filter) { selection.exit() }
+    SelectionPredictiveBack(selection)
+    var pickerOpen by remember { mutableStateOf(false) }
+    val selectedPairs = { shown.filter { it.second.key in selection.selected } }
+    val selectedSongs = { selectedPairs().map { it.second } }
+
     val head: LazyListScope.() -> Unit = {
         item(key = "hero", contentType = "hero") {
             FavoritesHero(favorites.size, latest, downloadedCount)
         }
-        item(key = "buttons", contentType = "actions") {
-            PlayShuffleRow(
-                enabled = songs.isNotEmpty(),
-                onPlay = { actions.play(songs.first(), songs) },
-                onShuffle = { val list = songs.shuffled(); actions.play(list.first(), list) },
-                playModifier = Modifier.focusRequester(playFocus),
-            )
-        }
-        item(key = "filters", contentType = "filters") {
-            FilterRow(FavFilter.entries, filter, { it.label }) { filter = it }
+        if (selection.active) {
+            stickyHeader(key = "selection", contentType = "actions") {
+                SelectionBar(
+                    count = selection.selected.size,
+                    allSelected = order.isNotEmpty() && selection.selected.containsAll(order),
+                    onToggleAll = { selection.toggleAll(order) },
+                    onPlay = {
+                        val picked = selectedSongs()
+                        if (picked.isNotEmpty()) actions.play(picked.first(), picked)
+                    },
+                    onAddTo = { pickerOpen = true },
+                    onRemove = {
+                        val pairs = selectedPairs()
+                        pairs.forEach { (_, song) -> actions.favorite(song) }
+                        undo.show("已取消收藏 ${pairs.size} 首") { actions.restoreSaved(pairs.map { it.first }) }
+                        selection.exit()
+                    },
+                    removeLabel = "取消收藏",
+                    onRangeModeToggle = selection::toggleRangeMode,
+                    rangeMode = selection.rangeMode,
+                    onExit = { selection.exit() },
+                    modifier = Modifier.selectionBackPreview(selection),
+                )
+            }
+        } else {
+            item(key = "buttons", contentType = "actions") {
+                PlayShuffleRow(
+                    enabled = songs.isNotEmpty(),
+                    onPlay = { actions.play(songs.first(), songs) },
+                    onShuffle = { val list = songs.shuffled(); actions.play(list.first(), list) },
+                    playModifier = Modifier.focusRequester(playFocus),
+                )
+            }
+            item(key = "filters", contentType = "filters") {
+                FilterRow(FavFilter.entries, filter, { it.label }) { filter = it }
+            }
         }
     }
     val list: LazyListScope.() -> Unit = {
@@ -186,30 +230,47 @@ fun FavoritesScreen(
             key = { _, it -> "fav:${it.first.key}" },
             contentType = { _, _ -> "song" },
         ) { index, (saved, song) ->
+            val picking = selection.active
+            val isSelected = picking && song.key in selection.selected
             val display = localDisplay(song)
             val local = localCopies(song)
+            val rowSwipe = rememberRowSwipe(
+                song,
+                songs,
+                delete = SwipeDelete("取消收藏", "取消收藏", sameAsUnfavorite = true) { unfavorite(saved, song) },
+            )
             SongRow(
                 title = display.title,
                 subtitle = if (local != null) localSubtitle(display, local) else listOf(song.artist, sourceLabel(song)).filter { it.isNotBlank() }.joinToString(" · "),
                 cover = display.cover,
                 index = index,
                 count = shown.size,
-                onClick = { if (!unplayable.intercept(song, local)) actions.play(song, songs) },
+                onClick = {
+                    if (picking) selection.tap(song.key, order)
+                    else if (!unplayable.intercept(song, local)) actions.play(song, songs)
+                },
+                container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                 playing = state.current?.key == song.key,
                 dimmed = local?.gone == true,
                 badges = local?.let { copy -> { LocalSongBadge(copy) } },
-                trailing = {
-                    IconButton(onClick = { unfavorite(saved, song) }, modifier = Modifier.tvFocusRing(CircleShape)) {
-                        Icon(Icons.Filled.Favorite, "取消收藏“${song.title}”", tint = MaterialTheme.colorScheme.primary)
-                    }
+                trailing = when {
+                    picking -> ({
+                        Icon(
+                            if (isSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                            contentDescription = if (isSelected) "取消选择“${song.title}”" else "选择“${song.title}”",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    })
+                    else -> ({
+                        IconButton(onClick = { unfavorite(saved, song) }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                            Icon(Icons.Filled.Favorite, "取消收藏“${song.title}”", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    })
                 },
-                onMore = { actionSong = saved to song },
+                onMore = if (picking) null else ({ actionSong = saved to song }),
+                onLongClick = if (picking) null else ({ selection.enter(song.key) }),
                 // 收藏里「删除」就是取消收藏（和行尾的心一样带撤销）；两个都露出来时只留一个
-                swipe = rememberRowSwipe(
-                    song,
-                    songs,
-                    delete = SwipeDelete("取消收藏", "取消收藏", sameAsUnfavorite = true) { unfavorite(saved, song) },
-                ),
+                swipe = if (picking) null else rowSwipe,
                 // 行尾的心本身是按钮：悬停按钮插在它前面，不替换
                 hoverReplacesTrailing = false,
             )
@@ -217,7 +278,14 @@ fun FavoritesScreen(
     }
 
     Box(Modifier.fillMaxSize()) {
-        PageScaffold(title = "喜欢", subtitle = if (window.isTv) "${all.size} 首 · 只保存在本机" else "", onBack = onBack) { padding ->
+        PageScaffold(
+            title = "喜欢",
+            subtitle = if (window.isTv) "${all.size} 首 · 只保存在本机" else "",
+            onBack = onBack,
+            actions = {
+                if (!selection.active && songs.isNotEmpty()) SelectionMenu { selection.start() }
+            },
+        ) { padding ->
             when {
                 favorites.isEmpty() && !settled -> SkeletonRows(6, Modifier.padding(padding).padding(horizontal = window.gutter))
                 favorites.isEmpty() -> CenteredEmpty(padding, playFocus) {
@@ -249,6 +317,20 @@ fun FavoritesScreen(
         removeSummary = "所有设备上都会取消",
         onRemove = { song -> all.firstOrNull { it.second.key == song.key }?.let { (saved, item) -> unfavorite(saved, item) } },
     )
+    if (pickerOpen) {
+        PlaylistPickerSheet(
+            playlists = playlists,
+            onPick = { id ->
+                actions.addSongsToPlaylist(id, selectedSongs())
+                selection.exit()
+            },
+            onCreate = { name ->
+                actions.addSongsToNewPlaylist(name, selectedSongs())
+                selection.exit()
+            },
+            onDismiss = { pickerOpen = false },
+        )
+    }
     actionSong?.let { (saved, song) ->
         TrackActionsSheet(
             song = song,
@@ -297,6 +379,7 @@ private fun FavoritesHero(count: Int, latest: Long, downloaded: Int) {
 
 // ======================= 最近播放 =======================
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HistoryScreen(
     state: MusicUiState,
@@ -354,6 +437,40 @@ fun HistoryScreen(
         }
     }
 
+    val selection = remember { SelectionState() }
+    SelectionPredictiveBack(selection)
+    var pickerOpen by remember { mutableStateOf(false) }
+    val order = remember(queue) { queue.map { it.key } }
+    val selectedSongs = { queue.filter { it.key in selection.selected } }
+    val selectedSaved = { selectedSongs().mapNotNull { song -> history.firstOrNull { it.key == song.key } } }
+    val selectionHead: LazyListScope.() -> Unit = {
+        if (selection.active) {
+            stickyHeader(key = "selection", contentType = "actions") {
+                SelectionBar(
+                    count = selection.selected.size,
+                    allSelected = order.isNotEmpty() && selection.selected.containsAll(order),
+                    onToggleAll = { selection.toggleAll(order) },
+                    onPlay = {
+                        val picked = selectedSongs()
+                        if (picked.isNotEmpty()) actions.play(picked.first(), picked)
+                    },
+                    onAddTo = { pickerOpen = true },
+                    onRemove = {
+                        val saved = selectedSaved()
+                        saved.forEach { actions.removePlayHistory(it.key) }
+                        undo.show("已从最近播放删除 ${saved.size} 条") { actions.restoreSaved(saved) }
+                        selection.exit()
+                    },
+                    removeLabel = "删除",
+                    onRangeModeToggle = selection::toggleRangeMode,
+                    rangeMode = selection.rangeMode,
+                    onExit = { selection.exit() },
+                    modifier = Modifier.selectionBackPreview(selection),
+                )
+            }
+        }
+    }
+
     fun LazyListScope.group(label: String, items: List<Pair<SavedSong, Song>>, focusFirst: Boolean) {
         item(key = "day:$label", contentType = "header") { DayLabel(label) }
         itemsIndexed(
@@ -361,31 +478,48 @@ fun HistoryScreen(
             key = { _, it -> "hist:${it.first.key}" },
             contentType = { _, _ -> "song" },
         ) { index, (saved, song) ->
+            val picking = selection.active
+            val isSelected = picking && saved.key in selection.selected
             val display = localDisplay(song)
             val local = localCopies(song)
+            // 左滑「删除」= 删这条记录，和 ⋮ 面板里的「从最近播放删除」同一份（撤销按原时间写回）
+            val rowSwipe = rememberRowSwipe(song, queue, delete = SwipeDelete("删除", "从最近播放删除") { removeOne(saved, song) })
             SongRow(
                 title = display.title,
                 subtitle = if (local != null) localSubtitle(display, local) else song.artist.ifBlank { song.album },
                 cover = display.cover,
                 index = index,
                 count = items.size,
-                onClick = { if (!unplayable.intercept(song, local)) actions.play(song, queue) },
+                onClick = {
+                    if (picking) selection.tap(saved.key, order)
+                    else if (!unplayable.intercept(song, local)) actions.play(song, queue)
+                },
+                container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                 modifier = Modifier
                     .then(if (focusFirst && index == 0) Modifier.focusRequester(firstRow) else Modifier)
                     .then(if (refocus?.second == saved.key) Modifier.focusRequester(refocusRow) else Modifier),
                 playing = state.current?.key == song.key,
                 dimmed = local?.gone == true,
                 badges = local?.let { copy -> { LocalSongBadge(copy) } },
-                trailing = {
-                    Text(
-                        timeLabel(saved.updatedAt),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                trailing = when {
+                    picking -> ({
+                        Icon(
+                            if (isSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                            contentDescription = if (isSelected) "取消选择“${song.title}”" else "选择“${song.title}”",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    })
+                    else -> ({
+                        Text(
+                            timeLabel(saved.updatedAt),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    })
                 },
-                onMore = { actionItem = saved to song },
-                // 左滑「删除」= 删这条记录，和 ⋮ 面板里的「从最近播放删除」同一份（撤销按原时间写回）
-                swipe = rememberRowSwipe(song, queue, delete = SwipeDelete("删除", "从最近播放删除") { removeOne(saved, song) }),
+                onMore = if (picking) null else ({ actionItem = saved to song }),
+                onLongClick = if (picking) null else ({ selection.enter(saved.key) }),
+                swipe = if (picking) null else rowSwipe,
             )
         }
     }
@@ -406,7 +540,7 @@ fun HistoryScreen(
             subtitle = if (window.isTv) "只保存在本机" else "",
             onBack = onBack,
             actions = {
-                if (history.isNotEmpty()) {
+                if (history.isNotEmpty() && !selection.active) {
                     TextButton(
                         onClick = {
                             val snapshot = history
@@ -415,6 +549,7 @@ fun HistoryScreen(
                         },
                         modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
                     ) { Text("清除") }
+                    SelectionMenu { selection.start() }
                 }
             },
         ) { padding ->
@@ -432,6 +567,7 @@ fun HistoryScreen(
                     padding,
                     if (window.isTv) 420.dp else 400.dp,
                     left = {
+                        selectionHead()
                         note()
                         groups.firstOrNull()?.let { group(it.label, it.items, focusFirst = true) }
                     },
@@ -455,6 +591,7 @@ fun HistoryScreen(
                     contentPadding = padding.withGutter(window.gutter),
                     verticalArrangement = Arrangement.spacedBy(SegmentGap),
                 ) {
+                    selectionHead()
                     note()
                     groups.forEachIndexed { index, day -> group(day.label, day.items, focusFirst = index == 0) }
                 }
@@ -462,6 +599,20 @@ fun HistoryScreen(
         }
     }
 
+    if (pickerOpen) {
+        PlaylistPickerSheet(
+            playlists = playlists,
+            onPick = { id ->
+                actions.addSongsToPlaylist(id, selectedSongs())
+                selection.exit()
+            },
+            onCreate = { name ->
+                actions.addSongsToNewPlaylist(name, selectedSongs())
+                selection.exit()
+            },
+            onDismiss = { pickerOpen = false },
+        )
+    }
     // 放不了的本地歌：面板里除了“找一首平台版本”，也能删掉这条记录
     LocalUnplayableSheets(
         host = unplayable,
@@ -495,11 +646,13 @@ fun HistoryScreen(
 
 // ======================= 下载 =======================
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DownloadsScreen(
     state: MusicUiState,
     downloads: List<DownloadRecord>,
     cacheBytes: Long,
+    playlists: List<LocalPlaylistSummary>,
     actions: MusicActions,
     onBack: () -> Unit,
 ) {
@@ -534,7 +687,31 @@ fun DownloadsScreen(
     val doneBytes = prepared.sections.doneBytes
     TvDefaultFocus(firstRow, done.isEmpty() && failed.isEmpty())
 
+    val selection = remember { SelectionState() }
+    SelectionPredictiveBack(selection)
+    var pickerOpen by remember { mutableStateOf(false) }
+    var bulkDeleting by remember { mutableStateOf<List<DownloadRecord>?>(null) }
+    val order = remember(doneSongs) { doneSongs.map { it.key } }
+    val selectedItems = { done.filter { it.record.key in selection.selected } }
+
     val summary: LazyListScope.() -> Unit = {
+        if (selection.active) {
+            stickyHeader(key = "selection", contentType = "actions") {
+                SelectionBar(
+                    count = selection.selected.size,
+                    allSelected = order.isNotEmpty() && selection.selected.containsAll(order),
+                    onToggleAll = { selection.toggleAll(order) },
+                    onPlay = { actions.playDownloads(selectedItems().map { it.record }) },
+                    onAddTo = { pickerOpen = true },
+                    onRemove = { bulkDeleting = selectedItems().map { it.record } },
+                    removeLabel = "删除",
+                    onRangeModeToggle = selection::toggleRangeMode,
+                    rangeMode = selection.rangeMode,
+                    onExit = { selection.exit() },
+                    modifier = Modifier.selectionBackPreview(selection),
+                )
+            }
+        }
         item(key = "usage", contentType = "usage") { StorageCard(done.size, doneBytes, cacheBytes, freeBytes) }
         if (active.isNotEmpty()) {
             item(key = "activeHead", contentType = "header") { DayLabel("正在下载") }
@@ -564,7 +741,7 @@ fun DownloadsScreen(
                     index = index,
                     count = failed.size,
                     // 失败记录点按直接重下；电视菜单键或行尾按钮删除这条记录
-                    onClick = { actions.download(item.song) },
+                    onClick = { if (!selection.active) actions.download(item.song) },
                     modifier = Modifier
                         .then(if (index == 0) Modifier.focusRequester(firstRow) else Modifier)
                         .onPreviewKeyEvent { event ->
@@ -597,23 +774,33 @@ fun DownloadsScreen(
             }
         }
         itemsIndexed(done, key = { _, it -> "done:${it.record.key}" }, contentType = { _, _ -> "download" }) { index, item ->
+            val picking = selection.active
+            val isSelected = picking && item.record.key in selection.selected
             // 显示磁盘上文件的真实后缀：记录里的 Song 可能是下载前的搜索元数据，
             // 平台标称无损、账号实际只拿到 mp3 时，两者会对不上。
             val fileExt = File(item.record.path).extension.uppercase().ifBlank { item.song.ext.uppercase() }
             val detail = if (item.missing) "文件已不存在" else listOf(fileExt, formatBytes(item.size))
                 .filter { it.isNotBlank() }.joinToString(" · ")
+            val rowSwipe = rememberRowSwipe(
+                item.song,
+                doneSongs,
+                delete = SwipeDelete("删文件", "删除下载文件", icon = Icons.Outlined.Delete) { deleting = item.record },
+            )
             SongRow(
                 title = item.song.title,
                 subtitle = listOf(item.song.artist, detail).filter { it.isNotBlank() }.joinToString(" · "),
                 cover = item.song.cover,
                 index = index,
                 count = done.size,
-                onClick = { actions.playDownload(item.record) },
+                onClick = {
+                    if (picking) selection.tap(item.record.key, order) else actions.playDownload(item.record)
+                },
+                container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                 // 电视：菜单键删除文件；其余设备用行尾的删除按钮
                 modifier = Modifier
                     .then(if (index == 0 && failed.isEmpty()) Modifier.focusRequester(firstRow) else Modifier)
                     .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown && event.key == Key.Menu) {
+                        if (!picking && event.type == KeyEventType.KeyDown && event.key == Key.Menu) {
                             deleting = item.record
                             true
                         } else {
@@ -621,23 +808,36 @@ fun DownloadsScreen(
                         }
                     },
                 playing = state.current?.key == item.song.key,
-                trailing = {
-                    IconButton(onClick = { deleting = item.record }, modifier = Modifier.tvFocusRing(CircleShape)) {
-                        Icon(Icons.Outlined.Delete, "删除“${item.song.title}”的下载文件", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                trailing = when {
+                    picking -> ({
+                        Icon(
+                            if (isSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                            contentDescription = if (isSelected) "取消选择“${item.song.title}”" else "选择“${item.song.title}”",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    })
+                    else -> ({
+                        IconButton(onClick = { deleting = item.record }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                            Icon(Icons.Outlined.Delete, "删除“${item.song.title}”的下载文件", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    })
                 },
+                onLongClick = if (picking) null else ({ selection.enter(item.record.key) }),
                 // 「删除」在下载里是删文件：和行尾按钮一样先弹确认框
-                swipe = rememberRowSwipe(
-                    item.song,
-                    doneSongs,
-                    delete = SwipeDelete("删文件", "删除下载文件", icon = Icons.Outlined.Delete) { deleting = item.record },
-                ),
+                swipe = if (picking) null else rowSwipe,
                 hoverReplacesTrailing = false,
             )
         }
     }
 
-    PageScaffold(title = "下载", subtitle = if (window.isTv) "失败项点按重试，菜单键删除" else "", onBack = onBack) { padding ->
+    PageScaffold(
+        title = "下载",
+        subtitle = if (window.isTv) "失败项点按重试，菜单键删除" else "",
+        onBack = onBack,
+        actions = {
+            if (!selection.active && done.isNotEmpty()) SelectionMenu { selection.start() }
+        },
+    ) { padding ->
         when {
             downloads.isEmpty() && !settled -> SkeletonRows(6, Modifier.padding(padding).padding(horizontal = window.gutter))
             downloads.isEmpty() -> CenteredEmpty(padding) {
@@ -671,6 +871,34 @@ fun DownloadsScreen(
             danger = true,
             onConfirm = { actions.deleteDownload(record) },
             onDismiss = { deleting = null },
+        )
+    }
+    bulkDeleting?.let { records ->
+        ConfirmDialog(
+            title = "删除下载文件",
+            message = "会删除这 ${records.size} 首的音频文件和歌词，不影响收藏和歌单。",
+            confirmLabel = "删除",
+            danger = true,
+            onConfirm = {
+                records.forEach(actions::deleteDownload)
+                selection.exit()
+                bulkDeleting = null
+            },
+            onDismiss = { bulkDeleting = null },
+        )
+    }
+    if (pickerOpen) {
+        PlaylistPickerSheet(
+            playlists = playlists,
+            onPick = { id ->
+                actions.addSongsToPlaylist(id, selectedItems().map { it.song })
+                selection.exit()
+            },
+            onCreate = { name ->
+                actions.addSongsToNewPlaylist(name, selectedItems().map { it.song })
+                selection.exit()
+            },
+            onDismiss = { pickerOpen = false },
         )
     }
 }

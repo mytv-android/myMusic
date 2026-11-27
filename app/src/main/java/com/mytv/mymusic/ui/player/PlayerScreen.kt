@@ -1,6 +1,10 @@
 package com.mytv.mymusic.ui.player
 
 import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import com.mytv.mymusic.overlay.FloatingLyricsService
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.IconToggleButtonShapes
@@ -52,6 +56,7 @@ import com.mytv.mymusic.ui.player.share.pickLines
 import com.mytv.mymusic.ui.player.share.shareLink
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import com.mytv.mymusic.ui.theme.LocalSeedColor
+import com.mytv.mymusic.ui.theme.isTelevision
 import com.mytv.mymusic.ui.AddToPlaylistSheet
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
@@ -448,6 +453,7 @@ fun PlayerScreen(
                     notice = state.playbackNotice,
                     deepLink = state.deepLink,
                     actions = actions,
+                    floatingLyrics = state.floatingLyricsEnabled,
                     top = state.tabletopTop,
                     lyricsMode = lyricsMode,
                     onLyricsMode = { lyricsMode = it },
@@ -480,6 +486,7 @@ fun PlayerScreen(
                     notice = state.playbackNotice,
                     deepLink = state.deepLink,
                     actions = actions,
+                    floatingLyrics = state.floatingLyricsEnabled,
                     idle = idle,
                     lyricsMode = lyricsMode,
                     onLyricsMode = { lyricsMode = it },
@@ -512,6 +519,7 @@ fun PlayerScreen(
                     notice = state.playbackNotice,
                     deepLink = state.deepLink,
                     actions = actions,
+                    floatingLyrics = state.floatingLyricsEnabled,
                     idle = idle,
                     lyricsMode = lyricsMode,
                     onLyricsMode = { lyricsMode = it },
@@ -620,10 +628,16 @@ internal fun MoreMenu(
     song: Song,
     deepLink: String,
     actions: MusicActions,
+    floatingLyrics: Boolean,
     onOpenSource: () -> Unit,
     onLyricsMode: (Boolean) -> Unit,
     onAddToPlaylist: () -> Unit,
 ) {
+    val context = LocalContext.current
+    // 开桌面歌词要先有悬浮窗权限：没有就跳系统授权页，回来再开
+    val overlayPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (FloatingLyricsService.hasPermission(context)) actions.setFloatingLyricsEnabled(true)
+    }
     var open by remember { mutableStateOf(false) }
     var commentsOpen by remember(song.key) { mutableStateOf(false) }
     if (commentsOpen) CommentsSheet(song, actions, onDismiss = { commentsOpen = false })
@@ -631,6 +645,21 @@ internal fun MoreMenu(
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, "更多", tint = MaterialTheme.colorScheme.onSurface) }
         DropdownMenu(open, onDismissRequest = { open = false }, shape = RoundedCornerShape(20.dp)) {
             DropdownMenuItem(text = { Text("全屏歌词") }, leadingIcon = { Icon(Icons.Filled.Lyrics, null) }, onClick = { open = false; onLyricsMode(true) })
+            if (!context.isTelevision()) {
+                DropdownMenuItem(
+                    text = { Text(if (floatingLyrics) "关闭桌面歌词" else "开启桌面歌词") },
+                    leadingIcon = { Icon(Icons.Filled.Lyrics, null) },
+                    onClick = {
+                        open = false
+                        when {
+                            floatingLyrics -> actions.setFloatingLyricsEnabled(false)
+                            FloatingLyricsService.hasPermission(context) -> actions.setFloatingLyricsEnabled(true)
+                            else -> runCatching { overlayPicker.launch(FloatingLyricsService.permissionIntent(context)) }
+                                .onFailure { actions.setFloatingLyricsEnabled(true) }
+                        }
+                    },
+                )
+            }
             // 收起播放页，露出队列海报墙
             DropdownMenuItem(text = { Text("海报墙") }, leadingIcon = { Icon(Icons.Filled.GridView, null) }, onClick = { open = false; actions.openPosterWall() })
             DropdownMenuItem(text = { Text("选择音源") }, leadingIcon = { Icon(Icons.Filled.SwapHoriz, null) }, onClick = { open = false; onOpenSource() })

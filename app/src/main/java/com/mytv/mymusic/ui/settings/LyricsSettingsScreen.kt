@@ -296,7 +296,7 @@ internal fun LyricsSettingsScreen(
             }
         }
         item(key = "fontNote", contentType = "note") {
-            SettingsNote("支持 TTF、OTF、TTC、OTC，单个文件不超过 30 MB；字体只保存在本机并用于播放页歌词与动画预览。Android 10 及以上完整支持逐字回退，旧版本个别动画仅使用首选字体。")
+            SettingsNote("支持 TTF、OTF、TTC、OTC，单个文件不超过 128 MB；字体只保存在本机并用于播放页歌词、桌面歌词与动画预览。Android 10 及以上完整支持逐字回退，旧版本个别动画仅使用首选字体。")
         }
         item(key = "sublineHead", contentType = "sectionHeader") { SectionLabel("歌词下面那一行") }
         item(key = "subline", contentType = "toggleGroup") {

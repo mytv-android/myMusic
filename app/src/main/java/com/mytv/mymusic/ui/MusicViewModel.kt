@@ -101,6 +101,7 @@ import com.mytv.mymusic.data.SavedSongTombstone
 import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.local.LOCAL_SOURCE
+import com.mytv.mymusic.data.local.LocalLrc
 import com.mytv.mymusic.data.local.LocalLibrary
 import com.mytv.mymusic.data.metadata.CommunityMetadata
 import com.mytv.mymusic.ui.player.LyricFonts
@@ -3736,8 +3737,39 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         dao.saveDownload(
             DownloadRecord(song.key, json.encodeToString(stored), file.absolutePath, DOWNLOAD_DONE, System.currentTimeMillis())
         )
-        if (previous != null && previous.path != file.absolutePath) File(previous.path).delete()
+        if (previous != null && previous.path != file.absolutePath) {
+            File(previous.path).delete()
+            LocalLrc.writeSidecar(File(previous.path), "")
+        }
         message("已下载「${song.title}」（${extensionOf(streamUrl).uppercase(Locale.ROOT)}）")
+        // 歌词跟着一起存到音频旁边：断网时从本机文件放也能出词
+        val lyric = try {
+            downloadLyricFor(ready.source.song)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Exception) {
+            ""
+        }
+        LocalLrc.writeSidecar(file, lyric)
+    }
+
+    /** 下载时顺手取歌词；平台没有再用公共歌词兜底。取不到就留空，不影响下载结果。 */
+    private suspend fun downloadLyricFor(song: Song): String {
+        val fromProvider = try {
+            app.repository.lyrics(song, cookieFor(song.source))
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Exception) {
+            ""
+        }
+        if (fromProvider.isNotBlank() || !settingsState.value.metadataFallback) return fromProvider
+        return try {
+            CommunityMetadata.fetch(song, needLyrics = true, needCover = false)?.lyrics.orEmpty()
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     /** 下载失败留下一条可见的记录，下载页能提示原因并直接重试；上一次已经下好的保持原样。 */
@@ -3768,7 +3800,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteDownload(record: DownloadRecord) = viewModelScope.launch {
-        if (record.path.isNotBlank()) File(record.path).delete()
+        if (record.path.isNotBlank()) {
+            File(record.path).delete()
+            LocalLrc.writeSidecar(File(record.path), "")
+        }
         app.database.dao().deleteDownload(record.key)
     }
 
@@ -3780,6 +3815,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         play(song.copy(url = Uri.fromFile(file).toString()), listOf(song))
+    }
+
+    /** 多选下载播放：按列表顺序排队，文件已不在的跳过。 */
+    fun playDownloaded(records: List<DownloadRecord>) {
+        val songs = records.mapNotNull { record ->
+            val file = File(record.path)
+            if (!file.exists() || file.length() <= 0L) null
+            else record.song(json).copy(url = Uri.fromFile(file).toString())
+        }
+        if (songs.isEmpty()) {
+            message("本地文件已不存在", error = true)
+            return
+        }
+        if (songs.size < records.size) message("有 ${records.size - songs.size} 首的本地文件已不存在，已跳过")
+        play(songs.first(), songs)
     }
 
     // ---------- playback ----------
@@ -4678,7 +4728,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // 快速切歌时上一首的请求可能比新歌晚返回，只保留最新一次
         lyricsJob?.cancel()
         lyricsJob = viewModelScope.launch {
-            val nativeLyrics = try {
+            // 下载的歌把歌词存成了同名 .lrc：先从本机读，断网也能出词
+            val downloadFile = if (song.source == LOCAL_SOURCE) null else downloadFilePath(song)
+            val savedLyrics = downloadFile?.let { withContext(Dispatchers.IO) { LocalLrc.readSidecar(it) } }
+            val nativeLyrics = savedLyrics ?: try {
                 // 本地歌：同名 .lrc 或匹配到的平台的歌词，由本地音乐库决定用哪份
                 if (song.source == LOCAL_SOURCE) {
                     app.localLibrary.lyrics(song, settingsState.value.cookies)
@@ -4701,6 +4754,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val state = base.value
             val currentSong = state.current ?: return@launch
             if (currentSong.key != song.key) return@launch
+            val finalLyrics = nativeLyrics.ifBlank { fallback?.lyrics.orEmpty() }
+            // 在线播这首下载歌时顺手把歌词补存下来，老下载不用重下也能离线看词
+            if (downloadFile != null && savedLyrics == null && finalLyrics.isNotBlank()) {
+                withContext(Dispatchers.IO) { LocalLrc.writeSidecar(downloadFile, finalLyrics) }
+            }
             val cover = fallback?.cover.orEmpty()
             val current = if (cover.isNotBlank()) currentSong.copy(cover = cover) else currentSong
             val currentSource = state.currentSource?.let { source ->
@@ -4714,10 +4772,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 currentSource = currentSource,
                 currentTrack = currentTrack,
                 queue = if (cover.isBlank()) state.queue else state.queue.map { if (it.key == song.key) it.copy(cover = cover) else it },
-                lyrics = nativeLyrics.ifBlank { fallback?.lyrics.orEmpty() },
+                lyrics = finalLyrics,
                 lyricsKey = song.key,
             )
         }
+    }
+
+    /** 正在放的是下载完成的本机文件时，返回音频文件本身（歌词就在它旁边）。 */
+    private fun downloadFilePath(song: Song): File? {
+        if (!song.url.startsWith("file:")) return null
+        val path = Uri.parse(song.url).path ?: return null
+        return File(path)
     }
 
     /** 评论始终落到实际平台曲目上；本地歌先取用户已经选好的平台匹配。 */

@@ -1,5 +1,6 @@
 package com.mytv.mymusic.data.local
 
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
@@ -48,4 +49,28 @@ object LocalLrc {
 
     /** 至少有一个时间标签才算 LRC；纯文本歌词放到滚动歌词里没法对时间，不用。 */
     fun looksLikeLrc(text: String): Boolean = timeTag.containsMatchIn(text)
+
+    /** 读 [audio] 旁边的同名 .lrc（下载时一起存下来的那份）。 */
+    fun readSidecar(audio: File): String? {
+        val dir = audio.parentFile ?: return null
+        val name = findSidecar(audio.name, dir.list()?.toList().orEmpty()) ?: return null
+        val file = File(dir, name)
+        if (file.length() > MAX_BYTES) return null
+        val bytes = runCatching { file.inputStream().use { it.readBytes() } }.getOrNull() ?: return null
+        return decode(bytes).takeIf { it.isNotBlank() }
+    }
+
+    /** 下载完成后把歌词写到音频旁边；[text] 为空时删掉旧的那份。 */
+    fun writeSidecar(audio: File, text: String) {
+        val dir = audio.parentFile ?: return
+        val file = File(dir, sidecarName(audio.name))
+        if (text.isBlank()) {
+            file.delete()
+            return
+        }
+        runCatching {
+            dir.mkdirs()
+            file.writeText(text, Charsets.UTF_8)
+        }
+    }
 }

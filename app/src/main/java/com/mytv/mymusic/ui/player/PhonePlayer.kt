@@ -111,6 +111,7 @@ internal fun PhonePlayer(
     notice: String,
     deepLink: String,
     actions: MusicActions,
+    floatingLyrics: Boolean,
     idle: IdleState,
     lyricsMode: Boolean,
     onLyricsMode: (Boolean) -> Unit,
@@ -164,9 +165,9 @@ internal fun PhonePlayer(
             {
                 if (showDefault) {
                     if (short) {
-                        PhoneShortTopBar(song, sleep, deepLink, actions, onClose, onOpenSource, onLyricsMode, onOpenQueue, onOpenTimer, onAddToPlaylist, idle, lyricsMode, chromeAlpha)
+                        PhoneShortTopBar(song, sleep, deepLink, actions, floatingLyrics, onClose, onOpenSource, onLyricsMode, onOpenQueue, onOpenTimer, onAddToPlaylist, idle, lyricsMode, chromeAlpha)
                     } else {
-                        PhoneTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, onClose, onOpenSource, onLyricsMode, onAddToPlaylist, idle, lyricsMode, chromeAlpha)
+                        PhoneTopBar(song, sourceProvider, sourceDetail, playbackMode, deepLink, actions, floatingLyrics, onClose, onOpenSource, onLyricsMode, onAddToPlaylist, idle, lyricsMode, chromeAlpha)
                     }
                 }
             },
@@ -186,6 +187,7 @@ internal fun PhonePlayer(
                         sleep = sleep,
                         deepLink = deepLink,
                         actions = actions,
+                        floatingLyrics = floatingLyrics,
                         idle = idle,
                         blocked = lyricsMode,
                         alpha = chromeAlpha,
@@ -271,6 +273,7 @@ private fun PhoneTopBar(
     playbackMode: String,
     deepLink: String,
     actions: MusicActions,
+    floatingLyrics: Boolean,
     onClose: () -> Unit,
     onOpenSource: () -> Unit,
     onLyricsMode: (Boolean) -> Unit,
@@ -289,7 +292,7 @@ private fun PhoneTopBar(
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 SourcePill(song, sourceProvider, sourceDetail, playbackMode, onOpenSource)
             }
-            MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
+            MoreMenu(song, deepLink, actions, floatingLyrics, onOpenSource, onLyricsMode, onAddToPlaylist)
         }
     }
 }
@@ -301,6 +304,7 @@ private fun PhoneShortTopBar(
     sleep: SleepTimerState,
     deepLink: String,
     actions: MusicActions,
+    floatingLyrics: Boolean,
     onClose: () -> Unit,
     onOpenSource: () -> Unit,
     onLyricsMode: (Boolean) -> Unit,
@@ -321,7 +325,7 @@ private fun PhoneShortTopBar(
             ToolbarLyricsButton(on = false, onToggle = onLyricsMode)
             ToolbarQueueButton(onOpenQueue)
             ToolbarSleepButton(sleep, onOpenTimer)
-            MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
+            MoreMenu(song, deepLink, actions, floatingLyrics, onOpenSource, onLyricsMode, onAddToPlaylist)
         }
     }
 }
@@ -523,6 +527,7 @@ private fun PhoneControls(
     sleep: SleepTimerState,
     deepLink: String,
     actions: MusicActions,
+    floatingLyrics: Boolean,
     idle: IdleState,
     blocked: Boolean,
     alpha: () -> Float,
@@ -564,7 +569,7 @@ private fun PhoneControls(
                     ToolbarQueueButton(onOpenQueue)
                     ToolbarSleepButton(sleep, onOpenTimer)
                     ToolbarSourceButton(onOpenSource)
-                    MoreMenu(song, deepLink, actions, onOpenSource, onLyricsMode, onAddToPlaylist)
+                    MoreMenu(song, deepLink, actions, floatingLyrics, onOpenSource, onLyricsMode, onAddToPlaylist)
                 }
             }
         }
