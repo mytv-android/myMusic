@@ -810,7 +810,7 @@ internal fun SourcePill(
         modifier = modifier
             .height(32.dp)
             .tvFocusRing(RoundedCornerShape(16.dp))
-            .semantics { contentDescription = "音源：$provider $sourceDetail，$playbackMode。点按切换音源" },
+            .semantics { contentDescription = "音源：$provider $sourceDetail，换源模式：$playbackMode。点按切换音源" },
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.13f),
         contentColor = MaterialTheme.colorScheme.onSurface,
