@@ -47,9 +47,10 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -774,18 +775,25 @@ private fun saveLabel(collection: CollectionUiState) =
 /**
  * 歌单 = 绑定（跟随平台更新）；榜单 / 专辑 = 存成本地歌单。
  * 已收藏 / 已绑定时只显示状态，取消要去“我的”里删歌单或解除绑定（删除需要二次确认）。
+ * 选中态只换图标（实心 / 空心）并染主色，不铺色底。
  */
 @Composable
 private fun SaveToggle(ops: CollectionOps, saved: Boolean, bind: Boolean, size: androidx.compose.ui.unit.Dp? = null) {
     val onLabel = if (bind) "已绑定，平台更新自动同步" else "已存到本地歌单"
     val offLabel = if (bind) "未绑定" else "未收藏"
-    FilledTonalIconToggleButton(
+    IconToggleButton(
         checked = saved,
         onCheckedChange = { if (!saved) ops.save() },
         modifier = Modifier
             .then(if (size != null) Modifier.size(size) else Modifier)
             .tvFocusRing(CircleShape)
             .semantics { stateDescription = if (saved) onLabel else offLabel },
+        colors = IconButtonDefaults.iconToggleButtonColors(
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            checkedContainerColor = Color.Transparent,
+            checkedContentColor = MaterialTheme.colorScheme.primary,
+        ),
     ) {
         Icon(
             if (bind) Icons.Filled.Link else if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,

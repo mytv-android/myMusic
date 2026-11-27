@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.AbsoluteRoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Bedtime
@@ -407,7 +406,7 @@ fun PlayerToolbar(
     )
 }
 
-/** 工具栏里的普通图标项。[selected] 时是 primaryContainer 底、16dp 圆角（歌词页里的“歌词”）。 */
+/** 工具栏里的普通图标项。[selected] 时图标染主色，不铺底色（歌词页里的“歌词”）。 */
 @Composable
 fun ToolbarIconButton(
     icon: ImageVector,
@@ -416,19 +415,18 @@ fun ToolbarIconButton(
     modifier: Modifier = Modifier,
     selected: Boolean = false,
 ) {
-    val shape = if (selected) RoundedCornerShape(16.dp) else CircleShape
     Surface(
         onClick = onClick,
         modifier = modifier
             .size(48.dp)
-            .tvFocusRing(shape)
+            .tvFocusRing(CircleShape)
             .semantics {
                 this.contentDescription = contentDescription
                 role = Role.Button
             },
-        shape = shape,
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-        contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        shape = CircleShape,
+        color = Color.Transparent,
+        contentColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
     ) {
         Box(contentAlignment = Alignment.Center) { Icon(icon, null) }
     }

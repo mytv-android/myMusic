@@ -528,8 +528,9 @@ private fun DockAction(
                 state?.let { stateDescription = it }
             },
         shape = CircleShape,
-        color = if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-        contentColor = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        // 开着只把图标染主色，不换底色：电视 dock 一排圆钮，哪块变色都抢焦点
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+        contentColor = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
     ) {
         Box(contentAlignment = Alignment.Center) { Icon(icon, label) }
     }

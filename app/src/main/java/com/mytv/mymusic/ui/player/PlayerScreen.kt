@@ -731,19 +731,19 @@ internal fun FavoriteToggle(
     size: Dp = 48.dp,
     onLongClick: (() -> Unit)? = null,
 ) {
-    val checkedShape = RoundedCornerShape(checkedCorner(size))
     val haptics = LocalHapticFeedback.current
+    // 选中态只换图标（实心 / 空心）并染主色，不铺底色：播放页是整幅封面，一块色底贴在歌名旁边很脏
     IconToggleButton(
         checked = favorite,
         onCheckedChange = { actions.favorite(song) },
         shapes = IconToggleButtonShapes(
             shape = CircleShape,
             pressedShape = RoundedCornerShape(12.dp),
-            checkedShape = checkedShape,
+            checkedShape = CircleShape,
         ),
         modifier = modifier
             .size(size)
-            .tvFocusRing(if (favorite) checkedShape else CircleShape)
+            .tvFocusRing(CircleShape)
             .then(
                 if (onLongClick == null) {
                     Modifier
@@ -760,35 +760,31 @@ internal fun FavoriteToggle(
         colors = IconButtonDefaults.iconToggleButtonColors(
             containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onSurface,
-            checkedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-            checkedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            checkedContainerColor = Color.Transparent,
+            checkedContentColor = MaterialTheme.colorScheme.primary,
         ),
     ) {
         Icon(if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏")
     }
 }
 
-/** 选中态的圆角：48dp 按钮是 14dp，40dp 的小一号按 12dp，看上去一样方。 */
-private fun checkedCorner(size: Dp): Dp = if (size >= 48.dp) 14.dp else 12.dp
-
 /**
  * 「加到歌单」按钮：和收藏同尺寸，排在收藏左边，点了打开加到歌单面板（[AddToPlaylistSheet]）。
- * 这首已经在任一自建歌单里（[added]）时图标换成 PlaylistAddCheck，底色同收藏按钮的选中态（primaryContainer、14dp 圆角）。
+ * 这首已经在任一自建歌单里（[added]）时图标换成 PlaylistAddCheck 并染主色，不铺底色，和收藏按钮一个路子。
  * 不是开关：点它不会直接加或移出，读屏读“加到歌单”加上现在在不在歌单里。
  */
 @Composable
 internal fun AddToPlaylistButton(added: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, size: Dp = 48.dp) {
-    val shape = if (added) RoundedCornerShape(checkedCorner(size)) else CircleShape
     IconButton(
         onClick = onClick,
-        shapes = IconButtonShapes(shape = shape, pressedShape = RoundedCornerShape(12.dp)),
+        shapes = IconButtonShapes(shape = CircleShape, pressedShape = RoundedCornerShape(12.dp)),
         modifier = modifier
             .size(size)
-            .tvFocusRing(shape)
+            .tvFocusRing(CircleShape)
             .semantics { stateDescription = if (added) "已在歌单里" else "不在歌单里" },
         colors = IconButtonDefaults.iconButtonColors(
-            containerColor = if (added) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-            contentColor = if (added) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+            containerColor = Color.Transparent,
+            contentColor = if (added) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
         ),
     ) {
         Icon(if (added) Icons.AutoMirrored.Filled.PlaylistAddCheck else Icons.AutoMirrored.Filled.PlaylistAdd, "加到歌单")

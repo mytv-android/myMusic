@@ -40,9 +40,10 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
@@ -54,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -383,10 +385,17 @@ fun NowPlayingPane(
                         )
                         Text(song.artist, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     }
-                    FilledTonalIconToggleButton(
+                    // 收藏：实心 / 空心图标加主色区分，不铺色底（和手机播放页一致）
+                    IconToggleButton(
                         checked = favorite,
                         onCheckedChange = { actions.favorite(song) },
                         modifier = Modifier.tvFocusRing(CircleShape),
+                        colors = IconButtonDefaults.iconToggleButtonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                            checkedContainerColor = Color.Transparent,
+                            checkedContentColor = MaterialTheme.colorScheme.primary,
+                        ),
                     ) {
                         Icon(if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, if (favorite) "取消收藏" else "收藏")
                     }
