@@ -606,20 +606,17 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         writePlaylist(cookie, playlistId, "SeqSonglist", songs)
 
     private suspend fun writePlaylist(cookie: String, playlistId: String, method: String, songs: List<Song>) {
-        val (uin, _) = qqLogin(cookie)
-        val musicKey = firstNonEmpty(
-            cookieValue(cookie, "qm_keyst"),
-            cookieValue(cookie, "qqmusic_key"),
-        )
-        if (uin == "0" || musicKey.isBlank()) {
-            throw PlaylistWriteException("qq playlist write requires login", PlaylistWriteFailure.NotLoggedIn)
+        val (uin, gtk) = qqLogin(cookie)
+        // 写接口的 g_tk 必须和读接口一样由 p_skey/skey 计算，不能用 qm_keyst。
+        val skey = firstNonEmpty(cookieValue(cookie, "p_skey"), cookieValue(cookie, "skey"))
+        if (uin == "0" || skey.isBlank()) {
+            throw PlaylistWriteException("请先登录 QQ 音乐", PlaylistWriteFailure.NotLoggedIn)
         }
         if (songs.isEmpty() && method != "SeqSonglist") return
         val (dirId, tid) = resolveDirId(cookie, playlistId)
-            ?: throw PlaylistWriteException("qq playlist is not owned by this account", PlaylistWriteFailure.NotOwner)
+            ?: throw PlaylistWriteException("QQ 音乐里找不到这个歌单，可能不是当前账号创建的", PlaylistWriteFailure.NotOwner)
         val pairs = songs.map { qqSongPair(cookie, it) }
         if (pairs.isEmpty()) return
-        val gtk = gtk33(musicKey)
         val param = buildJsonObject {
             put("dirId", dirId)
             put("tid", tid)
@@ -674,7 +671,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             userAgent = QQ_WINDOWS_USER_AGENT,
         )
         val root = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrNull()
-            ?: throw PlaylistWriteException("qq playlist write response is not json")
+            ?: throw PlaylistWriteException("QQ 音乐返回了无法识别的内容")
         val node = (root["req_1"] as? JsonObject) ?: root
         val code = node.intValue("code") ?: 0
         val retCode = (node["data"] as? JsonObject)?.intValue("retCode") ?: node.intValue("retCode")
@@ -684,7 +681,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                 else -> PlaylistWriteFailure.Other
             }
             throw PlaylistWriteException(
-                "qq playlist $method failed: code=$code retCode=$retCode",
+                "QQ 音乐歌单写入失败（code=$code，retCode=${retCode ?: "无"}）",
                 failure,
             )
         }
@@ -703,7 +700,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             if (id != null && id > 0) return id to 0
         }
         throw PlaylistWriteException(
-            "qq song id not found: ${song.name.ifBlank { song.id }}",
+            "QQ 音乐里找不到这首歌：${song.name.ifBlank { song.id }}",
             PlaylistWriteFailure.SongNotFound,
         )
     }

@@ -11,16 +11,32 @@ import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.favoriteCredentialFingerprint
 import com.mytv.mymusic.data.favoriteSyncPlaylists
 import com.mytv.mymusic.data.native.BaseNativeProvider
+import com.mytv.mymusic.data.native.NativeCrypto
+import com.mytv.mymusic.data.native.NativeHttp
+import com.mytv.mymusic.data.native.NetEaseProvider
+import com.mytv.mymusic.data.native.PlaylistWriteException
+import com.mytv.mymusic.data.native.PlaylistWriteFailure
+import com.mytv.mymusic.data.native.QQProvider
 import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.library.libraryPlaylistGroups
+import com.mytv.mymusic.ui.favoriteFailureReason
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FavoriteSyncTest {
@@ -107,6 +123,26 @@ class FavoriteSyncTest {
         assertEquals(listOf(unbound), libraryPlaylistGroups(listOf(unbound, qqSecond))[""])
     }
 
+    @Test
+    fun favoriteFailureReasonKeepsEachPlatformMessage() {
+        assertEquals(
+            "QQ 音乐歌单写入失败（code=1000，retCode=无）",
+            favoriteFailureReason(PlaylistWriteException("QQ 音乐歌单写入失败（code=1000，retCode=无）")),
+        )
+        assertEquals(
+            "汽水音乐收藏失败（1000004）",
+            favoriteFailureReason(PlaylistWriteException("汽水音乐收藏失败（1000004）")),
+        )
+        assertEquals(
+            "请重新登录",
+            favoriteFailureReason(PlaylistWriteException("expired", PlaylistWriteFailure.NotLoggedIn)),
+        )
+        assertEquals(
+            "请检查网络、登录和目标歌单",
+            favoriteFailureReason(IllegalStateException("network down")),
+        )
+    }
+
     private fun playlist(id: String, provider: String = "", remoteId: String = "") =
         LocalPlaylistSummary(id, id, 0, 0, false, linkProvider = provider, linkId = remoteId)
 
@@ -129,5 +165,110 @@ class FavoriteSyncTest {
         override suspend fun removePlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
             writes += "remove:$playlistId:${songs.single().id}"
         }
+    }
+}
+
+class NeteaseDefaultFavoriteSyncTest {
+    private val cookie = "MUSIC_U=fake-session; __csrf=fake-csrf"
+    private val song = Song(id = "123", source = "netease", extra = mapOf("song_id" to "2150000001"))
+
+    @Test
+    fun defaultFavoriteUpdatesTheSongHeart() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
+                    "/weapi/nuser/account/get" -> MockResponse(body = """{"code":200,"profile":{"userId":1234}}""")
+                    "/eapi/song/like" -> MockResponse(body = """{"code":200,"playlistId":5678}""")
+                    else -> MockResponse(code = 502)
+                }
+            }
+            val write = favoriteWrite(server)
+
+            for (liked in listOf(true, false)) {
+                assertEquals("5678", write.apply(song, add = liked) { true })
+                assertEquals("/weapi/nuser/account/get", server.takeRequest(2, TimeUnit.SECONDS)?.url?.encodedPath)
+                val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+                assertEquals("POST", request.method)
+                assertEquals(server.url("/eapi/song/like").toString(), request.url.toString())
+                assertEquals("/eapi/song/like", request.url.encodedPath)
+                assertEquals(cookie, request.headers["Cookie"])
+                assertTrue(request.headers["User-Agent"].orEmpty().startsWith("NeteaseMusic "))
+
+                val encrypted = request.body?.utf8()?.removePrefix("params=")
+                val apiPayload = NativeCrypto.aesEcbDecrypt(
+                    NativeCrypto.hexToBytes(requireNotNull(encrypted)),
+                    "e82ckenh8dichen8".toByteArray(),
+                ).decodeToString()
+                    .substringAfter("-36cd479b6b5-")
+                    .substringBeforeLast("-36cd479b6b5-")
+                val payload = NativeHttp.json.parseToJsonElement(apiPayload).jsonObject
+                val header = payload.getValue("header").jsonObject
+                assertEquals("2150000001", payload.getValue("trackId").jsonPrimitive.content)
+                assertEquals(1234L, payload.getValue("userid").jsonPrimitive.longOrNull)
+                assertEquals(liked.toString(), payload.getValue("like").jsonPrimitive.content)
+                assertEquals("iphone", header.getValue("os").jsonPrimitive.content)
+                assertEquals("fake-csrf", header.getValue("__csrf").jsonPrimitive.content)
+                assertEquals("fake-session", header.getValue("MUSIC_U").jsonPrimitive.content)
+            }
+        }
+    }
+
+    @Test
+    fun expiredSessionDoesNotAttemptHeartWrite() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse(body = """{"code":301,"profile":null}"""))
+            val write = favoriteWrite(server)
+            val error = runCatching { write.apply(song, add = true) { true } }.exceptionOrNull() as? PlaylistWriteException
+            assertEquals(PlaylistWriteFailure.NotLoggedIn, error?.failure)
+            assertEquals(1, server.requestCount)
+        }
+    }
+
+    @Test
+    fun reportsThePlatformHttpStatusWhenTheLikeRequestFails() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse(body = """{"code":200,"profile":{"userId":1234}}"""))
+            server.enqueue(MockResponse.Builder().code(502).body("upstream failed").build())
+            val error = runCatching { favoriteWrite(server).apply(song, add = true) { true } }
+                .exceptionOrNull() as? PlaylistWriteException
+            assertEquals(PlaylistWriteFailure.Other, error?.failure)
+            assertTrue(error?.message.orEmpty().contains("HTTP 502"))
+            assertTrue(error?.message.orEmpty().contains("返回码 无"))
+        }
+    }
+
+    @Test
+    fun missingPlaylistIdDoesNotFailASuccessfulHeartWrite() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse(body = """{"code":200,"profile":null,"account":{"id":1234}}"""))
+            server.enqueue(MockResponse(body = """{"code":200}"""))
+            assertNull(favoriteWrite(server).apply(song, add = true) { true })
+            assertEquals(2, server.requestCount)
+        }
+    }
+
+    private fun favoriteWrite(server: MockWebServer): FavoriteSyncWrite {
+        server.start()
+        val provider = NetEaseProvider(
+            server.url("/weapi/nuser/account/get").toString(),
+            server.url("/eapi/song/like").toString(),
+        )
+        return requireNotNull(FavoriteSyncWrite.forSong(song, provider, cookie, FavoriteSyncPreference()))
+    }
+}
+
+class QQFavoriteSyncTest {
+    @Test
+    fun signatureComesFromSessionSkeyNotMusicKey() {
+        val (uin, gtk) = QQProvider().qqLogin("uin=o123456; skey=session-key; qm_keyst=music-key")
+        assertEquals("123456", uin)
+        assertEquals(gtk33("session-key"), gtk)
+        assertTrue(gtk != gtk33("music-key"))
+    }
+
+    private fun gtk33(value: String): Int {
+        var hash = 5381
+        for (char in value) hash += (hash shl 5) + char.code
+        return hash and 0x7fffffff
     }
 }

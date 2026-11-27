@@ -1,5 +1,6 @@
 package com.mytv.mymusic.data.native
 
+import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.data.AlbumDetail
 import com.mytv.mymusic.data.AlbumSummary
 import com.mytv.mymusic.data.ArtistAlbumPage
@@ -75,7 +76,12 @@ private val NETEASE_URL_TRAILING = charArrayOf(
     ')', '）', ']', '】', '》', '」', '』', '"', '\'', ',', '，', '。', '、', ';', '；', '!', '！', '?', '？',
 )
 
-class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
+class NetEaseProvider internal constructor(
+    private val accountApi: String,
+    private val songLikeApi: String,
+) : BaseNativeProvider(NETEASE_INFO) {
+    constructor() : this(USER_ACCOUNT_API, SONG_LIKE_API)
+
     private val json = NativeHttp.json
     private val urlCache = ConcurrentHashMap<String, CachedUrl>()
     private val shortLinkCache = ConcurrentHashMap<String, String>()
@@ -353,24 +359,64 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
 
     private suspend fun setTrackLiked(cookie: String, song: Song, liked: Boolean): String? {
         if (cookie.isBlank()) throw PlaylistWriteException("请先登录网易云音乐", PlaylistWriteFailure.NotLoggedIn)
-        val csrf = cookie.split(';').firstNotNullOfOrNull { part ->
-            part.trim().takeIf { it.startsWith("__csrf=") }?.substringAfter('=')
-        }.orEmpty()
+        val trackId = neteaseTrackId(song)
+        val account = requireFavoriteResponse(
+            weapiPost(accountApi, buildJsonObject { put("csrf_token", "") }, cookie, randomIp = false, throwOnError = false),
+            "读取账号",
+        )
+        // 单曲红心需要当前登录账号的 ID。两次请求使用同一份登录态。
+        val userId = account.profileUserId()
+            ?: (account["account"] as? JsonObject)?.long("id")?.takeIf { it > 0 }
+            ?: throw PlaylistWriteException("请重新登录网易云音乐", PlaylistWriteFailure.NotLoggedIn)
         val body = buildJsonObject {
-            put("alg", "itembased")
-            put("trackId", neteaseTrackId(song))
+            put("trackId", trackId)
+            put("userid", userId)
             put("like", liked)
-            put("time", "3")
-            put("csrf_token", csrf)
+            put("e_r", false)
+            putJsonObject("header") {
+                put("osver", "16.2")
+                put("deviceId", "pyncm!")
+                put("os", "iphone")
+                put("appver", "9.0.90")
+                put("versioncode", "140")
+                put("mobilename", "")
+                put("buildver", (System.currentTimeMillis() / 1000).toString())
+                put("resolution", "1920x1080")
+                put("__csrf", "")
+                put("channel", "distribution")
+                put("requestId", System.currentTimeMillis().toString())
+                cookie.split(';').forEach { part ->
+                    val name = part.substringBefore('=').trim()
+                    val value = part.substringAfter('=', "").trim()
+                    if (name in SONG_LIKE_ACCOUNT_FIELDS && value.isNotEmpty()) put(name, value)
+                }
+            }
         }
-        val response = weapiPost(LIKE_API, body, cookie)
-        val result = json.parseToJsonElement(response.body).jsonObject
-        val code = result.int("code")
-        if (code != 200) {
-            val failure = if (code in setOf(301, 401, 403)) PlaylistWriteFailure.NotLoggedIn else PlaylistWriteFailure.Other
-            throw PlaylistWriteException("网易云收藏操作失败（$code）", failure)
-        }
+        val response = NativeHttp.postForm(
+            songLikeApi,
+            mapOf("params" to NativeCrypto.encryptEApi(songLikeApi, body.toString())),
+            headers = mapOf("Referer" to REFERER),
+            cookie = cookie,
+            userAgent = SONG_LIKE_USER_AGENT,
+            throwOnError = false,
+        )
+        val result = requireFavoriteResponse(response, if (liked) "收藏" else "取消收藏")
         return result.long("playlistId").takeIf { it > 0 }?.toString()
+    }
+
+    private fun requireFavoriteResponse(response: NativeResponse, action: String): JsonObject {
+        val result = runCatching { json.parseToJsonElement(response.body) as? JsonObject }.getOrNull()
+        val code = (result?.get("code") as? JsonPrimitive)?.intOrNull
+        if (result != null && response.code in 200..299 && code == 200) return result
+        val reason = if (response.code == 401 || code in setOf(301, 401, 403)) {
+            PlaylistWriteFailure.NotLoggedIn
+        } else {
+            PlaylistWriteFailure.Other
+        }
+        // 只记录状态码，响应正文和登录凭据可能包含隐私信息。
+        val message = "网易云${action}失败（HTTP ${response.code}，返回码 ${code ?: "无"}）"
+        AppLog.w("FavoriteSync", message)
+        throw PlaylistWriteException(message, reason)
     }
 
     override suspend fun addPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) =
@@ -416,8 +462,11 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         val response = weapiPost(USER_ACCOUNT_API, buildJsonObject { put("csrf_token", "") }, cookie)
         val root = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrNull() ?: return null
         if (root.int("code") != 200) return null
-        return root["profile"]?.jsonObject?.long("userId")?.takeIf { it > 0 }
+        return root.profileUserId()
     }
+
+    private fun JsonObject.profileUserId(): Long? =
+        (this["profile"] as? JsonObject)?.long("userId")?.takeIf { it > 0 }
 
     private suspend fun playlistDetail(cookie: String, id: String): NeteasePlaylistDetail {
         val body = buildJsonObject {
@@ -992,6 +1041,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         cookie: String,
         sendCookie: Boolean = true,
         randomIp: Boolean = true,
+        throwOnError: Boolean = true,
     ): NativeResponse {
         val (params, encSecKey) = NativeCrypto.encryptWeApi(body.toString())
         return NativeHttp.postForm(
@@ -1000,6 +1050,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
             headers = mapOf("Referer" to REFERER),
             cookie = if (sendCookie) cookie else "",
             randomIp = randomIp,
+            throwOnError = throwOnError,
         )
     }
 
@@ -1387,7 +1438,9 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         const val CATEGORY_API = "https://music.163.com/weapi/playlist/catalogue"
         const val CATEGORY_PLAYLIST_API = "https://music.163.com/weapi/playlist/list"
         const val USER_PLAYLIST_API = "https://music.163.com/weapi/user/playlist"
-        const val LIKE_API = "https://music.163.com/weapi/radio/like"
+        const val SONG_LIKE_API = "https://interface.music.163.com/eapi/song/like"
+        const val SONG_LIKE_USER_AGENT = "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)"
+        val SONG_LIKE_ACCOUNT_FIELDS = setOf("__csrf", "MUSIC_U", "MUSIC_A", "NMTID")
         const val ALBUM_API = "https://music.163.com/weapi/v1/album/%s"
         const val USER_ACCOUNT_API = "https://music.163.com/weapi/nuser/account/get"
         const val VIP_INFO_API = "https://music.163.com/weapi/music-vip-membership/front/vip/info"

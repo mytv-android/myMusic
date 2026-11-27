@@ -1810,7 +1810,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     /** 喜欢 / 取消喜欢单曲（「我喜欢的音乐」）。 */
     override suspend fun collectTrack(cookie: String, song: Song): String? {
         val trackId = songTrackId(song)
-        if (trackId.isEmpty()) throw IllegalArgumentException("track id is empty")
+        if (trackId.isEmpty()) throw PlaylistWriteException("未找到对应的歌曲", PlaylistWriteFailure.SongNotFound)
         val raw = businessPost(
             SodaCollection.COLLECT_MEDIA_PATH,
             SodaCollection.collectMediaBody(listOf(trackId)),
@@ -1822,7 +1822,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
     override suspend fun uncollectTrack(cookie: String, song: Song): String? {
         val trackId = songTrackId(song)
-        if (trackId.isEmpty()) throw IllegalArgumentException("track id is empty")
+        if (trackId.isEmpty()) throw PlaylistWriteException("未找到对应的歌曲", PlaylistWriteFailure.SongNotFound)
         val raw = businessPost(
             SodaCollection.UNCOLLECT_MEDIA_PATH,
             SodaCollection.uncollectMediaBody(listOf(trackId)),
@@ -1924,17 +1924,19 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     }
 
     /** 写操作回包校验：非 0 的 status_code 一律当失败，把服务端文案带出去。 */
-    private fun sodaWriteFailed(raw: String, action: String) {        val root = SodaJson.parse(raw)
+    private fun sodaWriteFailed(raw: String, action: String) {
+        val root = SodaJson.parse(raw)
         if (SodaPlaylistEdit.responseIsOk(root)) return
         val code = jsonInt(root, "status_code") ?: 0
         val message = SodaPlaylistEdit.responseErrorMessage(root)
         AppLog.w(TAG, "收藏写操作失败 action=$action code=$code msg=${message.ifBlank { "空" }}")
-        throw IllegalStateException(
+        throw PlaylistWriteException(
             when {
                 code == 1000003 -> "请先登录汽水音乐"
                 message.isNotBlank() -> message
                 else -> "汽水音乐${action}失败（$code）"
             },
+            if (code == 1000003) PlaylistWriteFailure.NotLoggedIn else PlaylistWriteFailure.Other,
         )
     }
 
