@@ -563,6 +563,7 @@ internal fun PlaybackSettingsScreen(
     val lxRecords by LxSources.records.collectAsState()
     val lxProvider = ProviderInfo(id = LxPlatform.PROVIDER_ID, name = LxPlatform.PROVIDER_NAME)
     val pinnable = searchable + listOfNotNull(lxProvider.takeIf { lxRecords.isNotEmpty() })
+    val priority = aggregation.priorityFor(searchable.map { it.id } + LxPlatform.PROVIDER_ID)
     SettingsPage(SettingsSection.Playback, embedded, onBack) {
         item(key = "crossHead", contentType = "sectionHeader") { SectionLabel("切歌过渡") }
         item(key = "crossSwitch", contentType = "switch") {
@@ -700,6 +701,27 @@ internal fun PlaybackSettingsScreen(
                         MusicChip(provider.name, aggregation.pinnedProvider == provider.id) { actions.setPinnedProvider(provider.id) }
                     }
                 }
+            }
+        }
+        // 顺序只在「按顺序」模式下决定播放平台：按音质按码率挑、首选平台认准一个，
+        // 这两种模式下摆出来只会让人以为排了就能影响结果
+        if (aggregation.playbackMode == PlaybackMode.Priority) {
+            item(key = "priorityHead", contentType = "sectionHeader") {
+                SectionLabel("音源顺序") {
+                    Text("越靠前越先尝试", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            item(key = "priority", contentType = "settingRow") {
+                ListRow(
+                    // 顺序全应用只有一份，就在「音乐源」里排；这里只说明现在是什么顺序
+                    title = priority.take(3).joinToString(" → ") { providerName(state.providers, it) }
+                        .ifBlank { "还没有平台" },
+                    index = 0,
+                    count = 1,
+                    onClick = { onOpen(SettingsSection.Sources) },
+                    icon = Icons.Filled.Tune,
+                    summary = "按这个顺序选择播放平台。去「音乐源」里调整",
+                )
             }
         }
         item(key = "matchHead", contentType = "sectionHeader") { SectionLabel("匹配") }

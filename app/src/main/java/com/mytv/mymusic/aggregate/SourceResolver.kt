@@ -171,12 +171,10 @@ class SourceResolver(
     }
 
     /**
-     * 「按音质」：并发问遍所有原生候选，拿实际码率挑最高的。串行会把第一个能响的当结果，
+     * 「按音质」：并发问遍所有候选，拿实际码率挑最高的。串行会把第一个能响的当结果，
      * 哪怕后面的平台能给更高音质。缓存命中的不重复发请求，按已知码率参与竞争；
-     * 显式指定的平台仍然优先，码率竞争只在不指定时才有意义。
-     *
-     * 洛雪是兜底，不在这儿并发：跑脚本有成本，原生源有能放的就不该动它，
-     * 原生全灭才单独让它上。
+     * 显式指定的平台仍然优先，码率竞争只在不指定时才有意义。洛雪伪源同样参与——
+     * 脚本能给更高码率时没理由不用它，并发也不会让总耗时超过最慢的那个。
      */
     private suspend fun resolveByQuality(
         track: CanonicalTrack,
@@ -187,25 +185,14 @@ class SourceResolver(
         customGeneration: Long,
         customSongs: Lazy<List<Song>>,
     ): Resolution = coroutineScope {
-        val native = ordered.filter { it.providerId != LxPlatform.PROVIDER_ID }
-        val custom = ordered.filter { it.providerId == LxPlatform.PROVIDER_ID }
         val attempts = mutableListOf<Attempt>()
         var ready = mutableListOf<Probe.Ready>()
-        for ((source, probe) in native.map { source ->
+        for ((source, probe) in ordered.map { source ->
             async { source to probeSource(track, source, policy, explicitProvider, cookieMap, customGeneration, customSongs) }
         }.awaitAll()) {
             when (probe) {
                 is Probe.Skipped -> attempts += Attempt(source, probe.reason)
                 is Probe.Ready -> ready += probe
-            }
-        }
-        // 原生一个都没成，才让洛雪兜底；脚本失败原因同样记进 attempts，换源面板才有东西可显示
-        if (ready.isEmpty()) {
-            for (source in custom) {
-                when (val probe = probeSource(track, source, policy, explicitProvider, cookieMap, customGeneration, customSongs)) {
-                    is Probe.Ready -> ready += probe
-                    is Probe.Skipped -> attempts += Attempt(source, probe.reason)
-                }
             }
         }
         val deepLink = track.sources.firstOrNull { it.song.link.isNotBlank() }?.song?.link.orEmpty()
