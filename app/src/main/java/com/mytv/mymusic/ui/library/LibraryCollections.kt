@@ -255,6 +255,7 @@ fun FavoritesScreen(
             favorite = true,
             playlists = playlists,
             onToggleFavorite = { unfavorite(saved, song); actionSong = null },
+            onPlayNext = { actions.playSongNext(song) },
             onDownload = { actions.download(song) },
             onAddToPlaylist = { id -> actions.addSongToPlaylist(id, song) },
             onOpenSource = {
@@ -475,6 +476,7 @@ fun HistoryScreen(
             favorite = favorites.any { it.key == song.key },
             playlists = playlists,
             onToggleFavorite = { actions.favorite(song) },
+            onPlayNext = { actions.playSongNext(song) },
             onDownload = { actions.download(song) },
             onAddToPlaylist = { id -> actions.addSongToPlaylist(id, song) },
             onOpenSource = {

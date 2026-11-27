@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -60,6 +61,7 @@ import com.mytv.mymusic.ui.components.AppWindow
 import com.mytv.mymusic.ui.components.DeviceKind
 import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.components.SelectionBar
 import com.mytv.mymusic.ui.components.WavySeekBar
 import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.ui.player.CoverStage
@@ -106,7 +108,7 @@ class ComposePerformanceBehaviorTest {
             TestTheme {
                 TrackActionsSheet(
                     Song(id = "sample", name = "test song", source = "test"), false, playlists,
-                    onToggleFavorite = {}, onDownload = {}, onAddToPlaylist = { selected = it },
+                    onToggleFavorite = {}, onPlayNext = {}, onDownload = {}, onAddToPlaylist = { selected = it },
                     onOpenSource = null, onRemoveFromPlaylist = null, onDismiss = { dismissed = true },
                 )
             }
@@ -118,6 +120,83 @@ class ComposePerformanceBehaviorTest {
         compose.runOnIdle {
             assertEquals("list-179", selected)
             assertTrue(dismissed)
+        }
+    }
+
+    @Test
+    fun playNextClosesSelectionAndRemainsReachableInANarrowBar() {
+        val count = mutableIntStateOf(0)
+        var scheduled = 0
+        var exited = false
+        compose.setContent {
+            TestTheme {
+                Box(Modifier.size(width = 290.dp, height = 240.dp)) {
+                    SelectionBar(
+                        count.intValue, allSelected = false, onToggleAll = {}, onPlay = {},
+                        onPlayNext = { scheduled = count.intValue }, onAddTo = {}, onExit = { exited = true },
+                        onUpload = {},
+                    )
+                }
+            }
+        }
+        val next = compose.onNodeWithText("下一首播放")
+        next.assertIsDisplayed().assertIsNotEnabled()
+        compose.runOnIdle { count.intValue = 2 }
+        next.assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(2, scheduled)
+            assertTrue(exited)
+        }
+    }
+
+    @Test
+    fun songMenuOffersPlayNextFirstAndClosesAfterScheduling() {
+        var scheduled = false
+        var dismissed = false
+        compose.setContent {
+            TestTheme {
+                TrackActionsSheet(
+                    Song(id = "sample", name = "Test song", source = "test"), false, emptyList(),
+                    onToggleFavorite = {}, onPlayNext = { scheduled = true }, onDownload = {},
+                    onAddToPlaylist = {}, onOpenSource = null, onRemoveFromPlaylist = null,
+                    onDismiss = { dismissed = true },
+                )
+            }
+        }
+        compose.onNodeWithText("下一首播放").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertTrue(scheduled)
+            assertTrue(dismissed)
+        }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun tvSelectionBarSchedulesNextWithTheConfirmKey() {
+        var scheduled = 0
+        var exited = false
+        lateinit var inputMode: androidx.compose.ui.input.InputModeManager
+        compose.setContent {
+            TestTheme(kind = DeviceKind.Tv) {
+                inputMode = androidx.compose.ui.platform.LocalInputModeManager.current
+                Box(Modifier.size(width = 900.dp, height = 240.dp)) {
+                    SelectionBar(
+                        count = 2, allSelected = false, onToggleAll = {}, onPlay = {},
+                        onPlayNext = { scheduled = 2 }, onAddTo = {}, onExit = { exited = true },
+                    )
+                }
+            }
+        }
+        compose.runOnIdle { inputMode.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard) }
+        val next = compose.onNodeWithText("下一首播放")
+        compose.waitUntil(3_000) {
+            runCatching { next.performSemanticsAction(SemanticsActions.RequestFocus) { it() } }
+            compose.onAllNodes(hasText("下一首播放") and isFocused()).fetchSemanticsNodes().isNotEmpty()
+        }
+        next.performKeyInput { pressKey(Key.DirectionCenter) }
+        compose.runOnIdle {
+            assertEquals(2, scheduled)
+            assertTrue(exited)
         }
     }
 

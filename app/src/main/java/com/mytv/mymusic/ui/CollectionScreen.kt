@@ -235,6 +235,7 @@ fun CollectionScreen(
             val picked = selectedSongs()
             if (picked.isNotEmpty()) actions.play(picked.first(), picked)
         },
+        onPlayNext = { actions.playSongsNext(selectedSongs()) },
         onAddTo = { pickerOpen = true },
         onExit = { selection.exit() },
     )
@@ -402,6 +403,7 @@ private data class CollectionSelectionOps(
     val allSelected: Boolean,
     val onToggleAll: () -> Unit,
     val onPlay: () -> Unit,
+    val onPlayNext: () -> Unit,
     val onAddTo: () -> Unit,
     val onExit: () -> Unit,
 )
@@ -413,6 +415,7 @@ private fun SelectionBarFor(ops: CollectionSelectionOps, modifier: Modifier = Mo
         allSelected = ops.allSelected,
         onToggleAll = ops.onToggleAll,
         onPlay = ops.onPlay,
+        onPlayNext = ops.onPlayNext,
         onAddTo = ops.onAddTo,
         onExit = ops.onExit,
         modifier = modifier,

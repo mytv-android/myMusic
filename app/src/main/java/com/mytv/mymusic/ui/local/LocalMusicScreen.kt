@@ -234,6 +234,7 @@ fun LocalMusicScreen(
                         val picked = songs.filter { it.key in selection.selected }
                         if (picked.isNotEmpty()) actions.play(picked.first(), picked)
                     },
+                    onPlayNext = { actions.playSongsNext(songs.filter { it.key in selection.selected }) },
                     onAddTo = { pickerSongs = songs.filter { it.key in selection.selected } },
                     onExit = { selection.exit() },
                     modifier = Modifier.padding(top = 12.dp).selectionBackPreview(selection),

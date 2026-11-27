@@ -44,7 +44,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -73,7 +72,6 @@ import com.mytv.mymusic.ui.WallPageActions
 import com.mytv.mymusic.ui.adaptive.foldAnchor
 import com.mytv.mymusic.ui.charts.SongAction
 import com.mytv.mymusic.ui.charts.SongActionsSheet
-import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalSharedTransitionScope
 import com.mytv.mymusic.ui.components.RequestKeepScreenOn
@@ -82,11 +80,9 @@ import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.player.AmbientClock
 import com.mytv.mymusic.ui.player.rememberScreenReaderOn
 import com.mytv.mymusic.ui.providerName
-import com.mytv.mymusic.ui.queueMoveNextTarget
 import com.mytv.mymusic.ui.theme.LocalAppearance
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -131,8 +127,6 @@ internal fun PosterWallScreen(
     var actionSong by remember { mutableStateOf<Song?>(null) }
     // 菜单键打开的单曲面板：焦点直接落在整页那一组（电视）
     var actionFromMenu by remember { mutableStateOf(false) }
-    val snackbar = LocalAppSnackbar.current
-    val scope = rememberCoroutineScope()
     val screenReader = rememberScreenReaderOn()
     // 手机上正在播放的大卡封面和播放页的封面是同一个共享元素；减少动画时不飞
     val sharedScope = LocalSharedTransitionScope.current
@@ -173,24 +167,10 @@ internal fun PosterWallScreen(
         }
     }
 
-    fun toast(message: String) {
-        scope.launch {
-            snackbar.currentSnackbarData?.dismiss()
-            snackbar.showSnackbar(message)
-        }
-    }
-
     val playNext: (Int) -> Unit = { index ->
-        val song = songs.getOrNull(index)
-        val target = queueMoveNextTarget(index, currentIndex, songs.size)
-        when {
-            song == null -> Unit
-            target == null -> toast("「${song.title}」已经是下一首")
-            else -> {
-                actions.moveQueueItemNext(index)
-                // 槽位按序号排：挪完这首坐到 target 那一位，在新位置上接着放大
-                wall.growSong(target)
-                toast("「${song.title}」将在下一首播放")
+        songs.getOrNull(index)?.let { song ->
+            actions.moveQueueItemNext(index, song.key)?.let { target ->
+                if (target != index) wall.growSong(target)
             }
         }
     }
