@@ -59,6 +59,7 @@ import com.mytv.mymusic.data.native.SodaWelfare
 import com.mytv.mymusic.data.bindingTarget
 import com.mytv.mymusic.data.platformImportMarks
 import com.mytv.mymusic.data.boundDiff
+import com.mytv.mymusic.data.prependPlaylistEntries
 import com.mytv.mymusic.data.CollectionView
 import com.mytv.mymusic.data.CoverShapeChoice
 import com.mytv.mymusic.data.LyricsBackgroundMode
@@ -2599,9 +2600,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return false
         }
         val snapshot = PlaylistSnapshot(playlist, entries)
+        // 加歌默认落到最上面（像网易云那样）；平台不认整单顺序的（网易云只能追加）照旧加到最后
+        val atTop = platformSupportsReorder(playlist)
         writeEntries(
             playlistId,
-            entries + resolved.mapIndexed { index, song -> entryOf(playlistId, entries.size + index, song) },
+            if (atTop) {
+                prependPlaylistEntries(playlistId, entries, resolved, ::entryOf)
+            } else {
+                entries + resolved.mapIndexed { index, song -> entryOf(playlistId, entries.size + index, song) }
+            },
         )
         AppLog.i("PlaylistWrite", "add start provider=$provider link=${playlist.linkId} songs=${resolved.size}")
         try {
@@ -2613,6 +2620,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             report(writeErrorMessage(playlist, "添加", error), true)
             return false
         }
+        // 平台的 add 只认追加，要“在最上”还得把新顺序整单写回去
+        if (atTop) pushBoundReorder(playlistId, playlist, "添加", report)
         AppLog.i("PlaylistWrite", "add ok provider=$provider link=${playlist.linkId} songs=${resolved.size}")
         commitBoundWrite(playlistId)
         scheduleBoundReload(playlistId)
@@ -2639,7 +2648,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         libraryDao.replaceEntries(
             playlist.id,
-            entries + candidates.mapIndexed { index, song -> entryOf(playlist.id, entries.size + index, song) },
+            prependPlaylistEntries(playlist.id, entries, candidates, ::entryOf),
         )
         libraryDao.markDirty(playlist.id, System.currentTimeMillis())
         app.sync.onLocalChange()
@@ -2959,23 +2968,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 message(writeErrorMessage(playlist, "撤销", error), error = true)
                 return@launchPlaylistEdit
             }
-            if (platformSupportsReorder(playlist)) {
-                val all = libraryDao.entriesOnce(playlistId).mapNotNull(::decodeEntrySong)
-                    .filter { it.source == playlist.linkProvider }
-                if (all.size >= 2) {
-                    runCatching {
-                        app.repository.reorderPlaylistTracks(
-                            playlist.linkProvider,
-                            cookieFor(playlist.linkProvider),
-                            playlist.linkId,
-                            all,
-                        )
-                    }.onFailure {
-                        if (it is CancellationException) throw it
-                        message("已加回，但顺序没能同步到平台", error = true)
-                    }
-                }
-            }
+            pushBoundReorder(playlistId, playlist, "加回", ::message)
             commitBoundWrite(playlistId)
             scheduleBoundReload(playlistId)
         }
@@ -3006,6 +2999,49 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun providerLabel(providerId: String): String =
         app.repository.providerInfo(providerId)?.name ?: providerId
+
+    /**
+     * 把本机的当前顺序整单写回平台。平台的增删都只认追加，加歌“落到最上面”、调整顺序都靠这一步；
+     * 失败不否决已经成功的增删（歌确实加进去了），只提示一句顺序没同步。
+     * 条目里混了非本平台的歌时整体跳过：SeqSonglist 这类接口收的是整单名单，漏谁就是从平台删掉谁。
+     */
+    private suspend fun pushBoundReorder(
+        playlistId: String,
+        playlist: PlaylistEntity,
+        action: String,
+        report: EditReport,
+    ) {
+        if (!platformSupportsReorder(playlist)) return
+        val entries = libraryDao.entriesOnce(playlistId)
+        if (entries.isEmpty()) return
+        if (entries.any { decodeEntrySong(it)?.source != playlist.linkProvider }) {
+            AppLog.w("PlaylistWrite", "reorder skipped: mixed sources playlist=${playlist.id}")
+            return
+        }
+        val all = entries.mapNotNull(::decodeEntrySong)
+        if (all.size < 2) return
+        AppLog.i(
+            "PlaylistWrite",
+            "reorder start provider=${playlist.linkProvider} link=${playlist.linkId} songs=${all.size}",
+        )
+        try {
+            app.repository.reorderPlaylistTracks(
+                playlist.linkProvider,
+                cookieFor(playlist.linkProvider),
+                playlist.linkId,
+                all,
+            )
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            AppLog.w(
+                "PlaylistWrite",
+                "reorder failed provider=${playlist.linkProvider} link=${playlist.linkId}: ${error.message}",
+            )
+            report("已$action，但顺序没能同步到平台", true)
+            return
+        }
+        AppLog.i("PlaylistWrite", "reorder ok provider=${playlist.linkProvider} songs=${all.size}")
+    }
 
     /** 把任意来源的歌曲解析成目标平台的曲目：同源直接过，其次查已合并的音源，最后严格搜索匹配。 */
     private suspend fun resolveForPlaylistWrite(song: Song, providerId: String, cookie: String): Song? {

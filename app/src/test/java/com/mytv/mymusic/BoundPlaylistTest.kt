@@ -1,10 +1,13 @@
 package com.mytv.mymusic
 
 import com.mytv.mymusic.data.PlaylistEntity
+import com.mytv.mymusic.data.PlaylistEntryEntity
+import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.bindingTarget
 import com.mytv.mymusic.data.boundDiff
 import com.mytv.mymusic.data.canReorderBoundPlaylist
 import com.mytv.mymusic.data.platformImportMarks
+import com.mytv.mymusic.data.prependPlaylistEntries
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -106,6 +109,44 @@ class BoundPlaylistTest {
     fun boundWritableProviderFollowsReorderCapability() {
         assertTrue(canReorderBoundPlaylist(bound = true, writeSupported = true, reorderSupported = true))
         assertFalse(canReorderBoundPlaylist(bound = true, writeSupported = true, reorderSupported = false))
+    }
+
+    // ---- 加歌落点：默认插到最上面，position 连续 ----
+
+    @Test
+    fun prependPutsNewSongsFirstAndReindexesPositions() {
+        val existing = listOf(entry("p", 0, "netease:a"), entry("p", 1, "netease:b"), entry("p", 2, "netease:c"))
+        val result = prependPlaylistEntries("p", existing, listOf(song("x"), song("y")), factory)
+        assertEquals(listOf("netease:x", "netease:y", "netease:a", "netease:b", "netease:c"), result.map { it.songKey })
+        assertEquals(listOf(0, 1, 2, 3, 4), result.map { it.position })
+        assertTrue(result.all { it.playlistId == "p" })
+    }
+
+    @Test
+    fun prependIntoEmptyPlaylistKeepsRequestedOrder() {
+        val result = prependPlaylistEntries("p", emptyList(), listOf(song("x"), song("y")), factory)
+        assertEquals(listOf("netease:x", "netease:y"), result.map { it.songKey })
+        assertEquals(listOf(0, 1), result.map { it.position })
+    }
+
+    @Test
+    fun prependKeepsExistingEntriesApartFromPosition() {
+        val existing = listOf(entry("p", 0, "netease:a", payload = "pa"), entry("p", 1, "netease:b", payload = "pb"))
+        val result = prependPlaylistEntries("p", existing, listOf(song("x")), factory)
+        val kept = result.drop(1)
+        assertEquals(listOf("netease:a", "netease:b"), kept.map { it.songKey })
+        assertEquals(listOf("pa", "pb"), kept.map { it.payload })
+        assertEquals(listOf(1, 2), kept.map { it.position })
+    }
+
+    private fun song(id: String) = Song(id = id, name = id, artist = "歌手", source = "netease")
+
+    private fun entry(playlistId: String, position: Int, songKey: String, payload: String = "") =
+        PlaylistEntryEntity(playlistId = playlistId, position = position, songKey = songKey, payload = payload)
+
+    /** 和 MusicViewModel.entryOf 同形状：建好的 position 会被 helper 重排，这里给几无所谓。 */
+    private val factory: (String, Int, Song) -> PlaylistEntryEntity = { playlistId, _, song ->
+        PlaylistEntryEntity(playlistId = playlistId, position = 0, songKey = song.key, payload = song.id)
     }
 
     // ---- 登录后导入平台歌单：哪些行灰掉、哪些会合并 ----

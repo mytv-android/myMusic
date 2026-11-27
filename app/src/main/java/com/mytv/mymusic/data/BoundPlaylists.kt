@@ -12,6 +12,20 @@ fun boundDiff(oldKeys: Collection<String>, newKeys: Collection<String>): BoundDi
 }
 
 /**
+ * 加歌进歌单的默认落点：新歌插到最上面（像网易云那样），原来的歌整体往后挪。
+ * position 按 0..n-1 重排后返回，调用方直接 replaceEntries。
+ */
+fun prependPlaylistEntries(
+    playlistId: String,
+    existing: List<PlaylistEntryEntity>,
+    added: List<Song>,
+    entryOf: (String, Int, Song) -> PlaylistEntryEntity,
+): List<PlaylistEntryEntity> =
+    (added.map { entryOf(playlistId, 0, it) } + existing)
+        .withIndex()
+        .map { (index, entry) -> entry.copy(position = index) }
+
+/**
  * 绑定歌单能不能调整顺序。没绑定、或者平台没有写接口时仍然可以在本机调（调完解绑）；
  * 有写接口的平台则要看它是否支持把整张歌单的新顺序写回去。
  */
