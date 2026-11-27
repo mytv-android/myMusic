@@ -302,7 +302,7 @@ class SyncCoordinator(
             val remoteFile = provider.read(token, account.remoteId)
             val remote = SyncJson.decode(remoteFile.content)
             val local = localSnapshot()
-            val base = syncDao.base(account.provider)?.snapshot?.let { raw ->
+            val base = readBaseSnapshot(account.provider)?.let { raw ->
                 runCatching { SyncJson.format.decodeFromString<SyncSnapshot>(raw) }.getOrNull()
             }
             if (base == null) {
@@ -1781,6 +1781,28 @@ class SyncCoordinator(
         syncDao.putAccount(account.copy(updatedAt = System.currentTimeMillis()))
     }
 
+    /**
+     * 读同步基线。基线是整份同步文件 JSON，歌单多时可达数 MB；直接 `SELECT *`
+     * 会让 SQLite 把整行塞进 CursorWindow，超过约 2 MB 就抛
+     * “Row too big to fit into CursorWindow”，同步会一直失败。
+     * 这里先取字符长度，再按字符分块取回拼接，单块远小于窗口上限。
+     * 返回 null 表示没有基线（首次同步）；空串表示基线为空。
+     */
+    private suspend fun readBaseSnapshot(accountId: String): String? {
+        val total = syncDao.baseSnapshotLength(accountId) ?: return null
+        if (total <= 0) return ""
+        val out = StringBuilder(total)
+        var offset = 1 // SQLite substr 的下标从 1 开始
+        while (offset <= total) {
+            val chunk = syncDao.baseSnapshotChunk(accountId, offset, BASE_SNAPSHOT_CHUNK_CHARS)
+                ?: return null
+            if (chunk.isEmpty()) break
+            out.append(chunk)
+            offset += chunk.length
+        }
+        return out.toString()
+    }
+
     private suspend fun saveBase(snapshot: SyncSnapshot, revision: String) {
         val account = syncDao.accountOnce() ?: return
         syncDao.putBase(
@@ -1844,6 +1866,8 @@ class SyncCoordinator(
         const val LOCAL_CHANGE_DEBOUNCE_MS = 1_000L
         const val SCREEN_PULL_STALE_MS = 30_000L
         private const val MAX_PUSH_ROUNDS = 3
+        // 分块读基线的字符数：中文按 UTF-8 约 3 字节/字，256K 字符仍远低于 2 MB 的 CursorWindow 上限
+        private const val BASE_SNAPSHOT_CHUNK_CHARS = 256 * 1024
     }
 }
 

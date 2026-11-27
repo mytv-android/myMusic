@@ -1530,8 +1530,12 @@ interface SyncDao {
     suspend fun account(provider: String): SyncAccountEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putAccount(account: SyncAccountEntity)
     @Query("DELETE FROM sync_accounts") suspend fun clearAccounts()
-    @Query("SELECT * FROM sync_base WHERE account_id = :id")
-    suspend fun base(id: String): SyncBaseEntity?
+    // 基线是整份同步文件 JSON，歌单多时会超过 CursorWindow 约 2 MB 的上限；
+    // SELECT * 会触发 "Row too big to fit into CursorWindow"。这两条按字符分块读取，单块远小于窗口。
+    @Query("SELECT length(snapshot) FROM sync_base WHERE account_id = :id")
+    suspend fun baseSnapshotLength(id: String): Int?
+    @Query("SELECT substr(snapshot, :offset, :length) FROM sync_base WHERE account_id = :id")
+    suspend fun baseSnapshotChunk(id: String, offset: Int, length: Int): String?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putBase(base: SyncBaseEntity)
     @Query("DELETE FROM sync_base") suspend fun clearBases()
     @Query("SELECT * FROM sync_conflicts ORDER BY detected_at DESC")
