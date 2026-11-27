@@ -1,13 +1,8 @@
 package com.mytv.mymusic.ui
 
 import com.mytv.mymusic.data.FavoriteSyncIssue
-import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.native.PlaylistWriteException
 import com.mytv.mymusic.data.native.PlaylistWriteFailure
-
-/** 收藏写平台时优先用歌曲原本所属的平台，实际取流源只负责播放。 */
-internal fun favoriteSourceSong(song: Song, currentSong: Song?, primarySong: Song?): Song =
-    if (currentSong?.key == song.key && primarySong != null) primarySong else song
 
 /** 收藏写平台失败时给用户看的原因；平台自带的错误信息优先，避免都落成同一句通用提示。 */
 internal fun favoriteFailureReason(error: Exception): String = when ((error as? PlaylistWriteException)?.failure) {

@@ -17,10 +17,10 @@ import com.mytv.mymusic.data.native.NetEaseProvider
 import com.mytv.mymusic.data.native.PlaylistWriteException
 import com.mytv.mymusic.data.native.PlaylistWriteFailure
 import com.mytv.mymusic.data.native.QQProvider
+import com.mytv.mymusic.data.native.findAccountPlaylist
 import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.library.libraryPlaylistGroups
 import com.mytv.mymusic.ui.favoriteFailureReason
-import com.mytv.mymusic.ui.favoriteSourceSong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
@@ -142,17 +142,6 @@ class FavoriteSyncTest {
             "请检查网络、登录和目标歌单",
             favoriteFailureReason(IllegalStateException("network down")),
         )
-    }
-
-    @Test
-    fun favoriteKeepsOriginalProviderWhenPlaybackResolvedElsewhere() {
-        val original = Song(id = "n1", source = "netease")
-        val playing = Song(id = "q1", source = "qq")
-        assertEquals("netease", favoriteSourceSong(playing, playing, original).source)
-        // 列表里点另一首（不是当前播放）时不受当前播放源影响
-        val other = Song(id = "n2", source = "netease")
-        assertEquals("netease", favoriteSourceSong(other, playing, original).source)
-        assertEquals("qq", favoriteSourceSong(playing, null, null).source)
     }
 
     private fun playlist(id: String, provider: String = "", remoteId: String = "") =
@@ -329,6 +318,45 @@ class QQFavoriteSyncTest {
         assertEquals("24", comm["ct"]!!.jsonPrimitive.content)
         assertEquals("12345", comm["g_tk"]!!.jsonPrimitive.content)
         assertTrue(body["req_1"] != null)
+        // PC 通道的请求形状和以前一致，不因为拿到歌单名就多带字段
+        assertNull(body["req_1"]!!.jsonObject["param"]!!.jsonObject["dirName"])
+    }
+
+    @Test
+    fun accountPlaylistSearchKeepsPagingUntilItFindsTheTarget() = runTest {
+        var calls = 0
+        val found = findAccountPlaylist({ page, _ ->
+            calls++
+            when (page) {
+                // 第一页塞满 100 个，目标在第二页：只读第一页就会解析出 tid=0
+                1 -> (1..100).map { Playlist("dir:$it", "歌单 $it", source = "qq", extra = mapOf("dirid" to "$it")) }
+                2 -> listOf(
+                    Playlist(
+                        "dir:201",
+                        "我喜欢",
+                        source = "qq",
+                        extra = mapOf("dirid" to "201", "tid" to "9300000001"),
+                    ),
+                )
+                else -> emptyList()
+            }
+        }) { it.extra["dirid"] == "201" }
+        assertEquals("dir:201", found?.id)
+        assertEquals("9300000001", found?.extra?.get("tid"))
+        assertEquals(2, calls)
+    }
+
+    @Test
+    fun accountPlaylistSearchStopsWhenTheServerStopsPaging() = runTest {
+        // 服务端忽略 sin/size 一直回同一页满页：翻两次就停，不能死循环
+        val repeated = (1..100).map { Playlist("same", "同一页", source = "qq") }
+        var calls = 0
+        val found = findAccountPlaylist({ _, _ ->
+            calls++
+            repeated
+        }) { it.id == "absent" }
+        assertNull(found)
+        assertEquals(2, calls)
     }
 
     private fun gtk33(value: String): Int {

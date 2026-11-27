@@ -61,13 +61,14 @@ All of these channels are best-effort: they carry no user-identifying data beyon
 
 ## Platform playlist writes (protocol only)
 
-Editing a bound platform playlist uses the following unofficial write contracts. No upstream source code is bundled for these; the Kotlin implementations are written against the request formats documented by the referenced projects.
+Editing a bound platform playlist, and the 收藏同步 writes that mirror a local favorite into the platform account, use the following unofficial write contracts. No upstream source code is bundled for these; the Kotlin implementations are written against the request formats documented by the referenced projects.
 
 - **NetEase Cloud Music** (`data/native/NetEaseProvider.kt`): `POST https://music.163.com/api/playlist/manipulate/tracks` (`op=add|del`, `pid`, `trackIds`, `imme`) and the Web API's `__csrf` cookie. Reference: NeteaseCloudMusicApi's `module/playlist_tracks.js`.
-- **QQ Music** (`data/native/QQProvider.kt`): `musicu.fcg` module `music.musicasset.PlaylistDetailWrite` (`AddSonglist` / `DelSonglist` / `SeqSonglist`), with `dirId`, `tid`, and `v_songInfo` / `v_songPair`. Reference: https://github.com/L-1124/QQMusicApi (`qqmusic_api/modules/songlist.py`) and https://github.com/jsososo/QQMusicApi (`routes/songlist.js`, legacy fcgi endpoints).
+  The single-track like / heart write behind 收藏同步 is `POST https://interface.music.163.com/eapi/song/like` (`trackId`, `userid`, `like`, `e_r`) inside an eapi envelope, carrying an iPhone client `header` (`appver` 9.0.90, `os` iphone) plus the `MUSIC_U` / `__csrf` cookies; the signed-in account is read from `weapi/nuser/account/get`.
+- **QQ Music** (`data/native/QQProvider.kt`): `musicu.fcg` module `music.musicasset.PlaylistDetailWrite` (`AddSonglist` / `DelSonglist` / `SeqSonglist`), with `dirId`, `tid`, and `v_songInfo` / `v_songPair`. When the cookie carries a `musickey` / `qm_keyst` the same module is written over the Android channel (`req_0`, `authst`) instead of the PC channel (`req_1`, `g_tk` from the session `skey`); either way `tid` and `dirName` are the account's own, and a `tid` of 0 is rejected with 500026. Reference: https://github.com/L-1124/QQMusicApi (`qqmusic_api/modules/songlist.py`) and https://github.com/jsososo/QQMusicApi (`routes/songlist.js`, legacy fcgi endpoints).
 - **Kugou Music** (`data/native/KugouProvider.kt`): cloud playlist service `/cloudlist.service/v6/add_song`, `/v4/delete_songs`, `/v1/modify_song_sort`, using the Android signature and the cloudlist AES/RSA envelope. Reference: https://github.com/MakcRe/KuGouMusicApi (`module/playlist_tracks_add.js`, `playlist_tracks_del.js`, `playlist_tracks_sort.js`).
 
-These are best-effort unofficial interfaces. They are only used when the user explicitly edits a bound playlist that belongs to the signed-in account.
+These are best-effort unofficial interfaces. They are only used when the user is signed in to that platform and either explicitly edits a bound playlist that belongs to the signed-in account or has turned 收藏同步 on for that source.
 
 ## libmssdk (protocol only)
 

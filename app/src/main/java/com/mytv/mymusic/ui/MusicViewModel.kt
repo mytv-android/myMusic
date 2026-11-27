@@ -3670,15 +3670,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                val reason = when ((error as? PlaylistWriteException)?.failure) {
-                    PlaylistWriteFailure.NotLoggedIn -> "请重新登录"
-                    PlaylistWriteFailure.NotOwner -> "目标歌单已不可修改，请重新选择"
-                    PlaylistWriteFailure.SongNotFound -> "未找到对应的歌曲"
-                    PlaylistWriteFailure.Unsupported -> "目标歌单不支持此操作，请重新选择"
-                    else -> (error as? FavoriteSyncIssue)?.message ?: "请检查网络、登录和目标歌单"
-                }
                 val localResult = if (add) "已在 App 收藏" else "已在 App 取消收藏"
-                reportFailure("$localResult，${write.provider.info.name}同步失败：$reason")
+                reportFailure("$localResult，${write.provider.info.name}同步失败：${favoriteFailureReason(error)}")
                 return@enqueue
             }
             if (remoteId != null) updateFavoriteBoundPlaylists(write, remoteId, song, add)

@@ -676,11 +676,13 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         method: String,
         pairs: List<Pair<Long, Int>>,
     ): JsonObject {
+        // 歌单名只有 Android 写入通道用得上；PC 通道（req_1）的请求形状和以前一致，别平白多带字段。
+        val name = dirName.takeIf { musicKey.isNotBlank() }.orEmpty()
         val param = buildJsonObject {
             put("dirId", dirId)
             put("tid", tid)
             put("bFmtUtf8", true)
-            if (dirName.isNotBlank()) put("dirName", dirName)
+            if (name.isNotBlank()) put("dirName", name)
             val key = if (method == "SeqSonglist") "v_songPair" else "v_songInfo"
             putJsonArray(key) {
                 pairs.forEach { (songId, songType) ->
@@ -760,64 +762,29 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         val id = playlistId.trim()
         val key = qqLogin(cookie).first to id
         dirIdCache[key]?.let { return it }
+        val load: suspend (Int, Int) -> List<Playlist> = { page, limit -> userPlaylists(cookie, page, limit) }
         val resolved = when {
-            id == QQ_FAVORITE_PLAYLIST_ID -> {
-                // “我喜欢”的目录号固定 201，但 tid 和名称要按账号读取，写死 tid=0 会被服务端拒绝。
-                var found: QQWriteTarget? = null
-                var page = 1
-                val seen = mutableSetOf<String>()
-                while (true) {
-                    val items = userPlaylists(cookie, page++, 100)
-                    val item = items.firstOrNull { it.extra["dirid"] == "201" }
-                    if (item != null) {
-                        found = QQWriteTarget(
-                            dirId = 201,
-                            tid = item.extra["tid"].orEmpty().toLongOrNull() ?: 0,
-                            name = item.name.ifBlank { "我喜欢" },
-                        )
-                        break
-                    }
-                    if (items.size < 100 || !seen.addAll(items.map { it.id })) break
+            // “我喜欢”的目录号固定 201，但 tid 和歌单名要按账号读取，写死 tid=0 会被服务端拒绝。
+            id == QQ_FAVORITE_PLAYLIST_ID -> findAccountPlaylist(load) { it.extra["dirid"] == "201" }
+                ?.let {
+                    QQWriteTarget(201, it.extra["tid"].orEmpty().toLongOrNull() ?: 0, it.name.ifBlank { "我喜欢" })
                 }
-                found ?: QQWriteTarget(201, 0L, "我喜欢")
-            }
+                ?: QQWriteTarget(201, 0L, "我喜欢")
+
+            // 账号里的普通歌单 id 就是 profile:dir:<dirid>；tid 和歌单名同样要按账号读，
+            // 解析不出来时不能让调用方拿着 tid=0 去写。
             id.startsWith(QQ_PROFILE_DIR_PREFIX) -> {
-                val dirId = id.removePrefix(QQ_PROFILE_DIR_PREFIX).toIntOrNull()?.takeIf { it > 0 }
-                if (dirId == null) {
-                    null
-                } else {
-                    val item = runCatching { userPlaylists(cookie, 1, 100) }.getOrNull()
-                        ?.firstOrNull { it.extra["dirid"] == dirId.toString() }
-                    QQWriteTarget(
-                        dirId = dirId,
-                        tid = item?.extra?.get("tid").orEmpty().toLongOrNull() ?: 0,
-                        name = item?.name.orEmpty(),
-                    )
-                }
+                val dirId = id.removePrefix(QQ_PROFILE_DIR_PREFIX).toIntOrNull()?.takeIf { it > 0 } ?: return null
+                val item = findAccountPlaylist(load) { it.extra["dirid"] == dirId.toString() } ?: return null
+                QQWriteTarget(dirId, item.extra["tid"].orEmpty().toLongOrNull() ?: 0, item.name)
             }
+
             else -> {
-                var found: QQWriteTarget? = null
-                var page = 1
-                val seen = mutableSetOf<String>()
-                while (true) {
-                    val items = userPlaylists(cookie, page++, 100)
-                    val item = items.firstOrNull { it.id == id }
-                    if (item != null) {
-                        val dirId = item.extra["dirid"].orEmpty().toIntOrNull()
-                        if (dirId != null && dirId > 0) {
-                            found = QQWriteTarget(
-                                dirId = dirId,
-                                tid = item.extra["tid"].orEmpty().toLongOrNull() ?: 0,
-                                name = item.name,
-                            )
-                            break
-                        }
-                    }
-                    if (items.size < 100 || !seen.addAll(items.map { it.id })) break
-                }
-                found
+                val item = findAccountPlaylist(load) { it.id == id } ?: return null
+                val dirId = item.extra["dirid"].orEmpty().toIntOrNull()?.takeIf { it > 0 } ?: return null
+                QQWriteTarget(dirId, item.extra["tid"].orEmpty().toLongOrNull() ?: 0, item.name)
             }
-        } ?: return null
+        }
         dirIdCache[key] = resolved
         return resolved
     }
@@ -3698,6 +3665,24 @@ private data class QQHotPlaylist(
 )
 
 private data class QQWriteTarget(val dirId: Int, val tid: Long, val name: String)
+
+/**
+ * 翻页在账号歌单里找第一个命中的。歌单一页 100 个，超过一页必须翻完：
+ * tid 和歌单名解析不出来时写接口会拿到 tid=0，被服务端以 500026 拒掉。
+ * [seen] 去重，服务端忽略 sin/size 一直回同一页时不会死循环。
+ */
+internal suspend fun findAccountPlaylist(
+    load: suspend (page: Int, limit: Int) -> List<Playlist>,
+    match: (Playlist) -> Boolean,
+): Playlist? {
+    val seen = mutableSetOf<String>()
+    var page = 1
+    while (true) {
+        val items = load(page++, 100)
+        items.firstOrNull(match)?.let { return it }
+        if (items.size < 100 || !seen.addAll(items.map { it.id })) return null
+    }
+}
 
 @Serializable
 private data class QQUserPlaylistResponse(
