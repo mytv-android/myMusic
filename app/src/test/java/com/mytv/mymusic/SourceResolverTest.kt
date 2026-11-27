@@ -19,6 +19,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.util.Collections
 
 class SourceResolverTest {
     private val resolver = SourceResolver(
@@ -159,6 +160,69 @@ class SourceResolverTest {
             policy = SourcePolicy(mode = PlaybackMode.Auto, priority = listOf("apple", "qq")),
         )
         assertEquals(listOf("apple", "qq"), candidates.map { it.providerId })
+    }
+
+    // ---------- 「按音质」并发探测：问遍所有候选，挑实际码率最高的 ----------
+
+    /** 按平台回不同码率的流；记录每个平台被问过几次，用来验证有没有并发问全。 */
+    private class BitrateRepository(private val bitrates: Map<String, Int>) : MusicRepository() {
+        // 并发探测会同时往这里写，普通 ArrayList 会丢元素
+        val requested: MutableList<String> = Collections.synchronizedList(mutableListOf())
+
+        override suspend fun playableStream(
+            song: Song,
+            cookie: String,
+            workDir: File,
+            quality: AudioQuality,
+        ): PlayableStream {
+            requested += song.source
+            // 没配码率的平台当作取不到地址，用来验证失败原因会进 attempts
+            val bitrate = bitrates[song.source] ?: return PlayableStream(url = "")
+            return PlayableStream(url = "https://example.com/${song.source}.mp3", bitrate = bitrate)
+        }
+    }
+
+    @Test
+    fun autoModeProbesEveryPlatformAndKeepsTheHighestBitrate() = runBlocking {
+        // 排在前面的网易云先成功，串行会在这儿停手；并发才能看到酷狗给的是 320k
+        val repository = BitrateRepository(mapOf("netease" to 128, "kugou" to 320))
+        val resolver = SourceResolver(repository, { emptyMap() }, { AggregationSettings() }, { File(".") })
+        val resolution = resolver.resolve(
+            track(listOf(neteaseSource(), TrackSource("kugou", "酷狗音乐", song("k1", "kugou")))),
+            policy = SourcePolicy(mode = PlaybackMode.Auto, priority = listOf("netease", "kugou")),
+        )
+        val ready = resolution as Resolution.Ready
+        assertEquals("kugou", ready.source.providerId)
+        assertEquals(320, ready.source.song.bitrate)
+        assertEquals(setOf("netease", "kugou"), repository.requested.toSet())
+    }
+
+    @Test
+    fun priorityModeStopsAtTheFirstPlayablePlatform() = runBlocking {
+        // 「按顺序」顺序敏感：第一个能响的就用，不问后面的平台
+        val repository = BitrateRepository(mapOf("netease" to 128, "kugou" to 320))
+        val resolver = SourceResolver(repository, { emptyMap() }, { AggregationSettings() }, { File(".") })
+        val resolution = resolver.resolve(
+            track(listOf(neteaseSource(), TrackSource("kugou", "酷狗音乐", song("k1", "kugou")))),
+            policy = SourcePolicy(mode = PlaybackMode.Priority, priority = listOf("netease", "kugou")),
+        )
+        val ready = resolution as Resolution.Ready
+        assertEquals("netease", ready.source.providerId)
+        assertEquals(listOf("netease"), repository.requested)
+    }
+
+    @Test
+    fun autoModeReportsEveryFailedPlatformInAttempts() = runBlocking {
+        // 全都取不到地址时，每个平台的失败原因都要进 attempts，换源面板才有的可显示
+        val repository = BitrateRepository(emptyMap())
+        val resolver = SourceResolver(repository, { emptyMap() }, { AggregationSettings() }, { File(".") })
+        val resolution = resolver.resolve(
+            track(listOf(neteaseSource(), TrackSource("kugou", "酷狗音乐", song("k1", "kugou")))),
+            policy = SourcePolicy(mode = PlaybackMode.Auto, priority = listOf("netease", "kugou")),
+        )
+        val none = resolution as Resolution.None
+        assertEquals(listOf("netease", "kugou"), none.attempts.map { it.source.providerId })
+        assertTrue(none.attempts.all { it.reason == "没有返回播放地址" })
     }
 
     // ---------- resolve()：取流后才知道是试听（汽水会员曲）的换源行为 ----------

@@ -7,6 +7,9 @@ import com.mytv.mymusic.data.local.LOCAL_SOURCE
 import com.mytv.mymusic.data.lx.LxPlatform
 import com.mytv.mymusic.data.native.AudioQuality
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import java.io.File
 import java.util.LinkedHashMap
 
@@ -147,133 +150,202 @@ class SourceResolver(
         val cookieMap = cookies()
         val explicitProvider = pinnedProvider ?: policy.pinnedProvider
         val customGeneration = repository.customSourceGeneration()
-        val customSongs by lazy { lxCandidates(track).map { it.song } }
+        // Lazy：串行路径一个候选都不走洛雪时不该白算一遍
+        val customSongs = lazy { lxCandidates(track).map { it.song } }
 
+        // 「按音质」要的是所有平台里码率最高的那个：串行会把第一个能响的当结果，
+        // 哪怕后面的平台能给更高音质，所以并发问遍所有候选再挑
+        if (policy.mode == PlaybackMode.Auto) {
+            return resolveByQuality(track, ordered, policy, explicitProvider, cookieMap, customGeneration, customSongs)
+        }
+        // 「按顺序」「首选平台」顺序敏感：第一个能响的就用，提前返回也最快
         for (source in ordered) {
-            val cookie = cookieMap[source.providerId].orEmpty()
-            val status = availabilityOf(source, cookie)
-            val custom = source.providerId == LxPlatform.PROVIDER_ID
-            if (status == Availability.Unavailable) {
-                attempts += Attempt(source, "不可用")
-                continue
+            when (val probe = probeSource(track, source, policy, explicitProvider, cookieMap, customGeneration, customSongs)) {
+                is Probe.Ready -> return Resolution.Ready(probe.source, probe.url, probe.preview, probe.resolvedAt)
+                is Probe.Skipped -> attempts += Attempt(source, probe.reason)
             }
-            if (status == Availability.VipOnly && cookie.isBlank() && !custom) {
-                attempts += Attempt(source, "需要登录或会员")
-                continue
-            }
-            val explicit = source.providerId == explicitProvider
-            if ((status == Availability.PreviewOnly || source.isPreview) && !policy.allowPreview && !explicit && !custom) {
-                attempts += Attempt(source, "仅提供试听")
-                continue
-            }
-
-            val now = System.currentTimeMillis()
-            val cacheKey = source.resolutionKey.ifBlank { source.song.key }
-            val cached = synchronized(lock) { urlCache[cacheKey] }
-            // 换过音质偏好就不能复用旧地址：用户选了无损，缓存里那条 128k 必须作废
-            val qualityId = quality().id
-            if (cached != null && cached.quality == qualityId && cached.generation == customGeneration && now - cached.at < URL_TTL_MS) {
-                // 汽水这类取流后才知道是试听的源，缓存里带着试听标记：同样受「允许试听」约束
-                if (cached.preview && !policy.allowPreview && !explicit) {
-                    attempts += Attempt(source, "仅提供试听")
-                    continue
-                }
-                val cachedSong = if (source.providerId == LxPlatform.PROVIDER_ID) cached.song ?: source.song else source.song
-                val cachedSource = source.copy(song = cachedSong).withQuality(cached.ext, cached.bitrate, cached.extra)
-                return Resolution.Ready(cachedSource, cached.url, cached.preview, cached.at)
-            }
-            if (cached != null) synchronized(lock) { urlCache.remove(cacheKey) }
-
-            val cachedFailure = synchronized(lock) { negativeCache[cacheKey] }
-            // 洛雪脚本失败多半是临时性风控/上游抖动：负缓存短一些，兜底能尽快重试
-            val negativeTtl = if (custom) CUSTOM_NEGATIVE_TTL_MS else NEGATIVE_TTL_MS
-            if (cachedFailure != null && cachedFailure.generation == customGeneration && now - cachedFailure.at < negativeTtl) {
-                attempts += Attempt(source, "近期解析失败")
-                continue
-            }
-
-            var failure: Throwable? = null
-            var resolvedSong = source.song
-            var stream = runCatching {
-                if (source.providerId == LxPlatform.PROVIDER_ID) {
-                    val result = repository.playableLxStream(customSongs, quality())
-                    resolvedSong = result?.song ?: source.song
-                    result?.stream
-                } else {
-                    repository.playableStream(source.song, cookie, workDir(), quality())
-                }
-            }.onFailure {
-                if (it is CancellationException) throw it
-                failure = it
-            }.getOrNull()
-            if (stream?.url.isNullOrBlank() && quality() != AudioQuality.Auto) {
-                // 用户锁了音质而这个平台给不了（没上架无损、账号没会员）：退回自动档再取一次，
-                // 宁可降档也要让这首歌响，不能因为一个音质偏好就整首播不出来。
-                stream = runCatching {
-                    if (source.providerId == LxPlatform.PROVIDER_ID) {
-                        val result = repository.playableLxStream(customSongs, AudioQuality.Auto)
-                        resolvedSong = result?.song ?: source.song
-                        result?.stream
-                    } else {
-                        repository.playableStream(source.song, cookie, workDir(), AudioQuality.Auto)
-                    }
-                }.onFailure {
-                    if (it is CancellationException) throw it
-                }.getOrNull()
-            }
-            val url = stream?.url.orEmpty()
-            if (url.isBlank()) {
-                // 洛雪是「换源点了却回退」的主要出处，失败原因要进应用内日志，用户导日志时能看见
-                if (source.providerId == LxPlatform.PROVIDER_ID) {
-                    val reason = repository.customSourceFailure().ifBlank { failure?.message.orEmpty() }
-                    AppLog.w("SourceResolver", "洛雪取流失败《${track.title}》：${reason.take(300)}")
-                }
-                synchronized(lock) {
-                    negativeCache[cacheKey] = CachedFailure(System.currentTimeMillis(), customGeneration)
-                }
-                val reason = failure?.message
-                    ?.takeIf { source.providerId == "soda" && it.contains("签名器") }
-                    ?.substringBefore("\n")
-                    ?: "没有返回播放地址"
-                attempts += Attempt(source, reason)
-                continue
-            }
-            val fromCustom = source.providerId == LxPlatform.PROVIDER_ID || stream?.extra?.containsKey("lx_source") == true
-            val preview = if (fromCustom) stream?.preview == true else {
-                source.isPreview || stream?.preview == true || isPreviewSource(source.providerId, source.song)
-            }
-            val resolvedSource = source.copy(song = resolvedSong).withQuality(
-                stream?.ext.orEmpty(),
-                stream?.bitrate ?: 0,
-                stream?.extra.orEmpty(),
-            )
-            synchronized(lock) {
-                urlCache[cacheKey] = CachedUrl(
-                    url = url,
-                    preview = preview,
-                    at = System.currentTimeMillis(),
-                    ext = resolvedSource.song.ext,
-                    bitrate = resolvedSource.song.bitrate,
-                    extra = stream?.extra.orEmpty(),
-                    quality = qualityId,
-                    generation = customGeneration,
-                    song = resolvedSong,
-                )
-            }
-            // 地址拿到了但只是片段，而设置里不允许试听：当没有可用地址，继续试下一个平台；
-            // 缓存里留着这份试听地址，用户打开「允许试听」后可以直接复用
-            if (preview && !policy.allowPreview && !explicit) {
-                attempts += Attempt(source, "仅提供试听")
-                continue
-            }
-            if (source.providerId == LxPlatform.PROVIDER_ID) {
-                AppLog.d("SourceResolver", "洛雪取流成功《${track.title}》：${stream?.extra?.get("lx_source").orEmpty()}")
-            }
-            return Resolution.Ready(resolvedSource, url, preview)
         }
 
         val deepLink = track.sources.firstOrNull { it.song.link.isNotBlank() }?.song?.link.orEmpty()
         return Resolution.None(attempts, deepLink)
+    }
+
+    /**
+     * 「按音质」：并发问遍所有原生候选，拿实际码率挑最高的。串行会把第一个能响的当结果，
+     * 哪怕后面的平台能给更高音质。缓存命中的不重复发请求，按已知码率参与竞争；
+     * 显式指定的平台仍然优先，码率竞争只在不指定时才有意义。
+     *
+     * 洛雪是兜底，不在这儿并发：跑脚本有成本，原生源有能放的就不该动它，
+     * 原生全灭才单独让它上。
+     */
+    private suspend fun resolveByQuality(
+        track: CanonicalTrack,
+        ordered: List<TrackSource>,
+        policy: SourcePolicy,
+        explicitProvider: String?,
+        cookieMap: Map<String, String>,
+        customGeneration: Long,
+        customSongs: Lazy<List<Song>>,
+    ): Resolution = coroutineScope {
+        val native = ordered.filter { it.providerId != LxPlatform.PROVIDER_ID }
+        val custom = ordered.filter { it.providerId == LxPlatform.PROVIDER_ID }
+        val attempts = mutableListOf<Attempt>()
+        var ready = mutableListOf<Probe.Ready>()
+        for ((source, probe) in native.map { source ->
+            async { source to probeSource(track, source, policy, explicitProvider, cookieMap, customGeneration, customSongs) }
+        }.awaitAll()) {
+            when (probe) {
+                is Probe.Skipped -> attempts += Attempt(source, probe.reason)
+                is Probe.Ready -> ready += probe
+            }
+        }
+        // 原生一个都没成，才让洛雪兜底；脚本失败原因同样记进 attempts，换源面板才有东西可显示
+        if (ready.isEmpty()) {
+            for (source in custom) {
+                when (val probe = probeSource(track, source, policy, explicitProvider, cookieMap, customGeneration, customSongs)) {
+                    is Probe.Ready -> ready += probe
+                    is Probe.Skipped -> attempts += Attempt(source, probe.reason)
+                }
+            }
+        }
+        val deepLink = track.sources.firstOrNull { it.song.link.isNotBlank() }?.song?.link.orEmpty()
+        // 码率相同看匹配度，还相同就沿用候选顺序——并发前的排列顺序就是排好的顺序
+        val best = ready.firstOrNull { it.source.providerId == explicitProvider }
+            ?: ready.maxWithOrNull(compareBy({ it.source.song.bitrate }, { it.source.matchScore }))
+        best?.let { Resolution.Ready(it.source, it.url, it.preview, it.resolvedAt) }
+            ?: Resolution.None(attempts, deepLink)
+    }
+
+    /** 单个候选探一次的结果：拿到了可用地址，或者因为某个原因跳过。 */
+    private sealed class Probe {
+        data class Ready(
+            val source: TrackSource,
+            val url: String,
+            val preview: Boolean,
+            val resolvedAt: Long,
+        ) : Probe()
+
+        data class Skipped(val reason: String) : Probe()
+    }
+
+    /**
+     * 对单个候选探一次：可用性、地址缓存、负缓存、取流、锁档回退、试听判定都在这里。
+     * 串行路径命中即返回；并发路径收集全部结果后挑码率最高的。
+     */
+    private suspend fun probeSource(
+        track: CanonicalTrack,
+        source: TrackSource,
+        policy: SourcePolicy,
+        explicitProvider: String?,
+        cookieMap: Map<String, String>,
+        customGeneration: Long,
+        customSongs: Lazy<List<Song>>,
+    ): Probe {
+        val cookie = cookieMap[source.providerId].orEmpty()
+        val custom = source.providerId == LxPlatform.PROVIDER_ID
+        val status = availabilityOf(source, cookie)
+        if (status == Availability.Unavailable) return Probe.Skipped("不可用")
+        if (status == Availability.VipOnly && cookie.isBlank() && !custom) return Probe.Skipped("需要登录或会员")
+        val explicit = source.providerId == explicitProvider
+        if ((status == Availability.PreviewOnly || source.isPreview) && !policy.allowPreview && !explicit && !custom) {
+            return Probe.Skipped("仅提供试听")
+        }
+
+        val now = System.currentTimeMillis()
+        val cacheKey = source.resolutionKey.ifBlank { source.song.key }
+        val cached = synchronized(lock) { urlCache[cacheKey] }
+        // 换过音质偏好就不能复用旧地址：用户选了无损，缓存里那条 128k 必须作废
+        val qualityId = quality().id
+        if (cached != null && cached.quality == qualityId && cached.generation == customGeneration && now - cached.at < URL_TTL_MS) {
+            // 汽水这类取流后才知道是试听的源，缓存里带着试听标记：同样受「允许试听」约束
+            if (cached.preview && !policy.allowPreview && !explicit) return Probe.Skipped("仅提供试听")
+            val cachedSong = if (custom) cached.song ?: source.song else source.song
+            val cachedSource = source.copy(song = cachedSong).withQuality(cached.ext, cached.bitrate, cached.extra)
+            return Probe.Ready(cachedSource, cached.url, cached.preview, cached.at)
+        }
+        if (cached != null) synchronized(lock) { urlCache.remove(cacheKey) }
+
+        val cachedFailure = synchronized(lock) { negativeCache[cacheKey] }
+        // 洛雪脚本失败多半是临时性风控/上游抖动：负缓存短一些，兜底能尽快重试
+        val negativeTtl = if (custom) CUSTOM_NEGATIVE_TTL_MS else NEGATIVE_TTL_MS
+        if (cachedFailure != null && cachedFailure.generation == customGeneration && now - cachedFailure.at < negativeTtl) {
+            return Probe.Skipped("近期解析失败")
+        }
+
+        var failure: Throwable? = null
+        var resolvedSong = source.song
+        var stream = runCatching {
+            if (custom) {
+                val result = repository.playableLxStream(customSongs.value, quality())
+                resolvedSong = result?.song ?: source.song
+                result?.stream
+            } else {
+                repository.playableStream(source.song, cookie, workDir(), quality())
+            }
+        }.onFailure {
+            if (it is CancellationException) throw it
+            failure = it
+        }.getOrNull()
+        if (stream?.url.isNullOrBlank() && quality() != AudioQuality.Auto) {
+            // 用户锁了音质而这个平台给不了（没上架无损、账号没会员）：退回自动档再取一次，
+            // 宁可降档也要让这首歌响，不能因为一个音质偏好就整首播不出来。
+            stream = runCatching {
+                if (custom) {
+                    val result = repository.playableLxStream(customSongs.value, AudioQuality.Auto)
+                    resolvedSong = result?.song ?: source.song
+                    result?.stream
+                } else {
+                    repository.playableStream(source.song, cookie, workDir(), AudioQuality.Auto)
+                }
+            }.onFailure {
+                if (it is CancellationException) throw it
+            }.getOrNull()
+        }
+        val url = stream?.url.orEmpty()
+        if (url.isBlank()) {
+            // 洛雪是「换源点了却回退」的主要出处，失败原因要进应用内日志，用户导日志时能看见
+            if (custom) {
+                val reason = repository.customSourceFailure().ifBlank { failure?.message.orEmpty() }
+                AppLog.w("SourceResolver", "洛雪取流失败《${track.title}》：${reason.take(300)}")
+            }
+            synchronized(lock) {
+                negativeCache[cacheKey] = CachedFailure(System.currentTimeMillis(), customGeneration)
+            }
+            val reason = failure?.message
+                ?.takeIf { source.providerId == "soda" && it.contains("签名器") }
+                ?.substringBefore("\n")
+                ?: "没有返回播放地址"
+            return Probe.Skipped(reason)
+        }
+        val fromCustom = custom || stream?.extra?.containsKey("lx_source") == true
+        val preview = if (fromCustom) stream?.preview == true else {
+            source.isPreview || stream?.preview == true || isPreviewSource(source.providerId, source.song)
+        }
+        val resolvedSource = source.copy(song = resolvedSong).withQuality(
+            stream?.ext.orEmpty(),
+            stream?.bitrate ?: 0,
+            stream?.extra.orEmpty(),
+        )
+        synchronized(lock) {
+            urlCache[cacheKey] = CachedUrl(
+                url = url,
+                preview = preview,
+                at = System.currentTimeMillis(),
+                ext = resolvedSource.song.ext,
+                bitrate = resolvedSource.song.bitrate,
+                extra = stream?.extra.orEmpty(),
+                quality = qualityId,
+                generation = customGeneration,
+                song = resolvedSong,
+            )
+        }
+        // 地址拿到了但只是片段，而设置里不允许试听：当没有可用地址，继续试下一个平台；
+        // 缓存里留着这份试听地址，用户打开「允许试听」后可以直接复用
+        if (preview && !policy.allowPreview && !explicit) return Probe.Skipped("仅提供试听")
+        if (custom) {
+            AppLog.d("SourceResolver", "洛雪取流成功《${track.title}》：${stream?.extra?.get("lx_source").orEmpty()}")
+        }
+        return Probe.Ready(resolvedSource, url, preview, System.currentTimeMillis())
     }
 
     private fun TrackSource.withQuality(
