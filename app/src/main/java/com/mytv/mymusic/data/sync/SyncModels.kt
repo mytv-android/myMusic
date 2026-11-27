@@ -36,7 +36,31 @@ data class SyncSnapshot(
     val cookies: List<SyncCookie> = emptyList(),
     /** 洛雪自定义音源，连脚本正文一起同步：本机导入的脚本没有地址，丢了只能重新导入。 */
     val lxSources: List<SyncLxSource> = emptyList(),
+    /**
+     * 汽水扫码登录的护照设备身份。它和 [cookies] 里那条汽水 Cookie 是**同一套凭据**：
+     * 护照服务按 `device_id` 做风控并按它补发 `odin_tt`，会话也签给这个身份，所以两台
+     * 设备必须用同一对。老同步文件没有这一项（null），本机保持自己那份。
+     */
+    val sodaDevice: SyncSodaDevice? = null,
 )
+
+/**
+ * 汽水扫码登录的护照设备身份（`device_id` 16 位 / `install_id` 15 位纯数字）。
+ *
+ * 跟着同步的只有这一份：播放上报用的设备指纹（`sodaReportDeviceId`）**不**同步——
+ * 那是每台设备自己的听歌历史，合并成一个身份会让推荐口味和播放计数全乱。
+ * 轮换（设置里的「重置登录设备」）会写一个新的 [updatedAt]，同步按它判新旧。
+ */
+@Serializable
+data class SyncSodaDevice(
+    val deviceId: String = "",
+    val installId: String = "",
+    val updatedAt: String = SyncTime.nowIso(),
+)
+
+fun SyncSodaDevice.changeTimeMillis(): Long = SyncTime.toMillis(updatedAt)
+
+fun SyncSodaDevice.isUsable(): Boolean = deviceId.isNotBlank() && installId.isNotBlank()
 
 /** 洛雪自定义音源。[script] 是脚本正文，[deletedAt] 非空表示删除的墓碑。 */
 @Serializable
@@ -268,6 +292,8 @@ fun buildSnapshot(
     /** 本地歌的线索，按 Song.key（local:sha256:…）查；平台歌不在里面。 */
     localRefs: Map<String, SyncTrackRefs> = emptyMap(),
     lxSources: List<SyncLxSource> = emptyList(),
+    /** 汽水扫码登录的护照设备身份；没生成过就传 null，老客户端看到会忽略。 */
+    sodaDevice: SyncSodaDevice? = null,
 ): SyncSnapshot {
     val entriesByPlaylist = entries.groupBy { it.playlistId }
     return SyncSnapshot(
@@ -327,6 +353,7 @@ fun buildSnapshot(
             }
             .filter { includeDeleted },
         lxSources = lxSources,
+        sodaDevice = sodaDevice,
     )
 }
 
@@ -432,6 +459,10 @@ fun snapshotSignature(snapshot: SyncSnapshot): String = buildString {
     append(refsSignature(snapshot))
     append("\n--lx--\n")
     append(snapshot.lxSources.sortedBy { it.id }.joinToString("\n") { "${it.id}:${it.scriptHash}:${it.enabled}:${it.deletedAt}" })
+    append("\n--soda-device--\n")
+    // 登录设备身份也算内容：轮换过要和别处一样被认出「本机改过」
+    val device = snapshot.sodaDevice
+    append(if (device == null) "-" else "${device.deviceId}:${device.installId}")
 }
 
 /** 所有带线索的本地歌：key + 三组线索，排好序；同一首在几个歌单里出现只算一次。 */

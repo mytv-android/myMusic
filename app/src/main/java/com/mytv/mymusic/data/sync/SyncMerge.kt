@@ -14,6 +14,7 @@ data class SyncContent(
     val favorites: List<SyncFavorite> = emptyList(),
     val cookies: List<SyncCookie> = emptyList(),
     val lxSources: List<SyncLxSource> = emptyList(),
+    val sodaDevice: SyncSodaDevice? = null,
 )
 
 data class MergeResult(
@@ -22,6 +23,7 @@ data class MergeResult(
     val cookies: List<SyncCookie>,
     val lxSources: List<SyncLxSource>,
     val conflicts: List<MergeConflict>,
+    val sodaDevice: SyncSodaDevice? = null,
 )
 
 object SyncMerge {
@@ -72,6 +74,7 @@ object SyncMerge {
             cookies = mergeCookies(base?.cookies.orEmpty(), local.cookies, remote.cookies),
             lxSources = mergeLxSources(base?.lxSources.orEmpty(), local.lxSources, remote.lxSources),
             conflicts = conflicts,
+            sodaDevice = mergeSodaDevice(local.sodaDevice, remote.sodaDevice),
         )
     }
 
@@ -128,8 +131,8 @@ object SyncMerge {
         remote: SyncSnapshot,
         strategy: SyncStrategy,
     ): SyncContent = when (strategy) {
-        SyncStrategy.Local -> SyncContent(local.playlists, local.favorites, local.cookies, local.lxSources)
-        SyncStrategy.Remote -> SyncContent(remote.playlists, remote.favorites, remote.cookies, remote.lxSources)
+        SyncStrategy.Local -> SyncContent(local.playlists, local.favorites, local.cookies, local.lxSources, local.sodaDevice)
+        SyncStrategy.Remote -> SyncContent(remote.playlists, remote.favorites, remote.cookies, remote.lxSources, remote.sodaDevice)
         SyncStrategy.Merge -> {
             val localMap = local.playlists.associateBy { it.id }
             val remoteMap = remote.playlists.associateBy { it.id }
@@ -140,8 +143,23 @@ object SyncMerge {
                 favorites = unionFavorites(local.favorites, remote.favorites),
                 cookies = unionCookies(local.cookies, remote.cookies),
                 lxSources = mergeLxSources(emptyList(), local.lxSources, remote.lxSources),
+                sodaDevice = mergeSodaDevice(local.sodaDevice, remote.sodaDevice),
             )
         }
+    }
+
+    /**
+     * 汽水登录设备身份按时间取新的（和 Cookie 一样不弹冲突界面）：它是单值不是列表，
+     * 也没有「删除」这个状态——轮换就是写一份带新时间戳的身份，旧快照盖不掉新的。
+     * 两边都没带（老同步文件 / 两台都没生成过）时返回 null，本机保持原样。
+     */
+    fun mergeSodaDevice(local: SyncSodaDevice?, remote: SyncSodaDevice?): SyncSodaDevice? {
+        val l = local?.takeIf { it.isUsable() }
+        val r = remote?.takeIf { it.isUsable() }
+        if (l == null) return r
+        if (r == null) return l
+        if (l.deviceId == r.deviceId && l.installId == r.installId) return l
+        return if (r.changeTimeMillis() > l.changeTimeMillis()) r else l
     }
 
     /** 收藏没有冲突界面：两边都改过时按修改时间取新的；时间相同保留本机。 */

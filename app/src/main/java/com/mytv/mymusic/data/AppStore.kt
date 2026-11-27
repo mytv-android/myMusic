@@ -347,6 +347,8 @@ class SettingsStore(private val context: Context) {
     // 汽水扫码登录的护照设备身份：和设备指纹是两套东西，落盘后所有二维码复用同一个
     private val sodaLoginDeviceIdKey = stringPreferencesKey("soda_login_device_id")
     private val sodaLoginInstallIdKey = stringPreferencesKey("soda_login_install_id")
+    // 身份是什么时候生成/轮换的：同步文件按它判新旧（轮换 = 一份带新时间戳的身份）
+    private val sodaLoginDeviceUpdatedAtKey = longPreferencesKey("soda_login_device_updated_at")
     // 酷狗概念版「听歌领会员」：启动时自动领一天的开关，和上次自动领取的日期（只用来去重）
     private val kugouWelfareAutoKey = booleanPreferencesKey("kugou_welfare_auto")
     private val kugouWelfareLastDateKey = stringPreferencesKey("kugou_welfare_last_date")
@@ -423,6 +425,7 @@ class SettingsStore(private val context: Context) {
             sodaReportDeviceId = values[sodaReportDeviceIdKey] ?: "",
             sodaLoginDeviceId = values[sodaLoginDeviceIdKey] ?: "",
             sodaLoginInstallId = values[sodaLoginInstallIdKey] ?: "",
+            sodaLoginDeviceUpdatedAt = values[sodaLoginDeviceUpdatedAtKey] ?: 0L,
             kugouWelfareAuto = values[kugouWelfareAutoKey] ?: true,
             kugouWelfareLastClaimDate = values[kugouWelfareLastDateKey] ?: "",
             lyricStage = lyricStagePrefs(values),
@@ -533,16 +536,26 @@ class SettingsStore(private val context: Context) {
      * `odin_tt`；每次登录都换新设备会被当成新设备，扫码后容易 `error_code=7`，
      * 拿到的会话也短命（对齐 libresoda `docs/QR-LOGIN.md` 与 sodam config 的
      * `login_device_id`：退出登录不清除，只有显式重置才轮换）。
+     *
+     * 身份和登录 Cookie 是**同一套凭据**，所以它跟着同步走（见 `SyncSodaDevice`）：
+     * 只同步这一份，播放上报用的设备指纹不同步——那是每台设备自己的听歌历史。
      */
     suspend fun sodaLoginDevice(): Pair<String, String> {
         val current = context.dataStore.data.first()
         val deviceId = current[sodaLoginDeviceIdKey]?.takeIf { it.isNotBlank() }
         val installId = current[sodaLoginInstallIdKey]?.takeIf { it.isNotBlank() }
-        if (deviceId != null && installId != null) return deviceId to installId
-        val generated = randomLoginDeviceId(16) to randomLoginDeviceId(15)
+        val stamped = current[sodaLoginDeviceUpdatedAtKey] ?: 0L
+        // 老版本生成的身份没记时间戳：补一个，不然同步里判不了新旧
+        if (deviceId != null && installId != null && stamped > 0L) return deviceId to installId
+        val generated = if (deviceId != null && installId != null) {
+            deviceId to installId
+        } else {
+            randomLoginDeviceId(16) to randomLoginDeviceId(15)
+        }
         context.dataStore.edit {
             it[sodaLoginDeviceIdKey] = generated.first
             it[sodaLoginInstallIdKey] = generated.second
+            it[sodaLoginDeviceUpdatedAtKey] = System.currentTimeMillis()
         }
         return generated
     }
@@ -553,8 +566,47 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit {
             it[sodaLoginDeviceIdKey] = generated.first
             it[sodaLoginInstallIdKey] = generated.second
+            it[sodaLoginDeviceUpdatedAtKey] = System.currentTimeMillis()
         }
         return generated
+    }
+
+    /**
+     * 同步带回来的登录设备身份写进本机。
+     *
+     * 为什么要同步它：护照服务按 `device_id` 风控并按它补发 `odin_tt`，会话也签给这个
+     * 身份。登录 Cookie 本来就整份同步，身份却各用各的话，另一台设备在服务端眼里就是
+     * 「拿着别人签发的会话 + 一个陌生设备」——正是风控最喜欢的那种形状。
+     *
+     * 判新旧的逻辑在合并那一层（`SyncMerge.mergeSodaDevice` 按时间取新的），这里和
+     * Cookie 一样：合并结果说什么就写什么。时间戳只向前走，免得回退之后下次合并判错。
+     */
+    suspend fun adoptSodaLoginDevice(deviceId: String, installId: String, updatedAt: Long): Boolean {
+        val id = deviceId.trim()
+        val install = installId.trim()
+        if (id.isEmpty() || install.isEmpty()) return false
+        var adopted = false
+        context.dataStore.edit {
+            val same = it[sodaLoginDeviceIdKey] == id && it[sodaLoginInstallIdKey] == install
+            val current = it[sodaLoginDeviceUpdatedAtKey] ?: 0L
+            val time = maxOf(updatedAt, current)
+            if (same && time == current) return@edit
+            it[sodaLoginDeviceIdKey] = id
+            it[sodaLoginInstallIdKey] = install
+            it[sodaLoginDeviceUpdatedAtKey] = time
+            adopted = true
+        }
+        return adopted
+    }
+
+    /** 同步读取登录设备身份和时间戳，避免两次读之间不一致。 */
+    suspend fun sodaLoginDeviceSnapshot(): SodaLoginDeviceSnapshot {
+        val values = context.dataStore.data.first()
+        return SodaLoginDeviceSnapshot(
+            deviceId = values[sodaLoginDeviceIdKey]?.takeIf { it.isNotBlank() }.orEmpty(),
+            installId = values[sodaLoginInstallIdKey]?.takeIf { it.isNotBlank() }.orEmpty(),
+            updatedAt = values[sodaLoginDeviceUpdatedAtKey] ?: 0L,
+        )
     }
 
     /** 纯数字、首位非 0（对齐 libresoda `QrDevice::generate` 的 `digits()`）。 */
@@ -862,6 +914,13 @@ data class CookieSnapshot(
     val updatedAt: Map<String, Long> = emptyMap(),
 )
 
+/** 汽水扫码登录的护照设备身份，连它上次生成/轮换的时间（同步按时间判新旧）。 */
+data class SodaLoginDeviceSnapshot(
+    val deviceId: String = "",
+    val installId: String = "",
+    val updatedAt: Long = 0L,
+)
+
 data class AppSettings(
     val provider: String = "netease",
     val chartsSource: String = "",
@@ -947,6 +1006,8 @@ data class AppSettings(
      */
     val sodaLoginDeviceId: String = "",
     val sodaLoginInstallId: String = "",
+    /** 登录设备身份上次生成/轮换的时间；同步按它判新旧（见 SettingsStore.adoptSodaLoginDevice）。 */
+    val sodaLoginDeviceUpdatedAt: Long = 0L,
     /** 酷狗概念版「听歌领会员」是否在启动时自动领一天。 */
     val kugouWelfareAuto: Boolean = true,
     /** 上次自动领取的日期（北京时间 yyyy-MM-dd），空表示还没自动领过。 */

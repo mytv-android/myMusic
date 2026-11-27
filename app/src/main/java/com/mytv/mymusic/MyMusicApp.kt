@@ -218,8 +218,10 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
                 PlayReportHub.updateCookies(values.cookies)
                 AppleSession.update(values.cookies)
                 SodaProvider.configureFallbackDeviceId(values.sodaReportDeviceId)
-                // 登录设备身份还没落盘：先生成一份写进去，之后一直复用（换设备身份等于换账号的新设备）
-                if (values.sodaLoginDeviceId.isBlank() && !sodaLoginDeviceReady) {
+                // 登录设备身份：落盘的那一份，所有二维码复用（服务端按它补发 odin_tt）。
+                // 启动时过一遍 sodaLoginDevice()：它负责生成，也给上一版生成却没记时间戳的
+                // 身份补一个——同步要按时间戳判新旧，没记过的身份在同步里永远算最旧
+                if (!sodaLoginDeviceReady) {
                     sodaLoginDeviceReady = true
                     val (deviceId, installId) = settings.sodaLoginDevice()
                     SodaProvider.configureLoginDevice(deviceId, installId)
