@@ -2103,11 +2103,8 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     private suspend fun fetchProfileDirPlaylistSongs(cookie: String, dirId: String): List<Song> {
         val dir = dirId.trim()
         if (dir.isEmpty()) throw IllegalArgumentException("qq profile dir playlist require dirid")
-        val uin = firstNonEmpty(
-            cookieValue(cookie, "euin"),
-            cookieValue(cookie, "wxuin"),
-            normalizeQqUin(cookie),
-        )
+        // 目录接口按数字 uin 查询；微信登录没有 uin 时 normalizeQqUin 会退回 euin。
+        val uin = normalizeQqUin(cookie)
         if (uin.isEmpty()) throw IllegalStateException("qq profile dir playlist require uin cookie")
         val url = QQ_PROFILE_DIR_API + "?" + qqQuery(
             "uin" to uin,

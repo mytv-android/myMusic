@@ -285,6 +285,12 @@ class QQFavoriteSyncTest {
         assertEquals(5381, gtk)
     }
 
+    @Test
+    fun numericUinWinsOverEuinForDirPlaylists() {
+        val (uin, _) = QQProvider().qqLogin("uin=o1205039851; euin=oFakeEuin123**; qm_keyst=W_X_test")
+        assertEquals("1205039851", uin)
+    }
+
     private fun gtk33(value: String): Int {
         var hash = 5381
         for (char in value) hash += (hash shl 5) + char.code
