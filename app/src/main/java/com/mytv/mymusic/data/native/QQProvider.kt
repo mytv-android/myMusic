@@ -607,9 +607,15 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
 
     private suspend fun writePlaylist(cookie: String, playlistId: String, method: String, songs: List<Song>) {
         val (uin, gtk) = qqLogin(cookie)
-        // 写接口的 g_tk 必须和读接口一样由 p_skey/skey 计算，不能用 qm_keyst。
-        val skey = firstNonEmpty(cookieValue(cookie, "p_skey"), cookieValue(cookie, "skey"))
-        if (uin == "0" || skey.isBlank()) {
+        // 微信登录态没有 p_skey/skey，musicu 写接口实际只认 cookie 里的 qm_keyst，g_tk 用 5381 即可。
+        val loginKey = firstNonEmpty(
+            cookieValue(cookie, "qm_keyst"),
+            cookieValue(cookie, "qqmusic_key"),
+            cookieValue(cookie, "musickey"),
+            cookieValue(cookie, "p_skey"),
+            cookieValue(cookie, "skey"),
+        )
+        if (uin == "0" || loginKey.isBlank()) {
             throw PlaylistWriteException("请先登录 QQ 音乐", PlaylistWriteFailure.NotLoggedIn)
         }
         if (songs.isEmpty() && method != "SeqSonglist") return
@@ -2861,9 +2867,14 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
             cookieValue(cookie, "p_uin"),
             cookieValue(cookie, "musicid"),
             cookieValue(cookie, "userid"),
+            // 微信扫码/网页登录没有数字 QQ 号，账号标识只有 euin 这类字符串。
+            cookieValue(cookie, "euin"),
         )
-        if (uin.startsWith("o")) uin = uin.substring(1)
-        return uin.trimStart('0').trim()
+        // QQ 网页 uin 常见格式是 o+数字；euin 等字符串不能按数字规则裁剪。
+        if (uin.startsWith("o") && uin.length > 1 && uin.substring(1).all { it.isDigit() }) {
+            uin = uin.substring(1)
+        }
+        return if (uin.all { it.isDigit() }) uin.trimStart('0').trim() else uin.trim()
     }
 
     /**
@@ -2872,7 +2883,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
      */
     internal fun qqLogin(cookie: String): Pair<String, Int> {
         val uin = normalizeQqUin(cookie)
-        if (uin.isBlank() || !uin.all { it.isDigit() }) return "0" to 5381
+        if (uin.isBlank()) return "0" to 5381
         val skey = firstNonEmpty(cookieValue(cookie, "p_skey"), cookieValue(cookie, "skey"))
         return uin to if (skey.isBlank()) 5381 else gtk33(skey)
     }

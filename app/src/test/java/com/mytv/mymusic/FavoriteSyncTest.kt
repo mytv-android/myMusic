@@ -266,6 +266,13 @@ class QQFavoriteSyncTest {
         assertTrue(gtk != gtk33("music-key"))
     }
 
+    @Test
+    fun wechatLoginUsesEuinAsAccountWithoutSkey() {
+        val (uin, gtk) = QQProvider().qqLogin("euin=oFakeEuin123**; qm_keyst=W_X_test")
+        assertEquals("oFakeEuin123**", uin)
+        assertEquals(5381, gtk)
+    }
+
     private fun gtk33(value: String): Int {
         var hash = 5381
         for (char in value) hash += (hash shl 5) + char.code
