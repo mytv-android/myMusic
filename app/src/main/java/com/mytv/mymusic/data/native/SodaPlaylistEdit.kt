@@ -129,9 +129,16 @@ internal object SodaPlaylistEdit {
      */
     fun responseIsOk(root: JsonObject?): Boolean {
         if (root == null) return false
-        val code = jsonInt(root, "status_code") ?: return true
+        // 收藏接口的错误可能挂在下层 status_info，顶层没码不等于成功。
+        val code = jsonInt(root, "status_code")
+            ?: jsonInt(root, "status_info", "status_code")
+            ?: return true
         return code == 0
     }
+
+    /** 取服务端错误码；顶层没有时读 `status_info.status_code`。 */
+    fun responseCode(root: JsonObject?): Int =
+        jsonInt(root, "status_code") ?: jsonInt(root, "status_info", "status_code") ?: 0
 
     /** 回包里的错误文案（`status_info.status_msg`），成功时为空。 */
     fun responseErrorMessage(root: JsonObject?): String =

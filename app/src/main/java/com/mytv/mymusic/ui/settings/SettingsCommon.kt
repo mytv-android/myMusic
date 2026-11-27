@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
@@ -88,6 +89,7 @@ internal enum class SettingsSection(
     Search("settings/search", "搜索与浏览", "默认浏览来源", Icons.Filled.Search, IconTone.Primary),
     Swipe("settings/swipe", "滑动操作", "歌曲列表左右滑的按钮和拉到头", Icons.Filled.Swipe, IconTone.Secondary),
     Accounts("settings/accounts", "平台账号", "扫码登录、Cookie 与退出", Icons.Filled.Person, IconTone.Secondary),
+    FavoriteSync("settings/accounts/favorites", "收藏同步", "设置各音源的收藏歌单", Icons.Filled.Favorite, IconTone.Secondary),
     Subsonic("settings/accounts/servers", "音乐服务器", "Navidrome、Airsonic 与 Subsonic 曲库", Icons.Filled.Dns, IconTone.Secondary),
     Sync("settings/sync", "音乐库同步", "自建歌单的云端同步", Icons.Filled.Cloud, IconTone.Secondary),
     LocalMusic("settings/local", "本地音乐", "扫描范围、封面歌词匹配与上传", Icons.Filled.AudioFile, IconTone.Secondary),
@@ -101,7 +103,7 @@ internal enum class SettingsSection(
     val parent: SettingsSection? get() = when (this) {
         Licenses, Privacy -> About
         LxSources -> Sources
-        Subsonic -> Accounts
+        Subsonic, FavoriteSync -> Accounts
         else -> null
     }
 

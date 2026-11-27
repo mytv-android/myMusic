@@ -513,8 +513,20 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         ) {
             return null
         }
-        return id.trim().startsWith("cloudlist:")
+        if (!id.startsWith("cloudlist:")) return false
+        val seen = mutableSetOf<String>()
+        var page = 1
+        while (true) {
+            val playlists = userPlaylists(cookie, page++, 100)
+            playlists.firstOrNull { it.id == id }?.let { return playlistWritableFromAccountList(it) }
+            if (playlists.size < 100 || !seen.addAll(playlists.map { it.id })) return false
+        }
     }
+
+    override fun playlistWritableFromAccountList(playlist: Playlist): Boolean =
+        playlist.id.startsWith("cloudlist:") &&
+            !playlist.extra["list_create_userid"].isNullOrBlank() &&
+            playlist.extra["list_create_userid"] == playlist.extra["user_id"]
 
     override suspend fun addPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
         if (songs.isEmpty()) return
@@ -636,14 +648,17 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         ).toLongOrNull() ?: 0L
 
     private fun kugouFileId(song: Song, page: KugouCloudlistPage): Long {
-        song.extra["fileid"].orEmpty().toLongOrNull()?.takeIf { it > 0 }?.let { return it }
-        val hash = song.extra["hash"].orEmpty().ifBlank { song.id }
-        page.fileIds[hash]?.let { return it }
-        // 刚加进来的歌还没刷新到本地时，hash 可能和详情里选中的文件不一致，按歌名歌手回退
-        val matched = page.songs.firstOrNull {
-            it.name.equals(song.name, ignoreCase = true) && it.artist == song.artist
+        // fileid 属于单张歌单，不能直接用另一张歌单上的 fileid 或按歌名删除。
+        if (song.extra["cloud_listid"] == page.playlist.id.removePrefix("cloudlist:")) {
+            song.extra["fileid"]?.toLongOrNull()?.takeIf { it > 0 && it in page.fileIds.values }?.let { return it }
         }
-        matched?.extra?.get("fileid")?.toLongOrNull()?.takeIf { it > 0 }?.let { return it }
+        val hashes = listOf(song.id, song.extra["hash"], song.extra["file_hash"], song.extra["sq_hash"])
+        hashes.firstNotNullOfOrNull { page.fileIds[it] }?.let { return it }
+        val mixId = kugouMixSongId(song)
+        if (mixId > 0L) {
+            page.songs.firstOrNull { kugouMixSongId(it) == mixId }
+                ?.extra?.get("fileid")?.toLongOrNull()?.takeIf { it > 0 }?.let { return it }
+        }
         throw PlaylistWriteException(
             "kugou fileid not found: ${song.name.ifBlank { song.id }}",
             PlaylistWriteFailure.SongNotFound,

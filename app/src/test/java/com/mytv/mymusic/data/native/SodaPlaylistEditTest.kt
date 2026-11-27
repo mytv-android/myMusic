@@ -76,6 +76,16 @@ class SodaPlaylistEditTest {
         assertTrue(SodaPlaylistEdit.responseIsOk(parse("""{"playlist":{"id":"7501"},"status_info":{"now":1}}""")))
         assertTrue(SodaPlaylistEdit.responseIsOk(parse("""{"status_code":0}""")))
         assertFalse(SodaPlaylistEdit.responseIsOk(parse("""{"status_code":1000004}""")))
+        // 收藏接口的错误码挂在下层 status_info，不能因为顶层缺码就当成功
+        assertFalse(
+            SodaPlaylistEdit.responseIsOk(
+                parse("""{"status_info":{"status_code":1000003,"status_msg":"未登录"}}"""),
+            ),
+        )
+        assertEquals(
+            1000003,
+            SodaPlaylistEdit.responseCode(parse("""{"status_info":{"status_code":1000003}}""")),
+        )
         // 解析不出 JSON 时不当成功：宁可报错也不能把失败吞了
         assertFalse(SodaPlaylistEdit.responseIsOk(null))
     }

@@ -1132,6 +1132,17 @@ internal fun AccountsSettingsScreen(
                 Modifier.padding(bottom = 8.dp),
             )
         }
+        item(key = "favorite_sync", contentType = "setting") {
+            ListRow(
+                title = SettingsSection.FavoriteSync.title,
+                summary = SettingsSection.FavoriteSync.subtitle,
+                index = 0,
+                count = 1,
+                onClick = { onOpen(SettingsSection.FavoriteSync) },
+                icon = SettingsSection.FavoriteSync.icon,
+                iconTone = SettingsSection.FavoriteSync.tone,
+            )
+        }
         if (providers.isEmpty()) {
             item(key = "loading", contentType = "skeleton") { SkeletonRows(5) }
         } else {
