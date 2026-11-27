@@ -28,6 +28,11 @@ data class LxSourceRecord(
     val capabilities: Map<String, LxCapability> = emptyMap(),
     /** 落雪桌面版（Electron）插件：只取流，没有平台能力表。 */
     val desktop: Boolean = false,
+    /**
+     * 能力表的解析版本。客户端多认识一个平台（比如汽水 qs）时，老记录的能力表里就没有这个平台，
+     * 启动时据此重探一次；与脚本版本无关，所以不能用 scriptHash 判断。
+     */
+    val capabilityVersion: Int = 0,
 )
 
 data class LxScriptMetadata(
@@ -80,6 +85,8 @@ object LxPlatform {
         "kuwo" to "kw",
         "migu" to "mg",
         "local" to "local",
+        // 汽水音乐：落雪自定义源用 qs 代号，songId 就是汽水的 track id
+        "soda" to "qs",
     )
 
     val labels = linkedMapOf(
@@ -88,6 +95,7 @@ object LxPlatform {
         "tx" to "QQ",
         "wy" to "网易云",
         "mg" to "咪咕",
+        "qs" to "汽水",
         "local" to "本地",
     )
 
@@ -148,3 +156,14 @@ internal object LxScriptHeaders {
 }
 
 internal const val MAX_SCRIPT_BYTES = 2 * 1024 * 1024
+
+/**
+ * 能力表解析规则的版本：解析层多认识一个平台就加一。
+ * 脚本没变，老记录的能力表却缺这个平台，只能靠版本号判断要不要重探。
+ * v2 加了汽水 qs 的 Kotlin 侧映射；v3 补上 preload 白名单（v2 的历史记录探过但仍是空的）。
+ */
+internal const val LX_CAPABILITY_SCHEMA_VERSION = 3
+
+/** 桌面插件没有平台能力表，永远不用重探。 */
+internal fun LxSourceRecord.needsCapabilityRefresh(): Boolean =
+    !desktop && capabilityVersion < LX_CAPABILITY_SCHEMA_VERSION

@@ -25,12 +25,14 @@ class LxProtocolTest {
             }
             """.trimIndent(),
         )
-        assertEquals(setOf("kw", "tx", "local"), capabilities.keys)
+        assertEquals(setOf("kw", "tx", "qs", "local"), capabilities.keys)
         assertEquals(listOf("musicUrl"), capabilities.getValue("kw").actions)
         // 档位不过滤：连不认识的 hires_plus 也原样保留，顺序照脚本声明
         assertEquals(listOf("128k", "320k", "flac", "hires", "master", "hires_plus"), capabilities.getValue("kw").qualities)
         assertEquals(listOf("flac24bit", "atmos", "atmos_plus", "master"), capabilities.getValue("tx").qualities)
         assertEquals(listOf("musicUrl", "lyric", "pic"), capabilities.getValue("local").actions)
+        // 汽水：脚本用 qs 代号声明，要原样收进来才能把汽水歌递进去取流
+        assertEquals(listOf("32k", "flac"), capabilities.getValue("qs").qualities)
     }
 
     @Test
@@ -54,6 +56,14 @@ class LxProtocolTest {
         assertEquals("kw", LxPlatform.sourceKey("kuwo"))
         assertEquals("wy", LxPlatform.sourceKey("netease"))
         assertEquals("mg", LxPlatform.sourceKey("migu"))
+        assertEquals("qs", LxPlatform.sourceKey("soda"))
+        // 汽水：脚本取 songId 时优先 hash/songmid，两者都要是 track id
+        val soda = LxProtocol.musicInfo(
+            "qs",
+            Song(id = "7501674235158431760", source = "soda", extra = mapOf("track_id" to "7501674235158431760")),
+        )
+        assertEquals("7501674235158431760", soda["songmid"]?.jsonPrimitive?.content)
+        assertFalse(soda.containsKey("hash"))
     }
 
     @Test
