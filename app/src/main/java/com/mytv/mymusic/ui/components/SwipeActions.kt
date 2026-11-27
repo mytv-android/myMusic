@@ -363,6 +363,7 @@ internal fun swipeArtistToOpen(artist: String, hide: String): String? {
  * [enabled] 为 false（多选中）、设置里关掉了滑动（连读屏操作也不挂）。
  * [favoriteKeys]：哪些 key 收藏了就算「已收藏」（搜索结果是聚合曲目，收藏的可能是另一个平台的版本），默认就是这首。
  * [onChooseSource]：「选择音源」换成列表自己的入口（搜索结果按聚合曲目打开，带着所有平台的版本）。
+ * [onPlayNext]：聚合搜索用完整曲目排队，不能只留下行上展示的音源。
  */
 @Composable
 fun rememberRowSwipe(
@@ -374,6 +375,7 @@ fun rememberRowSwipe(
     hideAlbum: String = "",
     favoriteKeys: List<String>? = null,
     onChooseSource: (() -> Unit)? = null,
+    onPlayNext: (() -> Unit)? = null,
 ): RowSwipe? {
     val env = LocalSongSwipeEnv.current ?: return null
     if (song == null || !enabled || !env.prefs.value.enabled) return null
@@ -382,6 +384,7 @@ fun rememberRowSwipe(
     val latestQueue = rememberUpdatedState(queue)
     val latestDelete = rememberUpdatedState(delete)
     val latestChooseSource = rememberUpdatedState(onChooseSource)
+    val latestPlayNext = rememberUpdatedState(onPlayNext)
     val latestNotifier = rememberUpdatedState(LocalSwipeNotifier.current)
     val deleteFacts = delete?.let { SwipeDeleteFacts(it.label, it.sameAsUnfavorite) }
     val deleteSpoken = delete?.spoken.orEmpty()
@@ -434,7 +437,7 @@ fun rememberRowSwipe(
                                 notify("已取消收藏「${target.title}」") { actions.undoFavorite(removal) }
                             }
                             SwipeAction.Delete -> latestDelete.value?.run?.invoke()
-                            SwipeAction.PlayNext -> actions.playSongNext(target)
+                            SwipeAction.PlayNext -> latestPlayNext.value?.invoke() ?: actions.playSongNext(target)
                             SwipeAction.AddToQueue -> actions.addToQueue(target)
                             SwipeAction.OpenArtist -> swipeArtistToOpen(target.artist, hideArtist)?.let { actions.openArtistByName(it, target) }
                             SwipeAction.OpenAlbum -> actions.openAlbumOf(target)

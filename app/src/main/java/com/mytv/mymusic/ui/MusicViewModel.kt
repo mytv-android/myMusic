@@ -4003,12 +4003,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         pinnedProvider: String?,
         openPlayer: Boolean,
         origin: PlaybackOrigin? = null,
+        emptyQueueId: Int? = null,
     ): Boolean {
         val player = awaitController()
         if (player == null) {
             base.value = base.value.copy(error = "播放器尚未就绪")
             return false
         }
+        fun canStart() = emptyQueueId == null || (
+            controller === player && base.value.queueId == emptyQueueId &&
+                base.value.queue.isEmpty() && player.mediaItemCount == 0
+            )
+        if (!canStart()) return false
         // 队列里已经有这首就照队列给的顺序放（newQueue 已把起点轮转过），从它的位置起播；不在就排到最前面
         val startIndex = queue.indexOfFirst { it.id == track.id }
         val ordered = if (startIndex < 0) (listOf(track) + queue).distinctBy { it.id } else queue.distinctBy { it.id }
@@ -4019,6 +4025,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         var autoNotice = ""
         if (local == null) {
             val result = resolvePlayable(track, pinnedProvider)
+            // 排队触发的起播只在原队列仍为空时生效，不能盖掉解析期间的点歌或清空。
+            if (!canStart()) return false
             playableTrack = result.track
             ready = result.resolution as? Resolution.Ready
             autoMatched = result.autoMatched
@@ -4049,6 +4057,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             pinnedProvider != null && ready.source.providerId != pinnedProvider ->
                 "所选平台没有返回可播放地址，已切换到${ready.source.providerName}"
             else -> ""
+        }
+        if (emptyQueueId != null) {
+            activeFeed = null
+            _playlists.update { if (it.listenActive.isEmpty()) it else it.copy(listenActive = "") }
+            publishFeed()
         }
         dormant = null
         resolvedSources.clear()
@@ -4648,53 +4661,103 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         player.play()
     }
 
-    /**
-     * “下一首播放”：把队列里第 [index] 首挪到正在放的这首后面，队列不增不减，听歌模式照常续流。
-     * 已经是当前这首或下一首时不动。从前面挪过来时当前这首往前退一位，播放器自己跟着改当前位置。
-     */
-    fun moveQueueItemNext(index: Int) {
-        val player = controller ?: return
-        materializeDormant(player)
+    /** 海报墙要用实际落位的下标继续放大同一首，不能用点击时的队列猜位置。 */
+    fun moveQueueItemNext(index: Int, songKey: String): Int? {
+        val player = controller ?: run {
+            message("播放器尚未就绪")
+            return null
+        }
         val state = base.value
-        val target = queueMoveNextTarget(index, player.currentMediaItemIndex, state.queue.size) ?: return
-        player.moveMediaItem(index, target)
-        base.value = state.copy(
-            queue = state.queue.moved(index, target),
-            canonicalQueue = if (index in state.canonicalQueue.indices && target in state.canonicalQueue.indices) {
-                state.canonicalQueue.moved(index, target)
-            } else {
-                state.canonicalQueue
-            },
-        )
+        val at = if (state.queue.getOrNull(index)?.key == songKey) index else state.queue.indexOfFirst { it.key == songKey }
+        val track = state.canonicalQueue.getOrNull(at) ?: return null
+        if (!editPlayNext(player, listOf(track))) return null
+        return base.value.queue.indexOfFirst { it.key == songKey }.takeIf { it >= 0 }
     }
 
-    /**
-     * 详情页海报视图大卡上的“下一首播放”：这首已在队列里就挪到正在放的这首后面（同 [moveQueueItemNext]），
-     * 不在就插到它后面，队列其余不动；队列是空的就直接放这首，不弹出播放页。
-     */
-    fun playSongNext(song: Song) {
-        val player = controller
-        val state = base.value
-        if (player == null || state.queue.isEmpty()) {
-            play(song, listOf(song), openPlayer = false)
-            return
+    private val playNextMutex = Mutex()
+
+    fun playSongNext(song: Song) = playSongsNext(listOf(song))
+
+    fun playSongsNext(songs: List<Song>) = playTracksNext(songs.map(::canonicalForSong), originForQueue(songs))
+
+    fun playTracksNext(tracks: List<CanonicalTrack>, origin: PlaybackOrigin? = null) {
+        if (tracks.isEmpty()) return
+        viewModelScope.launch {
+            playNextMutex.withLock {
+                val player = awaitController()
+                restoreJob?.await()
+                if (player == null || controller !== player || !player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) {
+                    message("播放器尚未就绪，请稍后再试")
+                    return@withLock
+                }
+                val state = base.value
+                val started = state.queue.isEmpty() && player.mediaItemCount == 0
+                if (started) {
+                    val first = tracks.first()
+                    if (!startTrack(first, listOf(first), null, openPlayer = false, origin = origin, emptyQueueId = state.queueId)) {
+                        return@withLock
+                    }
+                }
+                editPlayNext(player, tracks, started)
+            }
+        }
+    }
+
+    private fun editPlayNext(player: MediaController, requested: List<CanonicalTrack>, started: Boolean = false): Boolean {
+        if (!player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) {
+            message("播放器尚未就绪，请稍后再试")
+            return false
         }
         materializeDormant(player)
-        val track = canonicalForSong(song)
-        val index = state.canonicalQueue.indexOfFirst { it.id == track.id }
-        if (index >= 0) {
-            if (index == player.currentMediaItemIndex) return
-            moveQueueItemNext(index)
-        } else {
-            val at = queueInsertNextAt(player.currentMediaItemIndex, state.queue.size)
-            val queued = preferredSong(track)
-            player.addMediaItem(at, mediaItem(queued))
-            base.value = state.copy(
-                queue = state.queue.toMutableList().apply { add(at, queued) },
-                canonicalQueue = state.canonicalQueue.toMutableList().apply { add(at.coerceAtMost(size), track) },
-            )
+        val state = base.value
+        // MediaController 的临时下标在跨过当前曲目的移动后可能偏一位，连续点击仍按实际播放的歌定位。
+        val hint = player.currentMediaItemIndex
+        val current = if (state.queue.getOrNull(hint)?.key == state.current?.key) hint
+            else state.queue.indexOfFirst { it.key == state.current?.key }
+        if (current !in state.queue.indices || player.mediaItemCount != state.queue.size ||
+            state.canonicalQueue.size != state.queue.size || player.getMediaItemAt(current).mediaId != state.queue[current].key
+        ) {
+            message("播放队列正在更新，请稍后再试")
+            return false
         }
-        message("下一首播放：${song.title}")
+        // 首曲可能解析成另一来源，起播后不能再把请求中的原曲加入一次。
+        val requestedPicks = playNextPicks(if (started) requested.drop(1) else requested, state.queue, state.canonicalQueue)
+            .filterNot { it.queueIndex == current }
+        val (picks, skipped) = capPlayNext(requestedPicks)
+        if (picks.isEmpty() && !started) {
+            message("这首是当前歌曲")
+            return false
+        }
+        val edits = playNextEdits(picks, state.queue.size, current, player.shuffleModeEnabled)
+        if (edits.isNotEmpty()) {
+            val songs = state.queue.toMutableList()
+            val tracks = state.canonicalQueue.toMutableList()
+            for (edit in edits) {
+                when (edit) {
+                    is PlayNextEdit.Move -> {
+                        player.moveMediaItem(edit.from, edit.to)
+                        songs.add(edit.to, songs.removeAt(edit.from))
+                        tracks.add(edit.to, tracks.removeAt(edit.from))
+                    }
+                    is PlayNextEdit.Insert -> {
+                        val queued = edit.tracks.map(::preferredSong)
+                        player.addMediaItems(edit.at, queued.map(::mediaItem))
+                        songs.addAll(edit.at, queued)
+                        tracks.addAll(edit.at, edit.tracks)
+                    }
+                }
+            }
+            base.update { it.copy(queue = songs, canonicalQueue = tracks) }
+        }
+        val text = when {
+            started && picks.isEmpty() -> "已播放「${state.queue[current].title}」"
+            started -> "已开始播放所选 ${picks.size + 1} 首"
+            picks.size == 1 -> "已安排「${picks.single().track.title}」下一首播放"
+            else -> "已安排 ${picks.size} 首接着播放"
+        }
+        val capped = if (skipped > 0) " · 一次最多 $PLAY_NEXT_LIMIT 首，其余未加入" else ""
+        message((if (player.repeatMode == Player.REPEAT_MODE_ONE && picks.isNotEmpty()) "$text · 单曲循环中，按「下一首」切换" else text) + capped)
+        return true
     }
 
     /** 一首接到播放队列末尾（滑动的「加到播放队列」）；队列空着就直接放，已经在队列里只提示。 */
@@ -4773,7 +4836,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         controller?.clearMediaItems()
         controller?.stop()
         _position.value = 0
-        base.value = base.value.copy(current = null, currentTrack = null, currentSource = null, duration = 0, queue = emptyList(), canonicalQueue = emptyList(), playerOpen = false, posterOpen = false)
+        base.value = base.value.copy(current = null, currentTrack = null, currentSource = null, duration = 0, queue = emptyList(), canonicalQueue = emptyList(), queueId = base.value.queueId + 1, playerOpen = false, posterOpen = false)
     }
 
     fun openDeepLink() {
@@ -5758,8 +5821,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         override fun onEvents(player: Player, events: Player.Events) {
             // 从磁盘接上的队列还没装进播放器：播放器是空的，进度和时长都以存下来的为准
             val sleeping = dormant != null && player.mediaItemCount == 0
-            val song = if (sleeping) null else queueSongFor(player)
             val previous = base.value.current
+            // 仅重排时间线不等于切歌：会话确认前控制器的临时位置可能指向相邻曲目。
+            val reordered = previous != null && events.contains(Player.EVENT_TIMELINE_CHANGED) &&
+                !events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)
+            val song = if (sleeping || reordered) null else queueSongFor(player)
             val rawDuration = player.duration
             val duration = when {
                 sleeping -> base.value.duration
@@ -5852,7 +5918,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * 只补地址、不动播放器状态；解析失败就这一首放弃，下一首再试。
      */
     private fun maybePrefetchNextForCrossfade(player: Player, position: Long, duration: Long) {
-        if (!settingsState.value.crossfadeEnabled) return
+        if (!settingsState.value.crossfadeEnabled || player.repeatMode == Player.REPEAT_MODE_ONE) return
         // 选了不过渡：不用提前解析地址，也不用分析
         if (settingsState.value.crossfadeMode == com.mytv.mymusic.data.CrossfadeMode.None.name) return
         if (duration == C.TIME_UNSET || duration <= 0) return
@@ -6116,9 +6182,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             lastProgressRaw = -1L
             progressJumpAllowed = true
             player.addListener(playerListener)
-            connected.value = player
             if (progressJob?.isActive != true) startProgress()
             onControllerConnected(player)
+            connected.value = player
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -6412,6 +6478,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // 和 resumeDormant 一样：休眠时翻的随机 / 循环不能因为装队列丢掉
         player.shuffleModeEnabled = base.value.shuffle
         player.repeatMode = base.value.repeat.toPlayerRepeatMode()
+        // 有地址的休眠曲目不会走换源回调，先准备但不开播，之后的播放键才可以继续。
+        if (saved.current.url.isNotBlank()) player.prepare()
     }
 
     /** 等播放真正开始（缓冲或在放）。组件的广播接收器等到这时候才结束，前台服务在点击给的豁免窗口里起来。 */

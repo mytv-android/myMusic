@@ -2,8 +2,10 @@ package com.mytv.mymusic.ui.components
 
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -103,12 +105,14 @@ fun Modifier.selectionBackPreview(selection: SelectionState): Modifier = graphic
 }
 
 /** 批量操作条：替换列表头部的常规操作行。 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SelectionBar(
     count: Int,
     allSelected: Boolean,
     onToggleAll: () -> Unit,
     onPlay: () -> Unit,
+    onPlayNext: () -> Unit,
     onAddTo: () -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
@@ -122,49 +126,76 @@ fun SelectionBar(
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
-        Row(
+        Column(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = 56.dp)
-                .padding(start = 12.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(start = 4.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
         ) {
-            Text(
-                "已选 $count",
-                Modifier.padding(start = 8.dp),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.weight(1f))
-            TextButton(onToggleAll, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
-                Text(if (allSelected) "清除" else "全选")
-            }
-            onRemove?.let {
-                TextButton(
-                    onClick = it,
-                    enabled = count > 0,
-                    modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
-                ) {
-                    Text("移除", color = MaterialTheme.colorScheme.error)
-                }
-            }
-            TextButton(onPlay, enabled = count > 0, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
-                Text("播放")
-            }
-            onUpload?.let {
-                TextButton(it, enabled = count > 0, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
-                    Text("上传")
-                }
-            }
-            Button(
-                onClick = onAddTo,
-                enabled = count > 0,
-                modifier = Modifier.tvFocusRing(RoundedCornerShape(24.dp)),
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("加入歌单")
+                IconButton(onExit, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
+                    Icon(Icons.Filled.Close, contentDescription = "退出多选")
+                }
+                Text(
+                    "已选 $count",
+                    Modifier.padding(start = 4.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                // 电视和平板左栏只有 300dp 左右：这组操作整块换行，别把「下一首播放」拆成两行字
+                FlowRow(
+                    Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.End,
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onToggleAll, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
+                        Text(if (allSelected) "清除" else "全选")
+                    }
+                    TextButton(onPlay, enabled = count > 0, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
+                        Text("播放")
+                    }
+                    TextButton(
+                        onClick = { onPlayNext(); onExit() },
+                        enabled = count > 0,
+                        modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+                    ) {
+                        Text("下一首播放", maxLines = 1)
+                    }
+                }
             }
-            IconButton(onExit, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
-                Icon(Icons.Filled.Close, contentDescription = "退出多选")
+            // 第二行：次要操作靠左，主操作占满剩余宽度，避免单按钮悬在一角显得对不齐
+            Row(
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    onRemove?.let {
+                        TextButton(
+                            onClick = it,
+                            enabled = count > 0,
+                            modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp)),
+                        ) {
+                            Text("移除", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    onUpload?.let {
+                        TextButton(it, enabled = count > 0, modifier = Modifier.tvFocusRing(RoundedCornerShape(20.dp))) {
+                            Text("上传")
+                        }
+                    }
+                }
+                Button(
+                    onClick = onAddTo,
+                    enabled = count > 0,
+                    modifier = Modifier.weight(1f).tvFocusRing(RoundedCornerShape(24.dp)),
+                ) {
+                    Text("加入歌单")
+                }
             }
         }
     }

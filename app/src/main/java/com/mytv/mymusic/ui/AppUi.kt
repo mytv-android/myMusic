@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QueuePlayNext
 import androidx.compose.material.icons.filled.FindReplace
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tune
@@ -203,9 +204,10 @@ class MusicActions(private val model: MusicViewModel) {
     fun openPlaybackOrigin() = model.openPlaybackOrigin()
     fun consumePlaybackLocate() = model.consumePlaybackLocate()
     fun playQueueIndex(index: Int) = model.playQueueIndex(index)
-    fun moveQueueItemNext(index: Int) = model.moveQueueItemNext(index)
-    /** 任意一首（不一定在队列里）的“下一首播放”，详情页海报视图的大卡用。 */
+    fun moveQueueItemNext(index: Int, songKey: String) = model.moveQueueItemNext(index, songKey)
     fun playSongNext(song: Song) = model.playSongNext(song)
+    fun playSongsNext(songs: List<Song>) = model.playSongsNext(songs)
+    fun playTracksNext(tracks: List<CanonicalTrack>) = model.playTracksNext(tracks)
     /** 一首接到队列末尾（滑动的「加到播放队列」）。 */
     fun addToQueue(song: Song) = model.addToQueue(song)
     /** 播放队列移出一首；正在放的不能移，返回 null。返回值交给 [restoreQueueItem] 撤销。 */
@@ -730,6 +732,7 @@ fun TrackActionsSheet(
     favorite: Boolean,
     playlists: List<LocalPlaylistSummary>,
     onToggleFavorite: () -> Unit,
+    onPlayNext: () -> Unit,
     onDownload: () -> Unit,
     onAddToPlaylist: (String) -> Unit,
     onOpenSource: (() -> Unit)?,
@@ -793,7 +796,7 @@ fun TrackActionsSheet(
                     browsable && song.album.isNotBlank() &&
                         com.mytv.mymusic.aggregate.TrackNormalizer.keyOf(song.album) != com.mytv.mymusic.aggregate.TrackNormalizer.keyOf(hideAlbum)
                 }?.let { SheetRow(Icons.Filled.Album, "查看专辑：${song.album}", false, it) }
-                val rows = artistRows + listOfNotNull(
+                val rows = listOf(SheetRow(Icons.Filled.QueuePlayNext, "下一首播放", false, onPlayNext)) + artistRows + listOfNotNull(
                     albumRow,
                     onCollect?.let { SheetRow(Icons.Filled.FavoriteBorder, "收藏到账号", false, it) },
                     onRematch?.let { SheetRow(Icons.Filled.FindReplace, "换一个匹配", false, it) },

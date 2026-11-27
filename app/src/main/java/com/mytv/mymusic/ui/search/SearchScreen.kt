@@ -70,6 +70,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QueuePlayNext
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
@@ -249,6 +250,7 @@ private class SearchCtx(
     var pickerOpen: Boolean by mutableStateOf(false)
 
     fun play(track: CanonicalTrack) = actions.playTrack(track, groups.value)
+    fun playNext(track: CanonicalTrack) = actions.playTracksNext(listOf(track))
     fun isCurrent(track: CanonicalTrack) = currentTrackId.value == track.id
     fun openSource(track: CanonicalTrack) = actions.openSource(track, groups.value)
 }
@@ -446,6 +448,7 @@ fun SearchScreen(
             favorite = favorite != null,
             playlists = ctx.playlists.value,
             onToggleFavorite = { actions.favorite(favorite ?: song) },
+            onPlayNext = { ctx.playNext(track) },
             onDownload = { actions.download(song) },
             onAddToPlaylist = { id -> actions.addSongToPlaylist(id, song) },
             onOpenSource = {
@@ -974,6 +977,7 @@ private fun SearchSelectionHeader(ctx: SearchCtx, modifier: Modifier = Modifier)
             val picked = groups.filter { it.id in selection.selected }
             if (picked.isNotEmpty()) ctx.actions.playTrack(picked.first(), picked)
         },
+        onPlayNext = { ctx.actions.playTracksNext(groups.filter { it.id in selection.selected }) },
         onAddTo = { ctx.pickerOpen = true },
         onExit = { selection.exit() },
         modifier = modifier.selectionBackPreview(selection),
@@ -1255,6 +1259,7 @@ private fun SearchSongRow(
             enabled = !picking,
             favoriteKeys = sourceKeys,
             onChooseSource = { ctx.openSource(track) },
+            onPlayNext = { ctx.playNext(track) },
         ),
         // 平板行尾有「更多」菜单按钮：悬停按钮插在它前面
         hoverReplacesTrailing = !window.isTablet,
@@ -1289,6 +1294,7 @@ private fun TrackMenu(ctx: SearchCtx, track: CanonicalTrack, expanded: Boolean, 
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, shape = RoundedCornerShape(20.dp)) {
         if (!pickPlaylist) {
             MenuItem("播放", Icons.Filled.PlayArrow) { onDismiss(); ctx.play(track) }
+            MenuItem("下一首播放", Icons.Filled.QueuePlayNext) { onDismiss(); ctx.playNext(track) }
             MenuItem(if (favorite != null) "取消收藏" else "收藏", if (favorite != null) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder) {
                 onDismiss()
                 ctx.actions.favorite(favorite ?: song)

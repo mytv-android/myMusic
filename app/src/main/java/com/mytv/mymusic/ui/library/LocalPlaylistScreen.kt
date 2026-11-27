@@ -516,6 +516,7 @@ fun LocalPlaylistScreen(
                     val picked = shownSongs.filter { it.key in selection.selected }
                     if (picked.isNotEmpty()) actions.playLocalPlaylist(picked.first(), picked, playlistId, playlist?.name.orEmpty())
                 },
+                onPlayNext = { actions.playSongsNext(shownSongs.filter { it.key in selection.selected }) },
                 onAddTo = { pickerOpen = true },
                 onExit = { selection.exit() },
                 onRemove = removeSelected,
@@ -760,6 +761,7 @@ fun LocalPlaylistScreen(
             favorite = favorites.any { it.key == song.key },
             playlists = playlists.filterNot { it.id == playlistId },
             onToggleFavorite = { actions.favorite(song) },
+            onPlayNext = { actions.playSongNext(song) },
             onDownload = { actions.download(song) },
             onAddToPlaylist = { id -> actions.addSongToPlaylist(id, song) },
             onOpenSource = {
