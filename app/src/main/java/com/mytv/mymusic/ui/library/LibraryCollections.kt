@@ -186,6 +186,7 @@ fun FavoritesScreen(
                         val picked = selectedSongs()
                         if (picked.isNotEmpty()) actions.play(picked.first(), picked)
                     },
+                    onPlayNext = { actions.playSongsNext(selectedSongs()) },
                     onAddTo = { pickerOpen = true },
                     onRemove = {
                         val pairs = selectedPairs()
@@ -454,6 +455,7 @@ fun HistoryScreen(
                         val picked = selectedSongs()
                         if (picked.isNotEmpty()) actions.play(picked.first(), picked)
                     },
+                    onPlayNext = { actions.playSongsNext(selectedSongs()) },
                     onAddTo = { pickerOpen = true },
                     onRemove = {
                         val saved = selectedSaved()
@@ -702,6 +704,7 @@ fun DownloadsScreen(
                     allSelected = order.isNotEmpty() && selection.selected.containsAll(order),
                     onToggleAll = { selection.toggleAll(order) },
                     onPlay = { actions.playDownloads(selectedItems().map { it.record }) },
+                    onPlayNext = { actions.playSongsNext(selectedItems().map { it.song }) },
                     onAddTo = { pickerOpen = true },
                     onRemove = { bulkDeleting = selectedItems().map { it.record } },
                     removeLabel = "删除",
