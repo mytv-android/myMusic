@@ -132,6 +132,12 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         // 先于仓库、数据库和后台组件安装；写报告失败也会交还 Android 原 handler。
         CrashReporter.install(this)
         LxSources.attach(this)
+        // 解析层多认识的平台（汽水等）不会写进已导入脚本的能力表，启动时后台补探一次；
+        // 只对旧版本的记录跑 QuickJS，不挡启动，失败保留旧表等下次
+        appScope.launch(Dispatchers.IO) {
+            runCatching { LxSources.refreshStaleCapabilities() }
+                .onFailure { android.util.Log.w("MyMusicApp", "音源能力表重探失败：${it.message}") }
+        }
         AppleTokenCache.attach(this)
         val backgroundWork = BackgroundWork.available(this)
         if (!backgroundWork) {

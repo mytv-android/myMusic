@@ -74,6 +74,36 @@ object LxSources : LxPlayback {
         }
     }
 
+    /**
+     * 解析层多认识了平台（见 [LX_CAPABILITY_SCHEMA_VERSION]）时，把老记录的能力表重探一遍。
+     * 脚本 hash 没变，导入和同步都不会再走探测，缺了这一步汽水的歌永远递不进脚本。
+     * 探测失败保留旧能力表，等下次启动再试，不拿空表把已有平台能力抹掉。
+     */
+    suspend fun refreshStaleCapabilities() = importMutex.withLock {
+        val sourceStore = store ?: return@withLock
+        var changed = false
+        for (record in sourceStore.records.value.filter { it.needsCapabilityRefresh() }) {
+            val script = try {
+                sourceStore.readScript(record.id)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                AppLog.w("LxSources", "重探能力表读不到脚本：${record.name}: ${error.readableMessage()}")
+                continue
+            }
+            val capabilities = runCatching { probeCapabilities(record, script) }
+                .onFailure { AppLog.w("LxSources", "重探能力表失败，保留旧表：${record.name}: ${it.readableMessage()}") }
+                .getOrElse { record.capabilities }
+            sourceStore.save(
+                record.copy(capabilities = capabilities, capabilityVersion = LX_CAPABILITY_SCHEMA_VERSION),
+                script,
+            )
+            closeEngine(record.id)
+            changed = true
+        }
+        if (changed) bumpGeneration()
+    }
+
     override suspend fun resolve(song: Song, quality: String): PlayableStream? =
         resolve(listOf(song), quality)?.stream
 
@@ -248,6 +278,8 @@ object LxSources : LxPlayback {
                         enabled = source.enabled,
                         importedAt = existing?.importedAt ?: System.currentTimeMillis(),
                         updatedAt = System.currentTimeMillis(),
+                        // 能力表就地重探过，记录里同步写上当前解析版本，启动时不用再补
+                        capabilityVersion = LX_CAPABILITY_SCHEMA_VERSION,
                     )
                     // 能力表不进同步文件：写回后现场跑一遍脚本，换源时才知道它能给哪些平台取流；
                     // 探测失败保留上次的能力表，别用空表把已有平台能力永久抹掉
@@ -357,6 +389,7 @@ object LxSources : LxPlayback {
                 enabled = existing?.enabled ?: true,
                 importedAt = existing?.importedAt ?: now,
                 updatedAt = now,
+                capabilityVersion = LX_CAPABILITY_SCHEMA_VERSION,
             )
             val capabilities = probeCapabilities(candidate, script)
             val saved = candidate.copy(capabilities = capabilities)

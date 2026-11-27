@@ -180,6 +180,8 @@ internal object LxProtocol {
     private fun Song.songMid(source: String): String = when (source) {
         "mg" -> extra["copyright_id"].orEmpty().ifBlank { extra["songmid"].orEmpty() }.ifBlank { id.substringBefore('|') }
         "kg" -> extra["songmid"].orEmpty().ifBlank { extra["album_audio_id"].orEmpty() }.ifBlank { id }
+        // 汽水：落雪脚本要的 songId 就是汽水的 track id，SodaProvider 的 Song.id / extra.track_id 都是它
+        "qs" -> extra["track_id"].orEmpty().ifBlank { id }
         else -> extra["songmid"].orEmpty().ifBlank { id }
     }
 

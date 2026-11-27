@@ -1,8 +1,12 @@
 // LX Music mobile custom-source preload, Apache-2.0.
 // Upstream: lyswhut/lx-music-mobile, android/app/src/main/assets/script/user-api-preload.js
-// Vendored 2026-11-17; local change (2026-11-19): the inited capability table passes the
-// script's declared qualitys through unfiltered (lxserver-style) instead of cropping them
-// to the officially supported tiers. Everything else is upstream as-is.
+// Vendored 2026-11-17; local changes:
+//   - 2026-11-19: the inited capability table passes the script's declared qualitys through
+//     unfiltered (lxserver-style) instead of cropping them to the officially supported tiers.
+//   - 2026-11-27: allSources / supportActions gain 'qs' (汽水音乐). The host only forwards the
+//     platforms listed here, so a script declaring qs was silently dropped before; keep this
+//     whitelist in sync with LxPlatform.labels on the Kotlin side.
+// Everything else is upstream as-is.
 'use strict'
 
 globalThis.lx_setup = (key, id, name, description, version, author, homepage, rawScript) => {
@@ -154,7 +158,9 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
   const events = {
     request: null,
   }
-  const allSources = ['kw', 'kg', 'tx', 'wy', 'mg', 'local']
+  // 宿主接受哪些落雪平台：脚本 inited 只认这里列出的 key，和 Kotlin 的 LxPlatform.labels 同源。
+  // 汽水(qs) 是本地扩充，官方版没有；支持能力的取舍由 supportActions 决定。
+  const allSources = ['kw', 'kg', 'tx', 'wy', 'mg', 'qs', 'local']
   const supportActions = {
     kw: ['musicUrl'],
     kg: ['musicUrl'],
@@ -162,6 +168,7 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
     wy: ['musicUrl'],
     mg: ['musicUrl'],
     xm: ['musicUrl'],
+    qs: ['musicUrl'],
     local: ['musicUrl', 'lyric', 'pic'],
   }
 
