@@ -136,6 +136,11 @@ internal class CrossfadeController(
         val player = primary ?: return
         // 不过渡：整首放完由播放器自己接下一首，不预载也不叠
         if (!enabled || mode == CrossfadeMode.None) return
+        // nextMediaItemIndex 为手动切歌忽略单曲循环，自动过渡不能沿用它。
+        if (player.repeatMode == Player.REPEAT_MODE_ONE) {
+            if (secondary != null) cancel("单曲循环")
+            return
+        }
         if (!player.isPlaying) {
             val active = fade
             if (active == null) return

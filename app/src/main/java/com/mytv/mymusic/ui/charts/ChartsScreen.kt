@@ -231,6 +231,7 @@ private fun PhoneCharts(
                                         val picked = pool.filter { it.key in selection.selected }
                                         if (picked.isNotEmpty()) actions.play(picked.first(), picked)
                                     },
+                                    onPlayNext = { actions.playSongsNext(pool.filter { it.key in selection.selected }) },
                                     onAddTo = { pickerOpen = true },
                                     onExit = { selection.exit() },
                                     modifier = Modifier.padding(horizontal = gutter).padding(bottom = 8.dp).selectionBackPreview(selection),
@@ -991,6 +992,7 @@ internal fun SongActionsSheet(
         favorite = favorites.any { it.key == target.song.key },
         playlists = playlists,
         onToggleFavorite = { actions.favorite(target.song) },
+        onPlayNext = { actions.playSongNext(target.song) },
         onDownload = { actions.download(target.song) },
         onAddToPlaylist = { id -> actions.addSongToPlaylist(id, target.song) },
         onOpenSource = {

@@ -3,7 +3,6 @@ package com.mytv.mymusic
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.LISTENING_FEED_MARK
 import com.mytv.mymusic.ui.ListeningFeedUi
-import com.mytv.mymusic.ui.moved
 import com.mytv.mymusic.ui.queueMoveNextTarget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -17,7 +16,7 @@ class QueueMoveNextTest {
     /** 照着播放器的做法挪一次，返回新队列和当前这首的新位置。 */
     private fun moveNext(from: Int, current: Int): Pair<List<String>, Int>? {
         val target = queueMoveNextTarget(from, current, queue.size) ?: return null
-        val next = queue.moved(from, target)
+        val next = queue.toMutableList().apply { add(target, removeAt(from)) }
         return next to next.indexOf(queue[current])
     }
 
