@@ -873,6 +873,14 @@ class NetEaseProvider internal constructor(
 
     /** 私人漫游（原私人 FM）：默认 / 熟悉 / 探索三种口味，外加场景子模式。 */
     override suspend fun listeningModes(cookie: String): List<ListeningMode> {
+        val heartbeat = ListeningMode(
+            id = "heartbeat",
+            name = "心动模式",
+            subtitle = "按我喜欢的音乐智能推荐",
+            source = info.id,
+            group = "私人漫游",
+            extra = mapOf("heartbeat" to "1"),
+        )
         val roam = listOf(
             Triple("DEFAULT", "默认模式", "按你的口味推荐"),
             Triple("FAMILIAR", "熟悉模式", "多放你常听的歌"),
@@ -883,7 +891,7 @@ class NetEaseProvider internal constructor(
             "FOCUS" to "专注",
             "NIGHT_EMO" to "夜间 emo",
         )
-        return roam.map { (mode, name, subtitle) ->
+        return listOf(heartbeat) + roam.map { (mode, name, subtitle) ->
             ListeningMode(
                 id = "fm:$mode",
                 name = name,
@@ -906,6 +914,7 @@ class NetEaseProvider internal constructor(
 
     /** 私人漫游每次只回几首，连取几轮凑够起播长度；未登录时服务端不出歌。 */
     override suspend fun listeningModeSongs(cookie: String, mode: ListeningMode): List<Song> {
+        if (mode.id == "heartbeat") return heartbeatSongs(cookie)
         val fmMode = mode.extra["fm_mode"]?.trim().orEmpty().ifBlank { mode.id.substringAfter(':').substringBefore(':') }
         val submode = mode.extra["fm_submode"]?.trim().orEmpty()
         if (fmMode.isBlank()) throw IllegalArgumentException("invalid netease listening mode: ${mode.id}")
@@ -950,6 +959,67 @@ class NetEaseProvider internal constructor(
             throw IllegalStateException(if (cookie.isBlank()) "「${mode.name}」需要登录后播放" else "「${mode.name}」暂时没有歌曲")
         }
         return songs
+    }
+
+    /**
+     * 心动模式不是独立电台，需要「歌单 + 起始歌曲」当种子。
+     * 这里用当前账号的「我喜欢的音乐」和它的第一首歌起步，效果接近官方的心动推荐。
+     * shortcut: 续取仍以第一首为种子，连听超过一批可能重复；后续可按队列末首换种子。
+     */
+    private suspend fun heartbeatSongs(cookie: String): List<Song> {
+        if (cookie.isBlank()) throw IllegalStateException("心动模式需要先登录网易云音乐")
+        val playlists = userPlaylists(cookie, 1, 100)
+        val liked = playlists.firstOrNull { it.extra["special_type"] == "5" }
+            ?: playlists.firstOrNull { it.name == "我喜欢的音乐" }
+            ?: throw IllegalStateException("心动模式需要先登录并拥有「我喜欢的音乐」")
+        val start = fetchPlaylistDetailLimited(cookie, liked.id, 1).second.firstOrNull()
+            ?: throw IllegalStateException("「我喜欢的音乐」还没有歌曲，先收藏几首再试")
+        val startId = start.extra["song_id"]?.takeIf { it.isNotBlank() } ?: start.id
+        val body = buildJsonObject {
+            // 新旧两版接口字段同时带上：songId/playlistId 是新版，id/startMusicId 兼容旧版
+            put("songId", startId)
+            put("id", startId)
+            put("playlistId", liked.id)
+            put("startMusicId", startId)
+            put("type", "fromPlayOne")
+            put("count", HEARTBEAT_COUNT)
+            put("csrf_token", "")
+        }
+        val response = weapiPost(PLAYMODE_API, body, cookie)
+        val root = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrNull()
+            ?: throw IllegalStateException("网易云心动模式返回了无法识别的内容")
+        if (root.int("code") != 200) throw IllegalStateException("网易云心动模式失败（${root.int("code")}）")
+        val songs = (root["data"] as? JsonArray).orEmpty().mapNotNull { element ->
+            (element as? JsonObject)?.let(::heartbeatSong)
+        }
+        if (songs.isEmpty()) throw IllegalStateException("心动模式暂时没有可用歌曲")
+        return songs
+    }
+
+    /**
+     * 心动模式返回的歌曲字段在新旧接口间有 ar/al/dt 与 artists/album/duration 两套，这里都认。
+     * 放开到 internal 只为了能直接喂样本 JSON 做单测，不在模块外使用。
+     */
+    internal fun heartbeatSong(element: JsonObject): Song? {
+        val id = element.long("id").takeIf { it > 0 } ?: return null
+        val name = element.string("name").takeIf { it.isNotBlank() } ?: return null
+        val artists = (element["ar"] as? JsonArray ?: element["artists"] as? JsonArray)
+            ?.mapNotNull { (it as? JsonObject)?.string("name")?.takeIf { value -> value.isNotBlank() } }
+            .orEmpty()
+        val album = element["al"] as? JsonObject ?: element["album"] as? JsonObject
+        val duration = element.long("dt").takeIf { it > 0 } ?: element.long("duration")
+        return Song(
+            id = id.toString(),
+            name = name,
+            artist = artists.joinToString("、"),
+            album = album?.string("name").orEmpty(),
+            albumId = album?.long("id")?.takeIf { it > 0 }?.toString().orEmpty(),
+            duration = (duration / 1000).toInt(),
+            source = info.id,
+            cover = album?.string("picUrl").orEmpty().ifBlank { album?.string("blurPicUrl").orEmpty() },
+            link = "https://music.163.com/#/song?id=$id",
+            extra = mapOf("song_id" to id.toString()),
+        )
     }
 
     override suspend fun createLogin(type: String): QRCreateResult {
@@ -1446,6 +1516,8 @@ class NetEaseProvider internal constructor(
         const val VIP_INFO_API = "https://music.163.com/weapi/music-vip-membership/front/vip/info"
         const val RECOMMENDED_API = "https://music.163.com/weapi/personalized/playlist"
         const val PERSONAL_FM_API = "https://music.163.com/weapi/v1/radio/get"
+        const val PLAYMODE_API = "https://music.163.com/weapi/playmode/intelligence/list"
+        const val HEARTBEAT_COUNT = 50
         const val NETEASE_FM_BATCH = 6
         const val NETEASE_FM_ROUNDS = 3
         const val LYRIC_API = "https://music.163.com/weapi/song/lyric"
