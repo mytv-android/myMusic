@@ -15,6 +15,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionToken
+import androidx.room.withTransaction
 import com.google.common.util.concurrent.ListenableFuture
 import com.mytv.mymusic.data.local.LocalUploadRules
 import com.mytv.mymusic.AppLog
@@ -50,6 +51,14 @@ import com.mytv.mymusic.data.DOWNLOAD_ACTIVE
 import com.mytv.mymusic.data.DOWNLOAD_DONE
 import com.mytv.mymusic.data.DOWNLOAD_FAILED
 import com.mytv.mymusic.data.DownloadRecord
+import com.mytv.mymusic.data.FavoriteSyncIssue
+import com.mytv.mymusic.data.FavoriteSyncMode
+import com.mytv.mymusic.data.FavoriteSyncPreference
+import com.mytv.mymusic.data.FavoriteSyncWrite
+import com.mytv.mymusic.data.FavoriteWriteQueue
+import com.mytv.mymusic.data.canChooseFavoritePlaylist
+import com.mytv.mymusic.data.favoriteCredentialFingerprint
+import com.mytv.mymusic.data.favoriteSyncPlaylists
 import com.mytv.mymusic.data.ListenTaskState
 import com.mytv.mymusic.data.native.SodaApplyFreeVipResult
 import com.mytv.mymusic.data.native.SodaLoginExpiredException
@@ -358,6 +367,7 @@ data class MusicUiState(
      * 「登录已过期，请重新扫码」，别让一行「已登录」挂在那儿。
      */
     val loginExpiredProviders: Set<String> = emptySet(),
+    val favoriteSync: Map<String, FavoriteSyncPreference> = emptyMap(),
     val sourcePickerTrack: CanonicalTrack? = null,
     val sourcePickerQueue: List<CanonicalTrack> = emptyList(),
     val sourcePickerBusy: String = "",
@@ -699,6 +709,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             aggregation = settings.aggregation,
             searchHistory = settings.searchHistory,
             accountProfiles = profiles,
+            favoriteSync = settings.favoriteSync,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MusicUiState())
 
@@ -3206,6 +3217,42 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (songs.any { it.bucket == "favorite" }) app.sync.onLocalChange()
     }
 
+    internal fun supportsNativeFavorite(providerId: String): Boolean = app.repository.supportsCollect(providerId)
+
+    internal suspend fun favoritePlaylistChoices(providerId: String, cookie: String): List<Playlist> {
+        val provider = NativeProviders.get(providerId)?.takeIf { it.canChooseFavoritePlaylist() }
+            ?: throw FavoriteSyncIssue("这个音源暂不支持指定歌单")
+        if (cookie.isBlank()) throw FavoriteSyncIssue("请先登录${provider.info.name}")
+        return provider.favoriteSyncPlaylists(cookie)
+    }
+
+    internal suspend fun saveFavoriteSync(
+        providerId: String,
+        mode: FavoriteSyncMode,
+        playlist: Playlist?,
+        cookie: String,
+    ) {
+        val preference = if (mode == FavoriteSyncMode.Playlist) {
+            require(playlist != null && playlist.source == providerId && playlist.id.isNotBlank())
+            val provider = NativeProviders.get(providerId)?.takeIf { it.canChooseFavoritePlaylist() }
+                ?: throw FavoriteSyncIssue("这个音源暂不支持指定歌单")
+            if (cookie.isBlank() || app.settings.cookieSnapshot().cookies[providerId] != cookie) {
+                throw FavoriteSyncIssue("账号有变化，请重新打开设置")
+            }
+            when (provider.playlistWritable(cookie, playlist.id)) {
+                true -> Unit
+                false -> throw FavoriteSyncIssue("目标歌单已不可修改，请重新选择")
+                null -> throw FavoriteSyncIssue("无法确认目标歌单可写，请检查网络和登录")
+            }
+            FavoriteSyncPreference(mode, playlist.id, playlist.name, favoriteCredentialFingerprint(cookie))
+        } else {
+            FavoriteSyncPreference(mode)
+        }
+        if (!app.settings.saveFavoriteSync(providerId, preference)) {
+            throw FavoriteSyncIssue("账号有变化，请重新打开设置")
+        }
+    }
+
     fun addSongsToLibrary(name: String, songs: List<Song>) {
         if (songs.isEmpty()) return
         viewModelScope.launch {
@@ -3539,19 +3586,125 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         songs.firstOrNull()?.let { play(it, songs) }
     }
 
-    fun toggleFavorite(song: Song) = viewModelScope.launch {
-        val dao = app.database.dao()
-        // 直接查库：组件在后台点收藏时界面没在订阅，favorites 可能还是旧的
-        if (dao.songsOnce("favorite").any { it.key == song.key }) {
-            dao.remove("favorite", song.key)
-            dao.saveTombstone(SavedSongTombstone(song.key, "favorite", System.currentTimeMillis()))
-        } else {
-            dao.clearTombstone("favorite", song.key)
-            remember("favorite", song)
-            // 收藏也会同步：只在本机的本地歌提示一句能上传（其它歌照旧不提示）
-            uploadPrompt("已加入收藏", listOf(song))?.let { _events.tryEmit(it) }
+    internal class FavoriteUndo(val saved: SavedSong, val removedAt: Long, val write: FavoriteSyncWrite?)
+
+    private class FavoriteChange(val undo: FavoriteUndo?, val platformJob: Job?)
+
+    private val favoriteMutex = Mutex()
+    private val favoriteWrites = FavoriteWriteQueue(viewModelScope)
+
+    fun toggleFavorite(song: Song) = viewModelScope.launch { changeFavorite(song) }
+
+    internal fun addFavorite(song: Song) = viewModelScope.launch { changeFavorite(song, selected = true) }
+
+    internal fun removeFavorite(song: Song): Deferred<FavoriteUndo?> = viewModelScope.async {
+        changeFavorite(song, selected = false)?.undo
+    }
+
+    internal fun undoFavorite(removal: Deferred<FavoriteUndo?>) = viewModelScope.launch {
+        val undo = removal.await() ?: return@launch
+        favoriteMutex.withLock {
+            val dao = app.database.dao()
+            val restored = app.database.withTransaction {
+                val tombstone = dao.tombstone("favorite", undo.saved.key)
+                if (tombstone?.deletedAt != undo.removedAt || dao.savedSong("favorite", undo.saved.key) != null) {
+                    return@withTransaction false
+                }
+                dao.clearTombstone("favorite", undo.saved.key)
+                dao.save(undo.saved)
+                true
+            }
+            if (!restored) return@withLock
+            app.sync.onLocalChange()
+            runCatching { undo.saved.song(json) }.getOrNull()?.let { song ->
+                enqueueFavoriteWrite(undo.write, song, add = true) { message(it, error = true) }
+            }
         }
+    }
+
+    private suspend fun changeFavorite(
+        song: Song,
+        selected: Boolean? = null,
+        reportFailure: (String) -> Unit = { message(it, error = true) },
+    ): FavoriteChange? = favoriteMutex.withLock {
+        val settings = app.settings.state.first()
+        val dao = app.database.dao()
+        val now = System.currentTimeMillis()
+        // 直接查库也支持小组件的冷启动，并与跨设备收藏合并使用同一个事务边界。
+        val (previous, add) = app.database.withTransaction {
+            val saved = dao.savedSong("favorite", song.key)
+            val desired = selected ?: (saved == null)
+            if (desired == (saved != null)) return@withTransaction null
+            if (desired) {
+                dao.clearTombstone("favorite", song.key)
+                remember("favorite", song)
+            } else {
+                dao.remove("favorite", song.key)
+                dao.saveTombstone(SavedSongTombstone(song.key, "favorite", now))
+            }
+            saved to desired
+        } ?: return@withLock null
         app.sync.onLocalChange()
+        if (add) uploadPrompt("已加入收藏", listOf(song))?.let { _events.tryEmit(it) }
+
+        val target = previous?.let { runCatching { it.song(json) }.getOrNull() } ?: song
+        val write = FavoriteSyncWrite.forSong(
+            target,
+            NativeProviders.get(target.source),
+            settings.cookies[target.source].orEmpty(),
+            settings.favoriteSync[target.source] ?: FavoriteSyncPreference(),
+        )
+        val platformJob = enqueueFavoriteWrite(write, target, add, reportFailure)
+        FavoriteChange(previous?.let { FavoriteUndo(it, now, write) }, platformJob)
+    }
+
+    private fun enqueueFavoriteWrite(
+        write: FavoriteSyncWrite?,
+        song: Song,
+        add: Boolean,
+        reportFailure: (String) -> Unit,
+    ): Job? {
+        if (write == null) return null
+        return favoriteWrites.enqueue(song.key) {
+            val remoteId = try {
+                write.apply(song, add) { favoriteAccountIsCurrent(write) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                val localResult = if (add) "已在 App 收藏" else "已在 App 取消收藏"
+                reportFailure("$localResult，${write.provider.info.name}同步失败：${favoriteFailureReason(error)}")
+                return@enqueue
+            }
+            if (remoteId != null) updateFavoriteBoundPlaylists(write, remoteId, song, add)
+        }
+    }
+
+    private suspend fun favoriteAccountIsCurrent(write: FavoriteSyncWrite): Boolean {
+        val providerId = write.provider.info.id
+        return app.settings.cookieSnapshot().cookies[providerId].orEmpty() == write.cookie &&
+            NativeProviders.get(providerId) === write.provider
+    }
+
+    private suspend fun updateFavoriteBoundPlaylists(write: FavoriteSyncWrite, remoteId: String, song: Song, add: Boolean) {
+        playlistMutex.withLock {
+            if (!favoriteAccountIsCurrent(write)) return@withLock
+            val copies = app.database.withTransaction {
+                val matching = libraryDao.playlistsOnce().filter { it.linkProvider == song.source && it.linkId == remoteId }
+                val now = System.currentTimeMillis()
+                matching.forEach { playlist ->
+                    val entries = libraryDao.entriesOnce(playlist.id)
+                    if (add == entries.any { it.songKey == song.key }) return@forEach
+                    // 平台已确认增删，直接更新本机副本，移除最后一首也能落库。
+                    val updated = if (add) entries + entryOf(playlist.id, entries.size, song)
+                    else entries.filterNot { it.songKey == song.key }.mapIndexed { index, entry -> entry.copy(position = index) }
+                    libraryDao.replaceEntries(playlist.id, updated)
+                    libraryDao.putPlaylist(playlist.copy(linkSyncedAt = now, updatedAt = now, dirty = true))
+                }
+                matching
+            }
+            if (copies.isNotEmpty()) app.sync.onLocalChange()
+            copies.forEach { scheduleBoundReload(it.id) }
+        }
     }
 
     /** 同一首歌同时只跑一次下载；重复点击只提示，不并发写同一个文件。 */
@@ -6440,7 +6593,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         awaitController()
         restoreJob?.await()
         val song = base.value.current ?: return false
-        toggleFavorite(song).join()
+        val change = changeFavorite(song) { text ->
+            android.widget.Toast.makeText(app, text, android.widget.Toast.LENGTH_SHORT).show()
+        }
+        withTimeoutOrNull(6_000) { change?.platformJob?.join() }
         return true
     }
 

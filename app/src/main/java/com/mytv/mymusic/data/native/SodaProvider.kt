@@ -1484,9 +1484,16 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         body: String,
         cookie: String,
         extraHeaders: Map<String, String> = emptyMap(),
+        requireSigner: Boolean = false,
     ): NativeResponse {
         // 签名器关掉时不上网取指纹：播放上报不带签名服务端也收
         val signing = isSignerConfigured()
+        if (requireSigner && !signing) {
+            throw PlaylistWriteException(
+                "汽水音乐写入需要签名器，请在设置里配置汽水签名器",
+                PlaylistWriteFailure.Other,
+            )
+        }
         val creds = if (signing) ensureSignerCredentials() else localAppCredentials()
         val params = pcAppParams()
         params["device_id"] = creds.deviceId
@@ -1504,15 +1511,38 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             "Cookie" to cookie,
         )
         headers.putAll(extraHeaders)
-        val signed = if (signing) runCatching { signRequest(requestUrl, body, headers) }.getOrNull() else null
+        // 写接口必须带应用级签名；签名失败时不能静默退回未签名请求，否则服务端回空壳也会被当成成功。
+        val signed = if (signing) {
+            if (requireSigner) {
+                try {
+                    signRequest(requestUrl, body, headers)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    throw PlaylistWriteException(
+                        "汽水音乐写入失败：${error.message ?: "签名器不可用"}",
+                        PlaylistWriteFailure.Other,
+                    )
+                }
+            } else {
+                runCatching { signRequest(requestUrl, body, headers) }.getOrNull()
+            }
+        } else null
         signed?.headers?.forEach { (key, value) -> headers[key] = value }
-        return NativeHttp.postJson(
+        val response = NativeHttp.postJson(
             signed?.url ?: requestUrl,
             body,
             headers,
             cookie = cookie,
             userAgent = creds.userAgentOrDefault(),
         )
+        if (requireSigner && response.body.isBlank()) {
+            throw PlaylistWriteException(
+                "汽水音乐写入失败：签名头未被接受，请检查签名器设置",
+                PlaylistWriteFailure.Other,
+            )
+        }
+        return response
     }
 
     /** 签名器不可用时本地生成的一份设备身份，仅供播放上报这类不强制签名的接口用。 */
@@ -1592,10 +1622,10 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
         if (cookie.isBlank()) {
             throw PlaylistWriteException("请先登录汽水音乐", PlaylistWriteFailure.NotLoggedIn)
         }
-        val raw = businessPost(path, body, cookie).body
+        val raw = businessPost(path, body, cookie, requireSigner = true).body
         val root = SodaJson.parse(raw)
         if (!SodaPlaylistEdit.responseIsOk(root)) {
-            val code = jsonInt(root, "status_code") ?: 0
+            val code = SodaPlaylistEdit.responseCode(root)
             val message = SodaPlaylistEdit.responseErrorMessage(root)
             AppLog.w(TAG, "歌单写操作失败 path=$path code=$code msg=${message.ifBlank { "空" }}")
             throw PlaylistWriteException(
@@ -1665,6 +1695,9 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
      * 这个歌单能不能用当前账号改：出现在「我创建的歌单」里就能改。
      * null 表示没法判断（没登录 / 网络失败），调用方按「可以试」处理。
      */
+    override fun playlistWritableFromAccountList(playlist: Playlist): Boolean? =
+        playlist.extra["owner_id"]?.let { it == playlist.extra["user_id"] }
+
     override suspend fun playlistWritable(cookie: String, id: String): Boolean? {
         if (cookie.isBlank()) return null
         val playlistId = id.trim()
@@ -1727,10 +1760,11 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             SodaPlaylistEdit.CREATE_PATH,
             SodaPlaylistEdit.createBody(name, isPrivate, trackIds),
             cookie,
+            requireSigner = true,
         ).body
         val root = SodaJson.parse(raw)
         if (!SodaPlaylistEdit.responseIsOk(root)) {
-            val code = jsonInt(root, "status_code") ?: 0
+            val code = SodaPlaylistEdit.responseCode(root)
             val message = SodaPlaylistEdit.responseErrorMessage(root)
             throw PlaylistWriteException(
                 when {
@@ -1783,10 +1817,15 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
 
     /** 导入外部歌单链接；返回新歌单 id。导入是异步的，进度靠 [playlistImportTasks] 查。 */
     suspend fun importPlaylist(cookie: String, url: String): String {
-        val raw = businessPost(SodaPlaylistEdit.IMPORT_PATH, SodaPlaylistEdit.importBody(url), cookie).body
+        val raw = businessPost(
+            SodaPlaylistEdit.IMPORT_PATH,
+            SodaPlaylistEdit.importBody(url),
+            cookie,
+            requireSigner = true,
+        ).body
         val root = SodaJson.parse(raw)
         if (!SodaPlaylistEdit.responseIsOk(root)) {
-            val code = jsonInt(root, "status_code") ?: 0
+            val code = SodaPlaylistEdit.responseCode(root)
             throw PlaylistWriteException(
                 SodaPlaylistEdit.responseErrorMessage(root).ifEmpty { "汽水音乐导入歌单失败（$code）" },
                 PlaylistWriteFailure.Other,
@@ -1805,82 +1844,126 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     override fun supportsCollect(): Boolean = true
 
     /** 喜欢 / 取消喜欢单曲（「我喜欢的音乐」）。 */
-    override suspend fun collectTrack(cookie: String, song: Song) {
+    override suspend fun collectTrack(cookie: String, song: Song): String? {
         val trackId = songTrackId(song)
-        if (trackId.isEmpty()) throw IllegalArgumentException("track id is empty")
+        if (trackId.isEmpty()) throw PlaylistWriteException("未找到对应的歌曲", PlaylistWriteFailure.SongNotFound)
         val raw = businessPost(
             SodaCollection.COLLECT_MEDIA_PATH,
             SodaCollection.collectMediaBody(listOf(trackId)),
             cookie,
+            requireSigner = true,
         ).body
         sodaWriteFailed(raw, "收藏")
+        return null
     }
 
-    override suspend fun uncollectTrack(cookie: String, song: Song) {
+    override suspend fun uncollectTrack(cookie: String, song: Song): String? {
         val trackId = songTrackId(song)
-        if (trackId.isEmpty()) throw IllegalArgumentException("track id is empty")
+        if (trackId.isEmpty()) throw PlaylistWriteException("未找到对应的歌曲", PlaylistWriteFailure.SongNotFound)
         val raw = businessPost(
             SodaCollection.UNCOLLECT_MEDIA_PATH,
             SodaCollection.uncollectMediaBody(listOf(trackId)),
             cookie,
+            requireSigner = true,
         ).body
         sodaWriteFailed(raw, "取消收藏")
+        return null
     }
 
     /** 批量版：收藏多首（换源面板「把这批歌收藏到汽水」用）。 */
     suspend fun collectTracks(cookie: String, songs: List<Song>) {
         val ids = songs.map { songTrackId(it) }.filter { it.isNotEmpty() }.distinct()
         if (ids.isEmpty()) return
-        val raw = businessPost(SodaCollection.COLLECT_MEDIA_PATH, SodaCollection.collectMediaBody(ids), cookie).body
+        val raw = businessPost(
+            SodaCollection.COLLECT_MEDIA_PATH,
+            SodaCollection.collectMediaBody(ids),
+            cookie,
+            requireSigner = true,
+        ).body
         sodaWriteFailed(raw, "收藏")
     }
 
     suspend fun uncollectTracks(cookie: String, songs: List<Song>) {
         val ids = songs.map { songTrackId(it) }.filter { it.isNotEmpty() }.distinct()
         if (ids.isEmpty()) return
-        val raw = businessPost(SodaCollection.UNCOLLECT_MEDIA_PATH, SodaCollection.uncollectMediaBody(ids), cookie).body
+        val raw = businessPost(
+            SodaCollection.UNCOLLECT_MEDIA_PATH,
+            SodaCollection.uncollectMediaBody(ids),
+            cookie,
+            requireSigner = true,
+        ).body
         sodaWriteFailed(raw, "取消收藏")
     }
 
     suspend fun collectPlaylists(cookie: String, playlistIds: List<String>) {
         val ids = SodaCollection.cleanIds(playlistIds)
         if (ids.isEmpty() || cookie.isBlank()) return
-        val raw = businessPost(SodaCollection.COLLECT_PLAYLIST_PATH, SodaCollection.idsBody("playlist_ids", ids), cookie).body
+        val raw = businessPost(
+            SodaCollection.COLLECT_PLAYLIST_PATH,
+            SodaCollection.idsBody("playlist_ids", ids),
+            cookie,
+            requireSigner = true,
+        ).body
         sodaWriteFailed(raw, "收藏歌单")
     }
 
     suspend fun uncollectPlaylists(cookie: String, playlistIds: List<String>) {
         val ids = SodaCollection.cleanIds(playlistIds)
         if (ids.isEmpty() || cookie.isBlank()) return
-        val raw = businessPost(SodaCollection.UNCOLLECT_PLAYLIST_PATH, SodaCollection.idsBody("playlist_ids", ids), cookie).body
+        val raw = businessPost(
+            SodaCollection.UNCOLLECT_PLAYLIST_PATH,
+            SodaCollection.idsBody("playlist_ids", ids),
+            cookie,
+            requireSigner = true,
+        ).body
         sodaWriteFailed(raw, "取消收藏歌单")
     }
 
     suspend fun collectAlbums(cookie: String, albumIds: List<String>) {
         val ids = SodaCollection.cleanIds(albumIds)
         if (ids.isEmpty() || cookie.isBlank()) return
-        val raw = businessPost(SodaCollection.COLLECT_ALBUM_PATH, SodaCollection.idsBody("album_ids", ids), cookie).body
+        val raw = businessPost(
+            SodaCollection.COLLECT_ALBUM_PATH,
+            SodaCollection.idsBody("album_ids", ids),
+            cookie,
+            requireSigner = true,
+        ).body
         sodaWriteFailed(raw, "收藏专辑")
     }
 
     suspend fun uncollectAlbums(cookie: String, albumIds: List<String>) {
         val ids = SodaCollection.cleanIds(albumIds)
         if (ids.isEmpty() || cookie.isBlank()) return
-        val raw = businessPost(SodaCollection.UNCOLLECT_ALBUM_PATH, SodaCollection.idsBody("album_ids", ids), cookie).body
+        val raw = businessPost(
+            SodaCollection.UNCOLLECT_ALBUM_PATH,
+            SodaCollection.idsBody("album_ids", ids),
+            cookie,
+            requireSigner = true,
+        ).body
         sodaWriteFailed(raw, "取消收藏专辑")
     }
 
     suspend fun collectArtists(cookie: String, artistIds: List<String>) {
         val ids = SodaCollection.cleanIds(artistIds)
         if (ids.isEmpty() || cookie.isBlank()) return
-        val raw = businessPost(SodaCollection.COLLECT_ARTIST_PATH, SodaCollection.idsBody("artist_ids", ids), cookie).body
+        val raw = businessPost(
+            SodaCollection.COLLECT_ARTIST_PATH,
+            SodaCollection.idsBody("artist_ids", ids),
+            cookie,
+            requireSigner = true,
+        ).body
         sodaWriteFailed(raw, "收藏艺人")
     }
 
     suspend fun uncollectArtists(cookie: String, artistIds: List<String>) {
         val ids = SodaCollection.cleanIds(artistIds)
         if (ids.isEmpty() || cookie.isBlank()) return
-        val raw = businessPost(SodaCollection.UNCOLLECT_ARTIST_PATH, SodaCollection.idsBody("artist_ids", ids), cookie).body
+        val raw = businessPost(
+            SodaCollection.UNCOLLECT_ARTIST_PATH,
+            SodaCollection.idsBody("artist_ids", ids),
+            cookie,
+            requireSigner = true,
+        ).body
         sodaWriteFailed(raw, "取消收藏艺人")
     }
 
@@ -1919,17 +2002,19 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     }
 
     /** 写操作回包校验：非 0 的 status_code 一律当失败，把服务端文案带出去。 */
-    private fun sodaWriteFailed(raw: String, action: String) {        val root = SodaJson.parse(raw)
+    private fun sodaWriteFailed(raw: String, action: String) {
+        val root = SodaJson.parse(raw)
         if (SodaPlaylistEdit.responseIsOk(root)) return
-        val code = jsonInt(root, "status_code") ?: 0
+        val code = SodaPlaylistEdit.responseCode(root)
         val message = SodaPlaylistEdit.responseErrorMessage(root)
         AppLog.w(TAG, "收藏写操作失败 action=$action code=$code msg=${message.ifBlank { "空" }}")
-        throw IllegalStateException(
+        throw PlaylistWriteException(
             when {
                 code == 1000003 -> "请先登录汽水音乐"
                 message.isNotBlank() -> message
                 else -> "汽水音乐${action}失败（$code）"
             },
+            if (code == 1000003) PlaylistWriteFailure.NotLoggedIn else PlaylistWriteFailure.Other,
         )
     }
 
@@ -1996,7 +2081,12 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     suspend fun deleteRecentlyPlayed(cookie: String, trackIds: List<String>) {
         val ids = SodaCollection.cleanIds(trackIds)
         if (ids.isEmpty() || cookie.isBlank()) return
-        businessPost("$SODA_RECENTLY_PLAYED_PATH/delete", SodaCollection.mediaOnlyBody(ids), cookie)
+        businessPost(
+            "$SODA_RECENTLY_PLAYED_PATH/delete",
+            SodaCollection.mediaOnlyBody(ids),
+            cookie,
+            requireSigner = true,
+        )
     }
 
     /** 播放统计：带 `media_id` 才回 stats，只带 status 的是空查询。 */

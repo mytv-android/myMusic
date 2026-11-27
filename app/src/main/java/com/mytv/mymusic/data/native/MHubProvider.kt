@@ -347,6 +347,8 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
         }
     }
 
+    override fun playlistWritableFromAccountList(playlist: Playlist): Boolean = playlist.extra["library"] == "1"
+
     override suspend fun playlistWritable(cookie: String, id: String): Boolean? {
         if (cookie.isBlank()) return false
         val snapshot = librarySnapshot(cookie) ?: return null

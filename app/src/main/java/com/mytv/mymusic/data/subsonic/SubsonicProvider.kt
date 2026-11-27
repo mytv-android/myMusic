@@ -254,14 +254,16 @@ class SubsonicProvider(
 
     override fun supportsCollect(): Boolean = true
 
-    override suspend fun collectTrack(cookie: String, song: Song) {
+    override suspend fun collectTrack(cookie: String, song: Song): String? {
         requireSource(song)
         client.request("star", listOf("id" to song.id))
+        return null
     }
 
-    override suspend fun uncollectTrack(cookie: String, song: Song) {
+    override suspend fun uncollectTrack(cookie: String, song: Song): String? {
         requireSource(song)
         client.request("unstar", listOf("id" to song.id))
+        return null
     }
 
     override suspend fun accountInfo(cookie: String): AccountInfo {
@@ -275,8 +277,16 @@ class SubsonicProvider(
         )
     }
 
+    override fun playlistWritableFromAccountList(playlist: Playlist): Boolean =
+        client.account.playlistRole != false && playlist.extra["readonly"] != "1"
+
     override suspend fun playlistWritable(cookie: String, id: String): Boolean? {
-        val playlist = client.request("getPlaylist", listOf("id" to id)).obj("playlist") ?: return null
+        val playlist = try {
+            client.request("getPlaylist", listOf("id" to id)).obj("playlist") ?: return null
+        } catch (error: SubsonicException) {
+            if (error.code == 70) return false
+            throw error
+        }
         return !playlist.bool("readonly") && client.account.playlistRole != false
     }
 

@@ -426,12 +426,12 @@ fun rememberRowSwipe(
                                 // 已收藏时只提示，不会变成取消（取消在另一侧，免得手滑）
                                 notify("「${target.title}」已在收藏里", null)
                             } else {
-                                actions.favorite(target)
+                                actions.addFavorite(target)
                                 notify("已收藏「${target.title}」", null)
                             }
                             SwipeAction.Unfavorite -> keys.firstNotNullOfOrNull { env.favorites.value[it] }?.let { record ->
-                                actions.favorite(runCatching { record.song() }.getOrDefault(target))
-                                notify("已取消收藏「${target.title}」") { actions.restoreSaved(listOf(record)) }
+                                val removal = actions.removeFavorite(runCatching { record.song() }.getOrDefault(target))
+                                notify("已取消收藏「${target.title}」") { actions.undoFavorite(removal) }
                             }
                             SwipeAction.Delete -> latestDelete.value?.run?.invoke()
                             SwipeAction.PlayNext -> actions.playSongNext(target)

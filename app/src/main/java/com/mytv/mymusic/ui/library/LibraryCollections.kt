@@ -139,7 +139,7 @@ fun FavoritesScreen(
     val settled = rememberSettled()
     val playFocus = remember { FocusRequester() }
     var filter by rememberSaveable { mutableStateOf(FavFilter.All) }
-    var actionSong by remember { mutableStateOf<Pair<SavedSong, Song>?>(null) }
+    var actionSong by remember { mutableStateOf<Song?>(null) }
     // 收藏列表的 payload 是 JSON；解码放后台，别在组合里逐条 parse
     val all by produceState(initialValue = emptyList<Pair<SavedSong, Song>>(), favorites) {
         value = withContext(Dispatchers.IO) { favorites.map { it to it.song() } }
@@ -159,9 +159,9 @@ fun FavoritesScreen(
     // 摘要按输入缓存：不在每次重组时重新遍历收藏或计算已下载数量
     val latest = remember(favorites) { favorites.maxOfOrNull { it.updatedAt } ?: 0L }
     val downloadedCount = remember(all, downloaded) { all.count { it.second.key in downloaded } }
-    val unfavorite: (SavedSong, Song) -> Unit = { saved, song ->
-        actions.favorite(song)
-        undo.show("已取消收藏“${song.title}”") { actions.restoreSaved(listOf(saved)) }
+    val unfavorite: (Song) -> Unit = { song ->
+        val removal = actions.removeFavorite(song)
+        undo.show("已取消收藏“${song.title}”") { actions.undoFavorite(removal) }
     }
     TvDefaultFocus(playFocus, favorites.isEmpty())
 
@@ -230,7 +230,7 @@ fun FavoritesScreen(
             shown,
             key = { _, it -> "fav:${it.first.key}" },
             contentType = { _, _ -> "song" },
-        ) { index, (saved, song) ->
+        ) { index, (_, song) ->
             val picking = selection.active
             val isSelected = picking && song.key in selection.selected
             val display = localDisplay(song)
@@ -238,7 +238,7 @@ fun FavoritesScreen(
             val rowSwipe = rememberRowSwipe(
                 song,
                 songs,
-                delete = SwipeDelete("取消收藏", "取消收藏", sameAsUnfavorite = true) { unfavorite(saved, song) },
+                delete = SwipeDelete("取消收藏", "取消收藏", sameAsUnfavorite = true) { unfavorite(song) },
             )
             SongRow(
                 title = display.title,
@@ -263,12 +263,12 @@ fun FavoritesScreen(
                         )
                     })
                     else -> ({
-                        IconButton(onClick = { unfavorite(saved, song) }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                        IconButton(onClick = { unfavorite(song) }, modifier = Modifier.tvFocusRing(CircleShape)) {
                             Icon(Icons.Filled.Favorite, "取消收藏“${song.title}”", tint = MaterialTheme.colorScheme.primary)
                         }
                     })
                 },
-                onMore = if (picking) null else ({ actionSong = saved to song }),
+                onMore = if (picking) null else ({ actionSong = song }),
                 onLongClick = if (picking) null else ({ selection.enter(song.key) }),
                 // 收藏里「删除」就是取消收藏（和行尾的心一样带撤销）；两个都露出来时只留一个
                 swipe = if (picking) null else rowSwipe,
@@ -316,7 +316,7 @@ fun FavoritesScreen(
         host = unplayable,
         removeLabel = "取消收藏",
         removeSummary = "所有设备上都会取消",
-        onRemove = { song -> all.firstOrNull { it.second.key == song.key }?.let { (saved, item) -> unfavorite(saved, item) } },
+        onRemove = unfavorite,
     )
     if (pickerOpen) {
         PlaylistPickerSheet(
@@ -332,12 +332,12 @@ fun FavoritesScreen(
             onDismiss = { pickerOpen = false },
         )
     }
-    actionSong?.let { (saved, song) ->
+    actionSong?.let { song ->
         TrackActionsSheet(
             song = song,
             favorite = true,
             playlists = playlists,
-            onToggleFavorite = { unfavorite(saved, song); actionSong = null },
+            onToggleFavorite = { unfavorite(song); actionSong = null },
             onDownload = { actions.download(song) },
             onAddToPlaylist = { id -> actions.addSongToPlaylist(id, song) },
             onOpenSource = {

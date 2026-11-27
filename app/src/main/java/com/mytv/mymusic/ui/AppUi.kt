@@ -110,6 +110,7 @@ import com.mytv.mymusic.data.native.AudioQuality
 import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.data.SearchKind
+import com.mytv.mymusic.data.Playlist
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.sync.SyncStrategy
@@ -214,6 +215,18 @@ class MusicActions(private val model: MusicViewModel) {
     val position: kotlinx.coroutines.flow.StateFlow<Long> get() = model.position
     fun clearQueue() = model.clearQueue()
     fun favorite(song: Song) = model.toggleFavorite(song)
+    internal fun addFavorite(song: Song) = model.addFavorite(song)
+    internal fun removeFavorite(song: Song) = model.removeFavorite(song)
+    internal fun undoFavorite(removal: kotlinx.coroutines.Deferred<MusicViewModel.FavoriteUndo?>) = model.undoFavorite(removal)
+    internal fun supportsNativeFavorite(providerId: String) = model.supportsNativeFavorite(providerId)
+    internal suspend fun favoritePlaylistChoices(providerId: String, cookie: String) =
+        model.favoritePlaylistChoices(providerId, cookie)
+    internal suspend fun saveFavoriteSync(
+        providerId: String,
+        mode: com.mytv.mymusic.data.FavoriteSyncMode,
+        playlist: Playlist?,
+        cookie: String,
+    ) = model.saveFavoriteSync(providerId, mode, playlist, cookie)
     fun download(song: Song) = model.download(song)
     /** 收藏到平台账号（汽水的「我喜欢的音乐」）；平台没实现或没登录时由界面提示。 */
     fun collectOnPlatform(song: Song) = model.collectOnPlatform(song)

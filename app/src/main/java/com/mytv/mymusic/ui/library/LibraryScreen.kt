@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
@@ -32,9 +33,12 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -55,6 +59,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SyncProblem
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -70,6 +75,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -77,6 +83,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleFloatingActionButton
@@ -144,6 +151,7 @@ import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.PageScaffold
+import com.mytv.mymusic.ui.components.ProviderIcon
 import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.Skeleton
@@ -182,6 +190,17 @@ class LibraryNav(
 /** 新建菜单的三项：新建歌单、导入歌单链接、从文件导入。三端只是外形不同。 */
 private class NewMenu(val onCreate: () -> Unit, val onLink: () -> Unit, val onFile: () -> Unit)
 
+private class LibraryPlaylists(
+    val groups: Map<String, List<LocalPlaylistSummary>>,
+    source: String?,
+    val listState: LazyListState,
+    val selectSource: (String?) -> Unit,
+) {
+    val hasPlatformSources = groups.keys.any { it.isNotBlank() }
+    val source = source?.takeIf { hasPlatformSources && (it.isBlank() || it in groups) }
+    val visible = this.source?.let { mapOf(it to groups[it].orEmpty()) } ?: groups
+}
+
 @Composable
 fun LibraryScreen(
     state: MusicUiState,
@@ -201,6 +220,14 @@ fun LibraryScreen(
     val window = LocalAppWindow.current
     var createOpen by remember { mutableStateOf(false) }
     var linkOpen by remember { mutableStateOf(false) }
+    var playlistSource by rememberSaveable { mutableStateOf<String?>(null) }
+    val groups = remember(playlists) { libraryPlaylistGroups(playlists) }
+    val listState = rememberLazyListState()
+    val libraryPlaylists = LibraryPlaylists(groups, playlistSource, listState) { source ->
+        playlistSource = source
+        // 切换分组时展示新列表的开头，避免沿用上一组的滚动位置。
+        listState.requestScrollToItem(0)
+    }
     val importFile = rememberImportLauncher(actions)
     val menu = remember(importFile) { NewMenu({ createOpen = true }, { linkOpen = true }, importFile) }
     val stats = rememberLibraryStats(favorites, history, downloads)
@@ -210,9 +237,9 @@ fun LibraryScreen(
     }
 
     when {
-        window.isTv -> TvLibrary(state, history, playlists, covers, sync, stats, listen, soda, kugou, actions, nav, menu)
-        window.isTablet && window.twoPane -> TabletLibrary(playlists, covers, sync, stats, favorites, listen, soda, kugou, actions, nav, menu, detailPane, state.providers)
-        else -> PhoneLibrary(playlists, covers, sync, stats, favorites, listen, soda, kugou, actions, nav, menu, state.providers)
+        window.isTv -> TvLibrary(state, history, libraryPlaylists, covers, sync, stats, listen, soda, kugou, actions, nav, menu)
+        window.isTablet && window.twoPane -> TabletLibrary(libraryPlaylists, covers, sync, stats, favorites, listen, soda, kugou, actions, nav, menu, detailPane, state.providers)
+        else -> PhoneLibrary(libraryPlaylists, covers, sync, stats, favorites, listen, soda, kugou, actions, nav, menu, state.providers)
     }
 
     if (createOpen) {
@@ -220,7 +247,10 @@ fun LibraryScreen(
             title = "新建歌单",
             label = "歌单名称",
             confirmLabel = "创建",
-            onConfirm = actions::createPlaylist,
+            onConfirm = { name ->
+                actions.createPlaylist(name)
+                if (libraryPlaylists.source?.isNotBlank() == true) libraryPlaylists.selectSource("")
+            },
             onDismiss = { createOpen = false },
         )
     }
@@ -237,7 +267,7 @@ fun LibraryScreen(
 
 @Composable
 private fun PhoneLibrary(
-    playlists: List<LocalPlaylistSummary>,
+    playlists: LibraryPlaylists,
     covers: Map<String, List<String>>,
     sync: SyncUiState,
     stats: LibraryStats,
@@ -269,38 +299,36 @@ private fun PhoneLibrary(
                     NewPlaylistSplitButton(menu, Modifier.padding(end = 8.dp))
                 }
             },
+            belowHeader = { PlaylistSourceTabs(playlists, providers, Modifier.padding(horizontal = window.gutter)) },
         ) { padding ->
             LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = padding.withGutter(horizontal = window.gutter, extraBottom = if (phone) 88.dp else 0.dp),
+                Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
+                state = playlists.listState,
+                contentPadding = PaddingValues(
+                    start = window.gutter,
+                    end = window.gutter,
+                    bottom = padding.calculateBottomPadding() + if (phone) 88.dp else 0.dp,
+                ),
                 verticalArrangement = Arrangement.spacedBy(SegmentGap),
             ) {
-                item(key = "bento", contentType = "bento") {
-                    LibraryBento(
-                        stats = stats,
-                        onFavorites = nav.openFavorites,
-                        // 解码和播放都交给 VM 的后台任务，回调里不做全量 JSON 解析
-                        onPlayFavorites = favorites.takeIf { it.isNotEmpty() }?.let { list ->
-                            { actions.playSavedSongs(list) }
-                        },
-                        onHistory = nav.openHistory,
-                        onDownloads = nav.openDownloads,
-                        tileHeight = if (phone) 100.dp else 112.dp,
-                    )
+                if (playlists.source == null) {
+                    item(key = "bento", contentType = "bento") {
+                        LibraryBento(
+                            stats = stats,
+                            onFavorites = nav.openFavorites,
+                            // 解码和播放都交给 VM 的后台任务，回调里不做全量 JSON 解析
+                            onPlayFavorites = favorites.takeIf { it.isNotEmpty() }?.let { list ->
+                                { actions.playSavedSongs(list) }
+                            },
+                            onHistory = nav.openHistory,
+                            onDownloads = nav.openDownloads,
+                            tileHeight = if (phone) 100.dp else 112.dp,
+                        )
+                    }
+                    libraryEntryItems(soda, kugou, listen, sync, nav)
                 }
-                // 本地音乐、汽水天天送会员、酷狗概念版领会员并成一组（三行分段圆角）
-                item(key = "localMusic", contentType = "card") {
-                    LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 3, modifier = Modifier.padding(top = 12.dp))
-                }
-                item(key = "welfare", contentType = "card") {
-                    WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 3, modifier = Modifier)
-                }
-                item(key = "kugouWelfare", contentType = "card") {
-                    KugouWelfareEntryCard(kugou, nav.openKugouWelfare, index = 2, count = 3, modifier = Modifier)
-                }
-                item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
-                    SectionLabel("自建歌单", trailing = { CountTag("${playlists.size} 个") })
+                    SectionLabel("歌单", trailing = { CountTag("${playlists.visible.values.sumOf { it.size }} 个") })
                 }
                 playlistItems(playlists, covers, sync, conflictIds, settled, null, onOpen = nav.openPlaylist, onCreate = menu.onCreate, providers = providers)
             }
@@ -319,9 +347,84 @@ private fun PhoneLibrary(
     }
 }
 
-/** 自建歌单列表：手机、平板共用。selectedId 非空时用于平板的列表 + 详情。 */
-private fun androidx.compose.foundation.lazy.LazyListScope.playlistItems(
-    playlists: List<LocalPlaylistSummary>,
+internal fun libraryPlaylistGroups(playlists: List<LocalPlaylistSummary>): Map<String, List<LocalPlaylistSummary>> =
+    playlists.groupBy { if (it.bound) it.linkProvider else "" }
+        .entries.sortedBy { it.key.isNotEmpty() }.associate { it.key to it.value }
+
+private fun playlistGroupName(providerId: String, providers: List<ProviderInfo>): String =
+    if (providerId.isBlank()) "本地歌单" else providerName(providers, providerId)
+
+@Composable
+private fun PlaylistSourceTabs(
+    playlists: LibraryPlaylists,
+    providers: List<ProviderInfo>,
+    modifier: Modifier = Modifier,
+    focus: FocusRequester? = null,
+) {
+    if (!playlists.hasPlatformSources) return
+    val platformIds = playlists.groups.keys.filter { it.isNotBlank() }.sortedBy { providerName(providers, it) }
+    val sourceIds = listOf(null, "") + platformIds
+    val container = MaterialTheme.colorScheme.surface
+    SecondaryScrollableTabRow(
+        selectedTabIndex = sourceIds.indexOf(playlists.source),
+        modifier = Modifier.fillMaxWidth().background(container).then(modifier),
+        edgePadding = 0.dp,
+        minTabWidth = 64.dp,
+        containerColor = container,
+    ) {
+        sourceIds.forEach { source ->
+            val selected = source == playlists.source
+            val label = when (source) {
+                null -> "全部"
+                "" -> "本地"
+                else -> providerName(providers, source)
+            }
+            Tab(
+                selected = selected,
+                onClick = { if (!selected) playlists.selectSource(source) },
+                modifier = Modifier.tvFocusRing(scale = 1f)
+                    .then(if (selected && focus != null) Modifier.focusRequester(focus) else Modifier),
+            ) {
+                Row(
+                    Modifier.heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (source == null) {
+                        Icon(Icons.Outlined.Apps, null, Modifier.size(18.dp))
+                    } else {
+                        ProviderIcon(id = source.ifBlank { "local" }, name = label, size = 20.dp, active = selected)
+                    }
+                    Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+private fun LazyListScope.libraryEntryItems(
+    soda: SodaWelfareUi,
+    kugou: KugouWelfareUi,
+    listen: ListenTaskState,
+    sync: SyncUiState,
+    nav: LibraryNav,
+) {
+    // 本地音乐和两个会员入口按相邻行绘制圆角。
+    item(key = "localMusic", contentType = "card") {
+        LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 3, modifier = Modifier.padding(top = 12.dp))
+    }
+    item(key = "welfare", contentType = "card") {
+        WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 3, modifier = Modifier)
+    }
+    item(key = "kugouWelfare", contentType = "card") {
+        KugouWelfareEntryCard(kugou, nav.openKugouWelfare, index = 2, count = 3, modifier = Modifier)
+    }
+    item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
+}
+
+/** 歌单列表：手机、平板共用。selectedId 非空时用于平板的列表 + 详情。 */
+private fun LazyListScope.playlistItems(
+    playlists: LibraryPlaylists,
     covers: Map<String, List<String>>,
     sync: SyncUiState,
     conflictIds: Set<String>,
@@ -331,7 +434,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playlistItems(
     onCreate: () -> Unit,
     providers: List<ProviderInfo> = emptyList(),
 ) {
-    if (playlists.isEmpty()) {
+    if (playlists.visible.values.all { it.isEmpty() }) {
         item(key = "plEmpty", contentType = "empty") {
             if (!settled) {
                 SkeletonRows(3)
@@ -347,21 +450,28 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playlistItems(
         }
         return
     }
-    itemsIndexed(
-        playlists,
-        key = { _, it -> "pl:${it.id}" },
-        contentType = { _, _ -> "playlist" },
-    ) { index, playlist ->
-        ListRow(
-            title = playlist.name,
-            index = index,
-            count = playlists.size,
-            onClick = { onOpen(playlist.id) },
-            selected = playlist.id == selectedId,
-            summary = playlistRowSummary(playlist, providers),
-            leading = { PlaylistMosaic(covers[playlist.id].orEmpty(), playlist.name, 52.dp, 14.dp) },
-            trailing = { PlaylistSyncTag(playlist, sync, playlist.id in conflictIds) },
-        )
+    playlists.visible.forEach { (providerId, group) ->
+        if (playlists.source == null) {
+            item(key = "plGroup:$providerId", contentType = "section") {
+                SectionLabel(playlistGroupName(providerId, providers), trailing = { CountTag("${group.size} 个") })
+            }
+        }
+        itemsIndexed(
+            group,
+            key = { _, it -> "pl:${it.id}" },
+            contentType = { _, _ -> "playlist" },
+        ) { index, playlist ->
+            ListRow(
+                title = playlist.name,
+                index = index,
+                count = group.size,
+                onClick = { onOpen(playlist.id) },
+                selected = playlist.id == selectedId,
+                summary = playlistRowSummary(playlist, providers),
+                leading = { PlaylistMosaic(covers[playlist.id].orEmpty(), playlist.name, 52.dp, 14.dp) },
+                trailing = { PlaylistSyncTag(playlist, sync, playlist.id in conflictIds) },
+            )
+        }
     }
 }
 
@@ -373,9 +483,10 @@ internal fun playlistRowSummary(playlist: LocalPlaylistSummary, providers: List<
 
 // ---------------- 平板 ≥840dp：列表 + 详情 ----------------
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TabletLibrary(
-    playlists: List<LocalPlaylistSummary>,
+    playlists: LibraryPlaylists,
     covers: Map<String, List<String>>,
     sync: SyncUiState,
     stats: LibraryStats,
@@ -390,7 +501,9 @@ private fun TabletLibrary(
     providers: List<ProviderInfo> = emptyList(),
 ) {
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
-    val selected = selectedId?.takeIf { id -> playlists.any { it.id == id } } ?: playlists.firstOrNull()?.id
+    val visible = playlists.visible.values
+    val selected = selectedId?.takeIf { id -> visible.any { group -> group.any { it.id == id } } }
+        ?: visible.firstOrNull()?.firstOrNull()?.id
     // 默认选中的第一项要记住：歌单按修改时间排序，同步改动别的歌单时右栏不该跟着跳。
     // 这只是同步的状态修正，没有挂起或绘制时序依赖，用带 key 的 SideEffect。
     SideEffect(selected) { if (selected != null && selected != selectedId) selectedId = selected }
@@ -404,14 +517,15 @@ private fun TabletLibrary(
         modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface),
         start = {
             LazyColumn(
-                Modifier.fillMaxHeight(),
-                contentPadding = PaddingValues(start = 24.dp, end = 16.dp, top = top + 28.dp, bottom = LocalFoldPane.current.bottom(bottom + 24.dp)),
+                Modifier.fillMaxHeight().padding(top = top),
+                state = playlists.listState,
+                contentPadding = PaddingValues(start = 24.dp, end = 16.dp, top = 28.dp, bottom = LocalFoldPane.current.bottom(bottom + 24.dp)),
                 verticalArrangement = Arrangement.spacedBy(SegmentGap),
             ) {
                 item(key = "head", contentType = "header") {
                     Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("我的", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
+                            Text("我的", Modifier.semantics { heading() }, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
                             Text(
                                 syncHeadline(sync),
                                 style = MaterialTheme.typography.bodyMedium,
@@ -421,47 +535,44 @@ private fun TabletLibrary(
                         SyncCloudButton(sync, nav.openSync)
                     }
                 }
-                item(key = "bento", contentType = "bento") {
-                    val onPlayFavorites: (() -> Unit)? = favorites.takeIf { it.isNotEmpty() }?.let { list ->
-                        { actions.playSavedSongs(list) }
+                if (playlists.hasPlatformSources) {
+                    stickyHeader(key = "playlistSources", contentType = "playlistSources") {
+                        PlaylistSourceTabs(playlists, providers)
                     }
-                    // 按列表实际宽度选排法：平常 380dp 的列表放得下“左大右二”；
-                    // 书本姿态下列表收到折痕为止（Pixel Fold 不到 300dp），改成一行三张小卡
-                    BoxWithConstraints(Modifier.fillMaxWidth()) {
-                        if (maxWidth < LibraryBentoRowWidth) {
-                            LibraryBentoRow(
-                                stats = stats,
-                                onFavorites = nav.openFavorites,
-                                onPlayFavorites = onPlayFavorites,
-                                onHistory = nav.openHistory,
-                                onDownloads = nav.openDownloads,
-                            )
-                        } else {
-                            LibraryBento(
-                                stats = stats,
-                                onFavorites = nav.openFavorites,
-                                onPlayFavorites = onPlayFavorites,
-                                onHistory = nav.openHistory,
-                                onDownloads = nav.openDownloads,
-                                tileHeight = 84.dp,
-                                compact = true,
-                            )
+                }
+                if (playlists.source == null) {
+                    item(key = "bento", contentType = "bento") {
+                        val onPlayFavorites: (() -> Unit)? = favorites.takeIf { it.isNotEmpty() }?.let { list ->
+                            { actions.playSavedSongs(list) }
+                        }
+                        // 按列表实际宽度选排法：平常 380dp 的列表放得下“左大右二”；
+                        // 书本姿态下列表收到折痕为止（Pixel Fold 不到 300dp），改成一行三张小卡
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            if (maxWidth < LibraryBentoRowWidth) {
+                                LibraryBentoRow(
+                                    stats = stats,
+                                    onFavorites = nav.openFavorites,
+                                    onPlayFavorites = onPlayFavorites,
+                                    onHistory = nav.openHistory,
+                                    onDownloads = nav.openDownloads,
+                                )
+                            } else {
+                                LibraryBento(
+                                    stats = stats,
+                                    onFavorites = nav.openFavorites,
+                                    onPlayFavorites = onPlayFavorites,
+                                    onHistory = nav.openHistory,
+                                    onDownloads = nav.openDownloads,
+                                    tileHeight = 84.dp,
+                                    compact = true,
+                                )
+                            }
                         }
                     }
+                    libraryEntryItems(soda, kugou, listen, sync, nav)
                 }
-                // 本地音乐、汽水天天送会员、酷狗概念版领会员并成一组（三行分段圆角）
-                item(key = "localMusic", contentType = "card") {
-                    LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 3, modifier = Modifier.padding(top = 12.dp))
-                }
-                item(key = "welfare", contentType = "card") {
-                    WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 3, modifier = Modifier)
-                }
-                item(key = "kugouWelfare", contentType = "card") {
-                    KugouWelfareEntryCard(kugou, nav.openKugouWelfare, index = 2, count = 3, modifier = Modifier)
-                }
-                item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
-                    SectionLabel("自建歌单", trailing = { NewPlaylistSplitButton(menu) })
+                    SectionLabel("歌单", trailing = { NewPlaylistSplitButton(menu) })
                 }
                 playlistItems(playlists, covers, sync, conflictIds, settled, selected, onOpen = { selectedId = it }, onCreate = menu.onCreate, providers = providers)
             }
@@ -503,7 +614,7 @@ private fun TabletLibrary(
 private fun TvLibrary(
     state: MusicUiState,
     history: List<SavedSong>,
-    playlists: List<LocalPlaylistSummary>,
+    playlists: LibraryPlaylists,
     covers: Map<String, List<String>>,
     sync: SyncUiState,
     stats: LibraryStats,
@@ -527,13 +638,15 @@ private fun TvLibrary(
         title = "我的",
         subtitle = syncHeadline(sync),
         actions = { SyncCloudButton(sync, nav.openSync) },
+        belowHeader = { PlaylistSourceTabs(playlists, state.providers, Modifier.padding(horizontal = window.gutter), focus = first) },
     ) { padding ->
         LazyColumn(
             Modifier.fillMaxSize(),
+            state = playlists.listState,
             contentPadding = padding,
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            item(key = "tiles", contentType = "bento") {
+            if (playlists.source == null) item(key = "tiles", contentType = "bento") {
                 // 磁贴加起来比屏宽：不横向滚动的话 Row 把后面几块压成一条缝（“最近播放”“下载”只露 50dp），
                 // 方向键也走不过去。横向滚动后焦点移到哪块，哪块自己滚进来
                 Row(
@@ -543,7 +656,8 @@ private fun TvLibrary(
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
                     TvTile(
-                        modifier = Modifier.width(280.dp).focusRequester(first),
+                        modifier = Modifier.width(280.dp)
+                            .then(if (playlists.hasPlatformSources) Modifier else Modifier.focusRequester(first)),
                         container = MaterialTheme.colorScheme.primaryContainer,
                         content = MaterialTheme.colorScheme.onPrimaryContainer,
                         onClick = nav.openFavorites,
@@ -604,34 +718,29 @@ private fun TvLibrary(
                     }
                 }
             }
-            item(key = "playlists", contentType = "row") {
-                TvRow("自建歌单") {
-                    item(key = "new", contentType = "card") {
-                        TvNewCard(onClick = { newOpen = true })
-                    }
-                    items(playlists, key = { it.id }, contentType = { "playlist" }) { playlist ->
-                        TvCard(
-                            title = playlist.name,
-                            onClick = { nav.openPlaylist(playlist.id) },
-                            art = { PlaylistMosaic(covers[playlist.id].orEmpty(), playlist.name, 150.dp, 20.dp) },
-                            footer = {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    if (playlist.bound) {
-                                        Tag(
-                                            "已绑定${providerName(state.providers, playlist.linkProvider)}",
-                                            MaterialTheme.colorScheme.primaryContainer,
-                                            MaterialTheme.colorScheme.onPrimaryContainer,
-                                            Icons.Filled.Link,
-                                        )
-                                    }
-                                    PlaylistSyncTag(playlist, sync, playlist.id in conflictIds)
-                                }
-                            },
-                        )
+            val sources = if (playlists.source == null) listOf("") + playlists.visible.keys.filter { it.isNotEmpty() }
+            else playlists.visible.keys
+            sources.forEach { providerId ->
+                val group = playlists.visible[providerId].orEmpty()
+                item(key = "playlists:$providerId", contentType = "row") {
+                    TvRow("${playlistGroupName(providerId, state.providers)} · ${group.size} 个") {
+                        if (providerId == sources.firstOrNull()) {
+                            item(key = "new", contentType = "card") {
+                                TvNewCard(onClick = { newOpen = true })
+                            }
+                        }
+                        items(group, key = { it.id }, contentType = { "playlist" }) { playlist ->
+                            TvCard(
+                                title = playlist.name,
+                                onClick = { nav.openPlaylist(playlist.id) },
+                                art = { PlaylistMosaic(covers[playlist.id].orEmpty(), playlist.name, 150.dp, 20.dp) },
+                                footer = { PlaylistSyncTag(playlist, sync, playlist.id in conflictIds) },
+                            )
+                        }
                     }
                 }
             }
-            if (history.isNotEmpty()) {
+            if (playlists.source == null && history.isNotEmpty()) {
                 item(key = "recent", contentType = "row") {
                     TvRow("最近播放") {
                         items(recent, key = { "recent:${it.key}" }, contentType = { "song" }) { song ->

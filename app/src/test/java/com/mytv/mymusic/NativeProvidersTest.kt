@@ -72,8 +72,7 @@ class NativeProvidersTest {
 
     @Test
     fun collectCapabilitiesMatchImplementedProviders() {
-        // 目前只有汽水有账号侧收藏（「我喜欢的音乐」）
         val collect = NativeProviders.all().filter { it.supportsCollect() }.map { it.info.id }.toSet()
-        assertEquals(setOf("soda"), collect)
+        assertEquals(setOf("netease", "qq", "soda"), collect)
     }
 }
