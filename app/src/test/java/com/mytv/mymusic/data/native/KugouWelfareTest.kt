@@ -68,7 +68,9 @@ class KugouWelfareTest {
 
     @Test
     fun `month record counts this month and flags today`() {
-        val today = KugouWelfare.beijingToday()
+        // 「今天」写死：原来取北京时间当天，每月 28 号都会和下面那个 "${month}-28" 撞成同一天，
+        // 三条记录塌成两条，断言 3 必失败。parseMonthRecord 本来就收 today 参数，用它定点。
+        val today = "2026-03-10"
         val month = today.substring(0, 7)
         val yesterday = java.time.LocalDate.parse(today).minusDays(1).toString()
         val raw = """
@@ -78,7 +80,7 @@ class KugouWelfareTest {
               {"date":"${month}-28","content":"1天畅听VIP"}
             ]}}
         """.trimIndent()
-        val record = KugouWelfare.parseMonthRecord(raw)
+        val record = KugouWelfare.parseMonthRecord(raw, today)
         assertEquals(3, record?.first)
         assertTrue(record?.second == true)
     }
