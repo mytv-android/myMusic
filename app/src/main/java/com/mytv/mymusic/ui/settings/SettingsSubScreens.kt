@@ -677,8 +677,8 @@ internal fun PlaybackSettingsScreen(
                 label = {
                     when (it) {
                         PlaybackMode.Auto -> "自动"
-                        PlaybackMode.Priority -> "优先音源"
-                        PlaybackMode.Pinned -> "固定音源"
+                        PlaybackMode.Priority -> "按顺序"
+                        PlaybackMode.Pinned -> "指定音源"
                     }
                 },
                 modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
@@ -687,14 +687,14 @@ internal fun PlaybackSettingsScreen(
         item(key = "modeNote", contentType = "note") {
             SettingsNote(
                 when (aggregation.playbackMode) {
-                    PlaybackMode.Auto -> "只用已启用的音乐源：歌曲来源平台已启用时优先，未启用则按启用顺序换源；完整音源优先，其次看码率。播放页的音源标签会说明。"
-                    PlaybackMode.Priority -> "只用已启用的音乐源：歌曲来源平台已启用时优先，未启用则按启用顺序换源；排在前面的平台不可用再向后回退。"
-                    PlaybackMode.Pinned -> "优先使用指定平台；它没有返回地址时仍会回退，并提示实际播放源。"
+                    PlaybackMode.Auto -> "已启用的平台里挑码率最高的来放。哪个放不出来，就按下面的「音源顺序」换下一个。"
+                    PlaybackMode.Priority -> "严格按你排的顺序放，不看码率。前面的平台放不出来，才换下一个。"
+                    PlaybackMode.Pinned -> "始终先试你选的那个平台，它放不出来才换别的。播放页会显示实际在放哪个。"
                 },
             )
         }
         if (aggregation.playbackMode == PlaybackMode.Pinned) {
-            item(key = "pinHead", contentType = "sectionHeader") { SectionLabel("固定音源") }
+            item(key = "pinHead", contentType = "sectionHeader") { SectionLabel("指定音源") }
             item(key = "pin", contentType = "chips") {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     pinnable.forEach { provider ->
@@ -717,7 +717,7 @@ internal fun PlaybackSettingsScreen(
                 count = 1,
                 onClick = { onOpen(SettingsSection.Sources) },
                 icon = Icons.Filled.Tune,
-                summary = "自动换源和手动换源都按这个顺序回退；去「音乐源」里调整",
+                summary = "换源时按这个顺序往下试，「自动」在码率一样时也按它排。去「音乐源」里调整",
             )
         }
         item(key = "matchHead", contentType = "sectionHeader") { SectionLabel("匹配") }
@@ -759,7 +759,7 @@ internal fun PlaybackSettingsScreen(
         }
         item(key = "note", contentType = "note") {
             Box(Modifier.padding(top = 16.dp)) {
-                InfoNote("自动换源与手动换源都使用这里的规则。播放器里始终显示当前实际播放源。")
+                InfoNote("无论选哪种模式，都只用已启用的平台，「指定音源」选的平台除外。播放器里始终显示实际在放哪个。")
             }
         }
     }

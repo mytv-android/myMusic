@@ -171,10 +171,10 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
                 }
             }
             Spacer(Modifier.height(12.dp))
-            // 现有逻辑记住的是全局“固定平台”模式，不是只对这首歌生效，文案按实际行为写
+            // 现有逻辑记住的是全局「指定音源」模式，不是只对这首歌生效，文案按实际行为写
             SwitchRow(
-                title = "以后固定用所选音源",
-                summary = "播放模式改为固定音源，可在“播放与换源”中改回自动",
+                title = "以后先用所选音源",
+                summary = "换源模式改成「指定音源」，可在「播放与换源」里改回来",
                 checked = rememberChoice,
                 onCheckedChange = { rememberChoice = it },
                 index = 0,
@@ -305,7 +305,7 @@ private fun SourceRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (pinned) SmallLabel("已固定", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
+                if (pinned) SmallLabel("已指定", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (availability != null) StatusGlyph(availability, glyphColor(availability), 8.dp)

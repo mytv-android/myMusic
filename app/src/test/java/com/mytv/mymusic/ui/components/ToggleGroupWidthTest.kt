@@ -33,7 +33,7 @@ class ToggleGroupWidthTest {
 
     @Test
     fun `three short modes still fit`() {
-        assertTrue(widthOf(listOf("自动", "优先音源", "固定音源")) < 360 - 32)
+        assertTrue(widthOf(listOf("自动", "按顺序", "指定音源")) < 360 - 32)
     }
 
     @Test

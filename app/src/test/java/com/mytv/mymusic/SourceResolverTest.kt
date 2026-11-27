@@ -2,6 +2,7 @@ package com.mytv.mymusic
 
 import com.mytv.mymusic.aggregate.AggregationSettings
 import com.mytv.mymusic.aggregate.Availability
+import com.mytv.mymusic.aggregate.PlaybackMode
 import com.mytv.mymusic.aggregate.Resolution
 import com.mytv.mymusic.aggregate.SourcePolicy
 import com.mytv.mymusic.aggregate.SourceResolver
@@ -105,16 +106,59 @@ class SourceResolverTest {
 
     @Test
     fun priorityModeIgnoresBitrateWithoutVip() {
-        // 「优先级」播放模式下码率不参与排序，同平台优先级按匹配度来
+        // 「按顺序」播放模式下码率不参与排序，同平台优先级按匹配度来
         val netease = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/a.mp3", bitrate = 128), matchScore = 0.9f)
         val kugou = TrackSource("kugou", "酷狗音乐", song("k1", "kugou", url = "https://example.com/b.mp3", bitrate = 320), matchScore = 0.8f)
         val candidates = resolver.orderCandidates(
             track(listOf(netease, kugou)),
             pinnedProvider = null,
             excludeProviders = emptySet(),
-            policy = SourcePolicy(mode = com.mytv.mymusic.aggregate.PlaybackMode.Priority, priority = listOf("netease", "kugou")),
+            policy = SourcePolicy(mode = PlaybackMode.Priority, priority = listOf("netease", "kugou")),
         )
         assertEquals(listOf("netease", "kugou"), candidates.map { it.providerId })
+    }
+
+    @Test
+    fun autoModePicksTheHighestBitratePlatform() {
+        // 「自动」挑码率最高的平台，哪怕它排在用户顺序后面；顺序只在码率相同时起作用
+        val netease = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/a.mp3", bitrate = 128))
+        val kugou = TrackSource("kugou", "酷狗音乐", song("k1", "kugou", url = "https://example.com/b.mp3", bitrate = 320))
+        val candidates = resolver.orderCandidates(
+            track(listOf(netease, kugou)),
+            pinnedProvider = null,
+            excludeProviders = emptySet(),
+            policy = SourcePolicy(mode = PlaybackMode.Auto, priority = listOf("netease", "kugou")),
+        )
+        assertEquals(listOf("kugou", "netease"), candidates.map { it.providerId })
+    }
+
+    @Test
+    fun autoModeKeepsUnknownBitrateBehindKnownOnes() {
+        // 没报码率（0）的平台不跟已知码率的比大小，也不能当成最差：按用户排的顺序跟在后面
+        val apple = TrackSource("apple", "Apple Music", song("a1", "apple", url = "https://example.com/a.m4a", bitrate = 0))
+        val kugou = TrackSource("kugou", "酷狗音乐", song("k1", "kugou", url = "https://example.com/b.mp3", bitrate = 128))
+        val qq = TrackSource("qq", "QQ 音乐", song("q1", "qq", url = "https://example.com/c.mp3", bitrate = 0))
+        val candidates = resolver.orderCandidates(
+            track(listOf(apple, kugou, qq)),
+            pinnedProvider = null,
+            excludeProviders = emptySet(),
+            policy = SourcePolicy(mode = PlaybackMode.Auto, priority = listOf("apple", "kugou", "qq")),
+        )
+        assertEquals(listOf("kugou", "apple", "qq"), candidates.map { it.providerId })
+    }
+
+    @Test
+    fun autoModeFallsBackToPriorityOrderOnEqualBitrate() {
+        // 码率相同（都没报码率）时按用户排的顺序走，顺序仍然是最终的裁判
+        val apple = TrackSource("apple", "Apple Music", song("a1", "apple", url = "https://example.com/a.m4a", bitrate = 0))
+        val qq = TrackSource("qq", "QQ 音乐", song("q1", "qq", url = "https://example.com/c.mp3", bitrate = 0))
+        val candidates = resolver.orderCandidates(
+            track(listOf(qq, apple)),
+            pinnedProvider = null,
+            excludeProviders = emptySet(),
+            policy = SourcePolicy(mode = PlaybackMode.Auto, priority = listOf("apple", "qq")),
+        )
+        assertEquals(listOf("apple", "qq"), candidates.map { it.providerId })
     }
 
     // ---------- resolve()：取流后才知道是试听（汽水会员曲）的换源行为 ----------

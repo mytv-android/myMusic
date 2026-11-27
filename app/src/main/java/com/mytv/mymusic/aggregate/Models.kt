@@ -166,9 +166,10 @@ data class AggregationSettings(
     }
 
     /**
-     * 自动播放的候选顺序：pinned（用户显式固定）在最前，来源平台已启用时紧随其后，
+     * 自动播放的候选顺序：pinned（用户显式指定）在最前，来源平台已启用时紧随其后，
      * 其余按 [enabledProviders] 的启用顺序。未启用的平台不会出现在结果里——
      * 这里不能再拿 [providerPriority] 或 available 的剩余 id 兜底，否则关掉的来源平台又会被排回来。
+     * 注意「自动」模式按码率挑平台，这份顺序只在码率相同时起作用；「按顺序」模式才完全按它走。
      */
     fun playbackOrder(available: List<String>, origin: String?, pinned: String?): List<String> {
         val enabled = enabledProviders.distinct().filter { it in available }

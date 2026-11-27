@@ -98,7 +98,7 @@ fun StatusGlyph(status: Availability, color: Color, glyph: Dp) {
 }
 
 /**
- * 音源 chip：显示当前平台图标、音质，右侧标出“自动 / 固定”。换源结果直接写在 chip 下方，不弹 Snackbar。
+ * 音源 chip：显示当前平台图标、音质，右侧标出“自动 / 顺序 / 指定”。换源结果直接写在 chip 下方，不弹 Snackbar。
  */
 @Composable
 fun SourceChip(

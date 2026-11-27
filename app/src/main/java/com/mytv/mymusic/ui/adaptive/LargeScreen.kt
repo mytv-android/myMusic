@@ -491,6 +491,6 @@ private fun PaneCover(song: Song, playing: Boolean, shape: CoverShapeChoice, ope
 
 fun modeLabel(mode: PlaybackMode): String = when (mode) {
     PlaybackMode.Auto -> "自动"
-    PlaybackMode.Priority -> "优先"
-    PlaybackMode.Pinned -> "固定"
+    PlaybackMode.Priority -> "顺序"
+    PlaybackMode.Pinned -> "指定"
 }

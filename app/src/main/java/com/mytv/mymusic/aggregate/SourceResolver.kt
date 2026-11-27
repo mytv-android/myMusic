@@ -87,6 +87,14 @@ class SourceResolver(
         val pinnedSources = sources.filter { source ->
             source.providerId == pinned && statuses[source] != Availability.Unavailable
         }
+        // 自动（以及被固定平台的回退）：已启用的平台里挑码率最高的。没报码率的平台不参与比大小，
+        // 按用户排的顺序跟在已知码率的候选后面——既不能把「未知」当成最差，也不能让它插到已知码率前面。
+        // 「按顺序」模式相反：严格按用户排的顺序走，码率不参与跨平台比较。
+        val byQuality = compareBy<TrackSource> { if (it.song.bitrate > 0) 0 else 1 }
+            .thenByDescending { it.song.bitrate.coerceAtLeast(0) }
+            .thenByDescending { it.matchScore }
+            .thenBy { priorityIndex(it) }
+        val byOrder = compareBy<TrackSource> { priorityIndex(it) }.thenByDescending { it.matchScore }
         val full = sources.filter { source ->
             val status = statuses.getValue(source)
             val custom = source.providerId == LxPlatform.PROVIDER_ID
@@ -94,24 +102,13 @@ class SourceResolver(
                 status != Availability.Unavailable &&
                 !(status == Availability.VipOnly && cookieMap[source.providerId].isNullOrBlank() && !custom) &&
                 (status != Availability.PreviewOnly || custom)
-        }.sortedWith(
-            if (policy.mode == PlaybackMode.Priority) {
-                compareBy<TrackSource> { priorityIndex(it) }.thenByDescending { it.matchScore }
-            } else {
-                compareBy<TrackSource> { priorityIndex(it) }
-                    .thenByDescending { it.song.bitrate }
-                    .thenByDescending { it.matchScore }
-            }
-        )
+        }.sortedWith(if (policy.mode == PlaybackMode.Priority) byOrder else byQuality)
         val preview = sources.filter { source ->
             source.providerId != pinned &&
                 statuses.getValue(source) == Availability.PreviewOnly &&
                 source.providerId != LxPlatform.PROVIDER_ID &&
                 policy.allowPreview
-        }.sortedWith(
-            compareBy<TrackSource> { priorityIndex(it) }
-                .thenByDescending { it.song.bitrate }
-        )
+        }.sortedWith(if (policy.mode == PlaybackMode.Priority) byOrder else byQuality)
         return (pinnedSources + full + preview).distinctBy { it.resolutionKey.ifBlank { it.song.key } }
     }
 
