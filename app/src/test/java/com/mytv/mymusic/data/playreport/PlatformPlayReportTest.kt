@@ -261,4 +261,38 @@ class PlatformPlayReportTest {
             assertTrue("${reporter.providerId} 缺少上报说明", reporter.reportSummary().isNotBlank())
         }
     }
+
+    @Test
+    fun `netease device id is injected once and shared across instances`() {
+        val fixed = "0123456789abcdef0123456789abcdef"
+        NetEasePlayReporter.configureDeviceId(fixed)
+        try {
+            // 同一个进程里两个实例（播放页、后台服务）必须报同一台设备
+            assertEquals(fixed, NetEasePlayReporter.effectiveDeviceId())
+            val reporter = object : NetEasePlayReporter({ "MUSIC_U=abc" }) {
+                override suspend fun send(action: String, fields: Map<String, Any>) {}
+            }
+            assertEquals(fixed, reporter.deviceIdForTest("MUSIC_U=abc"))
+        } finally {
+            NetEasePlayReporter.configureDeviceId("")
+        }
+        // 没注入过也要给一个稳定的值，不能因为没注入就每请求换一个
+        val fallback = NetEasePlayReporter.effectiveDeviceId()
+        assertEquals(32, fallback.length)
+        assertEquals(fallback, NetEasePlayReporter.effectiveDeviceId())
+    }
+
+    @Test
+    fun `netease cookie device id wins over the injected one`() {
+        NetEasePlayReporter.configureDeviceId("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        try {
+            val reporter = object : NetEasePlayReporter({ "MUSIC_U=abc; deviceId=fromCookie" }) {
+                override suspend fun send(action: String, fields: Map<String, Any>) {}
+            }
+            // 上游哪天真把 deviceId 回种进 Cookie，就认它的
+            assertEquals("fromCookie", reporter.deviceIdForTest("MUSIC_U=abc; deviceId=fromCookie"))
+        } finally {
+            NetEasePlayReporter.configureDeviceId("")
+        }
+    }
 }

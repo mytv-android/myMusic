@@ -1,5 +1,6 @@
 package com.mytv.mymusic.data.native
 
+import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.data.AlbumDetail
 import com.mytv.mymusic.data.AlbumSummary
 import com.mytv.mymusic.data.ArtistAlbumPage
@@ -47,8 +48,10 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
+private const val TAG = "Kugou"
+
 private val KUGOU_INFO = ProviderInfo(
-    id = "kugou",
+    id = KugouProvider.KUGOU_PROVIDER_ID,
     name = "酷狗音乐",
     search = true,
     download = true,
@@ -3437,13 +3440,22 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
     }
 
     private fun initLoginDevice(): MutableMap<String, String> {
-        val guid = randomKugouGuid()
-        return mutableMapOf(
-            "KUGOU_API_GUID" to guid,
-            "KUGOU_API_MID" to calculateKugouMid(guid),
+        // 落盘的那一份：mid 参与客户端签名，每次登录都换新设备就是服务端眼里的一台新设备。
+        // 有种子就走确定性推导（跨登录、跨设备都是同一台），没种子才随机生成一份新的。
+        // 没种子时那份也要 memo：注入是启动时异步发的，用户在头几百毫秒点开扫码时
+        // createLogin 和之后的轮询必须还是同一台设备，不然又回到「一次登录两台设备」
+        val seed = loginDeviceSeed
+        if (seed.isNotBlank()) return kugouLoginDeviceFields(seed).toMutableMap()
+        fallbackLoginDevice?.let { return it.toMutableMap() }
+        val generated = mutableMapOf(
+            "KUGOU_API_GUID" to randomKugouGuid(),
+            "KUGOU_API_MID" to "",
             "KUGOU_API_MAC" to randomKugouString(12),
             "KUGOU_API_DEV" to randomKugouString(16),
         )
+        generated["KUGOU_API_MID"] = kugouMidOf(generated["KUGOU_API_GUID"].orEmpty())
+        fallbackLoginDevice = generated
+        return generated.toMutableMap()
     }
 
     private fun randomKugouString(length: Int): String {
@@ -3464,15 +3476,19 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
         return "${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}"
     }
 
-    private fun calculateKugouMid(seed: String): String {
-        val digest = java.security.MessageDigest.getInstance("MD5").digest(seed.toByteArray(Charsets.UTF_8))
-        return BigInteger(1, digest).toString()
-    }
+    /**
+     * dfid 兜底：有落盘种子就由它派生（形状和随机那份一致，24 位大写十六进制），
+     * 没注入过才随机。粘贴来的 cookie 不带 dfid 时，原来每次请求现造一个，服务端眼里
+     * 设备号一直在变——和「每次登录换一台设备」是同一条毛病。
+     */
+    private fun fallbackKugouDfid(): String =
+        loginDeviceSeed.takeIf { it.isNotBlank() }?.let(::kugouSeedDfid)
+            ?: NativeCrypto.md5Hex(System.nanoTime().toString()).uppercase().take(24)
 
-    private fun randomKugouDfid(): String =
-        NativeCrypto.md5Hex(System.nanoTime().toString()).uppercase().take(24)
+    private fun randomKugouDfid(): String = fallbackKugouDfid()
 
-    private fun randomKugouMid(): String = randomKugouDfid()
+    /** mid 兜底：认当前这台登录设备的 GUID 算出来的 mid，别再拿 dfid 的形状冒充。 */
+    private fun randomKugouMid(): String = kugouMidOf(initLoginDevice()["KUGOU_API_GUID"].orEmpty())
 
     private fun mapKugouMatch(item: JsonObject): Song? {
         val name = cleanKugouText(item.findString("songname"))
@@ -3801,8 +3817,29 @@ class KugouProvider : BaseNativeProvider(KUGOU_INFO) {
 
     private data class KrcLine(val startMs: Int, val endMs: Int, val words: List<KrcWord>)
 
-    private companion object {
+    companion object {
+        /**
+         * 扫码登录的设备身份种子，由设置里落盘的那一份注入（MyMusicApp 启动时）。
+         * 酷狗的 `mid` 参与客户端签名，每次登录都换新设备就是服务端眼里的一台新设备；
+         * 种子优先取已登录 Cookie 里的 GUID，所以另一台设备登录后同步过来也不会被换回去。
+         */
+        @Volatile private var loginDeviceSeed = ""
+
+        /**
+         * 种子还没注入时用的那份随机身份，整个进程只生成一次。
+         * 注入是启动时异步发出的，晚于它的扫码（createLogin + 每一次轮询）必须仍是同一台设备。
+         */
+        @Volatile private var fallbackLoginDevice: Map<String, String>? = null
+
+        fun configureLoginDevice(seed: String) {
+            val next = seed.trim()
+            if (next == loginDeviceSeed) return
+            loginDeviceSeed = next
+            if (next.isNotEmpty()) AppLog.i(TAG, "酷狗登录设备身份已注入 seed=${next.take(8)}…")
+        }
+
         /** 歌手头像档位：softhead 的 240 / 480 / 800 / 1000 都有，800 已经够铺满歌手页头部。 */
+        const val KUGOU_PROVIDER_ID = "kugou"
         const val KUGOU_ARTIST_AVATAR_SIZE = "800"
         const val MOBILE_USER_AGENT =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"
@@ -4014,6 +4051,65 @@ internal fun parseKugouCookie(cookie: String): Map<String, String> {
     }
     return result
 }
+
+/**
+ * 从落盘的设备种子确定性地推导出酷狗登录设备的四个字段。
+ *
+ * `KUGOU_API_MID` 参与客户端签名（loginWebGet 的参数、androidHeaders 的头），
+ * 服务端按它认设备：每次登录都换一套就是服务端眼里的一台新设备，会话也短。
+ * 种子本身跟着登录 Cookie 同步（见 [com.mytv.mymusic.data.AppStore.kugouLoginDevice]），
+ * 所以同一份种子在任何设备上都导出同一台设备，跨登录、跨设备都稳定。
+ *
+ * @param seed 32 位 hex（DataStore 里存的一份 UUID 去横线后的形态）
+ */
+internal fun kugouLoginDeviceFields(seed: String): Map<String, String> {
+    val guid = kugouSeedGuid(seed)
+    return mapOf(
+        "KUGOU_API_GUID" to guid,
+        "KUGOU_API_MID" to kugouMidOf(guid),
+        "KUGOU_API_MAC" to kugouSeedString(seed, "mac", 12),
+        "KUGOU_API_DEV" to kugouSeedString(seed, "dev", 16),
+    )
+}
+
+/** 种子格式化成 UUID 形状，和随机生成的那份同形（版本/变体位也置上，服务端不会因形状异常打回）。 */
+internal fun kugouSeedGuid(seed: String): String {
+    val hex = seed.filter { it in "0123456789abcdefABCDEF" }.lowercase().padEnd(32, '0').take(32)
+    val bytes = NativeCrypto.hexToBytes(hex)
+    // 和 randomKugouGuid() 同一套位运算：version 4、variant 10
+    bytes[6] = ((bytes[6].toInt() and 0x0f) or 0x40).toByte()
+    bytes[8] = ((bytes[8].toInt() and 0x3f) or 0x80).toByte()
+    val out = NativeCrypto.bytesToHex(bytes)
+    return "${out.substring(0, 8)}-${out.substring(8, 12)}-${out.substring(12, 16)}-" +
+        "${out.substring(16, 20)}-${out.substring(20)}"
+}
+
+/**
+ * 从种子确定性地导出定长设备串：字符集和随机版一致（`[1-9A-Z]`），
+ * 但同一个种子永远导出同一个值。盐值区分字段，避免 MAC 和 DEV 同串。
+ */
+internal fun kugouSeedString(seed: String, salt: String, length: Int): String {
+    val chars = "1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    val digest = NativeCrypto.md5Hex("$salt|$seed")
+    val out = StringBuilder(length)
+    for (index in 0 until length) {
+        out.append(chars[digest[index % digest.length].digitToInt(16) % chars.length])
+    }
+    return out.toString()
+}
+
+/** mid = GUID 的 MD5 当无符号大整数，酷狗客户端签名里就这一个字段参与计算。 */
+internal fun kugouMidOf(guid: String): String {
+    val digest = java.security.MessageDigest.getInstance("MD5").digest(guid.toByteArray(Charsets.UTF_8))
+    return BigInteger(1, digest).toString()
+}
+
+/**
+ * dfid 兜底值由种子派生：形状和随机那份逐字节同形（24 位大写十六进制），
+ * 所以不会改变请求形状，只是让粘贴来的 cookie 缺 dfid 时也不再每请求换一个。
+ */
+internal fun kugouSeedDfid(seed: String): String =
+    NativeCrypto.md5Hex("dfid|$seed").uppercase().take(24)
 
 // ---- response DTOs ----
 

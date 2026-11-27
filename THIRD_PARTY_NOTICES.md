@@ -75,6 +75,18 @@ These are best-effort unofficial interfaces. They are only used when the user ex
 - License: MIT License (the repository's own source); the official `bdms.node` / `metasecml.dll` binaries are proprietary and are not included or redistributed by myMusic.
 - Usage: reference for the signer service HTTP contract (`/sign`, the `device_id` field it returns, `BUSY` / `RATE_LIMITED` error codes) and health endpoints. `GET /config` was removed upstream; myMusic no longer calls it. No libmssdk code or binary is bundled.
 
+## 跨平台设备身份审计（2026-11-27）
+
+对 17 个平台侧的「账号设备身份 / 指纹」逐一核对后，只有三处动手，其余保持原状：
+
+- **酷狗音乐**：`KUGOU_API_GUID` / `KUGOU_API_MID` / `KUGOU_API_MAC` / `KUGOU_API_DEV` 四件套原来在 `createLogin` 和**每一次** `checkLogin` 轮询里重新生成（一次扫码最多 42 次），二维码用身份 X 建、轮询用 Y/Z/W，最后落盘的是最后一次那份零历史身份，而 `registerLoginDevice` 再拿它去 `risk/v2/r_register_dev` 换 dfid。现在种子落盘（`SettingsStore.kugouLoginDevice`，优先认已登录 Cookie 里那份 GUID），四个字段由 `KugouProvider.kugouLoginDeviceFields` 从种子确定性推导（GUID 补上和随机那份相同的 UUID 版本/变体位；未注入时那份随机身份也在进程内 memo，注入晚几十毫秒也不会让一次登录里出现两台设备）。**不新增同步字段**——GUID 本来就在 cookie 串里，跟着 `SyncCookie` 按 provider LWW 走。dfid 兜底值也改成种子派生（`kugouSeedDfid`，24 位大写十六进制，形状与随机那份一致），粘贴来的 cookie 缺 dfid 时不再每请求换一个。
+- **网易云音乐播放上报（weblog）**：这个设备号是直接拼进 Cookie 头和 `MUSIC_U` 一起发出去的，服务端按它把同一个账号的播放归并成「最近播放 / 听歌排行」。`MUSIC_U` 跟着 `SyncCookie` 跨设备同步，设备号却是每进程一个随机 32 位串（`resolveDeviceId` 里「读 cookie 里的 deviceId」是死分支：扫码登录只回 `MUSIC_U` / `__csrf`）。现在落盘（`SettingsStore.neteaseWeblogDevice`）并作为 `SyncSnapshot.neteaseIdentity` 随同步走，LWW 按变化时间戳；`osver` 同时固定成常量，与 `os=osx` 和桌面 UA 对齐（原来报真机 Android 版本，两台设备对同一账号自相矛盾）。
+- **music.op.wiki（MHub）**：`device_id` 原来每进程一个 UUID，只在 `password/login` 的 body 里上报一次。落盘复用（`SettingsStore.mhubLoginDevice` + `MHubProvider.configureLoginDevice`），但**不进同步文件**——它不在同步的那串 cookie 里，`mhub_session` 单独就能用，同步反而会让所有安装共用一个 device_id。
+
+其余平台判定为 no_change，理由摘要：QQ（vkey 的 guid 每请求自洽、登录不依赖任何设备字段）、QQ 埋点与酷我（匿名接口、只影响对侧统计，落盘反而更糊）、千千 / 咪咕 / JOOX / 5sing / Jamendo（无账号体系或无任何设备身份字段，`channel` / `UA` / `wmid` 全是编译期常量，所有安装完全同形）、B 站（`buvid3` 本来就住在 cookie 串里，天然随之同步，登录也不依赖它）、Apple Music（请求头只有 developer token / `media-user-token`，没有任何设备指纹；`storefront` 没同步是「账号属性」而非设备身份问题）、Spotify（匿名 Web Player 三件套 `sp_t` + `device_id` + `Client-Token` 45 分钟原子替换，纯内存自洽）、Subsonic（协议侧只有常量 `c` / `v`，账号整条 JSON 已在同步里）、洛雪自定义音源（宿主侧不注入任何设备身份；脚本登录态不落盘是真缺口，但修法是给脚本一个按 source id 落盘的 cookie jar，且同步它等于把一台设备的登录态广播到所有设备，需单独评估）。
+
+两条跨平台噪声，都不是同步缺口，本次不动：`randomIp=true` 让同一账号每请求换一个随机国内 IP（网易云 / QQ / B 站二维码），以及网易云 `deviceId="pyncm!"`、QQ `udid`/`QIMEI36="0"`、JOOX `wmid`、B 站匿名 `buvid3` 这些全网共用常量——要动都得单独立项并先拿到失败样本。
+
 ## ncm-afp / NeteaseCloudMusicApi (NetEase song recognition)
 
 - Upstream demo: https://github.com/c55403225/ncm-afp (the original mos9527/ncm-afp repository is no longer available)

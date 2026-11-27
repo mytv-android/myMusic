@@ -349,6 +349,14 @@ class SettingsStore(private val context: Context) {
     private val sodaLoginInstallIdKey = stringPreferencesKey("soda_login_install_id")
     // 身份是什么时候生成/轮换的：同步文件按它判新旧（轮换 = 一份带新时间戳的身份）
     private val sodaLoginDeviceUpdatedAtKey = longPreferencesKey("soda_login_device_updated_at")
+    // 酷狗扫码登录的设备身份种子：落盘后所有登录复用同一个（mid 参与客户端签名）
+    private val kugouLoginDeviceKey = stringPreferencesKey("kugou_login_device")
+    // 网易云播放上报（weblog）的设备号：和 MUSIC_U 拼在同一个 Cookie 头里，服务端按它归并听歌排行
+    private val neteaseWeblogDeviceKey = stringPreferencesKey("netease_weblog_device")
+    // 设备号上次变化的时间：同步文件按它判新旧
+    private val neteaseWeblogDeviceUpdatedAtKey = longPreferencesKey("netease_weblog_device_updated_at")
+    // MHub（music.op.wiki）登录时上报的设备号：只在登录 body 里出现一次，落盘后每次登录都是同一台
+    private val mhubLoginDeviceKey = stringPreferencesKey("mhub_login_device")
     // 酷狗概念版「听歌领会员」：启动时自动领一天的开关，和上次自动领取的日期（只用来去重）
     private val kugouWelfareAutoKey = booleanPreferencesKey("kugou_welfare_auto")
     private val kugouWelfareLastDateKey = stringPreferencesKey("kugou_welfare_last_date")
@@ -426,6 +434,10 @@ class SettingsStore(private val context: Context) {
             sodaLoginDeviceId = values[sodaLoginDeviceIdKey] ?: "",
             sodaLoginInstallId = values[sodaLoginInstallIdKey] ?: "",
             sodaLoginDeviceUpdatedAt = values[sodaLoginDeviceUpdatedAtKey] ?: 0L,
+            kugouLoginDevice = values[kugouLoginDeviceKey] ?: "",
+            neteaseWeblogDevice = values[neteaseWeblogDeviceKey] ?: "",
+            neteaseWeblogDeviceUpdatedAt = values[neteaseWeblogDeviceUpdatedAtKey] ?: 0L,
+            mhubLoginDevice = values[mhubLoginDeviceKey] ?: "",
             kugouWelfareAuto = values[kugouWelfareAutoKey] ?: true,
             kugouWelfareLastClaimDate = values[kugouWelfareLastDateKey] ?: "",
             lyricStage = lyricStagePrefs(values),
@@ -515,6 +527,112 @@ class SettingsStore(private val context: Context) {
     /** 记一次自动领取的日期（北京时间），同一天不再重复打接口。 */
     suspend fun kugouWelfareLastClaimDate(value: String) =
         context.dataStore.edit { it[kugouWelfareLastDateKey] = value }
+
+    /**
+     * 酷狗扫码登录的设备身份种子。落盘后所有登录复用同一个。
+     *
+     * 为什么必须持久化：酷狗的 `mid` 参与客户端签名（`loginWebGet` / `androidHeaders`
+     * 都带它，服务端按它认设备），而 `initLoginDevice()` 原来每次登录都生成一套新的
+     * GUID/MID/MAC/DEV，等于服务端眼里「这个账号每次换一台设备登录」。四个字段由
+     * `KugouProvider` 从这个种子推导，形状仍归它说了算，这里只存种子。
+     *
+     * 种子优先取**已登录 Cookie 里那份 GUID**：另一台设备登录后 Cookie 会整份同步过来，
+     * 认下它的 GUID 当种子，下一次登录就复用同一台设备，不会把 Cookie 里的设备又换回本机的。
+     */
+    suspend fun kugouLoginDevice(): String {
+        val values = context.dataStore.data.first()
+        cookieField(values[cookiesKey], "KUGOU_API_GUID")?.let { fromCookie ->
+            if (fromCookie != values[kugouLoginDeviceKey]) {
+                context.dataStore.edit { it[kugouLoginDeviceKey] = fromCookie }
+            }
+            return fromCookie
+        }
+        val existing = values[kugouLoginDeviceKey]
+        if (!existing.isNullOrBlank()) return existing
+        val generated = java.util.UUID.randomUUID().toString().replace("-", "")
+        context.dataStore.edit { it[kugouLoginDeviceKey] = generated }
+        return generated
+    }
+
+    /** 从一整串 cookie 里取一个字段的值；没有就 null。 */
+    private fun cookieField(raw: String?, name: String): String? {
+        if (raw.isNullOrBlank()) return null
+        for (pair in raw.split(';')) {
+            val trimmed = pair.trim()
+            if (trimmed.isEmpty()) continue
+            val index = trimmed.indexOf('=')
+            if (index <= 0) continue
+            if (trimmed.substring(0, index).trim() == name) {
+                return trimmed.substring(index + 1).trim().takeIf { it.isNotEmpty() }
+            }
+        }
+        return null
+    }
+
+    /**
+     * 网易云播放上报（weblog）的设备号：第一次随机落盘，之后一直复用。
+     *
+     * 为什么必须持久化：这个值是直接拼进 Cookie 头和 `MUSIC_U` 一起发出去的
+     * （见 `NetEasePlayReporter.send`），服务端按它把同一个账号的播放归并成
+     * 「最近播放 / 听歌排行」。`MUSIC_U` 跟着 Cookie 同步跨设备共用，设备号却是每进程
+     * 一个随机串，等于同一账号每次重启都是一台新设备，历史永远攒不起来——和汽水修复前
+     * 同形。原来「读 cookie 里的 deviceId」是个死分支：扫码登录只回 MUSIC_U/__csrf，
+     * 拼出来的 cookie 串里从来没有这个字段。
+     *
+     * 所以它跟着同步走（见 `SyncNeteaseIdentity`）：Cookie 和它本来就是同一套凭据。
+     */
+    suspend fun neteaseWeblogDevice(): String {
+        val values = context.dataStore.data.first()
+        val existing = values[neteaseWeblogDeviceKey]
+        if (!existing.isNullOrBlank()) {
+            // 老版本生成的没记时间戳：补一个，不然同步里判不了新旧
+            if ((values[neteaseWeblogDeviceUpdatedAtKey] ?: 0L) > 0L) return existing
+            context.dataStore.edit { it[neteaseWeblogDeviceUpdatedAtKey] = System.currentTimeMillis() }
+            return existing
+        }
+        val generated = com.mytv.mymusic.data.native.NativeCrypto.randomString(32)
+        context.dataStore.edit {
+            it[neteaseWeblogDeviceKey] = generated
+            it[neteaseWeblogDeviceUpdatedAtKey] = System.currentTimeMillis()
+        }
+        return generated
+    }
+
+    /**
+     * MHub（music.op.wiki）登录时上报的设备号：第一次随机落盘，之后每次登录都用同一个。
+     *
+     * 它只在登录 body 里出现一次，`mhub_session` 单独就能用，所以**不跨设备同步**
+     * （同步会让所有安装共用一个 device_id，服务端反而更分不清是哪台设备）。但得落盘：
+     * 原来每个进程一个新 UUID，重登几次服务端就攒下一堆陌生设备，正是汽水那条教训的同形问题。
+     */
+    suspend fun mhubLoginDevice(): String {
+        val existing = context.dataStore.data.first()[mhubLoginDeviceKey]
+        if (!existing.isNullOrBlank()) return existing
+        val generated = java.util.UUID.randomUUID().toString()
+        context.dataStore.edit { it[mhubLoginDeviceKey] = generated }
+        return generated
+    }
+
+    /**
+     * 同步带回来的网易云上报设备号写进本机。判新旧在合并那一层
+     * （`SyncMerge.mergeNeteaseIdentity` 按时间取新的），这里只负责落，
+     * 时间戳只向前走，免得回退之后下次合并判错。
+     */
+    suspend fun adoptNeteaseWeblogDevice(deviceId: String, updatedAt: Long): Boolean {
+        val id = deviceId.trim()
+        if (id.isEmpty()) return false
+        var adopted = false
+        context.dataStore.edit {
+            val same = it[neteaseWeblogDeviceKey] == id
+            val current = it[neteaseWeblogDeviceUpdatedAtKey] ?: 0L
+            val time = maxOf(updatedAt, current)
+            if (same && time == current) return@edit
+            it[neteaseWeblogDeviceKey] = id
+            it[neteaseWeblogDeviceUpdatedAtKey] = time
+            adopted = true
+        }
+        return adopted
+    }
 
     /**
      * 汽水上报的设备标识：第一次用随机值落盘，之后一直复用。
@@ -628,6 +746,15 @@ class SettingsStore(private val context: Context) {
             installId = values[sodaLoginInstallIdKey]?.takeIf { it.isNotBlank() }.orEmpty(),
             reportDeviceId = values[sodaReportDeviceIdKey]?.takeIf { it.isNotBlank() }.orEmpty(),
             updatedAt = values[sodaLoginDeviceUpdatedAtKey] ?: 0L,
+        )
+    }
+
+    /** 同步读取网易云上报设备号和时间戳，避免两次读之间不一致。 */
+    suspend fun neteaseWeblogDeviceSnapshot(): NeteaseIdentitySnapshot {
+        val values = context.dataStore.data.first()
+        return NeteaseIdentitySnapshot(
+            deviceId = values[neteaseWeblogDeviceKey]?.takeIf { it.isNotBlank() }.orEmpty(),
+            updatedAt = values[neteaseWeblogDeviceUpdatedAtKey] ?: 0L,
         )
     }
 
@@ -948,6 +1075,16 @@ data class SodaIdentitySnapshot(
     val updatedAt: Long = 0L,
 )
 
+/**
+ * 网易云播放上报的设备号，连它上次变化的时间（同步按时间判新旧）。
+ * 它和 [com.mytv.mymusic.data.sync.SyncCookie] 里那条网易云 Cookie 是同一套凭据：
+ * 值直接拼进 Cookie 头和 `MUSIC_U` 一起发，服务端按它归并「最近播放 / 听歌排行」。
+ */
+data class NeteaseIdentitySnapshot(
+    val deviceId: String = "",
+    val updatedAt: Long = 0L,
+)
+
 data class AppSettings(
     val provider: String = "netease",
     val chartsSource: String = "",
@@ -1035,6 +1172,14 @@ data class AppSettings(
     val sodaLoginInstallId: String = "",
     /** 汽水设备身份上次变化的时间；同步按它判新旧（见 SettingsStore.adoptSodaIdentity）。 */
     val sodaLoginDeviceUpdatedAt: Long = 0L,
+    /** 酷狗扫码登录的设备身份种子（见 SettingsStore.kugouLoginDevice）。 */
+    val kugouLoginDevice: String = "",
+    /** 网易云播放上报的设备号，空表示还没生成过（见 SettingsStore.neteaseWeblogDevice）。 */
+    val neteaseWeblogDevice: String = "",
+    /** 网易云上报设备号上次变化的时间；同步按它判新旧（见 adoptNeteaseWeblogDevice）。 */
+    val neteaseWeblogDeviceUpdatedAt: Long = 0L,
+    /** MHub 登录时上报的设备号（见 SettingsStore.mhubLoginDevice）。 */
+    val mhubLoginDevice: String = "",
     /** 酷狗概念版「听歌领会员」是否在启动时自动领一天。 */
     val kugouWelfareAuto: Boolean = true,
     /** 上次自动领取的日期（北京时间 yyyy-MM-dd），空表示还没自动领过。 */

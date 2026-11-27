@@ -15,6 +15,8 @@ import com.mytv.mymusic.data.MusicRepository
 import com.mytv.mymusic.data.SettingsStore
 import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.data.native.AppleTokenCache
+import com.mytv.mymusic.data.native.KugouProvider
+import com.mytv.mymusic.data.native.MHubProvider
 import com.mytv.mymusic.data.native.NativeProviders
 import com.mytv.mymusic.data.native.SodaPlayReporter
 import com.mytv.mymusic.data.native.SodaProvider
@@ -212,6 +214,12 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
         var sodaDiagLogged = false
         // 汽水扫码登录的护照设备身份：落盘后所有二维码复用同一个（服务端按它补发 odin_tt）
         var sodaLoginDeviceReady = false
+        // 酷狗扫码登录的设备身份：mid 参与客户端签名，落盘后所有登录复用同一个
+        var kugouLoginDeviceReady = false
+        // 网易云播放上报的设备号：和 MUSIC_U 拼在同一个 Cookie 头里，服务端按它归并听歌排行
+        var neteaseWeblogDeviceReady = false
+        // MHub 登录时上报的设备号：只在登录 body 里出现一次，落盘让每次登录都是同一台设备
+        var mhubLoginDeviceReady = false
         appScope.launch(Dispatchers.IO) {
             settings.state.collect { values ->
                 PlayReportHub.setEnabled(values.playReportEnabled)
@@ -227,6 +235,32 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
                     SodaProvider.configureLoginDevice(deviceId, installId)
                 } else {
                     SodaProvider.configureLoginDevice(values.sodaLoginDeviceId, values.sodaLoginInstallId)
+                }
+                // 酷狗登录设备：同样落盘复用。kugouLoginDevice() 优先认 Cookie 里那份 GUID，
+                // 所以另一台设备登录后 Cookie 同步过来，下一次登录还是同一台设备
+                if (!kugouLoginDeviceReady) {
+                    kugouLoginDeviceReady = true
+                    KugouProvider.configureLoginDevice(settings.kugouLoginDevice())
+                } else {
+                    // 会话进行中同步带来的酷狗 Cookie：它的 GUID 才是该沿用的种子，重新认一次，
+                    // 不然要等下次冷启动才换得过来。认不到就保持现状——空种子会把身份打回随机
+                    val synced = kugouCookieGuid(values.cookies)
+                    if (synced != null) KugouProvider.configureLoginDevice(synced)
+                }
+                // 网易云上报设备号：落盘复用，并随同步走（MUSIC_U 是同步的，它不能各进程一份）
+                if (!neteaseWeblogDeviceReady) {
+                    neteaseWeblogDeviceReady = true
+                    NetEasePlayReporter.configureDeviceId(settings.neteaseWeblogDevice())
+                } else if (values.neteaseWeblogDevice.isNotBlank()) {
+                    NetEasePlayReporter.configureDeviceId(values.neteaseWeblogDevice)
+                }
+                // MHub 登录设备号：落盘复用，但**不进同步**——同步会让所有安装共用一个
+                // device_id，服务端反而更分不清是哪台设备
+                if (!mhubLoginDeviceReady) {
+                    mhubLoginDeviceReady = true
+                    MHubProvider.configureLoginDevice(settings.mhubLoginDevice())
+                } else if (values.mhubLoginDevice.isNotBlank()) {
+                    MHubProvider.configureLoginDevice(values.mhubLoginDevice)
                 }
                 // 第一次开启：先把设备指纹落盘，之后每次启动都用同一个
                 if (values.playReportEnabled && values.sodaReportDeviceId.isBlank() && !reportDeviceIdReady) {
@@ -259,7 +293,12 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
             )
         }
         // 其余平台：有公开上报接口的才注册，咪咕 / JOOX 没有，见 README
-        PlayReportHub.register(NetEasePlayReporter { PlayReportHub.cookie("netease") })
+        PlayReportHub.register(
+            NetEasePlayReporter(
+                cookie = { PlayReportHub.cookie("netease") },
+                deviceId = { NetEasePlayReporter.effectiveDeviceId() },
+            ),
+        )
         PlayReportHub.register(QQPlayReporter { PlayReportHub.cookie("qq") })
         PlayReportHub.register(KuwoPlayReporter { PlayReportHub.cookie("kuwo") })
         PlayReportHub.register(QianqianPlayReporter { PlayReportHub.cookie("qianqian") })
@@ -282,6 +321,24 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
 
     /** 电视盒子存储小，默认 256 MB；其他设备 512 MB。 */
     fun defaultCacheLimitMb(): Int = if (isTelevision()) 256 else 512
+
+    /**
+     * 从同步过来的酷狗 Cookie 里取出那份 GUID：另一台设备登录后 Cookie 整份同步过来，
+     * 下一次登录就该沿用它的设备身份，不然服务端看到「同一个账号换回一台陌生设备」。
+     */
+    private fun kugouCookieGuid(cookies: Map<String, String>): String? {
+        val raw = cookies[KugouProvider.KUGOU_PROVIDER_ID] ?: return null
+        for (pair in raw.split(';')) {
+            val trimmed = pair.trim()
+            if (trimmed.isEmpty()) continue
+            val index = trimmed.indexOf('=')
+            if (index <= 0) continue
+            if (trimmed.substring(0, index).trim() == "KUGOU_API_GUID") {
+                return trimmed.substring(index + 1).trim().takeIf { it.isNotEmpty() }
+            }
+        }
+        return null
+    }
 
     companion object {
         private const val MB = 1024L * 1024

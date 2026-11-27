@@ -23,16 +23,14 @@ import kotlinx.serialization.json.putJsonObject
  */
 internal open class NetEasePlayReporter(
     private val cookie: () -> String,
+    /** 落盘并随同步走的设备号；由启动时注入，别在这里摸 DataStore。 */
+    private val deviceId: () -> String = { effectiveDeviceId() },
 ) : BasePlayReporter() {
 
     override val providerId: String = "netease"
 
     override fun reportSummary(): String =
         "听歌打卡：开播与播放量足够时各报一条，驱动最近播放和听歌排行"
-
-    /** 设备 id：进程内稳定，跨启动靠 cookie 里的值或新生成。 */
-    @Volatile
-    private var deviceId: String = ""
 
     override fun onPlayStart(trackId: String, durationMs: Long, extra: Map<String, String>) {
         if (!loggedIn()) return
@@ -95,7 +93,7 @@ internal open class NetEasePlayReporter(
         val musicU = jar["MUSIC_U"].orEmpty()
         if (musicU.isBlank()) return
         val header = buildJsonObject {
-            put("osver", ANDROID_RELEASE)
+            put("osver", OS_VER)
             put("deviceId", resolveDeviceId(jar))
             // os=osx 是这条通道能入账的决定性变量，换成 android / iphone / pc 都会被丢弃
             put("os", "osx")
@@ -144,23 +142,46 @@ internal open class NetEasePlayReporter(
         }
     }
 
-    private fun cookieJar(): Map<String, String> =
-        cookie().split(';')
+    private fun cookieJar(): Map<String, String> = parseCookieJar(cookie())
+
+    private fun parseCookieJar(raw: String): Map<String, String> =
+        raw.split(';')
             .mapNotNull { part ->
                 val index = part.indexOf('=')
                 if (index <= 0) null else part.substring(0, index).trim() to part.substring(index + 1).trim()
             }
             .toMap()
 
-    private fun resolveDeviceId(jar: Map<String, String>): String {
-        if (deviceId.isNotEmpty()) return deviceId
-        deviceId = jar["deviceId"].orEmpty().ifBlank { NativeCrypto.randomString(32) }
-        return deviceId
-    }
+    /**
+     * 设备号优先取注入的那份（落盘 + 随同步走）：`MUSIC_U` 是跨设备同步的，设备号却是每进程
+     * 一个随机串的话，服务端按它归并「最近播放 / 听歌排行」时同一账号每次重启都是一台新设备，
+     * 历史永远攒不起来——和汽水修复前同形。
+     *
+     * 仍保留「读 cookie 里的 deviceId」优先：上游哪天真把这个字段回种进 Cookie，就认它的。
+     */
+    private fun resolveDeviceId(jar: Map<String, String>): String =
+        jar["deviceId"].orEmpty().ifBlank { deviceId() }
 
     private fun encode(value: String): String = java.net.URLEncoder.encode(value, "UTF-8")
 
-    private companion object {
+    /** 单测用来核对最终采用的设备号（注入值 / Cookie 回种值，走同一条判定）。 */
+    internal fun deviceIdForTest(cookie: String): String = resolveDeviceId(parseCookieJar(cookie))
+
+    companion object {
+        /** 启动时注入的设备号：落盘并随同步走，进程内所有实例共用一份。 */
+        @Volatile
+        private var injectedDeviceId: String = ""
+
+        fun configureDeviceId(value: String) {
+            val next = value.trim()
+            if (next == injectedDeviceId) return
+            injectedDeviceId = next
+        }
+
+        /** 没注入过就现生成一份：总比每请求换一个好，也不会因为没注入就上报空值。 */
+        fun effectiveDeviceId(): String =
+            injectedDeviceId.ifBlank { NativeCrypto.randomString(32).also { injectedDeviceId = it } }
+
         const val CLIENT_LOG_DOMAIN = "https://clientlog.music.163.com"
         /** 签名用的路径要把 /eapi/ 换回 /api/，encryptEApi 内部已经处理。 */
         const val WEBLOG_PATH = "$CLIENT_LOG_DOMAIN/eapi/feedback/weblog"
@@ -168,7 +189,12 @@ internal open class NetEasePlayReporter(
         const val APP_VER = "3.1.10.5100"
         const val VERSION_CODE = "140"
         const val RESOLUTION = "1920x1080"
-        val ANDROID_RELEASE: String = runCatching { android.os.Build.VERSION.RELEASE }.getOrNull().orEmpty()
+        /**
+         * 系统版本固定成常量，和 [MAC_USER_AGENT] 的 macOS 对得上：这个通道只有
+         * `os=osx` 能入账，osver 却报真机 Android 版本是自相矛盾的；而设备号现在跨设备
+         * 同步，两台设备对同一账号报不同系统版本比各报各的随机号更可疑。
+         */
+        const val OS_VER = "10.15.7"
         const val MAC_USER_AGENT =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }

@@ -1,5 +1,6 @@
 package com.mytv.mymusic.data.native
 
+import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.data.AlbumDetail
 import com.mytv.mymusic.data.CollectionResult
 import com.mytv.mymusic.data.Playlist
@@ -38,6 +39,8 @@ private const val MHUB_BASE = "https://music.op.wiki"
  * 服务端按 IP 限流（源码默认约每分钟一次下载），所以准备任务严格串行、同曲复用，
  * 不预取、不并发、不批量。
  */
+private const val TAG = "MHub"
+
 private val MHUB_INFO = ProviderInfo(
     id = MHUB_ID,
     name = "music.op.wiki",
@@ -274,7 +277,13 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
 
     // ---------------- 账号 ----------------
 
-    private val deviceId: String by lazy { UUID.randomUUID().toString() }
+    /**
+     * 登录时上报的设备号。只在 `password/login` 的 body 里出现一次，会话本身不绑它
+     * （`mhub_session` 单独就能用），所以**不跨设备同步**——同步会让所有安装共用一个
+     * device_id，服务端反而更分不清是哪台设备。但它得落盘：原来每个进程一个新 UUID，
+     * 重登几次服务端就攒下一堆陌生设备，正是汽水那条教训的同形问题。
+     */
+    private val deviceId: String get() = injectedDeviceId.ifBlank { randomLoginDeviceId() }
 
     override suspend fun passwordLogin(username: String, password: String): String {
         val body = buildJsonObject {
@@ -741,7 +750,26 @@ class MHubProvider : BaseNativeProvider(MHUB_INFO) {
     private fun JsonObject?.str(key: String): String =
         ((this?.get(key) as? JsonPrimitive)?.contentOrNull).orEmpty()
 
-    private companion object {
+    companion object {
+        /**
+         * 启动时注入的落盘设备号。没注入过就 [randomLoginDeviceId] 现生成一份并记住：
+         * 一次进程内只报一台设备，也不至于因为注入晚了几十毫秒又退化成每请求一个新号。
+         */
+        @Volatile
+        internal var injectedDeviceId: String = ""
+
+        fun configureLoginDevice(value: String) {
+            val next = value.trim()
+            if (next == injectedDeviceId) return
+            injectedDeviceId = next
+            if (next.isNotEmpty()) {
+                AppLog.i(TAG, "MHub 登录设备身份已注入 ${next.take(8)}…")
+            }
+        }
+
+        private fun randomLoginDeviceId(): String =
+            java.util.UUID.randomUUID().toString().also { injectedDeviceId = it }
+
         val APPLE_ID = Regex("""[?&]i=(\d+)""")
         val APPLE_LINK = Regex("""/song/[^/]+/(\d+)""")
         val APPLE_HOST = Regex("""https?://music\.apple\.com/""")
