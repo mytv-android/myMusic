@@ -287,8 +287,48 @@ class QQFavoriteSyncTest {
 
     @Test
     fun numericUinWinsOverEuinForDirPlaylists() {
-        val (uin, _) = QQProvider().qqLogin("uin=o1205039851; euin=oFakeEuin123**; qm_keyst=W_X_test")
-        assertEquals("1205039851", uin)
+        val (uin, _) = QQProvider().qqLogin("uin=o123456789; euin=oFakeEuin123**; qm_keyst=W_X_test")
+        assertEquals("123456789", uin)
+    }
+
+    @Test
+    fun favoriteWriteUsesAndroidChannelWithRealTidAndName() {
+        val body = QQProvider().qqWriteBody(
+            uin = "123456789",
+            gtk = 5381,
+            musicKey = "W_X_test",
+            loginType = 2,
+            dirId = 201,
+            tid = 9300000001L,
+            dirName = "我喜欢",
+            method = "AddSonglist",
+            pairs = listOf(511853454L to 0),
+        )
+        val comm = body["comm"]!!.jsonObject
+        assertEquals("11", comm["ct"]!!.jsonPrimitive.content)
+        assertEquals("W_X_test", comm["authst"]!!.jsonPrimitive.content)
+        val param = body["req_0"]!!.jsonObject["param"]!!.jsonObject
+        assertEquals("9300000001", param["tid"]!!.jsonPrimitive.content)
+        assertEquals("我喜欢", param["dirName"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun skeyOnlyWriteKeepsPcChannel() {
+        val body = QQProvider().qqWriteBody(
+            uin = "123456789",
+            gtk = 12345,
+            musicKey = "",
+            loginType = 2,
+            dirId = 23,
+            tid = 9811000002L,
+            dirName = "111",
+            method = "AddSonglist",
+            pairs = listOf(511853454L to 0),
+        )
+        val comm = body["comm"]!!.jsonObject
+        assertEquals("24", comm["ct"]!!.jsonPrimitive.content)
+        assertEquals("12345", comm["g_tk"]!!.jsonPrimitive.content)
+        assertTrue(body["req_1"] != null)
     }
 
     private fun gtk33(value: String): Int {

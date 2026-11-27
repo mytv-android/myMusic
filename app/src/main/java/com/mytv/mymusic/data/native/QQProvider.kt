@@ -79,7 +79,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     /** 音质探测结果按 cookie 缓存：一次要打七八个档位的取流接口，不能每次进设置页都重跑。 */
     private val availableQualityCache = ConcurrentHashMap<String, List<AudioQualityOption>>()
     /** dirid 要和账号一起缓存，切换账号时不能继续使用旧账号的目录号。 */
-    private val dirIdCache = ConcurrentHashMap<Pair<String, String>, Pair<Int, Int>>()
+    private val dirIdCache = ConcurrentHashMap<Pair<String, String>, QQWriteTarget>()
 
     override val supportsSearchPagination: Boolean = true
 
@@ -608,77 +608,45 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     private suspend fun writePlaylist(cookie: String, playlistId: String, method: String, songs: List<Song>) {
         val (uin, gtk) = qqLogin(cookie)
         // 微信登录态没有 p_skey/skey，musicu 写接口实际只认 cookie 里的 qm_keyst，g_tk 用 5381 即可。
-        val loginKey = firstNonEmpty(
+        val musicKey = firstNonEmpty(
             cookieValue(cookie, "qm_keyst"),
             cookieValue(cookie, "qqmusic_key"),
             cookieValue(cookie, "musickey"),
-            cookieValue(cookie, "p_skey"),
-            cookieValue(cookie, "skey"),
         )
-        if (uin == "0" || loginKey.isBlank()) {
+        val skey = firstNonEmpty(cookieValue(cookie, "p_skey"), cookieValue(cookie, "skey"))
+        if (uin == "0" || (musicKey.isBlank() && skey.isBlank())) {
             throw PlaylistWriteException("请先登录 QQ 音乐", PlaylistWriteFailure.NotLoggedIn)
         }
         if (songs.isEmpty() && method != "SeqSonglist") return
-        val (dirId, tid) = resolveDirId(cookie, playlistId)
+        val target = resolveWriteTarget(cookie, playlistId)
             ?: throw PlaylistWriteException("QQ 音乐里找不到这个歌单，可能不是当前账号创建的", PlaylistWriteFailure.NotOwner)
         val pairs = songs.map { qqSongPair(cookie, it) }
         if (pairs.isEmpty()) return
-        val param = buildJsonObject {
-            put("dirId", dirId)
-            put("tid", tid)
-            put("bFmtUtf8", true)
-            if (method == "SeqSonglist") {
-                putJsonArray("v_songPair") {
-                    pairs.forEach { (songId, songType) ->
-                        add(buildJsonObject {
-                            put("songId", songId)
-                            put("songType", songType)
-                        })
-                    }
-                }
-            } else {
-                putJsonArray("v_songInfo") {
-                    pairs.forEach { (songId, songType) ->
-                        add(buildJsonObject {
-                            put("songId", songId)
-                            put("songType", songType)
-                        })
-                    }
-                }
-            }
-        }
-        val body = buildJsonObject {
-            putJsonObject("comm") {
-                put("ct", 24)
-                put("cv", 4747474)
-                put("platform", "yqq.json")
-                put("chid", "0")
-                put("uin", uin)
-                put("g_tk", gtk)
-                put("g_tk_new_20200303", gtk)
-                put("format", "json")
-                put("inCharset", "utf-8")
-                put("outCharset", "utf-8")
-                put("notice", 0)
-                put("need_new_code", 1)
-            }
-            putJsonObject("req_1") {
-                put("module", "music.musicasset.PlaylistDetailWrite")
-                put("method", method)
-                put("param", param)
-            }
-        }
+        // 有 musickey 时走 Android 写入通道；QQ 音乐的“我喜欢”只有这条通道能加歌。
+        val loginType = cookieValue(cookie, "tmeLoginType").toIntOrNull()
+            ?: if (musicKey.startsWith("W_X")) 1 else 2
+        val body = qqWriteBody(
+            uin = uin,
+            gtk = gtk,
+            musicKey = musicKey,
+            loginType = loginType,
+            dirId = target.dirId,
+            tid = target.tid,
+            dirName = target.name,
+            method = method,
+            pairs = pairs,
+        )
         val response = NativeHttp.postJson(
             QQ_MUSICU_API,
             body.toString(),
             headers = mapOf("Referer" to "https://y.qq.com/"),
             cookie = cookie,
             randomIp = true,
-            userAgent = QQ_WINDOWS_USER_AGENT,
+            userAgent = if (musicKey.isNotBlank()) QQ_ANDROID_WRITE_USER_AGENT else QQ_WINDOWS_USER_AGENT,
         )
         val root = runCatching { json.parseToJsonElement(response.body).jsonObject }.getOrNull()
             ?: throw PlaylistWriteException("QQ 音乐返回了无法识别的内容")
-        val node = (root["req_1"] as? JsonObject) ?: root
+        val node = (root["req_0"] as? JsonObject) ?: (root["req_1"] as? JsonObject) ?: root
         val code = node.intValue("code") ?: 0
         val retCode = (node["data"] as? JsonObject)?.intValue("retCode") ?: node.intValue("retCode")
         if (code != 0 || (retCode != null && retCode != 0)) {
@@ -690,6 +658,77 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                 "QQ 音乐歌单写入失败（code=$code，retCode=${retCode ?: "无"}）",
                 failure,
             )
+        }
+    }
+
+    /**
+     * 写歌单请求：有 musickey 时用 Android 写入通道（req_0），否则保留旧的 PC 通道（req_1）。
+     * “我喜欢”的 dirId 固定是 201，但 tid 和歌单名必须来自当前账号，否则服务端返回 500026。
+     */
+    internal fun qqWriteBody(
+        uin: String,
+        gtk: Int,
+        musicKey: String,
+        loginType: Int,
+        dirId: Int,
+        tid: Long,
+        dirName: String,
+        method: String,
+        pairs: List<Pair<Long, Int>>,
+    ): JsonObject {
+        val param = buildJsonObject {
+            put("dirId", dirId)
+            put("tid", tid)
+            put("bFmtUtf8", true)
+            if (dirName.isNotBlank()) put("dirName", dirName)
+            val key = if (method == "SeqSonglist") "v_songPair" else "v_songInfo"
+            putJsonArray(key) {
+                pairs.forEach { (songId, songType) ->
+                    add(buildJsonObject {
+                        put("songId", songId)
+                        put("songType", songType)
+                    })
+                }
+            }
+        }
+        val request = buildJsonObject {
+            put("module", "music.musicasset.PlaylistDetailWrite")
+            put("method", method)
+            put("param", param)
+        }
+        return if (musicKey.isNotBlank()) {
+            buildJsonObject {
+                putJsonObject("comm") {
+                    put("ct", 11)
+                    put("cv", 14090008)
+                    put("v", 14090008)
+                    put("chid", "10003505")
+                    put("tmeAppID", "qqmusic")
+                    put("tmeLoginType", loginType)
+                    put("qq", uin)
+                    put("authst", musicKey)
+                    put("format", "json")
+                }
+                put("req_0", request)
+            }
+        } else {
+            buildJsonObject {
+                putJsonObject("comm") {
+                    put("ct", 24)
+                    put("cv", 4747474)
+                    put("platform", "yqq.json")
+                    put("chid", "0")
+                    put("uin", uin)
+                    put("g_tk", gtk)
+                    put("g_tk_new_20200303", gtk)
+                    put("format", "json")
+                    put("inCharset", "utf-8")
+                    put("outCharset", "utf-8")
+                    put("notice", 0)
+                    put("need_new_code", 1)
+                }
+                put("req_1", request)
+            }
         }
     }
 
@@ -717,16 +756,47 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         else -> 1
     }
 
-    private suspend fun resolveDirId(cookie: String, playlistId: String): Pair<Int, Int>? {
+    private suspend fun resolveWriteTarget(cookie: String, playlistId: String): QQWriteTarget? {
         val id = playlistId.trim()
         val key = qqLogin(cookie).first to id
         dirIdCache[key]?.let { return it }
         val resolved = when {
-            id == QQ_FAVORITE_PLAYLIST_ID -> 201 to 0
-            id.startsWith(QQ_PROFILE_DIR_PREFIX) -> id.removePrefix(QQ_PROFILE_DIR_PREFIX)
-                .toIntOrNull()?.takeIf { it > 0 }?.let { it to 0 }
+            id == QQ_FAVORITE_PLAYLIST_ID -> {
+                // “我喜欢”的目录号固定 201，但 tid 和名称要按账号读取，写死 tid=0 会被服务端拒绝。
+                var found: QQWriteTarget? = null
+                var page = 1
+                val seen = mutableSetOf<String>()
+                while (true) {
+                    val items = userPlaylists(cookie, page++, 100)
+                    val item = items.firstOrNull { it.extra["dirid"] == "201" }
+                    if (item != null) {
+                        found = QQWriteTarget(
+                            dirId = 201,
+                            tid = item.extra["tid"].orEmpty().toLongOrNull() ?: 0,
+                            name = item.name.ifBlank { "我喜欢" },
+                        )
+                        break
+                    }
+                    if (items.size < 100 || !seen.addAll(items.map { it.id })) break
+                }
+                found ?: QQWriteTarget(201, 0L, "我喜欢")
+            }
+            id.startsWith(QQ_PROFILE_DIR_PREFIX) -> {
+                val dirId = id.removePrefix(QQ_PROFILE_DIR_PREFIX).toIntOrNull()?.takeIf { it > 0 }
+                if (dirId == null) {
+                    null
+                } else {
+                    val item = runCatching { userPlaylists(cookie, 1, 100) }.getOrNull()
+                        ?.firstOrNull { it.extra["dirid"] == dirId.toString() }
+                    QQWriteTarget(
+                        dirId = dirId,
+                        tid = item?.extra?.get("tid").orEmpty().toLongOrNull() ?: 0,
+                        name = item?.name.orEmpty(),
+                    )
+                }
+            }
             else -> {
-                var found: Pair<Int, Int>? = null
+                var found: QQWriteTarget? = null
                 var page = 1
                 val seen = mutableSetOf<String>()
                 while (true) {
@@ -735,7 +805,11 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                     if (item != null) {
                         val dirId = item.extra["dirid"].orEmpty().toIntOrNull()
                         if (dirId != null && dirId > 0) {
-                            found = dirId to (item.extra["tid"].orEmpty().toIntOrNull() ?: 0)
+                            found = QQWriteTarget(
+                                dirId = dirId,
+                                tid = item.extra["tid"].orEmpty().toLongOrNull() ?: 0,
+                                name = item.name,
+                            )
                             break
                         }
                     }
@@ -3115,6 +3189,7 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         const val QQ_USER_AGENT =
             "Mozilla/5.0 (iPhone; CPU iPhone OS 9_1 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13B143 Safari/601.1"
         const val QQ_WINDOWS_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        const val QQ_ANDROID_WRITE_USER_AGENT = "QQMusic 14090008(android 15)"
         const val QQ_CHROME_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
         const val QQ_IPHONE_USER_AGENT =
@@ -3621,6 +3696,8 @@ private data class QQHotPlaylist(
     @SerialName("song_count") val songCount: Int = 0,
     val username: String = "",
 )
+
+private data class QQWriteTarget(val dirId: Int, val tid: Long, val name: String)
 
 @Serializable
 private data class QQUserPlaylistResponse(
