@@ -54,6 +54,8 @@ class SourceResolver(
             pinnedProvider = pinned,
             allowPreview = current.allowPreview,
             allowedProviders = allowed,
+            // 只有真的定下了某个固定源，独占才有意义；否则保持原来的多源回退。
+            pinnedOnly = current.pinnedOnly && pinned != null,
         )
     }
 
@@ -153,6 +155,12 @@ class SourceResolver(
         val customSongs by lazy { lxCandidates(track).map { it.song } }
 
         for (source in ordered) {
+            // 独占固定音源：只试用户指定的那个，其余平台记一笔就跳过。
+            // 回退到别的平台常拿到试听或直接中断，比在这里停下更难排查。
+            if (policy.pinnedOnly && explicitProvider != null && source.providerId != explicitProvider) {
+                attempts += Attempt(source, "固定音源独占，不尝试其他来源")
+                continue
+            }
             val cookie = cookieMap[source.providerId].orEmpty()
             val status = availabilityOf(source, cookie)
             val custom = source.providerId == LxPlatform.PROVIDER_ID

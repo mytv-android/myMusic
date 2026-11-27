@@ -689,7 +689,11 @@ internal fun PlaybackSettingsScreen(
                 when (aggregation.playbackMode) {
                     PlaybackMode.Auto -> "只用已启用的音乐源：歌曲来源平台已启用时优先，未启用则按启用顺序换源；完整音源优先，其次看码率。播放页的音源标签会说明。"
                     PlaybackMode.Priority -> "只用已启用的音乐源：歌曲来源平台已启用时优先，未启用则按启用顺序换源；排在前面的平台不可用再向后回退。"
-                    PlaybackMode.Pinned -> "优先使用指定平台；它没有返回地址时仍会回退，并提示实际播放源。"
+                    PlaybackMode.Pinned -> if (aggregation.pinnedOnly) {
+                        "只使用指定平台；它取不到地址时直接说明原因，不再回退到其他平台。"
+                    } else {
+                        "优先使用指定平台；它没有返回地址时仍会回退，并提示实际播放源。"
+                    }
                 },
             )
         }
@@ -701,6 +705,18 @@ internal fun PlaybackSettingsScreen(
                         MusicChip(provider.name, aggregation.pinnedProvider == provider.id) { actions.setPinnedProvider(provider.id) }
                     }
                 }
+            }
+            // 回退到别的平台只会播试听或直接中断，这里给一个明确的独占开关。
+            item(key = "pinnedOnly", contentType = "switch") {
+                SwitchRow(
+                    title = "只用固定音源",
+                    checked = aggregation.pinnedOnly,
+                    onCheckedChange = { actions.setPinnedOnly(it) },
+                    index = 1,
+                    count = 1,
+                    summary = "开启后固定源取不到地址就直接提示，不再回退到其他平台",
+                    icon = Icons.Filled.Shield,
+                )
             }
         }
         item(key = "priorityHead", contentType = "sectionHeader") {

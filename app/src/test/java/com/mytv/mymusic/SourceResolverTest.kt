@@ -186,6 +186,44 @@ class SourceResolverTest {
         assertEquals(1, calls)
     }
 
+    // ---------- 固定音源独占：不回退到只能播试听的平台 ----------
+
+    @Test
+    fun pinnedOnlyStopsInsteadOfFallingBackToAnotherPlatform() = runBlocking {
+        // 固定源取不到地址时就该停：回退到别的平台往往只能播试听，播一秒又断。
+        val resolver = previewResolver(mapOf("netease:n1" to PlayableStream(url = "https://example.com/netease.mp3")))
+        val resolution = resolver.resolve(
+            track(listOf(TrackSource("kugou", "酷狗音乐", song("k1", "kugou")), neteaseSource())),
+            policy = SourcePolicy(
+                priority = listOf("kugou", "netease"),
+                pinnedProvider = "kugou",
+                pinnedOnly = true,
+                allowedProviders = setOf("kugou", "netease"),
+            ),
+        )
+        assertTrue("独占固定源失败后不应该改用{{PERSON}}播出来", resolution is Resolution.None)
+        assertTrue(
+            "被跳过的来源要留下原因，播放页才能说明为什么没换源",
+            (resolution as Resolution.None).attempts.any { it.reason.contains("固定音源独占") },
+        )
+    }
+
+    @Test
+    fun pinnedOnlyStillPlaysThePinnedSource() = runBlocking {
+        // 独占只排除其他平台，固定源自己照常播放。
+        val resolver = previewResolver(mapOf("kugou:k1" to PlayableStream(url = "https://example.com/kugou.mp3")))
+        val resolution = resolver.resolve(
+            track(listOf(TrackSource("kugou", "酷狗音乐", song("k1", "kugou")), neteaseSource())),
+            policy = SourcePolicy(
+                priority = listOf("netease", "kugou"),
+                pinnedProvider = "kugou",
+                pinnedOnly = true,
+                allowedProviders = setOf("kugou", "netease"),
+            ),
+        )
+        assertEquals("kugou", (resolution as Resolution.Ready).source.providerId)
+    }
+
     @Test
     fun storedSongWithoutUrlStillResolves() = runBlocking {
         // 歌单/收藏里存下来的歌不带取流地址（Song.forStorage 会剥掉），不能因此判成不可用

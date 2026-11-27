@@ -72,6 +72,11 @@ data class SourcePolicy(
     val allowPreview: Boolean = false,
     /** 自动播放的候选白名单；null 表示不限制，兼容手写策略与现有单测。 */
     val allowedProviders: Set<String>? = null,
+    /**
+     * 固定音源是否独占：只在 [pinnedProvider] 取流，失败就停，不再回退别的平台。
+     * 回退到没有播放权限的平台往往只能播试听，播一秒又断，比直接报错更难理解。
+     */
+    val pinnedOnly: Boolean = false,
 )
 
 data class Attempt(val source: TrackSource, val reason: String)
@@ -142,6 +147,11 @@ data class AggregationSettings(
     val playbackMode: PlaybackMode = PlaybackMode.Auto,
     val providerPriority: List<String> = listOf("netease", "qq", "kugou", "kuwo", "migu", "lx", "apple"),
     val pinnedProvider: String? = null,
+    /**
+     * 「固定音源」是否独占：只在 [pinnedProvider] 取流，失败就停，不再回退别的平台。
+     * 默认关，保持原有「先固定、再回退」的行为。
+     */
+    val pinnedOnly: Boolean = false,
     val allowPreview: Boolean = false,
     val matchStrictness: MatchStrictness = MatchStrictness.Strict,
     val showUnavailable: Boolean = true,

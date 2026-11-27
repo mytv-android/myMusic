@@ -322,6 +322,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun setStartupTab(route: String) = model.setStartupTab(route)
     fun setPlaybackMode(mode: PlaybackMode) = model.setPlaybackMode(mode)
     fun setPinnedProvider(id: String?) = model.setPinnedProvider(id)
+    fun setPinnedOnly(value: Boolean) = model.setPinnedOnly(value)
     fun setAllowPreview(value: Boolean) = model.setAllowPreview(value)
     fun setStrictMatch(value: Boolean) = model.setMatchStrictness(
         if (value) com.mytv.mymusic.aggregate.MatchStrictness.Strict

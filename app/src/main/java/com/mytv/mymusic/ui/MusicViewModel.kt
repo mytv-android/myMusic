@@ -6431,6 +6431,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    /** 固定音源是否独占。关掉时保持原来的「先固定、失败再回退」。 */
+    fun setPinnedOnly(value: Boolean) = viewModelScope.launch {
+        app.settings.saveAggregation(settingsState.value.aggregation.copy(pinnedOnly = value))
+    }
+
     fun setAllowPreview(value: Boolean) = viewModelScope.launch {
         searchEngine.clearCache()
         app.settings.saveAggregation(settingsState.value.aggregation.copy(allowPreview = value))
