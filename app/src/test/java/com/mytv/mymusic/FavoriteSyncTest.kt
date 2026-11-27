@@ -20,6 +20,7 @@ import com.mytv.mymusic.data.native.QQProvider
 import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.library.libraryPlaylistGroups
 import com.mytv.mymusic.ui.favoriteFailureReason
+import com.mytv.mymusic.ui.favoriteSourceSong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
@@ -141,6 +142,17 @@ class FavoriteSyncTest {
             "请检查网络、登录和目标歌单",
             favoriteFailureReason(IllegalStateException("network down")),
         )
+    }
+
+    @Test
+    fun favoriteKeepsOriginalProviderWhenPlaybackResolvedElsewhere() {
+        val original = Song(id = "n1", source = "netease")
+        val playing = Song(id = "q1", source = "qq")
+        assertEquals("netease", favoriteSourceSong(playing, playing, original).source)
+        // 列表里点另一首（不是当前播放）时不受当前播放源影响
+        val other = Song(id = "n2", source = "netease")
+        assertEquals("netease", favoriteSourceSong(other, playing, original).source)
+        assertEquals("qq", favoriteSourceSong(playing, null, null).source)
     }
 
     private fun playlist(id: String, provider: String = "", remoteId: String = "") =
