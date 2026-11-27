@@ -98,7 +98,7 @@ fun StatusGlyph(status: Availability, color: Color, glyph: Dp) {
 }
 
 /**
- * 音源 chip：显示当前平台图标、音质，右侧标出“自动 / 顺序 / 指定”。换源结果直接写在 chip 下方，不弹 Snackbar。
+ * 音源 chip：显示当前平台图标、音质，右侧标出“音质 / 顺序 / 首选”。换源结果直接写在 chip 下方，不弹 Snackbar。
  */
 @Composable
 fun SourceChip(
@@ -123,7 +123,7 @@ fun SourceChip(
                 clip = true
             }
             .tvFocusRing(RoundedCornerShape(12.dp))
-            .semantics { contentDescription = "音源：$providerName $detail，$mode。点按切换音源" },
+            .semantics { contentDescription = "音源：$providerName $detail，换源模式：$mode。点按切换音源" },
         shape = RectangleShape,
         color = container,
         contentColor = content,

@@ -145,9 +145,9 @@ internal fun themeLabel(theme: String): String = when (theme) {
 }
 
 private fun playbackModeSummary(mode: PlaybackMode): String = when (mode) {
-    PlaybackMode.Auto -> "自动选源"
-    PlaybackMode.Priority -> "按音源顺序"
-    PlaybackMode.Pinned -> "指定音源"
+    PlaybackMode.Auto -> "按音质"
+    PlaybackMode.Priority -> "按顺序"
+    PlaybackMode.Pinned -> "首选平台"
 }
 
 /** 音乐源的当前值：启用几个、第一个是谁。顺序就是用户排的顺序。 */

@@ -87,7 +87,7 @@ class SourceResolver(
         val pinnedSources = sources.filter { source ->
             source.providerId == pinned && statuses[source] != Availability.Unavailable
         }
-        // 自动（以及被固定平台的回退）：已启用的平台里挑码率最高的。没报码率的平台不参与比大小，
+        // 「按音质」和「首选平台」的备选排序：已启用的平台里挑码率最高的。没报码率的平台不参与比大小，
         // 按用户排的顺序跟在已知码率的候选后面——既不能把「未知」当成最差，也不能让它插到已知码率前面。
         // 「按顺序」模式相反：严格按用户排的顺序走，码率不参与跨平台比较。
         val byQuality = compareBy<TrackSource> { if (it.song.bitrate > 0) 0 else 1 }

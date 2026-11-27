@@ -676,9 +676,9 @@ internal fun PlaybackSettingsScreen(
                 onSelect = { actions.setPlaybackMode(it) },
                 label = {
                     when (it) {
-                        PlaybackMode.Auto -> "自动"
+                        PlaybackMode.Auto -> "按音质"
                         PlaybackMode.Priority -> "按顺序"
-                        PlaybackMode.Pinned -> "指定音源"
+                        PlaybackMode.Pinned -> "首选平台"
                     }
                 },
                 modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
@@ -687,14 +687,14 @@ internal fun PlaybackSettingsScreen(
         item(key = "modeNote", contentType = "note") {
             SettingsNote(
                 when (aggregation.playbackMode) {
-                    PlaybackMode.Auto -> "已启用的平台里挑码率最高的来放。哪个放不出来，就按下面的「音源顺序」换下一个。"
-                    PlaybackMode.Priority -> "严格按你排的顺序放，不看码率。前面的平台放不出来，才换下一个。"
-                    PlaybackMode.Pinned -> "始终先试你选的那个平台，它放不出来才换别的。播放页会显示实际在放哪个。"
+                    PlaybackMode.Auto -> "按码率从高到低选择播放平台。"
+                    PlaybackMode.Priority -> "按「音源顺序」选择播放平台。"
+                    PlaybackMode.Pinned -> "选定平台排最前，平台不可用时按「音源顺序」选择。"
                 },
             )
         }
         if (aggregation.playbackMode == PlaybackMode.Pinned) {
-            item(key = "pinHead", contentType = "sectionHeader") { SectionLabel("指定音源") }
+            item(key = "pinHead", contentType = "sectionHeader") { SectionLabel("首选平台") }
             item(key = "pin", contentType = "chips") {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     pinnable.forEach { provider ->
@@ -717,7 +717,7 @@ internal fun PlaybackSettingsScreen(
                 count = 1,
                 onClick = { onOpen(SettingsSection.Sources) },
                 icon = Icons.Filled.Tune,
-                summary = "换源时按这个顺序往下试，「自动」在码率一样时也按它排。去「音乐源」里调整",
+                summary = "「按音质」在码率相同时按这个顺序排。去「音乐源」里调整",
             )
         }
         item(key = "matchHead", contentType = "sectionHeader") { SectionLabel("匹配") }
@@ -756,11 +756,6 @@ internal fun PlaybackSettingsScreen(
                     TextButton(onClick = actions::clearMatchCache, modifier = Modifier.tvFocusRing(CircleShape)) { Text("清除") }
                 },
             )
-        }
-        item(key = "note", contentType = "note") {
-            Box(Modifier.padding(top = 16.dp)) {
-                InfoNote("无论选哪种模式，都只用已启用的平台，「指定音源」选的平台除外。播放器里始终显示实际在放哪个。")
-            }
         }
     }
 }
@@ -840,7 +835,7 @@ internal fun SourcesSettingsScreen(
             }
         }
         item(key = "note", contentType = "note") {
-            SettingsNote("顺序同时决定聚合搜索、榜单和歌单的来源条、换源面板和播放换源的先后。")
+            SettingsNote("顺序决定聚合搜索、榜单和歌单来源条、换源面板的先后；播放换源也按它，「按音质」在码率相同时才按它排。")
         }
         item(key = "lxSources", contentType = "settingRow") {
             Box(Modifier.padding(top = 16.dp)) {
