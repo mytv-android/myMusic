@@ -563,7 +563,6 @@ internal fun PlaybackSettingsScreen(
     val lxRecords by LxSources.records.collectAsState()
     val lxProvider = ProviderInfo(id = LxPlatform.PROVIDER_ID, name = LxPlatform.PROVIDER_NAME)
     val pinnable = searchable + listOfNotNull(lxProvider.takeIf { lxRecords.isNotEmpty() })
-    val priority = aggregation.priorityFor(searchable.map { it.id } + LxPlatform.PROVIDER_ID)
     SettingsPage(SettingsSection.Playback, embedded, onBack) {
         item(key = "crossHead", contentType = "sectionHeader") { SectionLabel("切歌过渡") }
         item(key = "crossSwitch", contentType = "switch") {
@@ -688,8 +687,8 @@ internal fun PlaybackSettingsScreen(
             SettingsNote(
                 when (aggregation.playbackMode) {
                     PlaybackMode.Auto -> "按码率从高到低选择播放平台。"
-                    PlaybackMode.Priority -> "按「音源顺序」选择播放平台。"
-                    PlaybackMode.Pinned -> "选定平台排最前，平台不可用时按「音源顺序」选择。"
+                    PlaybackMode.Priority -> "按「音乐源」页排好的顺序选择播放平台。"
+                    PlaybackMode.Pinned -> "选定平台排最前，平台不可用时按「音乐源」页排好的顺序选择。"
                 },
             )
         }
@@ -702,23 +701,6 @@ internal fun PlaybackSettingsScreen(
                     }
                 }
             }
-        }
-        item(key = "priorityHead", contentType = "sectionHeader") {
-            SectionLabel("音源顺序") {
-                Text("越靠前越先尝试", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        item(key = "priority", contentType = "settingRow") {
-            ListRow(
-                // 顺序全应用只有一份，就在「音乐源」里排；这里只说明现在是什么顺序
-                title = priority.take(3).joinToString(" → ") { providerName(state.providers, it) }
-                    .ifBlank { "还没有平台" },
-                index = 0,
-                count = 1,
-                onClick = { onOpen(SettingsSection.Sources) },
-                icon = Icons.Filled.Tune,
-                summary = "「按音质」在码率相同时按这个顺序排。去「音乐源」里调整",
-            )
         }
         item(key = "matchHead", contentType = "sectionHeader") { SectionLabel("匹配") }
         item(key = "strict", contentType = "switch") {
@@ -835,7 +817,7 @@ internal fun SourcesSettingsScreen(
             }
         }
         item(key = "note", contentType = "note") {
-            SettingsNote("顺序决定聚合搜索、榜单和歌单来源条、换源面板的先后；播放换源也按它，「按音质」在码率相同时才按它排。")
+            SettingsNote("顺序决定聚合搜索、榜单和歌单来源条、换源面板的先后；「按顺序」和「首选平台」下的播放换源也按它排。")
         }
         item(key = "lxSources", contentType = "settingRow") {
             Box(Modifier.padding(top = 16.dp)) {
