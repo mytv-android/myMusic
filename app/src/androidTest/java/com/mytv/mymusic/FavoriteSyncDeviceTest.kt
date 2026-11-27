@@ -9,6 +9,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -47,6 +48,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -183,9 +185,10 @@ class FavoriteSyncUiTest {
             }
         }
         val list = compose.onNode(hasScrollToIndexAction() and SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
-        list.performScrollToKey(if (window.isTv) "playlists:" else "pl:local-10")
-        compose.onNodeWithText("全部").assertIsDisplayed().assertIsSelected()
-        compose.onNodeWithText(provider.name).performClick().assertIsSelected()
+        val heading = compose.onNode(hasText("我的") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)).assertIsDisplayed()
+        val all = compose.onNodeWithText("全部").assertIsDisplayed().assertIsSelected()
+        assertTrue(all.fetchSemanticsNode().boundsInRoot.top >= heading.fetchSemanticsNode().boundsInRoot.bottom)
+        compose.onNodeWithText(provider.name).assertIsDisplayed().performClick().assertIsSelected()
         compose.onNodeWithText(bound.name).assertIsDisplayed()
         compose.onNodeWithText(local.first().name).assertDoesNotExist()
         if (window.isTablet) compose.onNodeWithText("详情 ${bound.id}").assertIsDisplayed()
@@ -194,6 +197,11 @@ class FavoriteSyncUiTest {
         compose.onNodeWithText(bound.name).assertDoesNotExist()
         compose.onNodeWithText(local.first().name).assertIsDisplayed()
 
+        if (!window.isTv) {
+            list.performScrollToKey("pl:local-10")
+            compose.onNodeWithText(provider.name).assertIsDisplayed().performClick()
+            compose.onNodeWithText(bound.name).assertIsDisplayed()
+        }
         compose.onNodeWithText("全部").performClick().assertIsSelected()
         list.performScrollToKey(if (window.isTv) "playlists:${provider.id}" else "pl:${bound.id}")
         compose.onNodeWithText(bound.name).assertIsDisplayed()

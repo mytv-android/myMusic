@@ -51,6 +51,7 @@ fun PageScaffold(
     large: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
+    belowHeader: @Composable () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val window = LocalAppWindow.current
@@ -58,6 +59,7 @@ fun PageScaffold(
     if (window.isTv) {
         Column(modifier.fillMaxSize().semantics { paneTitle = title }) {
             TvPageHeader(title, subtitle, onBack, actions)
+            belowHeader()
             Box(Modifier.weight(1f)) {
                 content(PaddingValues(bottom = 48.dp))
             }
@@ -86,37 +88,40 @@ fun PageScaffold(
         contentWindowInsets = WindowInsets(0),
         floatingActionButton = floatingActionButton,
         topBar = {
-            if (large) {
-                LargeFlexibleTopAppBar(
-                    // M3 顶栏不给标题加 heading，读屏按标题跳转时找不到页面标题
-                    title = { Text(title, Modifier.semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    subtitle = if (subtitle.isNotBlank()) ({ Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }) else null,
-                    navigationIcon = navigation,
-                    actions = actions,
-                    colors = colors,
-                    scrollBehavior = scroll,
-                )
-            } else {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(title, Modifier.semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (subtitle.isNotBlank()) {
-                                Text(
-                                    subtitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+            Column {
+                if (large) {
+                    LargeFlexibleTopAppBar(
+                        // M3 顶栏不给标题加 heading，读屏按标题跳转时找不到页面标题
+                        title = { Text(title, Modifier.semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        subtitle = if (subtitle.isNotBlank()) ({ Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }) else null,
+                        navigationIcon = navigation,
+                        actions = actions,
+                        colors = colors,
+                        scrollBehavior = scroll,
+                    )
+                } else {
+                    TopAppBar(
+                        title = {
+                            Column {
+                                Text(title, Modifier.semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (subtitle.isNotBlank()) {
+                                    Text(
+                                        subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
-                        }
-                    },
-                    navigationIcon = navigation,
-                    actions = actions,
-                    colors = colors,
-                    scrollBehavior = scroll,
-                )
+                        },
+                        navigationIcon = navigation,
+                        actions = actions,
+                        colors = colors,
+                        scrollBehavior = scroll,
+                    )
+                }
+                belowHeader()
             }
         },
     ) { inner ->

@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SyncProblem
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -150,6 +151,7 @@ import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.PageScaffold
+import com.mytv.mymusic.ui.components.ProviderIcon
 import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.Skeleton
@@ -190,10 +192,13 @@ private class NewMenu(val onCreate: () -> Unit, val onLink: () -> Unit, val onFi
 
 private class LibraryPlaylists(
     val groups: Map<String, List<LocalPlaylistSummary>>,
-    val source: String?,
+    source: String?,
+    val listState: LazyListState,
     val selectSource: (String?) -> Unit,
 ) {
-    val visible = if (source == null) groups else mapOf(source to groups[source].orEmpty())
+    val hasPlatformSources = groups.keys.any { it.isNotBlank() }
+    val source = source?.takeIf { hasPlatformSources && (it.isBlank() || it in groups) }
+    val visible = this.source?.let { mapOf(it to groups[it].orEmpty()) } ?: groups
 }
 
 @Composable
@@ -217,8 +222,12 @@ fun LibraryScreen(
     var linkOpen by remember { mutableStateOf(false) }
     var playlistSource by rememberSaveable { mutableStateOf<String?>(null) }
     val groups = remember(playlists) { libraryPlaylistGroups(playlists) }
-    val activeSource = playlistSource?.takeIf { it.isBlank() || it in groups }
-    val libraryPlaylists = LibraryPlaylists(groups, activeSource) { playlistSource = it }
+    val listState = rememberLazyListState()
+    val libraryPlaylists = LibraryPlaylists(groups, playlistSource, listState) { source ->
+        playlistSource = source
+        // 切换分组时展示新列表的开头，避免沿用上一组的滚动位置。
+        listState.requestScrollToItem(0)
+    }
     val importFile = rememberImportLauncher(actions)
     val menu = remember(importFile) { NewMenu({ createOpen = true }, { linkOpen = true }, importFile) }
     val stats = rememberLibraryStats(favorites, history, downloads)
@@ -240,7 +249,7 @@ fun LibraryScreen(
             confirmLabel = "创建",
             onConfirm = { name ->
                 actions.createPlaylist(name)
-                if (activeSource?.isNotBlank() == true) playlistSource = ""
+                if (libraryPlaylists.source?.isNotBlank() == true) libraryPlaylists.selectSource("")
             },
             onDismiss = { createOpen = false },
         )
@@ -274,7 +283,6 @@ private fun PhoneLibrary(
     val window = LocalAppWindow.current
     val phone = window.isPhone
     var fabOpen by rememberSaveable { mutableStateOf(false) }
-    val listState = rememberLazyListState()
     val settled = rememberSettled()
     val conflictIds = sync.conflicts.map { it.playlistId }.toSet()
     Box(Modifier.fillMaxSize()) {
@@ -291,11 +299,11 @@ private fun PhoneLibrary(
                     NewPlaylistSplitButton(menu, Modifier.padding(end = 8.dp))
                 }
             },
+            belowHeader = { PlaylistSourceTabs(playlists, providers, Modifier.padding(horizontal = window.gutter)) },
         ) { padding ->
             LazyColumn(
-                // 列表视口从顶栏下缘开始，避免吸顶的页签被顶栏遮住。
                 Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
-                state = listState,
+                state = playlists.listState,
                 contentPadding = PaddingValues(
                     start = window.gutter,
                     end = window.gutter,
@@ -303,34 +311,25 @@ private fun PhoneLibrary(
                 ),
                 verticalArrangement = Arrangement.spacedBy(SegmentGap),
             ) {
-                item(key = "bento", contentType = "bento") {
-                    LibraryBento(
-                        stats = stats,
-                        onFavorites = nav.openFavorites,
-                        // 解码和播放都交给 VM 的后台任务，回调里不做全量 JSON 解析
-                        onPlayFavorites = favorites.takeIf { it.isNotEmpty() }?.let { list ->
-                            { actions.playSavedSongs(list) }
-                        },
-                        onHistory = nav.openHistory,
-                        onDownloads = nav.openDownloads,
-                        tileHeight = if (phone) 100.dp else 112.dp,
-                    )
+                if (playlists.source == null) {
+                    item(key = "bento", contentType = "bento") {
+                        LibraryBento(
+                            stats = stats,
+                            onFavorites = nav.openFavorites,
+                            // 解码和播放都交给 VM 的后台任务，回调里不做全量 JSON 解析
+                            onPlayFavorites = favorites.takeIf { it.isNotEmpty() }?.let { list ->
+                                { actions.playSavedSongs(list) }
+                            },
+                            onHistory = nav.openHistory,
+                            onDownloads = nav.openDownloads,
+                            tileHeight = if (phone) 100.dp else 112.dp,
+                        )
+                    }
+                    libraryEntryItems(soda, kugou, listen, sync, nav)
                 }
-                // 本地音乐、汽水天天送会员、酷狗概念版领会员并成一组（三行分段圆角）
-                item(key = "localMusic", contentType = "card") {
-                    LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 3, modifier = Modifier.padding(top = 12.dp))
-                }
-                item(key = "welfare", contentType = "card") {
-                    WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 3, modifier = Modifier)
-                }
-                item(key = "kugouWelfare", contentType = "card") {
-                    KugouWelfareEntryCard(kugou, nav.openKugouWelfare, index = 2, count = 3, modifier = Modifier)
-                }
-                item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
                     SectionLabel("歌单", trailing = { CountTag("${playlists.visible.values.sumOf { it.size }} 个") })
                 }
-                playlistSourceTabs(listState, playlists, providers)
                 playlistItems(playlists, covers, sync, conflictIds, settled, null, onOpen = nav.openPlaylist, onCreate = menu.onCreate, providers = providers)
             }
         }
@@ -355,46 +354,72 @@ internal fun libraryPlaylistGroups(playlists: List<LocalPlaylistSummary>): Map<S
 private fun playlistGroupName(providerId: String, providers: List<ProviderInfo>): String =
     if (providerId.isBlank()) "本地歌单" else providerName(providers, providerId)
 
-private const val PLAYLIST_SOURCE_TABS = "playlistSources"
-
-@OptIn(ExperimentalFoundationApi::class)
-private fun LazyListScope.playlistSourceTabs(
-    listState: LazyListState,
+@Composable
+private fun PlaylistSourceTabs(
     playlists: LibraryPlaylists,
     providers: List<ProviderInfo>,
-    gutter: Dp = 0.dp,
+    modifier: Modifier = Modifier,
+    focus: FocusRequester? = null,
 ) {
+    if (!playlists.hasPlatformSources) return
     val platformIds = playlists.groups.keys.filter { it.isNotBlank() }.sortedBy { providerName(providers, it) }
-    if (platformIds.isEmpty()) return
     val sourceIds = listOf(null, "") + platformIds
-    stickyHeader(key = PLAYLIST_SOURCE_TABS, contentType = "playlistSources") {
-        SecondaryScrollableTabRow(
-            selectedTabIndex = sourceIds.indexOf(playlists.source),
-            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = gutter),
-            edgePadding = 0.dp,
-            containerColor = MaterialTheme.colorScheme.surface,
-        ) {
-            sourceIds.forEach { source ->
-                val label = when (source) {
-                    null -> "全部"
-                    "" -> "本地"
-                    else -> providerName(providers, source)
+    val container = MaterialTheme.colorScheme.surface
+    SecondaryScrollableTabRow(
+        selectedTabIndex = sourceIds.indexOf(playlists.source),
+        modifier = Modifier.fillMaxWidth().background(container).then(modifier),
+        edgePadding = 0.dp,
+        minTabWidth = 64.dp,
+        containerColor = container,
+    ) {
+        sourceIds.forEach { source ->
+            val selected = source == playlists.source
+            val label = when (source) {
+                null -> "全部"
+                "" -> "本地"
+                else -> providerName(providers, source)
+            }
+            Tab(
+                selected = selected,
+                onClick = { if (!selected) playlists.selectSource(source) },
+                modifier = Modifier.tvFocusRing(scale = 1f)
+                    .then(if (selected && focus != null) Modifier.focusRequester(focus) else Modifier),
+            ) {
+                Row(
+                    Modifier.heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (source == null) {
+                        Icon(Icons.Outlined.Apps, null, Modifier.size(18.dp))
+                    } else {
+                        ProviderIcon(id = source.ifBlank { "local" }, name = label, size = 20.dp, active = selected)
+                    }
+                    Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Tab(
-                    selected = source == playlists.source,
-                    onClick = {
-                        playlists.selectSource(source)
-                        val header = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == PLAYLIST_SOURCE_TABS }
-                        if (source != playlists.source && header != null && listState.firstVisibleItemIndex >= header.index) {
-                            listState.requestScrollToItem(header.index)
-                        }
-                    },
-                    modifier = Modifier.tvFocusRing(scale = 1f),
-                    text = { Text(label, maxLines = 1) },
-                )
             }
         }
     }
+}
+
+private fun LazyListScope.libraryEntryItems(
+    soda: SodaWelfareUi,
+    kugou: KugouWelfareUi,
+    listen: ListenTaskState,
+    sync: SyncUiState,
+    nav: LibraryNav,
+) {
+    // 本地音乐和两个会员入口按相邻行绘制圆角。
+    item(key = "localMusic", contentType = "card") {
+        LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 3, modifier = Modifier.padding(top = 12.dp))
+    }
+    item(key = "welfare", contentType = "card") {
+        WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 3, modifier = Modifier)
+    }
+    item(key = "kugouWelfare", contentType = "card") {
+        KugouWelfareEntryCard(kugou, nav.openKugouWelfare, index = 2, count = 3, modifier = Modifier)
+    }
+    item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
 }
 
 /** 歌单列表：手机、平板共用。selectedId 非空时用于平板的列表 + 详情。 */
@@ -458,6 +483,7 @@ internal fun playlistRowSummary(playlist: LocalPlaylistSummary, providers: List<
 
 // ---------------- 平板 ≥840dp：列表 + 详情 ----------------
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TabletLibrary(
     playlists: LibraryPlaylists,
@@ -482,7 +508,6 @@ private fun TabletLibrary(
     // 这只是同步的状态修正，没有挂起或绘制时序依赖，用带 key 的 SideEffect。
     SideEffect(selected) { if (selected != null && selected != selectedId) selectedId = selected }
     val settled = rememberSettled()
-    val listState = rememberLazyListState()
     val conflictIds = sync.conflicts.map { it.playlistId }.toSet()
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottom = LocalOverlayPadding.current.calculateBottomPadding()
@@ -493,14 +518,14 @@ private fun TabletLibrary(
         start = {
             LazyColumn(
                 Modifier.fillMaxHeight().padding(top = top),
-                state = listState,
+                state = playlists.listState,
                 contentPadding = PaddingValues(start = 24.dp, end = 16.dp, top = 28.dp, bottom = LocalFoldPane.current.bottom(bottom + 24.dp)),
                 verticalArrangement = Arrangement.spacedBy(SegmentGap),
             ) {
                 item(key = "head", contentType = "header") {
                     Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("我的", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
+                            Text("我的", Modifier.semantics { heading() }, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
                             Text(
                                 syncHeadline(sync),
                                 style = MaterialTheme.typography.bodyMedium,
@@ -510,49 +535,45 @@ private fun TabletLibrary(
                         SyncCloudButton(sync, nav.openSync)
                     }
                 }
-                item(key = "bento", contentType = "bento") {
-                    val onPlayFavorites: (() -> Unit)? = favorites.takeIf { it.isNotEmpty() }?.let { list ->
-                        { actions.playSavedSongs(list) }
+                if (playlists.hasPlatformSources) {
+                    stickyHeader(key = "playlistSources", contentType = "playlistSources") {
+                        PlaylistSourceTabs(playlists, providers)
                     }
-                    // 按列表实际宽度选排法：平常 380dp 的列表放得下“左大右二”；
-                    // 书本姿态下列表收到折痕为止（Pixel Fold 不到 300dp），改成一行三张小卡
-                    BoxWithConstraints(Modifier.fillMaxWidth()) {
-                        if (maxWidth < LibraryBentoRowWidth) {
-                            LibraryBentoRow(
-                                stats = stats,
-                                onFavorites = nav.openFavorites,
-                                onPlayFavorites = onPlayFavorites,
-                                onHistory = nav.openHistory,
-                                onDownloads = nav.openDownloads,
-                            )
-                        } else {
-                            LibraryBento(
-                                stats = stats,
-                                onFavorites = nav.openFavorites,
-                                onPlayFavorites = onPlayFavorites,
-                                onHistory = nav.openHistory,
-                                onDownloads = nav.openDownloads,
-                                tileHeight = 84.dp,
-                                compact = true,
-                            )
+                }
+                if (playlists.source == null) {
+                    item(key = "bento", contentType = "bento") {
+                        val onPlayFavorites: (() -> Unit)? = favorites.takeIf { it.isNotEmpty() }?.let { list ->
+                            { actions.playSavedSongs(list) }
+                        }
+                        // 按列表实际宽度选排法：平常 380dp 的列表放得下“左大右二”；
+                        // 书本姿态下列表收到折痕为止（Pixel Fold 不到 300dp），改成一行三张小卡
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            if (maxWidth < LibraryBentoRowWidth) {
+                                LibraryBentoRow(
+                                    stats = stats,
+                                    onFavorites = nav.openFavorites,
+                                    onPlayFavorites = onPlayFavorites,
+                                    onHistory = nav.openHistory,
+                                    onDownloads = nav.openDownloads,
+                                )
+                            } else {
+                                LibraryBento(
+                                    stats = stats,
+                                    onFavorites = nav.openFavorites,
+                                    onPlayFavorites = onPlayFavorites,
+                                    onHistory = nav.openHistory,
+                                    onDownloads = nav.openDownloads,
+                                    tileHeight = 84.dp,
+                                    compact = true,
+                                )
+                            }
                         }
                     }
+                    libraryEntryItems(soda, kugou, listen, sync, nav)
                 }
-                // 本地音乐、汽水天天送会员、酷狗概念版领会员并成一组（三行分段圆角）
-                item(key = "localMusic", contentType = "card") {
-                    LocalMusicEntryRow(nav.openLocalMusic, index = 0, count = 3, modifier = Modifier.padding(top = 12.dp))
-                }
-                item(key = "welfare", contentType = "card") {
-                    WelfareEntryCard(soda, listen.todayMinutes, nav.openWelfare, index = 1, count = 3, modifier = Modifier)
-                }
-                item(key = "kugouWelfare", contentType = "card") {
-                    KugouWelfareEntryCard(kugou, nav.openKugouWelfare, index = 2, count = 3, modifier = Modifier)
-                }
-                item(key = "sync", contentType = "card") { SyncStatusCard(sync, nav.openSync, Modifier.padding(top = 12.dp)) }
                 item(key = "plHead", contentType = "section") {
                     SectionLabel("歌单", trailing = { NewPlaylistSplitButton(menu) })
                 }
-                playlistSourceTabs(listState, playlists, providers)
                 playlistItems(playlists, covers, sync, conflictIds, settled, selected, onOpen = { selectedId = it }, onCreate = menu.onCreate, providers = providers)
             }
         },
@@ -606,7 +627,6 @@ private fun TvLibrary(
 ) {
     val window = LocalAppWindow.current
     val first = remember { FocusRequester() }
-    val listState = rememberLazyListState()
     var newOpen by remember { mutableStateOf(false) }
     val conflictIds = sync.conflicts.map { it.playlistId }.toSet()
     // 最近播放的 payload 解码放在页面层：惰性项被回收再进入时不会重做
@@ -618,14 +638,15 @@ private fun TvLibrary(
         title = "我的",
         subtitle = syncHeadline(sync),
         actions = { SyncCloudButton(sync, nav.openSync) },
+        belowHeader = { PlaylistSourceTabs(playlists, state.providers, Modifier.padding(horizontal = window.gutter), focus = first) },
     ) { padding ->
         LazyColumn(
             Modifier.fillMaxSize(),
-            state = listState,
+            state = playlists.listState,
             contentPadding = padding,
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            item(key = "tiles", contentType = "bento") {
+            if (playlists.source == null) item(key = "tiles", contentType = "bento") {
                 // 磁贴加起来比屏宽：不横向滚动的话 Row 把后面几块压成一条缝（“最近播放”“下载”只露 50dp），
                 // 方向键也走不过去。横向滚动后焦点移到哪块，哪块自己滚进来
                 Row(
@@ -635,7 +656,8 @@ private fun TvLibrary(
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
                     TvTile(
-                        modifier = Modifier.width(280.dp).focusRequester(first),
+                        modifier = Modifier.width(280.dp)
+                            .then(if (playlists.hasPlatformSources) Modifier else Modifier.focusRequester(first)),
                         container = MaterialTheme.colorScheme.primaryContainer,
                         content = MaterialTheme.colorScheme.onPrimaryContainer,
                         onClick = nav.openFavorites,
@@ -696,7 +718,6 @@ private fun TvLibrary(
                     }
                 }
             }
-            playlistSourceTabs(listState, playlists, state.providers, window.gutter)
             val sources = if (playlists.source == null) listOf("") + playlists.visible.keys.filter { it.isNotEmpty() }
             else playlists.visible.keys
             sources.forEach { providerId ->
@@ -719,7 +740,7 @@ private fun TvLibrary(
                     }
                 }
             }
-            if (history.isNotEmpty()) {
+            if (playlists.source == null && history.isNotEmpty()) {
                 item(key = "recent", contentType = "row") {
                     TvRow("最近播放") {
                         items(recent, key = { "recent:${it.key}" }, contentType = { "song" }) { song ->
