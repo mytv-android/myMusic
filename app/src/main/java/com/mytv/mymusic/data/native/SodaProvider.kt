@@ -1665,6 +1665,9 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
      * 这个歌单能不能用当前账号改：出现在「我创建的歌单」里就能改。
      * null 表示没法判断（没登录 / 网络失败），调用方按「可以试」处理。
      */
+    override fun playlistWritableFromAccountList(playlist: Playlist): Boolean? =
+        playlist.extra["owner_id"]?.let { it == playlist.extra["user_id"] }
+
     override suspend fun playlistWritable(cookie: String, id: String): Boolean? {
         if (cookie.isBlank()) return null
         val playlistId = id.trim()
@@ -1805,7 +1808,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
     override fun supportsCollect(): Boolean = true
 
     /** 喜欢 / 取消喜欢单曲（「我喜欢的音乐」）。 */
-    override suspend fun collectTrack(cookie: String, song: Song) {
+    override suspend fun collectTrack(cookie: String, song: Song): String? {
         val trackId = songTrackId(song)
         if (trackId.isEmpty()) throw IllegalArgumentException("track id is empty")
         val raw = businessPost(
@@ -1814,9 +1817,10 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             cookie,
         ).body
         sodaWriteFailed(raw, "收藏")
+        return null
     }
 
-    override suspend fun uncollectTrack(cookie: String, song: Song) {
+    override suspend fun uncollectTrack(cookie: String, song: Song): String? {
         val trackId = songTrackId(song)
         if (trackId.isEmpty()) throw IllegalArgumentException("track id is empty")
         val raw = businessPost(
@@ -1825,6 +1829,7 @@ class SodaProvider : BaseNativeProvider(SODA_INFO) {
             cookie,
         ).body
         sodaWriteFailed(raw, "取消收藏")
+        return null
     }
 
     /** 批量版：收藏多首（换源面板「把这批歌收藏到汽水」用）。 */

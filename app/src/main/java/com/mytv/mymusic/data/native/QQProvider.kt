@@ -78,8 +78,8 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     private val volumeCache = ConcurrentHashMap<String, CachedVolume>()
     /** 音质探测结果按 cookie 缓存：一次要打七八个档位的取流接口，不能每次进设置页都重跑。 */
     private val availableQualityCache = ConcurrentHashMap<String, List<AudioQualityOption>>()
-    /** dissid → (dirid, tid)；写歌单用，只在本进程内缓存。 */
-    private val dirIdCache = ConcurrentHashMap<String, Pair<Int, Int>>()
+    /** dirid 要和账号一起缓存，切换账号时不能继续使用旧账号的目录号。 */
+    private val dirIdCache = ConcurrentHashMap<Pair<String, String>, Pair<Int, Int>>()
 
     override val supportsSearchPagination: Boolean = true
 
@@ -566,18 +566,34 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
         val (uin, _) = qqLogin(cookie)
         if (uin == "0") return null
         val playlistId = id.trim()
-        if (playlistId == QQ_FAVORITE_PLAYLIST_ID || playlistId.startsWith(QQ_PROFILE_DIR_PREFIX)) return true
-        for (page in 1..3) {
+        if (playlistId == QQ_FAVORITE_PLAYLIST_ID) return true
+        val seen = mutableSetOf<String>()
+        var page = 1
+        while (true) {
             val items = try {
-                userPlaylists(cookie, page, 100)
+                userPlaylists(cookie, page++, 100)
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 return null
             }
-            if (items.any { it.id == playlistId }) return true
-            if (items.size < 100) return false
+            items.firstOrNull { it.id == playlistId }?.let { return playlistWritableFromAccountList(it) }
+            if (items.size < 100 || !seen.addAll(items.map { it.id })) return false
         }
-        return false
+    }
+
+    override fun playlistWritableFromAccountList(playlist: Playlist): Boolean =
+        playlist.id == QQ_FAVORITE_PLAYLIST_ID || (playlist.extra["dirid"]?.toIntOrNull() ?: 0) > 0
+
+    override fun supportsCollect(): Boolean = true
+
+    override suspend fun collectTrack(cookie: String, song: Song): String {
+        addPlaylistTracks(cookie, QQ_FAVORITE_PLAYLIST_ID, listOf(song))
+        return QQ_FAVORITE_PLAYLIST_ID
+    }
+
+    override suspend fun uncollectTrack(cookie: String, song: Song): String {
+        removePlaylistTracks(cookie, QQ_FAVORITE_PLAYLIST_ID, listOf(song))
+        return QQ_FAVORITE_PLAYLIST_ID
     }
 
     override suspend fun addPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) =
@@ -699,16 +715,19 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
     }
 
     private suspend fun resolveDirId(cookie: String, playlistId: String): Pair<Int, Int>? {
-        dirIdCache[playlistId]?.let { return it }
         val id = playlistId.trim()
+        val key = qqLogin(cookie).first to id
+        dirIdCache[key]?.let { return it }
         val resolved = when {
             id == QQ_FAVORITE_PLAYLIST_ID -> 201 to 0
             id.startsWith(QQ_PROFILE_DIR_PREFIX) -> id.removePrefix(QQ_PROFILE_DIR_PREFIX)
                 .toIntOrNull()?.takeIf { it > 0 }?.let { it to 0 }
             else -> {
                 var found: Pair<Int, Int>? = null
-                for (page in 1..3) {
-                    val items = userPlaylists(cookie, page, 100)
+                var page = 1
+                val seen = mutableSetOf<String>()
+                while (true) {
+                    val items = userPlaylists(cookie, page++, 100)
                     val item = items.firstOrNull { it.id == id }
                     if (item != null) {
                         val dirId = item.extra["dirid"].orEmpty().toIntOrNull()
@@ -717,12 +736,12 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                             break
                         }
                     }
-                    if (items.size < 100) break
+                    if (items.size < 100 || !seen.addAll(items.map { it.id })) break
                 }
                 found
             }
         } ?: return null
-        dirIdCache[playlistId] = resolved
+        dirIdCache[key] = resolved
         return resolved
     }
 

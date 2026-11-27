@@ -23,6 +23,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonArray
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -323,11 +324,53 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
     override suspend fun playlistWritable(cookie: String, id: String): Boolean? {
         if (cookie.isBlank()) return null
         val userId = accountUserId(cookie) ?: return null
-        val detail = runCatching { playlistDetail(cookie, id) }.getOrNull() ?: return null
+        val detail = try {
+            playlistDetail(cookie, id)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: PlaylistWriteException) {
+            if (error.failure == PlaylistWriteFailure.SongNotFound) return false
+            return null
+        } catch (_: Exception) {
+            return null
+        }
         // 我喜欢的音乐等特殊歌单不走普通歌单的加删接口
         if (detail.specialType != 0) return false
         if (detail.creator.userId == 0L) return null
         return detail.creator.userId == userId
+    }
+
+    override fun playlistWritableFromAccountList(playlist: Playlist): Boolean? {
+        val creatorId = playlist.extra["creator_id"]?.takeIf { it != "0" } ?: return null
+        return creatorId == playlist.extra["user_id"] && playlist.extra["special_type"] == "0"
+    }
+
+    override fun supportsCollect(): Boolean = true
+
+    override suspend fun collectTrack(cookie: String, song: Song): String? = setTrackLiked(cookie, song, true)
+
+    override suspend fun uncollectTrack(cookie: String, song: Song): String? = setTrackLiked(cookie, song, false)
+
+    private suspend fun setTrackLiked(cookie: String, song: Song, liked: Boolean): String? {
+        if (cookie.isBlank()) throw PlaylistWriteException("请先登录网易云音乐", PlaylistWriteFailure.NotLoggedIn)
+        val csrf = cookie.split(';').firstNotNullOfOrNull { part ->
+            part.trim().takeIf { it.startsWith("__csrf=") }?.substringAfter('=')
+        }.orEmpty()
+        val body = buildJsonObject {
+            put("alg", "itembased")
+            put("trackId", neteaseTrackId(song))
+            put("like", liked)
+            put("time", "3")
+            put("csrf_token", csrf)
+        }
+        val response = weapiPost(LIKE_API, body, cookie)
+        val result = json.parseToJsonElement(response.body).jsonObject
+        val code = result.int("code")
+        if (code != 200) {
+            val failure = if (code in setOf(301, 401, 403)) PlaylistWriteFailure.NotLoggedIn else PlaylistWriteFailure.Other
+            throw PlaylistWriteException("网易云收藏操作失败（$code）", failure)
+        }
+        return result.long("playlistId").takeIf { it > 0 }?.toString()
     }
 
     override suspend fun addPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) =
@@ -385,7 +428,8 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         val response = weapiPost(PLAYLIST_API, body, cookie)
         val data = json.decodeFromString<NeteasePlaylistResponse>(response.body)
         if (data.code != 200) {
-            throw PlaylistWriteException("netease playlist detail error code: ${data.code}")
+            val failure = if (data.code == 404) PlaylistWriteFailure.SongNotFound else PlaylistWriteFailure.Other
+            throw PlaylistWriteException("netease playlist detail error code: ${data.code}", failure)
         }
         return data.playlist ?: throw PlaylistWriteException("netease playlist not found", PlaylistWriteFailure.SongNotFound)
     }
@@ -726,6 +770,8 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
                 link = "https://music.163.com/#/playlist?id=${item.id}",
                 extra = mapOf(
                     "user_id" to userId.toString(),
+                    "creator_id" to item.creator.userId.toString(),
+                    "special_type" to item.specialType.toString(),
                     "subscribed" to item.subscribed.toString(),
                 ),
             )
@@ -1341,6 +1387,7 @@ class NetEaseProvider : BaseNativeProvider(NETEASE_INFO) {
         const val CATEGORY_API = "https://music.163.com/weapi/playlist/catalogue"
         const val CATEGORY_PLAYLIST_API = "https://music.163.com/weapi/playlist/list"
         const val USER_PLAYLIST_API = "https://music.163.com/weapi/user/playlist"
+        const val LIKE_API = "https://music.163.com/weapi/radio/like"
         const val ALBUM_API = "https://music.163.com/weapi/v1/album/%s"
         const val USER_ACCOUNT_API = "https://music.163.com/weapi/nuser/account/get"
         const val VIP_INFO_API = "https://music.163.com/weapi/music-vip-membership/front/vip/info"
@@ -1761,6 +1808,7 @@ private data class NeteaseUserPlaylistItem(
     val playCount: Double = 0.0,
     val description: String = "",
     val subscribed: Boolean = false,
+    val specialType: Int = 0,
     val creator: NeteaseCreator = NeteaseCreator(),
 )
 

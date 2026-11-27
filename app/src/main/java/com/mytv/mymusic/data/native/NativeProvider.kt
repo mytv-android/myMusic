@@ -179,19 +179,16 @@ interface NativeProvider {
     suspend fun passwordLogin(username: String, password: String): String =
         throw UnsupportedOperationException("${info.name} 暂不支持账号密码登录")
 
-    /**
-     * 这个平台有没有账号侧的「收藏」：把一首歌加进平台账号的我喜欢 / 收藏夹。
-     * 和本机收藏是两件事：这个写去平台，换设备也在。默认 false，界面据此决定显不显示这一行。
-     */
+    /** 是否可以写入平台自带的「我喜欢」。 */
     fun supportsCollect(): Boolean = false
 
-    /** 收藏到平台账号；没实现或没登录时抛 [UnsupportedOperationException]。 */
-    suspend fun collectTrack(cookie: String, song: Song) {
+    /** 收藏到平台账号，返回已变更的歌单 ID（没有可绑定的歌单或未知时为 null）。 */
+    suspend fun collectTrack(cookie: String, song: Song): String? {
         throw UnsupportedOperationException("${info.name} 暂不支持收藏")
     }
 
     /** 从平台账号取消收藏。 */
-    suspend fun uncollectTrack(cookie: String, song: Song) {
+    suspend fun uncollectTrack(cookie: String, song: Song): String? {
         throw UnsupportedOperationException("${info.name} 暂不支持取消收藏")
     }
 
@@ -203,6 +200,9 @@ interface NativeProvider {
      * 调用方按“可以试”处理，写失败时再给原因。
      */
     suspend fun playlistWritable(cookie: String, id: String): Boolean? = null
+
+    /** 个人歌单列表已经给出归属时，选择器可直接使用；否则单独检查该歌单。 */
+    fun playlistWritableFromAccountList(playlist: Playlist): Boolean? = null
 
     /** 往平台歌单里加歌；[songs] 必须已经是这个平台的曲目。 */
     suspend fun addPlaylistTracks(cookie: String, playlistId: String, songs: List<Song>) {
