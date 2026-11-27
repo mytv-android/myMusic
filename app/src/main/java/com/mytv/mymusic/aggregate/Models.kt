@@ -169,12 +169,20 @@ data class AggregationSettings(
      * 自动播放的候选顺序：pinned（用户显式固定）在最前，来源平台已启用时紧随其后，
      * 其余按 [enabledProviders] 的启用顺序。未启用的平台不会出现在结果里——
      * 这里不能再拿 [providerPriority] 或 available 的剩余 id 兜底，否则关掉的来源平台又会被排回来。
+     *
+     * [originLocked] 表示来源平台在「音乐源」里根本没有开关（纯歌单音源，如云听电台），
+     * 用户既开不了也关不掉：这时它和已启用一样算「正在用」，要排在最前。
      */
-    fun playbackOrder(available: List<String>, origin: String?, pinned: String?): List<String> {
+    fun playbackOrder(
+        available: List<String>,
+        origin: String?,
+        pinned: String?,
+        originLocked: Boolean = false,
+    ): List<String> {
         val enabled = enabledProviders.distinct().filter { it in available }
         return buildList {
             pinned?.takeIf { it.isNotBlank() }?.let { add(it) }
-            origin?.takeIf { it in enabled }?.let { add(it) }
+            origin?.takeIf { it in enabled || (originLocked && it in available) }?.let { add(it) }
             addAll(enabled)
         }.distinct()
     }

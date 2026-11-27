@@ -376,4 +376,61 @@ class SourceResolverTest {
         assertEquals(listOf("kugou", "netease"), policy.priority)
         assertEquals(listOf("kugou", "netease"), resolver.orderCandidates(target, null, emptySet(), policy).map { it.providerId })
     }
+
+    // ---------- 没有开关的音源（云听电台）不能被启用列表挡掉 ----------
+
+    /** 云听电台的直播曲目：没有搜索能力，「音乐源」设置里没有它的开关。 */
+    private fun yuntingLiveSource() = TrackSource(
+        "yunting",
+        "云听",
+        song("live:639", "yunting", url = "http://ytcast2.radio.cn/110/radios/40639/index.m3u8", ext = "m3u8"),
+    )
+
+    @Test
+    fun providerWithoutSourceToggleIsNotBlockedByTheEnabledList() {
+        // 云听只提供歌单、不能搜索，用户既开不了也关不掉：默认启用列表里没有它，
+        // 但从它自己歌单里开的歌不能因此一首都放不出来
+        val target = track(listOf(yuntingLiveSource()))
+        val resolver = policyResolver(AggregationSettings())
+        val policy = resolver.buildPolicy(target)
+        assertEquals(setOf("yunting", "local"), policy.allowedProviders)
+        assertEquals(listOf("yunting"), policy.priority)
+        assertEquals(listOf("yunting"), resolver.orderCandidates(target, null, emptySet(), policy).map { it.providerId })
+    }
+
+    @Test
+    fun toggleLessOriginStillBeatsEnabledPlatforms() {
+        // 同一首歌既有云听原版又有已启用的平台版本时，来源平台仍排最前
+        val netease = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/a.mp3"))
+        val target = track(listOf(yuntingLiveSource(), netease))
+        val resolver = policyResolver(AggregationSettings())
+        val policy = resolver.buildPolicy(target)
+        assertEquals(listOf("yunting", "netease"), policy.priority)
+        assertEquals(listOf("yunting", "netease"), resolver.orderCandidates(target, null, emptySet(), policy).map { it.providerId })
+    }
+
+    @Test
+    fun disabledSearchProviderIsStillBlocked() {
+        // 有开关的平台照样按启用列表来：关掉网易云就不能自动播它的地址
+        val netease = TrackSource("netease", "网易云音乐", song("n1", "netease", url = "https://example.com/a.mp3"))
+        val target = track(listOf(netease))
+        val resolver = policyResolver(AggregationSettings(enabledProviders = listOf("qq")))
+        val policy = resolver.buildPolicy(target)
+        assertEquals(setOf("local"), policy.allowedProviders)
+        assertTrue(resolver.orderCandidates(target, null, emptySet(), policy).isEmpty())
+    }
+
+    @Test
+    fun yuntingLiveSongResolvesWithDefaultSettings() = runBlocking {
+        // 云听直播：默认启用列表里没有云听，整条解析链路（策略 → 候选 → 取流）也要能拿到地址
+        val resolver = previewResolver(
+            mapOf("yunting:live:639" to PlayableStream(url = "http://ytcast2.radio.cn/110/radios/40639/index.m3u8", ext = "m3u8")),
+        )
+        val target = track(listOf(yuntingLiveSource()))
+        val resolution = resolver.resolve(target, policy = resolver.buildPolicy(target))
+        val ready = resolution as Resolution.Ready
+        assertEquals("yunting", ready.source.providerId)
+        assertEquals("m3u8", ready.source.song.ext)
+        assertEquals("http://ytcast2.radio.cn/110/radios/40639/index.m3u8", ready.url)
+    }
 }

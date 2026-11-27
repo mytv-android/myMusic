@@ -46,16 +46,30 @@ class SourceResolver(
         }.distinct()
         val pinned = pinnedProvider
             ?: current.pinnedProvider.takeIf { current.playbackMode == PlaybackMode.Pinned }
+        val origin = track.sources.firstOrNull()?.providerId
+        // 没有开关的平台（纯歌单音源）用户既开不了也关不掉，不算被关闭
+        val originLocked = origin != null && !hasSourceToggle(origin)
         // 自动播放只允许已启用的音乐源；用户显式固定的平台和本地源永远允许
-        val allowed = (available.filter { it in current.enabledProviders } + listOfNotNull(pinned) + LOCAL_SOURCE).toSet()
+        val allowed = (
+            available.filter { it in current.enabledProviders || it == pinned || !hasSourceToggle(it) } +
+                listOfNotNull(pinned) + LOCAL_SOURCE
+            ).toSet()
         return SourcePolicy(
             mode = current.playbackMode,
-            priority = current.playbackOrder(available, track.sources.firstOrNull()?.providerId, pinned),
+            priority = current.playbackOrder(available, origin, pinned, originLocked),
             pinnedProvider = pinned,
             allowPreview = current.allowPreview,
             allowedProviders = allowed,
         )
     }
+
+    /**
+     * 这个平台在「音乐源」设置里有没有开关。开关只列能搜索的平台（见 `SourcesSettingsScreen`），
+     * 所以云听电台这类只提供歌单的音源没有开关——它进不了启用列表，自动播放也就不能按
+     * 「未启用」把它挡掉，否则从它自己歌单里开的歌一首都放不出来。
+     */
+    private fun hasSourceToggle(providerId: String): Boolean =
+        repository.providerInfo(providerId)?.search ?: true
 
     fun orderCandidates(
         track: CanonicalTrack,
