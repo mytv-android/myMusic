@@ -376,4 +376,26 @@ class SourceResolverTest {
         assertEquals(listOf("kugou", "netease"), policy.priority)
         assertEquals(listOf("kugou", "netease"), resolver.orderCandidates(target, null, emptySet(), policy).map { it.providerId })
     }
+
+    // ---------- 手写策略：云听这类没有开关的音源由调用方显式放行 ----------
+
+    @Test
+    fun explicitlyAllowedProviderResolvesEvenWhenNotEnabled() = runBlocking {
+        // 云听没有搜索能力，「音乐源」里没有它的开关，进不了启用列表；
+        // 播放层按「只能走云听」手写策略显式放行，解析要能拿到直播地址
+        val resolver = previewResolver(
+            mapOf(
+                "yunting:live:639" to PlayableStream(
+                    url = "http://ytcast2.radio.cn/110/radios/40639/index.m3u8",
+                    ext = "m3u8",
+                ),
+            ),
+        )
+        val yunting = TrackSource("yunting", "云听", song("live:639", "yunting", ext = "m3u8"))
+        val policy = SourcePolicy(priority = listOf("yunting"), allowedProviders = setOf("yunting", "local"))
+        val ready = resolver.resolve(track(listOf(yunting)), policy = policy) as Resolution.Ready
+        assertEquals("yunting", ready.source.providerId)
+        assertEquals("m3u8", ready.source.song.ext)
+        assertEquals("http://ytcast2.radio.cn/110/radios/40639/index.m3u8", ready.url)
+    }
 }

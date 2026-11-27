@@ -37,6 +37,7 @@ import com.mytv.mymusic.aggregate.Resolution
 import com.mytv.mymusic.aggregate.SearchScope
 import com.mytv.mymusic.aggregate.SearchStatus
 import com.mytv.mymusic.aggregate.SearchUpdate
+import com.mytv.mymusic.aggregate.SourcePolicy
 import com.mytv.mymusic.aggregate.SourceResolver
 import com.mytv.mymusic.aggregate.TrackMatcher
 import com.mytv.mymusic.aggregate.TrackSource
@@ -4774,7 +4775,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         localFileFor(track)?.let { (source, url) ->
             return source.song.copy(url = url)
         }
-        val policy = resolver.buildPolicy(track, null)
+        val policy = if (track.sources.firstOrNull()?.providerId == YUNTING_SOURCE) {
+            yuntingPolicy()
+        } else {
+            resolver.buildPolicy(track, null)
+        }
         val source = resolver.orderCandidates(track, null, emptySet(), policy).firstOrNull()
         if (source == null) {
             // 来源平台被关掉、又没有允许的候选：清掉地址，让 onMediaItemTransition 走
@@ -4879,6 +4884,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         return current
     }
 
+    /**
+     * 云听电台的解析策略：候选锁死云听自己。
+     *
+     * 云听没有搜索能力，「音乐源」设置页只列能搜索的平台，所以它没有开关、也永远不在
+     * 启用列表里；不在这里显式放行，从云听歌单开的歌会被「只走已启用的音乐源」挡成
+     * 一条候选都不剩。同理也不能自动匹配或洛雪兜底——直播和当天回听在别的平台没有对应录音。
+     */
+    private fun yuntingPolicy() = SourcePolicy(
+        mode = settingsState.value.aggregation.playbackMode,
+        priority = listOf(YUNTING_SOURCE),
+        pinnedProvider = null,
+        allowPreview = settingsState.value.aggregation.allowPreview,
+        allowedProviders = setOf(YUNTING_SOURCE, LOCAL_SOURCE),
+    )
+
     private suspend fun resolvePlayable(
         track: CanonicalTrack,
         pinnedProvider: String? = null,
@@ -4886,6 +4906,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         forDownload: Boolean = false,
     ): AutoResolution {
         if (track.sources.any { it.providerId == LOCAL_SOURCE }) return resolveLocal(track, excludeProviders)
+        // 云听电台只能走云听：直播流和当天回听在别的平台没有对应录音，按歌名歌手自动匹配出来的是
+        // 另一首歌，洛雪也无歌可递。所以候选锁死云听，取不到就原样报错，不换源、不兜底、不匹配
+        if (track.sources.firstOrNull()?.providerId == YUNTING_SOURCE) {
+            return AutoResolution(
+                track,
+                resolver.resolve(track, null, excludeProviders, yuntingPolicy()),
+                autoMatched = false,
+            )
+        }
         // 洛雪按平台递歌：点了或固定了洛雪，而轨道里缺脚本声明的平台时，先按歌曲信息把变体
         // 配出来（MatchJob 带 30 天缓存），不然单平台的歌递不进脚本，只会静默回退到原平台
         val aggregation = settingsState.value.aggregation
@@ -5421,7 +5450,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // HLS 清单每十秒重拉一次，网络抖动、清单刷新失败都会走到这里。
             // isLive 依赖 Song.extra；队列被重建过、extra 掉了时按云听的 m3u8 兜底认出来
             val live = queued?.isLive == true ||
-                (failedSource?.providerId == "yunting" && queued?.ext == "m3u8")
+                (failedSource?.providerId == YUNTING_SOURCE && queued?.ext == "m3u8")
             AppLog.i(
                 "Player",
                 "错误分流：live=$live provider=${failedSource?.providerId ?: "无"} ext=${queued?.ext.orEmpty()}",
@@ -7415,6 +7444,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val BROWSE_CACHE_MS = 10L * 60 * 1000
 
+        /**
+         * 云听电台。直播和当天回听只存在于云听自己，别的平台没有对应录音：
+         * 播放、换源、续播、下载都只许走它，不自动匹配、不洛雪兜底。
+         */
+        const val YUNTING_SOURCE = "yunting"
+
         /** 授权页最多打开两次还装不上，就认定这台设备走不通那条路，转手动安装。 */
         const val MAX_INSTALL_PERMISSION_ATTEMPTS = 2
 
@@ -7436,8 +7471,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         /**
          * 切歌时必须重新走一遍解析的来源：这些平台列表里给的 url 不是能直接放的流。
          * 见 [preferredSong]——不清掉 url，onMediaItemTransition 会把它当成已有地址直接放。
+         * 云听的直播/回听地址带签发时刻的令牌，队列里放久了会失效，同样要现取现放。
          */
-        val NEEDS_RESOLVE_ON_SWITCH = setOf("soda", "apple")
+        val NEEDS_RESOLVE_ON_SWITCH = setOf("soda", "apple", YUNTING_SOURCE)
 
         /** 听歌模式队列剩这么多首时开始续取，避免放到最后一首才去请求。 */
         const val FEED_EXTEND_THRESHOLD = 3
