@@ -37,30 +37,34 @@ data class SyncSnapshot(
     /** 洛雪自定义音源，连脚本正文一起同步：本机导入的脚本没有地址，丢了只能重新导入。 */
     val lxSources: List<SyncLxSource> = emptyList(),
     /**
-     * 汽水扫码登录的护照设备身份。它和 [cookies] 里那条汽水 Cookie 是**同一套凭据**：
-     * 护照服务按 `device_id` 做风控并按它补发 `odin_tt`，会话也签给这个身份，所以两台
-     * 设备必须用同一对。老同步文件没有这一项（null），本机保持自己那份。
+     * 汽水的一整套设备身份。它和 [cookies] 里那条汽水 Cookie 是**同一套凭据**：
+     * 护照服务按 `device_id` 做风控并按它补发 `odin_tt`，会话也签给这个身份，业务请求
+     * 的设备指纹又是另一份——三份各用各的话，另一台设备在服务端眼里就是「拿着别人签发
+     * 的会话 + 一个陌生设备」。老同步文件没有这一项（null），本机保持自己那份。
      */
-    val sodaDevice: SyncSodaDevice? = null,
+    val sodaIdentity: SyncSodaIdentity? = null,
 )
 
 /**
- * 汽水扫码登录的护照设备身份（`device_id` 16 位 / `install_id` 15 位纯数字）。
+ * 汽水的一整套设备身份：扫码登录的护照身份（`device_id` 16 位 / `install_id` 15 位
+ * 纯数字）+ 播放上报与业务请求用的设备指纹。
  *
- * 跟着同步的只有这一份：播放上报用的设备指纹（`sodaReportDeviceId`）**不**同步——
- * 那是每台设备自己的听歌历史，合并成一个身份会让推荐口味和播放计数全乱。
  * 轮换（设置里的「重置登录设备」）会写一个新的 [updatedAt]，同步按它判新旧。
+ * [reportDeviceId] 允许为空：另一台设备可能没开播放上报，空的那份不该把本机已有的
+ * 指纹抹掉——抹了业务请求又会退化成「每次都是一个新设备号」。
  */
 @Serializable
-data class SyncSodaDevice(
+data class SyncSodaIdentity(
     val deviceId: String = "",
     val installId: String = "",
+    val reportDeviceId: String = "",
     val updatedAt: String = SyncTime.nowIso(),
 )
 
-fun SyncSodaDevice.changeTimeMillis(): Long = SyncTime.toMillis(updatedAt)
+fun SyncSodaIdentity.changeTimeMillis(): Long = SyncTime.toMillis(updatedAt)
 
-fun SyncSodaDevice.isUsable(): Boolean = deviceId.isNotBlank() && installId.isNotBlank()
+/** 登录身份是主，两个字段缺一个就不算可用；上报指纹可以空。 */
+fun SyncSodaIdentity.isUsable(): Boolean = deviceId.isNotBlank() && installId.isNotBlank()
 
 /** 洛雪自定义音源。[script] 是脚本正文，[deletedAt] 非空表示删除的墓碑。 */
 @Serializable
@@ -292,8 +296,8 @@ fun buildSnapshot(
     /** 本地歌的线索，按 Song.key（local:sha256:…）查；平台歌不在里面。 */
     localRefs: Map<String, SyncTrackRefs> = emptyMap(),
     lxSources: List<SyncLxSource> = emptyList(),
-    /** 汽水扫码登录的护照设备身份；没生成过就传 null，老客户端看到会忽略。 */
-    sodaDevice: SyncSodaDevice? = null,
+    /** 汽水的一整套设备身份；没生成过就传 null，老客户端看到会忽略。 */
+    sodaIdentity: SyncSodaIdentity? = null,
 ): SyncSnapshot {
     val entriesByPlaylist = entries.groupBy { it.playlistId }
     return SyncSnapshot(
@@ -353,7 +357,7 @@ fun buildSnapshot(
             }
             .filter { includeDeleted },
         lxSources = lxSources,
-        sodaDevice = sodaDevice,
+        sodaIdentity = sodaIdentity,
     )
 }
 
@@ -459,10 +463,10 @@ fun snapshotSignature(snapshot: SyncSnapshot): String = buildString {
     append(refsSignature(snapshot))
     append("\n--lx--\n")
     append(snapshot.lxSources.sortedBy { it.id }.joinToString("\n") { "${it.id}:${it.scriptHash}:${it.enabled}:${it.deletedAt}" })
-    append("\n--soda-device--\n")
-    // 登录设备身份也算内容：轮换过要和别处一样被认出「本机改过」
-    val device = snapshot.sodaDevice
-    append(if (device == null) "-" else "${device.deviceId}:${device.installId}")
+    append("\n--soda-identity--\n")
+    // 设备身份也算内容：轮换过要和别处一样被认出「本机改过」
+    val identity = snapshot.sodaIdentity
+    append(if (identity == null) "-" else "${identity.deviceId}:${identity.installId}:${identity.reportDeviceId}")
 }
 
 /** 所有带线索的本地歌：key + 三组线索，排好序；同一首在几个歌单里出现只算一次。 */
