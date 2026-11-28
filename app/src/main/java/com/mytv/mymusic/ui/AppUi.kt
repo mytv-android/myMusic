@@ -173,10 +173,12 @@ class MusicActions(private val model: MusicViewModel) {
     fun restoreHistory(items: List<String>) = model.restoreSearchHistory(items)
     fun retryFailedSearch() = model.retryFailedSearch()
 
-    fun openSource(track: CanonicalTrack, queue: List<CanonicalTrack>) = model.openSource(track, queue)
+    fun openSource(track: CanonicalTrack, queue: List<CanonicalTrack>, onlyOnce: Boolean = false) =
+        model.openSource(track, queue, onlyOnce)
     fun openSourceForSong(song: Song, queue: List<Song>) = model.openSourceForSong(song, queue)
     fun closeSource() = model.closeSource()
-    fun chooseSource(providerId: String, remember: Boolean) = model.chooseSource(providerId, remember)
+    fun chooseSource(providerId: String, remember: Boolean, method: com.mytv.mymusic.aggregate.PlaybackMethod? = null) =
+        model.chooseSource(providerId, remember, method)
     fun playAlternative(track: CanonicalTrack, source: TrackSource) = model.playAlternative(track, source)
     fun splitSource(track: CanonicalTrack, source: TrackSource) = model.splitSource(track, source)
     fun openMerge(track: CanonicalTrack) = model.openMerge(track)
@@ -335,6 +337,8 @@ class MusicActions(private val model: MusicViewModel) {
     fun setStartupTab(route: String) = model.setStartupTab(route)
     fun setPlaybackMode(mode: PlaybackMode) = model.setPlaybackMode(mode)
     fun setPinnedProvider(id: String?) = model.setPinnedProvider(id)
+    fun setPlatformPlayback(providerId: String, preference: com.mytv.mymusic.aggregate.PlatformPlaybackPreference) =
+        model.setPlatformPlayback(providerId, preference)
     fun setAllowPreview(value: Boolean) = model.setAllowPreview(value)
     fun setStrictMatch(value: Boolean) = model.setMatchStrictness(
         if (value) com.mytv.mymusic.aggregate.MatchStrictness.Strict

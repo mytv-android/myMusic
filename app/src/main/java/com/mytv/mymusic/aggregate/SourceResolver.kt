@@ -41,7 +41,12 @@ class SourceResolver(
     private val negativeCache = object : LinkedHashMap<String, CachedFailure>(32, 0.75f, true) {}
     private val lock = Any()
 
-    fun buildPolicy(track: CanonicalTrack, pinnedProvider: String? = null): SourcePolicy {
+    fun buildPolicy(
+        track: CanonicalTrack,
+        pinnedProvider: String? = null,
+        manualMethod: PlaybackMethod? = null,
+        usePlatformPlayback: Boolean = true,
+    ): SourcePolicy {
         val current = settings()
         val available = buildList {
             track.sources.mapTo(this) { it.providerId }
@@ -49,14 +54,32 @@ class SourceResolver(
         }.distinct()
         val pinned = pinnedProvider
             ?: current.pinnedProvider.takeIf { current.playbackMode == PlaybackMode.Pinned }
-        // 自动播放只允许已启用的音乐源；用户显式固定的平台和本地源永远允许
-        val allowed = (available.filter { it in current.enabledProviders } + listOfNotNull(pinned) + LOCAL_SOURCE).toSet()
+        // 只保留真正能生效的偏好：自动模式等于没配置，脚本已被删掉的洛雪方式也不该留在策略里
+        val preferences = if (pinnedProvider == null && usePlatformPlayback) {
+            current.platformPlayback.filter { (providerId, preference) ->
+                preference.mode != PlaybackMode.Auto && preference.method in playbackMethodsFor(providerId)
+            }
+        } else emptyMap()
+        // 从某个平台的列表点进来的曲目才认它的入口平台，聚合结果没有入口平台
+        val preferred = track.playbackPlatform?.takeIf { it in preferences }
+        // 自动播放只允许已启用的音乐源；用户显式固定的平台、本次点进来的入口平台和本地源永远允许
+        val allowed = (available.filter { it in current.enabledProviders } + listOfNotNull(pinned, preferred) + LOCAL_SOURCE).toSet()
+        // 有按平台偏好时不再拿"曲目第一个来源"当排序起点：那会把偏好平台的歌排到别的平台前面
+        val origin = if (track.playbackPlatform == null && current.playbackMode == PlaybackMode.Priority && preferences.isNotEmpty()) {
+            null
+        } else track.sources.firstOrNull()?.providerId
         return SourcePolicy(
             mode = current.playbackMode,
-            priority = current.playbackOrder(available, track.sources.firstOrNull()?.providerId, pinned),
+            priority = current.playbackOrder(available, origin, pinned),
             pinnedProvider = pinned,
             allowPreview = current.allowPreview,
             allowedProviders = allowed,
+            // 只有「仅本次换源」这种一次性选择才独占，常驻设置里没有独占开关
+            pinnedOnly = pinned != null && manualMethod != null,
+            platformPlayback = preferences,
+            preferredPlatform = preferred,
+            manualMethod = manualMethod,
+            deferPreview = preferences.isNotEmpty(),
         )
     }
 
@@ -69,13 +92,26 @@ class SourceResolver(
         val cookieMap = cookies()
         val pinned = pinnedProvider ?: policy.pinnedProvider
         val allowed = policy.allowedProviders
+        // 同一个平台按配置炸成多个候选：平台直连一个、洛雪再一个，各自独立探测和缓存
         val nativeSources = track.sources
             .filterNot { it.providerId in excludeProviders }
             .filter { allowed == null || it.providerId in allowed || it.providerId == pinned }
+            .flatMap { source ->
+                val preference = policy.platformPlayback[source.providerId]
+                val methods = when {
+                    source.providerId == pinned && policy.manualMethod != null -> listOf(policy.manualMethod)
+                    preference?.mode == PlaybackMode.Priority ->
+                        (listOf(preference.method) + playbackMethodsFor(source.providerId)).distinct()
+                    preference?.mode == PlaybackMode.Pinned -> listOf(preference.method)
+                    else -> listOf(PlaybackMethod.Direct)
+                }
+                methods.map { method -> source.withPlaybackMethod(method) }
+            }
         // 洛雪伪源只有被允许（或用户显式固定）时才合成：有候选不等于能用
         val lxAllowed = allowed == null || LxPlatform.PROVIDER_ID in allowed || pinned == LxPlatform.PROVIDER_ID
         val sources = nativeSources + listOfNotNull(unifiedLxSource(track, excludeProviders).takeIf { lxAllowed })
-        val statuses = sources.associateWith { availabilityOf(it, cookieMap[it.providerId].orEmpty()) }
+        // 洛雪候选能不能播由脚本决定，不跟原生源的会员/试听状态走
+        val statuses = sources.associateWith { playbackAvailability(it, cookieMap[it.providerId].orEmpty()) }
         // 手写策略没给顺序时沿用 sources 顺序；buildPolicy 生成的策略不这样回落，免得把未启用的平台带回来
         val priority = if (policy.priority.isEmpty() && allowed == null) {
             sources.map { it.providerId }.distinct()
@@ -100,20 +136,41 @@ class SourceResolver(
         val byOrder = compareBy<TrackSource> { priorityIndex(it) }.thenByDescending { it.matchScore }
         val full = sources.filter { source ->
             val status = statuses.getValue(source)
-            val custom = source.providerId == LxPlatform.PROVIDER_ID
-            source.providerId != pinned &&
-                status != Availability.Unavailable &&
-                !(status == Availability.VipOnly && cookieMap[source.providerId].isNullOrBlank() && !custom) &&
-                (status != Availability.PreviewOnly || custom)
+            val custom = source.providerId == LxPlatform.PROVIDER_ID || source.playbackMethod == PlaybackMethod.Lx
+            // 配了按平台方式的平台即使当前"不可用"也留着，交给脚本或下一次探测决定
+            val configured = source.providerId in policy.platformPlayback
+            source.providerId != pinned && (configured ||
+                (status != Availability.Unavailable &&
+                    !(status == Availability.VipOnly && cookieMap[source.providerId].isNullOrBlank() && !custom) &&
+                    (status != Availability.PreviewOnly || custom)))
         }.sortedWith(if (policy.mode == PlaybackMode.Priority) byOrder else byQuality)
         val preview = sources.filter { source ->
             source.providerId != pinned &&
                 statuses.getValue(source) == Availability.PreviewOnly &&
+                source.providerId !in policy.platformPlayback &&
                 source.providerId != LxPlatform.PROVIDER_ID &&
                 policy.allowPreview
         }.sortedWith(if (policy.mode == PlaybackMode.Priority) byOrder else byQuality)
-        return (pinnedSources + full + preview).distinctBy { it.resolutionKey.ifBlank { it.song.key } }
+        val ordered = (pinnedSources + full + preview).distinctBy { it.playbackKey }
+        // 入口平台排最前：同平台的直连和洛雪仍然按策略里的方式顺序走
+        val preferred = policy.preferredPlatform ?: return ordered
+        return ordered.filter { it.providerId == preferred } + ordered.filterNot { it.providerId == preferred }
     }
+
+    /** 同一首歌换个取流方式就是另一个候选：缓存键要分开，直连的地址不能拿去当洛雪的结果。 */
+    private fun TrackSource.withPlaybackMethod(method: PlaybackMethod): TrackSource =
+        if (method == PlaybackMethod.Direct) copy(playbackMethod = method, resolutionKey = "") else copy(
+            playbackMethod = method,
+            availability = Availability.Playable,
+            isPreview = false,
+            resolutionKey = "${method.name}:${song.key}",
+        )
+
+    /** 洛雪候选能不能播由脚本决定，不跟原生源的会员/试听状态走。 */
+    private fun playbackAvailability(source: TrackSource, cookie: String): Availability =
+        if (source.playbackMethod != PlaybackMethod.Direct || source.providerId == LxPlatform.PROVIDER_ID) {
+            Availability.Playable
+        } else availabilityOf(source, cookie)
 
     /** 一个洛雪候选代表整个脚本集合；锚点只用于列表展示，实际歌曲由脚本解析结果决定。 */
     private fun unifiedLxSource(track: CanonicalTrack, excludeProviders: Set<String>): TrackSource? {
@@ -123,6 +180,7 @@ class SourceResolver(
         return anchor.copy(
             providerId = LxPlatform.PROVIDER_ID,
             providerName = LxPlatform.PROVIDER_NAME,
+            playbackMethod = PlaybackMethod.Lx,
             availability = Availability.Playable,
             isPreview = false,
             // 候选指纹进缓存键：expand 补配出新平台变体后要能重新尝试洛雪，别被旧负缓存挡住
@@ -144,6 +202,7 @@ class SourceResolver(
         pinnedProvider: String? = null,
         excludeProviders: Set<String> = emptySet(),
         policy: SourcePolicy = buildPolicy(track, pinnedProvider),
+        excludeMethods: Set<String> = emptySet(),
     ): Resolution {
         val ordered = orderCandidates(track, pinnedProvider, excludeProviders, policy)
         val attempts = mutableListOf<Attempt>()
@@ -153,19 +212,73 @@ class SourceResolver(
         // Lazy：串行路径一个候选都不走洛雪时不该白算一遍
         val customSongs = lazy { lxCandidates(track).map { it.song } }
 
+        // 从某个平台点进来的歌先用该平台自己配置的方式；它给不出整曲，再交给全局规则
+        val preferred = policy.preferredPlatform
+        if (preferred != null && policy.mode == PlaybackMode.Auto && !policy.pinnedOnly) {
+            var previewHead: Resolution.Ready? = null
+            for (source in ordered.filter { it.providerId == preferred }) {
+                when (val probe = probeSource(track, source, policy, explicitProvider, cookieMap, customGeneration, customSongs)) {
+                    is Probe.Ready -> {
+                        val ready = Resolution.Ready(probe.source, probe.url, probe.preview, probe.resolvedAt, attempts.toList())
+                        if (!ready.isPreview || !policy.deferPreview) return ready
+                        if (previewHead == null) previewHead = ready
+                        attempts += Attempt(source, "仅提供试听")
+                    }
+                    is Probe.Skipped -> attempts += Attempt(source, probe.reason)
+                }
+            }
+            val rest = ordered.filterNot { it.providerId == preferred }
+            val tail = resolveByQuality(
+                track, rest, policy.copy(preferredPlatform = null),
+                explicitProvider, cookieMap, customGeneration, customSongs,
+            )
+            val merged = attempts + ((tail as? Resolution.Ready)?.attempts ?: (tail as Resolution.None).attempts)
+            return when (tail) {
+                is Resolution.Ready -> tail.copy(attempts = merged)
+                is Resolution.None -> previewHead?.copy(attempts = merged) ?: tail.copy(attempts = merged)
+            }
+        }
         // 「按音质」要的是所有平台里码率最高的那个：串行会把第一个能响的当结果，
         // 哪怕后面的平台能给更高音质，所以并发问遍所有候选再挑
-        if (policy.mode == PlaybackMode.Auto) {
+        if (policy.mode == PlaybackMode.Auto && !policy.pinnedOnly) {
             return resolveByQuality(track, ordered, policy, explicitProvider, cookieMap, customGeneration, customSongs)
         }
         // 「按顺序」「首选平台」顺序敏感：第一个能响的就用，提前返回也最快
+        var firstPreview: Resolution.Ready? = null
         for (source in ordered) {
+            // 刚失败过的方式本次不再试，避免原地重试同一份脚本/直连
+            if (source.playbackKey in excludeMethods) {
+                attempts += Attempt(source, "播放失败")
+                continue
+            }
+            // 「仅本次换源」指定了方式：只试这个平台，其余记一笔原因就跳过
+            if (policy.pinnedOnly && explicitProvider != null &&
+                source.providerId != explicitProvider && source.providerId != policy.preferredPlatform
+            ) {
+                attempts += Attempt(source, "固定音源独占，不尝试其他来源")
+                continue
+            }
             when (val probe = probeSource(track, source, policy, explicitProvider, cookieMap, customGeneration, customSongs)) {
-                is Probe.Ready -> return Resolution.Ready(probe.source, probe.url, probe.preview, probe.resolvedAt)
-                is Probe.Skipped -> attempts += Attempt(source, probe.reason)
+                is Probe.Ready -> {
+                    val ready = Resolution.Ready(probe.source, probe.url, probe.preview, probe.resolvedAt)
+                    // 试听先收着继续找：同平台可能还有洛雪能拿到整曲
+                    if (!ready.isPreview || !policy.deferPreview) return ready
+                    if (firstPreview == null) firstPreview = ready
+                    attempts += Attempt(source, "仅提供试听")
+                }
+                is Probe.Skipped -> {
+                    attempts += Attempt(source, probe.reason)
+                    // 「固定」方式失败就停在这首，把失败源带回去给播放页说明原因
+                    val fixed = policy.platformPlayback[source.providerId]?.mode == PlaybackMode.Pinned
+                    if (fixed) {
+                        val deepLink = track.sources.firstOrNull { it.song.link.isNotBlank() }?.song?.link.orEmpty()
+                        return Resolution.None(attempts, deepLink, source)
+                    }
+                }
             }
         }
 
+        firstPreview?.let { return it }
         val deepLink = track.sources.firstOrNull { it.song.link.isNotBlank() }?.song?.link.orEmpty()
         return Resolution.None(attempts, deepLink)
     }
@@ -197,10 +310,23 @@ class SourceResolver(
         }
         val deepLink = track.sources.firstOrNull { it.song.link.isNotBlank() }?.song?.link.orEmpty()
         // 码率相同看匹配度，还相同就沿用候选顺序——并发前的排列顺序就是排好的顺序
-        val best = ready.firstOrNull { it.source.providerId == explicitProvider }
-            ?: ready.maxWithOrNull(compareBy({ it.source.song.bitrate }, { it.source.matchScore }))
-        best?.let { Resolution.Ready(it.source, it.url, it.preview, it.resolvedAt) }
-            ?: Resolution.None(attempts, deepLink)
+        // 配了按平台方式时整曲优先于试听：同平台还有洛雪没试，不能拿直连的片段交差
+        val ranker = if (policy.deferPreview) {
+            compareBy<Probe.Ready> { !it.preview }
+                .thenBy { it.source.song.bitrate }
+                .thenBy { it.source.matchScore }
+        } else {
+            compareBy<Probe.Ready> { it.source.song.bitrate }
+                .thenBy { it.source.matchScore }
+        }
+        val best = ready.filter { it.source.providerId == explicitProvider }.maxWithOrNull(ranker)
+            ?: ready.maxWithOrNull(ranker)
+        best?.let { return@coroutineScope Resolution.Ready(it.source, it.url, it.preview, it.resolvedAt) }
+        // 「固定」方式全失败：把失败源带回去，播放页据此停在当前歌曲
+        val fixedFailure = ordered.firstOrNull { source ->
+            policy.platformPlayback[source.providerId]?.mode == PlaybackMode.Pinned
+        }
+        Resolution.None(attempts, deepLink, fixedFailure)
     }
 
     /** 单个候选探一次的结果：拿到了可用地址，或者因为某个原因跳过。 */
@@ -229,8 +355,9 @@ class SourceResolver(
         customSongs: Lazy<List<Song>>,
     ): Probe {
         val cookie = cookieMap[source.providerId].orEmpty()
-        val custom = source.providerId == LxPlatform.PROVIDER_ID
-        val status = availabilityOf(source, cookie)
+        // 洛雪方式（伪源或某个平台的洛雪变体）都按脚本处理，不走会员/试听判定
+        val custom = source.providerId == LxPlatform.PROVIDER_ID || source.playbackMethod == PlaybackMethod.Lx
+        val status = playbackAvailability(source, cookie)
         if (status == Availability.Unavailable) return Probe.Skipped("不可用")
         if (status == Availability.VipOnly && cookie.isBlank() && !custom) return Probe.Skipped("需要登录或会员")
         val explicit = source.providerId == explicitProvider
@@ -239,7 +366,7 @@ class SourceResolver(
         }
 
         val now = System.currentTimeMillis()
-        val cacheKey = source.resolutionKey.ifBlank { source.song.key }
+        val cacheKey = source.playbackKey
         val cached = synchronized(lock) { urlCache[cacheKey] }
         // 换过音质偏好就不能复用旧地址：用户选了无损，缓存里那条 128k 必须作废
         val qualityId = quality().id
@@ -263,7 +390,12 @@ class SourceResolver(
         var resolvedSong = source.song
         var stream = runCatching {
             if (custom) {
-                val result = repository.playableLxStream(customSongs.value, quality())
+                // 按平台指定的洛雪只解析这个平台的那首歌；洛雪伪源才让脚本在整个候选集里挑
+                // 洛雪伪源让脚本在整个候选集里挑；按平台指定的洛雪只解析这个平台的那首歌
+                val songs = if (source.providerId != LxPlatform.PROVIDER_ID && source.playbackMethod == PlaybackMethod.Lx) {
+                    listOf(source.song)
+                } else customSongs.value
+                val result = repository.playableLxStream(songs, quality())
                 resolvedSong = result?.song ?: source.song
                 result?.stream
             } else {
@@ -278,7 +410,11 @@ class SourceResolver(
             // 宁可降档也要让这首歌响，不能因为一个音质偏好就整首播不出来。
             stream = runCatching {
                 if (custom) {
-                    val result = repository.playableLxStream(customSongs.value, AudioQuality.Auto)
+                    // 洛雪伪源让脚本在整个候选集里挑；按平台指定的洛雪只解析这个平台的那首歌
+                val songs = if (source.providerId != LxPlatform.PROVIDER_ID && source.playbackMethod == PlaybackMethod.Lx) {
+                    listOf(source.song)
+                } else customSongs.value
+                    val result = repository.playableLxStream(songs, AudioQuality.Auto)
                     resolvedSong = result?.song ?: source.song
                     result?.stream
                 } else {
@@ -350,7 +486,7 @@ class SourceResolver(
     }
 
     fun invalidate(source: TrackSource) {
-        val cacheKey = source.resolutionKey.ifBlank { source.song.key }
+        val cacheKey = source.playbackKey
         synchronized(lock) {
             urlCache.remove(cacheKey)
             negativeCache.remove(cacheKey)

@@ -26,6 +26,7 @@ import androidx.room.Upsert
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.mytv.mymusic.aggregate.AggregationSettings
+import com.mytv.mymusic.aggregate.PlatformPlaybackPreference
 import com.mytv.mymusic.data.local.LocalMusicSettings
 import com.mytv.mymusic.data.local.LocalTrackDao
 import com.mytv.mymusic.data.local.LocalRefDao
@@ -385,6 +386,8 @@ class SettingsStore(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     val state: Flow<AppSettings> = context.dataStore.data.map { values ->
+        val savedCredentials = runCatching { json.decodeFromString<Map<String, String>>(values[cookiesKey] ?: "{}") }
+            .getOrDefault(emptyMap())
         AppSettings(
             provider = values[providerKey] ?: "netease",
             chartsSource = values[chartsSourceKey] ?: "",
@@ -394,8 +397,7 @@ class SettingsStore(private val context: Context) {
             listenGroup = values[listenGroupKey] ?: "",
             theme = values[themeKey] ?: "system",
             layoutMode = values[layoutModeKey] ?: "Auto",
-            cookies = runCatching { json.decodeFromString<Map<String, String>>(values[cookiesKey] ?: "{}") }
-                .getOrDefault(emptyMap()),
+            cookies = savedCredentials,
             favoriteSync = favoriteSyncPreferences(values[favoriteSyncKey]),
             sodaSignerUrl = values[sodaSignerUrlKey] ?: "",
             sodaSignerToken = values[sodaSignerTokenKey] ?: "",
@@ -1041,6 +1043,14 @@ class SettingsStore(private val context: Context) {
 
     suspend fun saveAggregation(value: AggregationSettings) = context.dataStore.edit {
         it[aggregationKey] = json.encodeToString(value)
+    }
+
+    suspend fun setPlatformPlayback(providerId: String, value: PlatformPlaybackPreference) = context.dataStore.edit {
+        val current = runCatching { json.decodeFromString<AggregationSettings>(it[aggregationKey].orEmpty()) }
+            .getOrDefault(AggregationSettings())
+        it[aggregationKey] = json.encodeToString(
+            current.copy(platformPlayback = current.platformPlayback + (providerId to value)),
+        )
     }
 
     /** 设置 › 本地音乐：在 edit 里读旧值再改，扫描写“上次扫描时间”和用户改开关同时发生也不会互相覆盖。 */

@@ -90,6 +90,10 @@ private fun SectionContent(
             val state by app.model.state.collectAsState()
             PlaybackSettingsScreen(state, actions, onBack, embedded, onOpen)
         }
+        SettingsSection.PlatformPlayback -> {
+            val state by app.model.state.collectAsState()
+            PlatformPlaybackSettingsScreen(state, actions, onBack, embedded) { onOpen(SettingsSection.LxSources) }
+        }
         SettingsSection.Report -> {
             val state by app.model.state.collectAsState()
             ReportSettingsScreen(state, actions, onBack, embedded)

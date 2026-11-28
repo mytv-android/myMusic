@@ -82,6 +82,7 @@ internal enum class SettingsSection(
     // 原来叫“歌词”；枚举名和路由保持不变，旧的深链接和保存的选中项继续有效
     Lyrics("settings/lyrics", "播放页", "封面形状、歌词背景与动画、律动与跟拍校准", Icons.Filled.PlayCircle, IconTone.Primary),
     Playback("settings/playback", "播放与换源", "切歌过渡、换源模式与平台顺序", Icons.Filled.SwapHoriz, IconTone.Primary),
+    PlatformPlayback("settings/playback/platforms", "各平台播放方式", "为每个平台选择直连或其他播放方式", Icons.Filled.SwapHoriz, IconTone.Primary),
     Report("settings/report", "播放上报", "把播放记录回传给平台，推荐跟着口味走", Icons.Filled.Analytics, IconTone.Primary),
     Equalizer("settings/equalizer", "均衡器", "本机播放音效，不影响下载文件", Icons.Filled.GraphicEq, IconTone.Primary),
     Sources("settings/sources", "音乐源", "启用哪些平台、按什么顺序", Icons.Filled.Tune, IconTone.Primary),
@@ -102,6 +103,7 @@ internal enum class SettingsSection(
 
     val parent: SettingsSection? get() = when (this) {
         Licenses, Privacy -> About
+        PlatformPlayback -> Playback
         LxSources -> Sources
         Subsonic, FavoriteSync -> Accounts
         else -> null

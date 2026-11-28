@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -665,7 +666,7 @@ internal fun PlaybackSettingsScreen(
                 }
                 SettingsNote(
                     "锁了档位就只取那一档；平台给不了（没上架、账号没有会员）时先换平台，仍不行才退回自动档。" +
-                        "各平台能选哪些档取决于当前账号，Spotify 与 Apple Music 只有试听片段。",
+                        "各平台能选哪些档取决于当前账号和使用的播放方式。",
                 )
             }
         }
@@ -692,6 +693,16 @@ internal fun PlaybackSettingsScreen(
                     PlaybackMode.Priority -> "按「音乐源」页排好的顺序选择播放平台。"
                     PlaybackMode.Pinned -> "选定平台排最前，平台不可用时按「音乐源」页排好的顺序选择。"
                 },
+            )
+        }
+        item(key = "platformPlayback", contentType = "settingRow") {
+            ListRow(
+                title = "各平台播放方式",
+                summary = "为每个平台单独选择取流方式与换源模式",
+                index = 0,
+                count = 1,
+                onClick = { onOpen(SettingsSection.PlatformPlayback) },
+                icon = Icons.Filled.SwapHoriz,
             )
         }
         if (aggregation.playbackMode == PlaybackMode.Pinned) {

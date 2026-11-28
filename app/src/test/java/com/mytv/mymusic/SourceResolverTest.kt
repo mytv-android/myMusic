@@ -2,6 +2,8 @@ package com.mytv.mymusic
 
 import com.mytv.mymusic.aggregate.AggregationSettings
 import com.mytv.mymusic.aggregate.Availability
+import com.mytv.mymusic.aggregate.PlatformPlaybackPreference
+import com.mytv.mymusic.aggregate.PlaybackMethod
 import com.mytv.mymusic.aggregate.PlaybackMode
 import com.mytv.mymusic.aggregate.Resolution
 import com.mytv.mymusic.aggregate.SourcePolicy

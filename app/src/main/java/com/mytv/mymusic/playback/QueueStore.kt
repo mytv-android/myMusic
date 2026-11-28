@@ -23,7 +23,12 @@ data class SavedQueue(
     val savedAt: Long = 0L,
     /** 队列来自哪张歌单；空表示搜索、单首播放或旧版本快照。 */
     val origin: PlaybackOrigin? = null,
+    val routes: List<SavedTrackRoute?> = emptyList(),
 )
+
+/** 保留聚合候选和点歌平台，避免续播时把上一次的实际取流平台当作点歌平台。 */
+@Serializable
+data class SavedTrackRoute(val platform: String?, val candidates: List<Song>)
 
 /** 当前队列的来源。[kind] 为 collection（平台详情）或 local（自建歌单），[key] 是对应页面 key / 歌单 id。 */
 @Serializable
@@ -54,7 +59,12 @@ data class SavedCursor(
 }
 
 /** 一次能续播的快照：队列和位置对得上才算数。 */
-data class SavedPlayback(val songs: List<Song>, val cursor: SavedCursor, val origin: PlaybackOrigin? = null) {
+data class SavedPlayback(
+    val songs: List<Song>,
+    val cursor: SavedCursor,
+    val origin: PlaybackOrigin? = null,
+    val routes: List<SavedTrackRoute?> = emptyList(),
+) {
     val index: Int get() = cursor.index.coerceIn(0, songs.lastIndex)
     val current: Song get() = songs[index]
 }
@@ -87,15 +97,19 @@ class QueueStore(context: Context) {
         val fixed = if (index >= 0) cursor.copy(index = index) else SavedCursor(key = queue.songs.first().key)
         // 上次整个队列放完停在最后一首的末尾：从这首开头接上，和播放器放完后再按播放一样
         val ended = fixed.durationMs > 0 && fixed.positionMs >= fixed.durationMs - END_SLACK_MS
-        SavedPlayback(queue.songs, if (ended) fixed.copy(positionMs = 0L) else fixed, queue.origin)
+        SavedPlayback(queue.songs, if (ended) fixed.copy(positionMs = 0L) else fixed, queue.origin, queue.routes)
     }
 
-    suspend fun saveQueue(songs: List<Song>, origin: PlaybackOrigin? = null) = withContext(Dispatchers.IO) {
+    suspend fun saveQueue(
+        songs: List<Song>,
+        origin: PlaybackOrigin? = null,
+        routes: List<SavedTrackRoute?> = emptyList(),
+    ) = withContext(Dispatchers.IO) {
         if (songs.isEmpty()) {
             clear()
             return@withContext
         }
-        val text = json.encodeToString(SavedQueue(songs.map(::forDisk), System.currentTimeMillis(), origin))
+        val text = json.encodeToString(SavedQueue(songs.map(::forDisk), System.currentTimeMillis(), origin, routes))
         lock.withLock { write(queueFile, text) }
     }
 

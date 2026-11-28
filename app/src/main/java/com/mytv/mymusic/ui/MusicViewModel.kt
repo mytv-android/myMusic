@@ -31,6 +31,8 @@ import com.mytv.mymusic.aggregate.CanonicalTrack
 import com.mytv.mymusic.aggregate.CollectionMatcher
 import com.mytv.mymusic.aggregate.MatchJob
 import com.mytv.mymusic.aggregate.MatchStrictness
+import com.mytv.mymusic.aggregate.PlatformPlaybackPreference
+import com.mytv.mymusic.aggregate.PlaybackMethod
 import com.mytv.mymusic.aggregate.PlaybackMode
 import com.mytv.mymusic.aggregate.ProviderSearchState
 import com.mytv.mymusic.aggregate.ProviderStatus
@@ -43,6 +45,7 @@ import com.mytv.mymusic.aggregate.SourceResolver
 import com.mytv.mymusic.aggregate.TrackMatcher
 import com.mytv.mymusic.aggregate.TrackSource
 import com.mytv.mymusic.aggregate.availabilityOf
+import com.mytv.mymusic.aggregate.playbackMethodsFor
 import com.mytv.mymusic.data.AppSettings
 import com.mytv.mymusic.data.CachedAccountProfile
 import com.mytv.mymusic.data.CanonicalSourceEntity
@@ -150,6 +153,7 @@ import com.mytv.mymusic.playback.PlaybackService
 import com.mytv.mymusic.playback.PlaybackOrigin
 import com.mytv.mymusic.playback.SavedCursor
 import com.mytv.mymusic.playback.SavedPlayback
+import com.mytv.mymusic.playback.SavedTrackRoute
 import com.mytv.mymusic.playback.VolumeNormalization
 import com.mytv.mymusic.widget.PlaybackSnapshot
 import com.mytv.mymusic.widget.SearchRequest
@@ -372,8 +376,10 @@ data class MusicUiState(
     val sourcePickerBusy: String = "",
     val sourcePickerError: String = "",
     val sourcePickerInfo: String = "",
+    val sourcePickerOnlyOnce: Boolean = false,
     val mergeTrack: CanonicalTrack? = null,
     val playbackNotice: String = "",
+    val fixedPlaybackFailure: String = "",
     val deepLink: String = "",
 ) {
     /**
@@ -500,7 +506,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     )
     private var failoverInProgress = false
 
-    /** 本轮播放里已经试过并失败的平台（按曲目）：换源重试要累积排除，不然会在两个源之间来回切。 */
+    /** 失败记录按取流方式存，同平台的直连与卡密仍可互相回退。 */
     private val failoverExcluded = mutableMapOf<String, MutableSet<String>>()
     private var updateDownloadJob: Job? = null
     private var pendingUpdateInstall = false
@@ -512,8 +518,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var mergeTargets: Map<String, String> = emptyMap()
     private var aggregateSongs: Map<String, List<Song>> = emptyMap()
     private val pinnedProviders = mutableMapOf<String, String>()
+    private var oneTimeTrackId: String? = null
     /** 本次队列实际解析出的来源；洛雪是组合源，不能只靠歌曲 key 反查原生平台。 */
     private val resolvedSources = mutableMapOf<String, TrackSource>()
+    private val prefetchedNotices = mutableMapOf<String, String>()
     private val aggregateDao = app.database.aggregate()
     private val libraryDao = app.database.library()
 
@@ -4003,6 +4011,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         pinnedProvider: String?,
         openPlayer: Boolean,
         origin: PlaybackOrigin? = null,
+        manualMethod: PlaybackMethod? = null,
     ): Boolean {
         val player = awaitController()
         if (player == null) {
@@ -4015,52 +4024,47 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val local = localFileFor(track)
         var playableTrack = track
         var ready: Resolution.Ready? = null
-        var autoMatched = false
-        var autoNotice = ""
+        var notice = ""
+        var fixedFailure = ""
         if (local == null) {
-            val result = resolvePlayable(track, pinnedProvider)
+            val result = resolvePlayable(track, pinnedProvider, manualMethod = manualMethod)
             playableTrack = result.track
             ready = result.resolution as? Resolution.Ready
-            autoMatched = result.autoMatched
-            autoNotice = result.notice
             if (ready == null) {
-                base.value = base.value.copy(
-                    playbackNotice = noSourceMessage(playableTrack, result.resolution),
-                    deepLink = (result.resolution as? Resolution.None)?.deepLink.orEmpty(),
-                )
-                return false
+                val reason = noSourceMessage(playableTrack, result.resolution)
+                val failure = result.resolution as? Resolution.None
+                if (failure?.fixedSource == null) {
+                    base.value = base.value.copy(playbackNotice = reason, deepLink = failure?.deepLink.orEmpty())
+                    return false
+                }
+                fixedFailure = reason
+            } else {
+                notice = playbackNotice(result, ready)
             }
         }
-        if (pinnedProvider != null) pinnedProviders[playableTrack.id] = pinnedProvider
-        val source = local?.first ?: ready!!.source
-        val resolvedSong = if (local != null) {
-            source.song.copy(url = local.second)
-        } else {
-            source.song.copy(url = ready!!.url)
-        }
+        val source = local?.first ?: ready?.source
+        val resolvedSong = (source ?: playableTrack.primarySource ?: return false).song
+            .copy(url = local?.second ?: ready?.url.orEmpty())
         val canonicalQueue = ordered.map { if (it.id == track.id) playableTrack else it }
         val queueSongs = canonicalQueue.map { item ->
             if (item.id == playableTrack.id) resolvedSong else preferredSong(item)
         }
-        val fallbackNotice = when {
-            local != null -> ""
-            ready!!.isPreview -> "当前为试听片段"
-            autoMatched -> autoNotice.ifBlank { "原音源不可用，已自动匹配到${ready.source.providerName}" }
-            pinnedProvider != null && ready.source.providerId != pinnedProvider ->
-                "所选平台没有返回可播放地址，已切换到${ready.source.providerName}"
-            else -> ""
+        if (notice.isBlank() && pinnedProvider != null && ready != null && ready.source.providerId != pinnedProvider) {
+            notice = "所选平台没有返回可播放地址，已切换到${ready.source.actualProviderName}"
         }
         dormant = null
+        oneTimeTrackId = playableTrack.id.takeIf { manualMethod != null }
+        pinnedProviders.clear()
+        if (pinnedProvider != null && manualMethod == null) pinnedProviders[playableTrack.id] = pinnedProvider
+        failoverExcluded.clear()
         resolvedSources.clear()
-        resolvedSources[playableTrack.id] = source
+        prefetchedNotices.clear()
+        if (source != null) resolvedSources[playableTrack.id] = source
         AppLog.d(
             "Player",
-            "起播《${resolvedSong.title}》${source.providerName}${if (local != null) "（本机文件）" else ""}" +
+            "切到《${resolvedSong.title}》${source?.actualProviderName.orEmpty()}${if (local != null) "（本机文件）" else ""}" +
                 "，队列 ${queueSongs.size} 首，从第 ${startIndex.coerceAtLeast(0) + 1} 首",
         )
-        player.setMediaItems(queueSongs.map(::mediaItem), startIndex.coerceAtLeast(0), 0)
-        player.prepare()
-        player.play()
         val requestId = base.value.queueId + 1
         base.value = base.value.copy(
             queue = queueSongs,
@@ -4070,11 +4074,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             current = resolvedSong,
             currentTrack = playableTrack,
             currentSource = source,
-            playerOpen = (openPlayer && autoOpenPlayer) || base.value.playerOpen,
-            playbackNotice = fallbackNotice,
+            playerOpen = fixedFailure.isNotBlank() || (openPlayer && autoOpenPlayer) || base.value.playerOpen,
+            playbackNotice = notice,
+            fixedPlaybackFailure = fixedFailure,
             error = "",
             deepLink = "",
         )
+        if (fixedFailure.isNotBlank()) player.pause()
+        player.setMediaItems(queueSongs.map(::mediaItem), startIndex.coerceAtLeast(0), 0)
+        if (fixedFailure.isNotBlank()) {
+            loadLyrics(resolvedSong)
+            return false
+        }
+        player.prepare()
+        player.play()
         verifyQueueApplied(player, requestId)
         rememberCanonical(playableTrack)
         remember("history", historySong(resolvedSong))
@@ -4114,7 +4127,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun openSource(track: CanonicalTrack, queue: List<CanonicalTrack> = _search.value.aggregateGroups) {
+    fun openSource(
+        track: CanonicalTrack,
+        queue: List<CanonicalTrack> = _search.value.aggregateGroups,
+        onlyOnce: Boolean = false,
+    ) {
         val ordered = queue.ifEmpty { listOf(track) }.let { list ->
             if (list.any { it.id == track.id }) list else listOf(track) + list
         }
@@ -4124,6 +4141,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             sourcePickerBusy = "",
             sourcePickerError = "",
             sourcePickerInfo = "",
+            sourcePickerOnlyOnce = onlyOnce,
         )
     }
 
@@ -4140,15 +4158,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             sourcePickerBusy = "",
             sourcePickerError = "",
             sourcePickerInfo = "",
+            sourcePickerOnlyOnce = false,
         )
     }
 
-    fun chooseSource(providerId: String, remember: Boolean = false) {
+    fun chooseSource(providerId: String, remember: Boolean = false, method: PlaybackMethod? = null) {
         val track = base.value.sourcePickerTrack ?: return
         val queue = base.value.sourcePickerQueue.ifEmpty { listOf(track) }
         viewModelScope.launch {
             base.value = base.value.copy(sourcePickerBusy = providerId, sourcePickerError = "", sourcePickerInfo = "")
             if (providerId == LxPlatform.PROVIDER_ID) {
+                if (method != null) {
+                    playSourceOnce(track, queue, providerId, method)
+                    return@launch
+                }
                 if (remember) {
                     app.settings.saveAggregation(
                         settingsState.value.aggregation.copy(
@@ -4157,7 +4180,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         ),
                     )
                 }
-                pinnedProviders[track.id] = providerId
                 base.value = base.value.copy(sourcePickerTrack = null, sourcePickerQueue = emptyList(), sourcePickerBusy = "")
                 playTrack(track, queue, providerId)
                 return@launch
@@ -4188,6 +4210,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             val updated = if (existing != null) track else TrackMatcher.withSource(track, source)
+            if (method != null) {
+                playSourceOnce(updated, queue, providerId, method)
+                return@launch
+            }
             if (remember) {
                 app.settings.saveAggregation(
                     settingsState.value.aggregation.copy(
@@ -4196,13 +4222,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
             }
-            pinnedProviders[updated.id] = providerId
             base.value = base.value.copy(
                 sourcePickerTrack = null,
                 sourcePickerQueue = emptyList(),
                 sourcePickerBusy = "",
             )
             playTrack(updated, queue.map { if (it.id == updated.id) updated else it }, providerId)
+        }
+    }
+
+    private suspend fun playSourceOnce(
+        track: CanonicalTrack,
+        queue: List<CanonicalTrack>,
+        providerId: String,
+        method: PlaybackMethod,
+    ) {
+        if (startTrack(track, queue, providerId, openPlayer = true, origin = base.value.playbackOrigin, manualMethod = method)) {
+            closeSource()
+        } else {
+            base.update { it.copy(sourcePickerBusy = "", sourcePickerError = it.playbackNotice.ifBlank { "所选方式无法播放" }) }
         }
     }
 
@@ -4213,7 +4251,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             source.providerId,
             cookieFor(source.providerId),
         )
-        pinnedProviders[single.id] = source.providerId
         base.value = base.value.copy(sourcePickerTrack = null, sourcePickerQueue = emptyList(), sourcePickerError = "")
         playTrack(single, listOf(single), source.providerId)
     }
@@ -4547,7 +4584,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         when (action) {
-            "play" -> if (player.isPlaying) player.pause() else player.play()
+            "play" -> {
+                val state = base.value
+                val blocked = state.currentTrack?.takeIf { state.fixedPlaybackFailure.isNotBlank() }
+                when {
+                    player.isPlaying -> player.pause()
+                    blocked != null -> playTrack(blocked, state.canonicalQueue, openPlayer = false, playbackOrigin = state.playbackOrigin)
+                    else -> player.play()
+                }
+            }
             "next" -> {
                 // 上报要知道上一首是被「下一首」切走的，不是自己播完的
                 base.value.current?.let { PlayReportHub.userAction(it.source, PlayEndReason.Next) }
@@ -4589,7 +4634,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } catch (_: Throwable) {
                 false
             }
-            if (!ok) base.update { it.copy(playbackNotice = "暂时连不上播放器，请稍后再试") }
+            if (!ok) base.update { state ->
+                if (state.playbackNotice.isNotBlank() || state.fixedPlaybackFailure.isNotBlank()) state
+                else state.copy(playbackNotice = "暂时连不上播放器，请稍后再试")
+            }
         }
     }
 
@@ -4769,11 +4817,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearQueue() {
         dormant = null
+        oneTimeTrackId = null
         resolvedSources.clear()
+        prefetchedNotices.clear()
+        pinnedProviders.clear()
+        failoverExcluded.clear()
         controller?.clearMediaItems()
         controller?.stop()
         _position.value = 0
-        base.value = base.value.copy(current = null, currentTrack = null, currentSource = null, duration = 0, queue = emptyList(), canonicalQueue = emptyList(), playerOpen = false, posterOpen = false)
+        base.value = base.value.copy(current = null, currentTrack = null, currentSource = null, duration = 0, queue = emptyList(), canonicalQueue = emptyList(), playerOpen = false, posterOpen = false, fixedPlaybackFailure = "")
     }
 
     fun openDeepLink() {
@@ -4969,6 +5021,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun canonicalForSong(song: Song): CanonicalTrack {
         val providerId = song.source.ifBlank { settingsState.value.provider }
         val track = TrackMatcher.singleSource(song, providerName(providerId), providerId, cookieFor(providerId))
+            .copy(playbackPlatform = providerId)
         // 本地歌的标签常是“Track 01 / 未知歌手”，按标题歌手时长算的规范 id 会撞车，
         // 队列按 id 去重时就把别的歌吞掉了；本地歌的身份本来就唯一，直接用它
         return if (providerId == LOCAL_SOURCE) track.copy(id = song.key) else track
@@ -4996,7 +5049,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         //  - Apple：url 恒为 30 秒试听片段（`previews[0]`），整曲是 Widevine 加密的 HLS，
         //    只有 playableStream 才拿得到。不清掉的话 onMediaItemTransition 看到 url 非空
         //    就直接放片段，永远不会解析，DRM 三件套也就挂不上 MediaItem。
-        return if (song.source in NEEDS_RESOLVE_ON_SWITCH) song.copy(url = "") else song
+        return if (song.source in NEEDS_RESOLVE_ON_SWITCH ||
+            policy.platformPlayback.keys.any { providerId -> track.sources.any { it.providerId == providerId } }
+        ) song.copy(url = "") else song
     }
 
     /**
@@ -5022,7 +5077,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun historySong(song: Song): Song = song.forStorage()
 
     private fun noSourceMessage(track: CanonicalTrack, resolution: Resolution): String {
-        val attempts = (resolution as? Resolution.None)?.attempts.orEmpty()
+        val failure = resolution as? Resolution.None
+        val attempts = failure?.attempts.orEmpty()
+        failure?.fixedSource?.let { source ->
+            val reason = attempts.lastOrNull { it.source.playbackKey == source.playbackKey }?.reason ?: "没有可用的整曲"
+            return "${source.providerName}已固定为${source.playbackMethod.label}，$reason"
+        }
         // 本地歌放不了：原因由本地音乐库给（只在原设备上 / 文件不在了），比“都没有返回地址”说得清楚
         attempts.firstOrNull { it.source.providerId == LOCAL_SOURCE }?.let { return it.reason }
         val reasons = attempts.map { it.reason }
@@ -5052,6 +5112,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         /** 换到别的源时要给用户看的说明；空就用默认的“已自动匹配到…”。 */
         val notice: String = "",
     )
+
+    private fun playbackNotice(result: AutoResolution, ready: Resolution.Ready): String {
+        val preferredFailure = ready.attempts.firstOrNull { attempt ->
+            settingsState.value.aggregation.platformPlayback[attempt.source.providerId]?.let {
+                it.mode == PlaybackMode.Priority && it.method == attempt.source.playbackMethod
+            } == true && attempt.source.playbackKey != ready.source.playbackKey
+        }
+        val fallback = preferredFailure?.let {
+            "${it.source.actualProviderName}（${it.reason}），已改用${ready.source.actualProviderName}"
+        } ?: result.notice.ifBlank {
+            if (result.autoMatched) "原音源不可用，已自动匹配到${ready.source.actualProviderName}" else ""
+        }
+        return listOfNotNull(fallback.takeIf { it.isNotBlank() }, "当前为试听片段".takeIf { ready.isPreview })
+            .joinToString(" · ")
+    }
 
     /**
      * 洛雪要的平台变体轨道里没有时，按歌曲信息并发补配（只补缺失的平台）；
@@ -5110,8 +5185,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         pinnedProvider: String? = null,
         excludeProviders: Set<String> = emptySet(),
         forDownload: Boolean = false,
+        excludeMethods: Set<String> = emptySet(),
+        manualMethod: PlaybackMethod? = null,
     ): AutoResolution {
-        if (track.sources.any { it.providerId == LOCAL_SOURCE }) return resolveLocal(track, excludeProviders)
+        if (pinnedProvider != null && manualMethod != null) {
+            val effective = if (pinnedProvider == LxPlatform.PROVIDER_ID) expandTrackForLx(track) else track
+            val policy = resolver.buildPolicy(effective, pinnedProvider, manualMethod)
+            val resolution = resolver.resolve(effective, pinnedProvider, policy = policy)
+            return AutoResolution(effective, resolution, autoMatched = false)
+        }
+        if (track.sources.any { it.providerId == LOCAL_SOURCE }) return resolveLocal(track, excludeProviders, excludeMethods)
         // 云听电台只能走云听：直播流和当天回听在别的平台没有对应录音，按歌名歌手自动匹配出来的是
         // 另一首歌，洛雪也无歌可递。所以候选锁死云听，取不到就原样报错，不换源、不兜底、不匹配
         if (track.sources.firstOrNull()?.providerId == YUNTING_SOURCE) {
@@ -5128,16 +5211,26 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             .takeIf { it.playbackMode == PlaybackMode.Pinned }?.pinnedProvider
         val lxPinned = pinnedProvider == LxPlatform.PROVIDER_ID ||
             (pinnedProvider == null && settingsPinned == LxPlatform.PROVIDER_ID)
-        val effective = if (lxPinned) expandTrackForLx(track) else track
+        fun buildPolicy(item: CanonicalTrack) = resolver.buildPolicy(item, pinnedProvider, usePlatformPlayback = !forDownload)
+        val effective = if (lxPinned && buildPolicy(track).preferredPlatform == null) {
+            expandTrackForLx(track)
+        } else track
+        val basePolicy = buildPolicy(effective)
+        val deferPreview = pinnedProvider == null && basePolicy.allowPreview && basePolicy.platformPlayback.isNotEmpty()
         // 下载只要整曲：试听片段和无损档位一样会被平台降级，回退时也优先能下整曲的源
-        fun policyFor(item: CanonicalTrack) = resolver.buildPolicy(item, pinnedProvider).let {
-            if (forDownload) it.copy(allowPreview = false, pinnedProvider = null) else it
+        fun policyFor(item: CanonicalTrack, fullOnly: Boolean = deferPreview) = buildPolicy(item).let {
+            when {
+                forDownload -> it.copy(allowPreview = false, pinnedProvider = null)
+                fullOnly -> it.copy(allowPreview = false)
+                else -> it
+            }
         }
         val initial = resolver.resolve(
             effective,
             pinnedProvider,
             excludeProviders,
             policyFor(effective),
+            excludeMethods,
         )
         if (initial is Resolution.Ready) {
             val notice = if (lxPinned && initial.source.providerId != LxPlatform.PROVIDER_ID) {
@@ -5145,21 +5238,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } else ""
             return AutoResolution(effective, initial, autoMatched = false, notice = notice)
         }
+        if ((initial as? Resolution.None)?.fixedSource != null) return AutoResolution(effective, initial, autoMatched = false)
 
         var current = effective
         var last: Resolution = initial
         // 洛雪万能兜底：单平台歌（Apple/Spotify/汽水/B站等）原生解析失败后，按歌曲信息补配洛雪
         // 平台变体，再让洛雪伪源单独试一次——否则这些歌单永远轮不到脚本
         val lxEnabled = LxPlatform.PROVIDER_ID in aggregation.enabledProviders
-        if (lxEnabled && !lxPinned) {
+        if (lxEnabled && !lxPinned && !basePolicy.pinnedOnly) {
             val expanded = expandTrackForLx(effective)
             if (expanded.sources.size > effective.sources.size) {
                 // 排除所有原生变体（含刚补配的平台），让洛雪伪源成为唯一候选，只试脚本；
                 // 洛雪内部仍能拿到全部平台变体，脚本失败再回退原生自动匹配
                 val nativeExclude = excludeProviders + expanded.sources.map { it.providerId }
-                val lxResolution = resolver.resolve(expanded, pinnedProvider, nativeExclude, policyFor(expanded))
+                val lxResolution = resolver.resolve(expanded, pinnedProvider, nativeExclude, policyFor(expanded), excludeMethods)
                 if (lxResolution is Resolution.Ready) {
-                    return AutoResolution(expanded, lxResolution, autoMatched = true, notice = "原音源不可用，已用洛雪播放")
+                    return AutoResolution(
+                        expanded,
+                        lxResolution.copy(attempts = (initial as Resolution.None).attempts + lxResolution.attempts),
+                        autoMatched = true,
+                        notice = "原音源不可用，已用洛雪播放",
+                    )
                 }
                 if ((lxResolution as? Resolution.None)?.attempts?.isNotEmpty() == true) last = lxResolution
             }
@@ -5169,9 +5268,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             ?: return AutoResolution(effective, last, autoMatched = false)
         // 自动匹配的排除集合只看原始轨道：expand 补配出来的变体只是给洛雪的，不能把原生平台误排除
         val attempted = (effective.sources.map { it.providerId } + excludeProviders).toMutableSet()
-        for (providerId in autoMatchProviders(attempted)) {
+        val matchProviders = if (basePolicy.pinnedOnly) listOfNotNull(basePolicy.pinnedProvider).filterNot { it in attempted }
+        else autoMatchProviders(attempted)
+        for (providerId in matchProviders) {
             val result = withTimeoutOrNull(AUTO_MATCH_TIMEOUT_MS) {
-                runCatching { matchJob.matchOne(original, providerId) }.getOrNull()
+                runCatching { matchJob.matchOne(original, providerId) }.getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    null
+                }
             } ?: continue
             val song = result.song ?: continue
             current = TrackMatcher.withSource(
@@ -5189,11 +5293,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 pinnedProvider,
                 excludeProviders,
                 policyFor(current),
+                excludeMethods,
             )
             if (resolution is Resolution.Ready) {
                 return AutoResolution(current, resolution, autoMatched = true)
             }
+            if ((resolution as? Resolution.None)?.fixedSource != null) return AutoResolution(current, resolution, autoMatched = false)
             last = resolution
+        }
+        if (deferPreview && !forDownload) {
+            val preview = resolver.resolve(current, pinnedProvider, excludeProviders, policyFor(current, false), excludeMethods)
+            if (preview is Resolution.Ready) return AutoResolution(current, preview, autoMatched = false)
         }
         return AutoResolution(current, last, autoMatched = false)
     }
@@ -5205,7 +5315,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * 刚放失败的本机文件或云端副本（[excludeProviders] 里有 local）不再拿回来：两者是同一份内容，
      * 格式放不了换哪份都一样，直接去平台版本，免得在同一个坏文件上来回重试。
      */
-    private suspend fun resolveLocal(track: CanonicalTrack, excludeProviders: Set<String>): AutoResolution {
+    private suspend fun resolveLocal(
+        track: CanonicalTrack,
+        excludeProviders: Set<String>,
+        excludeMethods: Set<String>,
+    ): AutoResolution {
         val source = track.sources.first { it.providerId == LOCAL_SOURCE }
         val failedBefore = LOCAL_SOURCE in excludeProviders
         val outcome = app.localLibrary.resolve(source.song, skipFile = failedBefore, skipCloud = failedBefore)
@@ -5244,7 +5358,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 TrackSource(providerId, providerName(providerId), song, matchScore = score, matchMethod = method),
             )
             val platformOnly = withPlatform.copy(sources = withPlatform.sources.filter { it.providerId != LOCAL_SOURCE })
-            val resolution = resolver.resolve(platformOnly, null, exclude, resolver.buildPolicy(platformOnly, null))
+            val resolution = resolver.resolve(platformOnly, excludeProviders = exclude, excludeMethods = excludeMethods)
+            if ((resolution as? Resolution.None)?.fixedSource != null) {
+                return AutoResolution(withPlatform, resolution, autoMatched = false)
+            }
             if (resolution !is Resolution.Ready) return null
             return AutoResolution(
                 withPlatform,
@@ -5387,7 +5504,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     .setMultiSession(true)
                     .build(),
             )
-        } else if (song.source == "apple" && song.url.contains(".m3u8", ignoreCase = true)) {
+        } else if (song.source == "apple" && song.url.contains(".m3u8", ignoreCase = true) &&
+            !song.url.startsWith("http://127.0.0.1:")
+        ) {
             // 整曲清单却没有 DRM 三件套，放出去必然解不开。这条路以前是哑的——日志里只看到
             // "整曲就绪"，然后播放没动静，中间发生了什么完全看不出来。
             AppLog.w(
@@ -5471,8 +5590,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val index = controller?.currentMediaItemIndex ?: return
             val song = base.value.queue.getOrNull(index) ?: return
             val track = base.value.canonicalQueue.getOrNull(index)
+            if (track?.id != oneTimeTrackId) oneTimeTrackId = null
+            val stayingOnFailure = track?.id == base.value.currentTrack?.id && base.value.fixedPlaybackFailure.isNotBlank()
+            if (stayingOnFailure && controller?.playWhenReady != true) return
             val source = track?.let { resolvedSources[it.id] } ?: track?.sources?.find { it.song.key == song.key }
-            base.value = base.value.copy(currentTrack = track, currentSource = source)
+            base.value = base.value.copy(
+                currentTrack = track,
+                currentSource = source,
+                fixedPlaybackFailure = "",
+                playbackNotice = track?.id?.let(prefetchedNotices::remove) ?: base.value.playbackNotice,
+            )
             staleErrorRetried = -1
             extendFeedIfNeeded(index)
             if (song.url.isNotBlank()) {
@@ -5492,6 +5619,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         private fun resolveQueueItem(index: Int, track: CanonicalTrack) {
             if (resolvingIndex == index && resolving?.isActive == true) return
             resolvingIndex = index
+            val queueId = base.value.queueId
             resolving = viewModelScope.launch {
                 val local = localFileFor(track)
                 if (local != null) {
@@ -5514,14 +5642,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val pinned = pinnedProviders[track.id]
                 val result = resolvePlayable(track, pinned)
                 val resolution = result.resolution as? Resolution.Ready
+                val at = queueIndexOf(track, index)
+                if (base.value.queueId != queueId || controller?.currentMediaItemIndex != at || at < 0) return@launch
                 if (resolution == null) {
-                    skipUnplayable(index, track.title, noSourceMessage(result.track, result.resolution))
+                    val reason = noSourceMessage(result.track, result.resolution)
+                    if ((result.resolution as? Resolution.None)?.fixedSource != null) {
+                        holdPlaybackFailure(at, result.track, reason)
+                    } else {
+                        skipUnplayable(at, track.title, reason)
+                    }
                     return@launch
                 }
                 val resolved = resolution.source.song.copy(url = resolution.url)
-                val at = queueIndexOf(track, index)
-                val currentIndex = controller?.currentMediaItemIndex ?: return@launch
-                if (currentIndex != at) return@launch
                 controller?.replaceMediaItem(at, mediaItem(resolved))
                 prepareIfStopped()
                 unplayableSkips = 0
@@ -5532,11 +5664,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     current = resolved,
                     currentTrack = result.track,
                     currentSource = resolution.source,
-                    playbackNotice = when {
-                        result.autoMatched -> result.notice.ifBlank { "原音源不可用，已自动匹配到${resolution.source.providerName}" }
-                        resolution.isPreview -> "当前为试听片段"
-                        else -> skipNotice.orEmpty()
-                    },
+                    fixedPlaybackFailure = "",
+                    playbackNotice = playbackNotice(result, resolution).ifBlank { skipNotice.orEmpty() },
                 )
                 skipNotice = null
                 rememberCanonical(result.track)
@@ -5589,6 +5718,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (player.playbackState == Player.STATE_IDLE) player.prepare()
         }
 
+        private fun holdPlaybackFailure(index: Int, track: CanonicalTrack, reason: String) {
+            val song = base.value.queue.getOrNull(index) ?: return
+            base.update {
+                it.copy(
+                    current = song,
+                    currentTrack = track,
+                    currentSource = null,
+                    canonicalQueue = it.canonicalQueue.mapIndexed { at, item -> if (at == index) track else item },
+                    fixedPlaybackFailure = reason,
+                    playbackNotice = "",
+                    playerOpen = true,
+                )
+            }
+            controller?.pause()
+        }
+
         /**
          * 第 [index] 首解析不出来：还停在它上面就用播放提示说明原因并跳到下一首；没有下一首，或连着跳过了整个队列 /
          * [MAX_UNPLAYABLE_SKIPS] 首（多半是断网或账号问题，再跳也是白跑），就暂停只留提示。用户已经切走时只提示，不再动播放器。
@@ -5616,9 +5761,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (base.value.queue.getOrNull(player.currentMediaItemIndex)?.url?.isNotBlank() == true) prepareIfStopped()
         }
 
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            // 放起来了就把这一轮的排除记录清掉，下次出错重新从所有源里挑
-            if (playbackState == Player.STATE_READY) {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            // 已经开始播放后才结束起播重试，缓冲就绪时不能恢复刚失败过的方式。
+            if (isPlaying) {
                 base.value.currentTrack?.id?.let(failoverExcluded::remove)
                 base.value.current?.key?.let(LxSources::clearPlaybackFailures)
             }
@@ -5641,6 +5786,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // 解析恰好赶在这个报错之前换好了地址（地址缓存命中）时，报错来自换掉的空地址，重新准备一次即可
             val queued = base.value.queue.getOrNull(index)
             if (queued != null && queued.url.isBlank()) {
+                if (base.value.fixedPlaybackFailure.isNotBlank() && controller?.playWhenReady != true) return
                 resolveQueueItem(index, track)
                 return
             }
@@ -5651,7 +5797,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 controller?.prepare()
                 return
             }
-            val failedSource = base.value.currentSource ?: track.sources.find { it.song.key == base.value.current?.key }
+            val failedSource = resolvedSources[track.id] ?: track.sources.find { it.song.key == queued?.key }
+            if (track.id == oneTimeTrackId) {
+                holdPlaybackFailure(index, track, "${failedSource?.actualProviderName ?: "所选方式"}播放失败")
+                return
+            }
             // 直播断流：别的平台没有这个台，换源没有意义；先按原台重签地址重连，短时间内连不上就停下提示。
             // HLS 清单每十秒重拉一次，网络抖动、清单刷新失败都会走到这里。
             // isLive 依赖 Song.extra；队列被重建过、extra 掉了时按云听的 m3u8 兜底认出来
@@ -5671,6 +5821,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 base.value = base.value.copy(playbackNotice = "直播中断，正在重连…")
             }
             val position = controller?.currentPosition ?: 0L
+            val queueId = base.value.queueId
             failoverInProgress = true
             viewModelScope.launch {
                 val local = localFileFor(track)
@@ -5703,7 +5854,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     emptySet()
                 } else {
                     failoverExcluded.getOrPut(track.id) { mutableSetOf() }
-                        .apply { if (!customFailed) failedSource?.providerId?.let(::add) }
+                        .apply { if (!customFailed) failedSource?.playbackKey?.let(::add) }
                         .toSet()
                 }
                 AppLog.w(
@@ -5714,13 +5865,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val result = if (live) {
                     resolvePlayable(track, pinnedProvider = failedSource?.providerId)
                 } else {
-                    resolvePlayable(track, null, excluded)
+                    val excludedProviders = if (failedSource?.providerId == LOCAL_SOURCE) setOf(LOCAL_SOURCE) else emptySet()
+                    resolvePlayable(track, excludeProviders = excludedProviders, excludeMethods = excluded)
+                }
+                val at = queueIndexOf(track, index)
+                if (base.value.queueId != queueId || at < 0 || controller?.currentMediaItemIndex != at) {
+                    failoverInProgress = false
+                    return@launch
                 }
                 val resolution = result.resolution as? Resolution.Ready
                 if (resolution != null) {
                     val player = controller
-                    val at = queueIndexOf(track, index)
-                    if (player == null || at < 0) {
+                    if (player == null) {
                         failoverInProgress = false
                         return@launch
                     }
@@ -5728,6 +5884,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     player.replaceMediaItem(at, mediaItem(resolved))
                     // 直播没有可续的位置，重连后从直播点接着放
                     if (!live) player.seekTo(position)
+                    prepareIfStopped()
                     player.play()
                     if (pinnedProviders[track.id] == failedSource?.providerId) {
                         pinnedProviders[track.id] = resolution.source.providerId
@@ -5739,17 +5896,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         current = resolved,
                         currentTrack = result.track,
                         currentSource = resolution.source,
+                        fixedPlaybackFailure = "",
                         playbackNotice = when {
                             live -> "直播中断，已重新连接"
-                            result.autoMatched -> "当前音源中断，已自动匹配到${resolution.source.providerName}，并从 ${formatPosition(position)} 继续播放"
-                            else -> "当前音源中断，已切换到${resolution.source.providerName}，并从 ${formatPosition(position)} 继续播放"
+                            else -> playbackNotice(result, resolution).ifBlank {
+                                "当前音源中断，已切换到${resolution.source.actualProviderName}，并从 ${formatPosition(position)} 继续播放"
+                            }
                         },
                     )
                     rememberCanonical(result.track)
                     loadLyrics(resolved)
                 } else {
-                    controller?.pause()
-                    base.value = base.value.copy(playbackNotice = noSourceMessage(result.track, result.resolution))
+                    val reason = noSourceMessage(result.track, result.resolution)
+                    if ((result.resolution as? Resolution.None)?.fixedSource != null) {
+                        holdPlaybackFailure(at, result.track, reason)
+                    } else {
+                        controller?.pause()
+                        base.value = base.value.copy(playbackNotice = reason)
+                    }
                 }
                 failoverInProgress = false
             }
@@ -5881,23 +6045,33 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         prefetchIndex = nextIndex
         prefetchKey = track.id
         prefetchAt = now
+        val queueId = base.value.queueId
+        val playbackPreferences = settingsState.value.aggregation.platformPlayback
         AppLog.i("Crossfade", "提前解析下一首 index=$nextIndex ${track.title}")
         viewModelScope.launch {
             val local = localFileFor(track)
             val resolved: Song
+            val source: TrackSource
+            var notice = ""
             var resolvedTrack = track
             if (local != null) {
                 resolved = local.first.song.copy(url = local.second)
+                source = local.first
             } else {
                 val result = resolvePlayable(track, pinnedProviders[track.id])
                 val ready = result.resolution as? Resolution.Ready ?: return@launch
                 resolved = ready.source.song.copy(url = ready.url)
                 resolvedTrack = result.track
+                source = ready.source
+                notice = playbackNotice(result, ready)
             }
             val playerNow = controller ?: return@launch
             // 解析期间队列变了或已经切走：别把别的歌覆盖掉
+            if (base.value.queueId != queueId || settingsState.value.aggregation.platformPlayback != playbackPreferences) return@launch
             if (playerNow.nextMediaItemIndex != nextIndex) return@launch
             if (base.value.queue.getOrNull(nextIndex)?.key != song.key) return@launch
+            resolvedSources[track.id] = source
+            prefetchedNotices[track.id] = notice
             playerNow.replaceMediaItem(nextIndex, mediaItem(resolved))
             base.value = base.value.copy(
                 queue = base.value.queue.mapIndexed { i, queued -> if (i == nextIndex) resolved else queued },
@@ -6223,7 +6397,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         dormant = saved
         val current = saved.current
         saved.cursor.shapeChoice?.let { NowPlayingShape.restore(current.key, it) }
-        val tracks = saved.songs.map(::canonicalForSong)
+        val tracks = tracksFor(saved)
         val track = tracks.getOrNull(saved.index)
         base.update {
             it.copy(
@@ -6234,6 +6408,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 current = current,
                 currentTrack = track,
                 currentSource = track?.sources?.find { source -> source.song.key == current.key },
+                fixedPlaybackFailure = "",
                 duration = saved.cursor.durationMs.takeIf { duration -> duration > 0 } ?: current.duration * 1000L,
                 playing = false,
                 shuffle = saved.cursor.shuffle,
@@ -6247,6 +6422,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private var persistenceStarted = false
 
+    private fun tracksFor(saved: SavedPlayback): List<CanonicalTrack> =
+        saved.songs.mapIndexed { index, song ->
+            val route = saved.routes.getOrNull(index)
+            val origin = route?.candidates?.firstOrNull()
+            if (origin == null) canonicalForSong(song) else {
+                route.candidates.drop(1).fold(canonicalForSong(origin)) { track, candidate ->
+                    val source = canonicalForSong(candidate).primarySource
+                    if (source == null) track else TrackMatcher.withSource(track, source)
+                }.copy(playbackPlatform = route.platform)
+            }
+        }
+
     /** 队列一变（停 1 秒再写）就落盘；位置由 [persistCursor] 在切歌、暂停和播放中每 10 秒写一次。 */
     private fun startPersistence() {
         if (persistenceStarted) return
@@ -6256,7 +6443,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 .distinctUntilChanged { old, new -> old.first === new.first && old.second == new.second }
                 .debounce(QUEUE_SAVE_DEBOUNCE_MS)
                 .collect { (queue, origin) ->
-                    app.queueStore.saveQueue(queue, origin)
+                    val tracks = base.value.canonicalQueue.takeIf { base.value.queue === queue }
+                    val routes = tracks?.mapIndexed { index, track ->
+                        val source = track.sources.singleOrNull()
+                        val song = queue.getOrNull(index)
+                        if (source != null && source.song.key == song?.key &&
+                            source.playbackMethod == PlaybackMethod.Direct && track.playbackPlatform == source.providerId
+                        ) null else SavedTrackRoute(
+                            track.playbackPlatform,
+                            track.sources.map { it.song.forStorage() },
+                        )
+                    }.orEmpty()
+                    app.queueStore.saveQueue(queue, origin, routes.takeIf { it.any { route -> route != null } }.orEmpty())
                     if (queue.isNotEmpty()) persistCursor()
                 }
         }
@@ -6354,9 +6552,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val songs = saved.songs
         if (songs.isEmpty()) return null
         val tracks = base.value.canonicalQueue.takeIf { it.size == songs.size && base.value.queue === songs }
-            ?: songs.map(::canonicalForSong)
+            ?: tracksFor(saved)
         val first = index.coerceIn(0, songs.lastIndex)
         var notice = ""
+        var fixed: Pair<Int, CanonicalTrack>? = null
         val found = withTimeoutOrNull(RESUME_TIMEOUT_MS) {
             for (at in first..minOf(songs.lastIndex, first + RESUME_TRIES - 1)) {
                 val track = tracks[at]
@@ -6366,20 +6565,46 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val result = resolvePlayable(track, pinnedProviders[track.id])
                 val ready = result.resolution as? Resolution.Ready
-                if (ready != null) return@withTimeoutOrNull Resumed(at, result.track, ready.source, ready.source.song.copy(url = ready.url))
+                if (ready != null) {
+                    return@withTimeoutOrNull Resumed(
+                        at, result.track, ready.source, ready.source.song.copy(url = ready.url), playbackNotice(result, ready),
+                    )
+                }
                 notice = noSourceMessage(result.track, result.resolution)
+                if ((result.resolution as? Resolution.None)?.fixedSource != null) {
+                    fixed = at to result.track
+                    break
+                }
             }
             null
         }
+        if (dormant !== saved) return null
         if (found == null) {
+            fixed?.let { (at, track) ->
+                val song = songs[at]
+                dormant = saved.copy(cursor = saved.cursor.copy(key = song.key, index = at, positionMs = if (at == first) positionMs else 0))
+                base.update { state ->
+                    state.copy(
+                        current = song,
+                        currentTrack = track,
+                        currentSource = null,
+                        canonicalQueue = tracks.mapIndexed { index, item -> if (index == at) track else item },
+                        fixedPlaybackFailure = notice,
+                        playerOpen = true,
+                    )
+                }
+                loadLyrics(song)
+                return null
+            }
             base.update { it.copy(playbackNotice = notice.ifBlank { "暂时连不上音源，稍后再试" }) }
             return null
         }
-        // 解析期间用户在 App 里放了别的：这份队列已经不是当前的了
-        if (dormant !== saved) return null
-        val queue = songs.mapIndexed { i, song -> if (i == found.index) found.song else song }
+        val queue = tracks.mapIndexed { at, track -> if (at == found.index) found.song else preferredSong(track) }
         val canonical = tracks.mapIndexed { i, track -> if (i == found.index) found.track else track }
         dormant = null
+        resolvedSources.clear()
+        prefetchedNotices.clear()
+        resolvedSources[found.track.id] = found.source
         base.update {
             it.copy(
                 queue = queue,
@@ -6387,7 +6612,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 current = found.song,
                 currentTrack = found.track,
                 currentSource = found.source,
-                playbackNotice = if (found.index != first) "已跳过《${songs[first].title}》：$notice" else "",
+                playbackNotice = found.notice.ifBlank { if (found.index != first) "已跳过《${songs[first].title}》：$notice" else "" },
+                fixedPlaybackFailure = "",
                 error = "",
             )
         }
@@ -6401,7 +6627,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    private data class Resumed(val index: Int, val track: CanonicalTrack, val source: TrackSource, val song: Song)
+    private data class Resumed(
+        val index: Int,
+        val track: CanonicalTrack,
+        val source: TrackSource,
+        val song: Song,
+        val notice: String = "",
+    )
 
     /** 队列编辑要动播放器里的队列：先把 [dormant] 原样装进去（不解析、不开播），按播放时再走空地址的解析。 */
     private fun materializeDormant(player: MediaController) {
@@ -6672,6 +6904,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setAllowPreview(value: Boolean) = viewModelScope.launch {
         searchEngine.clearCache()
         app.settings.saveAggregation(settingsState.value.aggregation.copy(allowPreview = value))
+    }
+
+    fun setPlatformPlayback(providerId: String, preference: PlatformPlaybackPreference) = viewModelScope.launch {
+        if (preference.method !in playbackMethodsFor(providerId)) return@launch
+        app.settings.setPlatformPlayback(providerId, preference)
+        val player = controller ?: return@launch
+        val state = base.value
+        if (player.mediaItemCount != state.queue.size) return@launch
+        // 非当前曲目可能已被提前解析。保留本机下载，其他地址在切歌时按新规则重取。
+        val queue = state.queue.mapIndexed { index, song ->
+            val track = state.canonicalQueue.getOrNull(index)
+            if (index != player.currentMediaItemIndex && song.url.isNotBlank() &&
+                track != null && track.sources.any { it.providerId == providerId } && localFileFor(track) == null
+            ) {
+                resolvedSources.remove(track.id)
+                prefetchedNotices.remove(track.id)
+                song.copy(url = "")
+            } else song
+        }
+        base.update { it.copy(queue = queue) }
+        queue.forEachIndexed { index, song ->
+            if (song !== state.queue[index]) player.replaceMediaItem(index, mediaItem(song))
+        }
     }
 
     fun setMatchStrictness(value: MatchStrictness) = viewModelScope.launch {

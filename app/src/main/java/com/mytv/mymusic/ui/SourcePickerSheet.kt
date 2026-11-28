@@ -53,6 +53,8 @@ import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.aggregate.Availability
 import com.mytv.mymusic.aggregate.CanonicalTrack
 import com.mytv.mymusic.aggregate.PlaybackMode
+import com.mytv.mymusic.aggregate.PlaybackMethod
+import com.mytv.mymusic.aggregate.playbackMethodsFor
 import com.mytv.mymusic.aggregate.TrackSource
 import com.mytv.mymusic.aggregate.availabilityOf
 import com.mytv.mymusic.data.lx.LxPlatform
@@ -75,6 +77,7 @@ import com.mytv.mymusic.ui.components.tvFocusRing
 fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
     val track = state.sourcePickerTrack ?: return
     val tv = LocalAppWindow.current.isTv
+    val onlyOnce = state.sourcePickerOnlyOnce
     val lxRecords by LxSources.records.collectAsState()
     // 只要有启用的脚本就给洛雪留位：轨道缺的平台变体在点了之后按歌曲信息现配（MatchJob 有缓存）
     val lxAvailable = lxRecords.any { it.enabled }
@@ -84,6 +87,14 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
         addAll(track.alternatives.map { it.providerId })
     }.distinct().filter { it != LxPlatform.PROVIDER_ID || lxAvailable }
     val ordered = state.aggregation.priorityFor(providerIds)
+    val choices = ordered.flatMap { providerId ->
+        val methods = if (!onlyOnce) listOf(null) else if (providerId == LxPlatform.PROVIDER_ID) {
+            listOf(PlaybackMethod.Lx)
+        } else {
+            playbackMethodsFor(providerId)
+        }
+        methods.map { providerId to it }
+    }
     // 只有正在播放的就是这首歌时才有“当前音源”
     val currentId = state.currentSource?.providerId?.takeIf { state.currentTrack?.id == track.id }
     val pinnedId = state.aggregation.pinnedProvider?.takeIf { state.aggregation.playbackMode == PlaybackMode.Pinned }
@@ -104,7 +115,7 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
 
     AdaptiveSheet(
         onDismiss = actions::closeSource,
-        title = "选择音源",
+        title = if (onlyOnce) "仅本次换源" else "选择音源",
         subtitle = listOf(track.title, track.artistLabel).filter { it.isNotBlank() }.joinToString(" · "),
     ) {
         // 放在面板内容里：电视上面板是 Dialog，内容要等窗口显示、进场动画开始后才组合，在外面请求时行还没挂上
@@ -135,11 +146,13 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
                 )
             }
             Column(verticalArrangement = Arrangement.spacedBy(SegmentGap)) {
-                ordered.forEachIndexed { index, providerId ->
+                choices.forEachIndexed { index, (providerId, method) ->
                     val source = track.sources.find { it.providerId == providerId }
                     SourceRow(
                         providerId = providerId,
-                        providerName = providerName(state.providers, providerId),
+                        providerName = providerName(state.providers, providerId).let { name ->
+                            if (method == null || providerId == LxPlatform.PROVIDER_ID) name else "$name · ${method.label}"
+                        },
                         source = source,
                         availability = if (providerId == LxPlatform.PROVIDER_ID) Availability.Playable else availability(source),
                         duration = track.durationLabel,
@@ -151,7 +164,7 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
                         busy = busy == providerId,
                         splitMode = splitMode,
                         index = index,
-                        count = ordered.size,
+                        count = choices.size,
                         // 检索中不禁用整列：禁用会让遥控器焦点丢失，检索失败后无处可回；改为忽略点按
                         enabled = !splitMode || (source != null && canSplit),
                         onClick = {
@@ -162,15 +175,19 @@ fun SourcePickerSheet(state: MusicUiState, actions: MusicActions) {
                                     actions.splitSource(track, source)
                                 }
                                 // 点当前音源不重新播放，除非要顺便固定这个平台
+                                method != null -> actions.chooseSource(providerId, false, method)
                                 providerId == currentId && !rememberChoice -> actions.closeSource()
                                 else -> actions.chooseSource(providerId, rememberChoice)
                             }
                         },
-                        modifier = if (providerId == focusId) Modifier.focusRequester(focus) else Modifier,
+                        modifier = if (providerId == focusId && choices.indexOfFirst { it.first == focusId } == index) {
+                            Modifier.focusRequester(focus)
+                        } else Modifier,
                     )
                 }
             }
             Spacer(Modifier.height(12.dp))
+            if (onlyOnce) return@Column
             // 现有逻辑记住的是全局「首选平台」模式，不是只对这首歌生效，文案按实际行为写
             SwitchRow(
                 title = "以后先放这个平台",
