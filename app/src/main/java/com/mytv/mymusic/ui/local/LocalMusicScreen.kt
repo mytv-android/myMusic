@@ -227,9 +227,8 @@ fun LocalMusicScreen(
         item(key = "actions", contentType = "actions") {
             if (selection.active) {
                 SelectionBar(
-                    count = selection.selected.size,
-                    allSelected = songs.isNotEmpty() && selection.selected.containsAll(songs.map { it.key }),
-                    onToggleAll = { selection.toggleAll(songs.map { it.key }) },
+                    selection = selection,
+                    orderedKeys = songs.map { it.key },
                     onPlay = {
                         val picked = songs.filter { it.key in selection.selected }
                         if (picked.isNotEmpty()) actions.play(picked.first(), picked)
@@ -339,6 +338,7 @@ fun LocalMusicScreen(
                     count = items.size,
                     playing = state.current?.key == item.song.key,
                     selection = selection,
+                    selectionOrder = songs,
                     onPlay = {
                         when {
                             item.onDevice -> actions.play(item.song, playable)
@@ -502,6 +502,7 @@ private fun LocalSongRow(
     count: Int,
     playing: Boolean,
     selection: SelectionState,
+    selectionOrder: List<Song>,
     onPlay: () -> Unit,
     onMore: () -> Unit,
     queue: List<Song>,
@@ -528,7 +529,9 @@ private fun LocalSongRow(
         cover = song.cover,
         index = position,
         count = count,
-        onClick = { if (picking) selection.toggle(song.key) else onPlay() },
+        onClick = { if (picking) selection.tap(song.key, selectionOrder.map { it.key }) else onPlay() },
+        selection = selection,
+        selectionKey = song.key,
         playing = playing,
         container = if (selected) scheme.secondaryContainer else scheme.surfaceContainerLow,
         dimmed = copy.gone,

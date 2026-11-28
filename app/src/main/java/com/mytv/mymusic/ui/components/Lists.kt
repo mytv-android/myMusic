@@ -129,11 +129,24 @@ fun SongRow(
     swipe: RowSwipe? = null,
     /** 鼠标悬停时滑动按钮替换 [trailing]；trailing 本身是按钮的列表传 false，滑动按钮插在它前面。 */
     hoverReplacesTrailing: Boolean = true,
+    /** 多选状态与这一行的 key；非空且激活时统一接管勾选标记、读屏、滑动和长按。 */
+    selection: SelectionState? = null,
+    selectionKey: String? = null,
 ) {
     val shape = segmentShape(index, count)
-    val background = if (playing) MaterialTheme.colorScheme.secondaryContainer else container
-    val padding = PaddingValues(start = if (rank != null) 8.dp else 12.dp, end = if (onMore != null) 0.dp else 16.dp, top = 8.dp, bottom = 8.dp)
-    if (swipe == null) {
+    val selecting = selection?.active == true && selectionKey != null
+    val selected = selecting && selection.selected.contains(selectionKey)
+    val background = if (selected || playing) MaterialTheme.colorScheme.secondaryContainer else container
+    val effectiveOnMore = if (selecting) null else onMore
+    val effectiveOnLongClick = if (selecting) null else onLongClick
+    val effectiveSwipe = if (selecting) null else swipe
+    val effectiveTrailing: (@Composable (RowScope.() -> Unit))? = if (selection != null && selectionKey != null && selection.active) {
+        { SelectionRowTrailing(selection, selectionKey) }
+    } else {
+        trailing
+    }
+    val padding = PaddingValues(start = if (rank != null) 8.dp else 12.dp, end = if (effectiveOnMore != null) 0.dp else 16.dp, top = 8.dp, bottom = 8.dp)
+    if (effectiveSwipe == null) {
         Row(
             modifier
                 .fillMaxWidth()
@@ -141,36 +154,47 @@ fun SongRow(
                 .tvFocusRing(shape, scale = 1.02f)
                 .clip(shape)
                 .background(background)
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = onLongClick?.let { "更多操作" })
-                // 正在播放只靠底色和字重区分，读屏要单独说出来
-                .semantics { if (playing) stateDescription = "正在播放" }
+                .combinedClickable(onClick = onClick, onLongClick = effectiveOnLongClick, onLongClickLabel = effectiveOnLongClick?.let { "更多操作" })
+                .semantics {
+                    if (selecting) {
+                        role = Role.Checkbox
+                        this.selected = selected
+                        toggleableState = ToggleableState(selected)
+                        stateDescription = listOfNotNull(
+                            if (selected) "已选择" else "未选择",
+                            if (playing) "正在播放" else null,
+                        ).joinToString("；")
+                    } else if (playing) {
+                        stateDescription = "正在播放"
+                    }
+                }
                 .padding(padding),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SongRowBody(title, subtitle, cover, rank, playing, badges, trailing, onMore, dimmed, showCover, rankEmphasis, rankLabel)
+            SongRowBody(title, subtitle, cover, rank, playing, badges, effectiveTrailing, effectiveOnMore, dimmed, showCover, rankEmphasis, rankLabel)
         }
         return
     }
     SwipeRowFrame(
-        swipe = swipe,
+        swipe = effectiveSwipe,
         shape = shape,
         modifier = modifier,
         background = background,
         onClick = onClick,
-        onLongClick = onLongClick,
+        onLongClick = effectiveOnLongClick,
         playing = playing,
         padding = padding,
     ) { hovered ->
         // 鼠标悬停：行尾换成滑动的那几个按钮（稿子里时长藏起来、按钮出来）
         val shownTrailing: (@Composable RowScope.() -> Unit)? = if (hovered) {
             {
-                SwipeHoverButtons(swipe)
-                if (!hoverReplacesTrailing) trailing?.invoke(this)
+                SwipeHoverButtons(effectiveSwipe)
+                if (!hoverReplacesTrailing) effectiveTrailing?.invoke(this)
             }
         } else {
-            trailing
+            effectiveTrailing
         }
-        SongRowBody(title, subtitle, cover, rank, playing, badges, shownTrailing, onMore, dimmed, showCover, rankEmphasis, rankLabel)
+        SongRowBody(title, subtitle, cover, rank, playing, badges, shownTrailing, effectiveOnMore, dimmed, showCover, rankEmphasis, rankLabel)
     }
 }
 

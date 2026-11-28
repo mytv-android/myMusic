@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.outlined.QueueMusic
@@ -102,7 +103,10 @@ import com.mytv.mymusic.ui.components.LocalSharedTransitionScope
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.LocalPageChromeScheme
+import com.mytv.mymusic.ui.components.LocalSelectionChrome
 import com.mytv.mymusic.ui.components.PageChromeScheme
+import com.mytv.mymusic.ui.components.SelectionActionDock
+import com.mytv.mymusic.ui.components.SelectionChrome
 import com.mytv.mymusic.ui.components.rememberAppWindow
 import com.mytv.mymusic.ui.library.libraryRoutes
 import com.mytv.mymusic.ui.player.LocalPlayerBottomChrome
@@ -190,6 +194,7 @@ fun MyMusicApp(model: MusicViewModel) {
     val playerChrome = remember { PlayerBottomChrome() }
     val hazeState = rememberHazeState()
     val pageChrome = remember { PageChromeScheme() }
+    val selectionChrome = remember { SelectionChrome() }
     // 启动页只在建图时定一次；记住的是用户选的那个，切走的tab由返回栈同步
     val startupTab = state.startupTab.toTopTab()
     var selectedTab by rememberSaveable { mutableStateOf(startupTab.route) }
@@ -224,6 +229,7 @@ fun MyMusicApp(model: MusicViewModel) {
     }
 
     fun openTab(tab: String) {
+        selectionChrome.current?.state?.exit()
         if (selectedTab == tab) {
             nav.popBackStack(tab, inclusive = false)
             return
@@ -354,8 +360,12 @@ fun MyMusicApp(model: MusicViewModel) {
     }
 
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val selectionDock = selectionChrome.current?.takeIf { it.showDock }
     val overlayBottom = when {
-        window.isPhone -> phoneOverlayHeight(hasMini = state.current != null) + navInset
+        // 多选菜单与 MiniPlayer 同槽位；无播放进入时也按「Dock + 贴底导航」让位。
+        window.isPhone -> phoneOverlayHeight(hasMini = selectionDock != null || state.current != null) + navInset
+        // 横屏和没有固定侧栏的宽页使用悬浮 Dock，原底部播放条此时不再占一排。
+        selectionDock != null && !window.isTv -> BottomPlayerBarHeight + navInset
         window.showBottomPlayerBar && state.current != null -> 0.dp
         else -> navInset
     }
@@ -370,7 +380,7 @@ fun MyMusicApp(model: MusicViewModel) {
         playerVisible ->
             (if (window.isTv) 0.dp else navInset) + with(LocalDensity.current) { playerChrome.bottomPx.toDp() }
         posterVisible -> navInset + if (window.isTv) 0.dp else PosterWallBottomChrome
-        window.showBottomPlayerBar && state.current != null -> BottomPlayerBarHeight + navInset
+        window.showBottomPlayerBar && state.current != null && selectionDock == null -> BottomPlayerBarHeight + navInset
         else -> overlayBottom
     }
     // 播放页还在组合里（含退场动画）：墙等它完全退场再拿遥控器焦点（播放页的焦点组退场途中不放焦点出去）
@@ -390,6 +400,7 @@ fun MyMusicApp(model: MusicViewModel) {
         LocalSongSwipeEnv provides if (window.isTv) null else swipeEnv,
         LocalSwipeNotifier provides swipeNotifier,
         LocalPageChromeScheme provides pageChrome,
+        LocalSelectionChrome provides selectionChrome,
         // 播放页在这里往上报底部控件高度，胶囊在同一个范围里读
         LocalPlayerBottomChrome provides playerChrome,
     ) {
@@ -445,6 +456,20 @@ fun MyMusicApp(model: MusicViewModel) {
                                 settingsRoutes(app)
                             }
                         }
+                        // 横屏与没有固定侧栏的宽页：Dock 只覆盖当前内容区，不跨导航轨和常驻播放窗格。
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = !window.isPhone && selectionDock != null && !covered,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(horizontal = 16.dp)
+                                .padding(bottom = navInset + 12.dp),
+                            enter = fadeIn(),
+                            exit = fadeOut(),
+                        ) {
+                            ShellChromeTheme(pageChrome) {
+                                selectionDock?.let { SelectionActionDock(it, Modifier.widthIn(max = 560.dp)) }
+                            }
+                        }
                         androidx.compose.animation.AnimatedVisibility(
                             // 海报墙开着时也收起：迷你播放器的封面不能在墙底下和播放页的封面配成共享元素飞出来
                             visible = window.isPhone && !covered,
@@ -466,7 +491,7 @@ fun MyMusicApp(model: MusicViewModel) {
                             }
                         }
                     }
-                    if (window.showBottomPlayerBar && state.current != null) {
+                    if (window.showBottomPlayerBar && state.current != null && selectionDock == null) {
                         ShellChromeTheme(pageChrome) {
                             BottomPlayerBar(state, position, actions, onOpenQueue = { queueOpen = true }, visible = !covered)
                         }
@@ -531,7 +556,7 @@ fun MyMusicApp(model: MusicViewModel) {
                         playerVisible -> navInset
                         // 让开海报墙右下角的定位和设置按钮
                         posterVisible -> navInset + if (window.isTv) 0.dp else PosterWallBottomChrome
-                        window.showBottomPlayerBar && state.current != null -> BottomPlayerBarHeight + navInset
+                        window.showBottomPlayerBar && state.current != null && selectionDock == null -> BottomPlayerBarHeight + navInset
                         else -> overlayBottom
                     },
                 ),

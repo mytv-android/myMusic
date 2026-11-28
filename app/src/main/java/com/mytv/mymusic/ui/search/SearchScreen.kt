@@ -952,6 +952,7 @@ private fun PlatformsNote(ctx: SearchCtx) {
  */
 @Composable
 private fun SearchSelectionHeader(ctx: SearchCtx, modifier: Modifier = Modifier) {
+    val window = LocalAppWindow.current
     val groups = ctx.groups.value
     if (groups.size < 2) return
     val selection = ctx.selection
@@ -970,9 +971,10 @@ private fun SearchSelectionHeader(ctx: SearchCtx, modifier: Modifier = Modifier)
         return
     }
     SelectionBar(
-        count = selection.selected.size,
-        allSelected = selection.selected.containsAll(rowIds),
-        onToggleAll = { selection.toggleAll(rowIds) },
+        selection = selection,
+        orderedKeys = rowIds,
+        showDock = !window.isTv,
+        sidePanel = window.isTv,
         onPlay = {
             val picked = groups.filter { it.id in selection.selected }
             if (picked.isNotEmpty()) ctx.actions.playTrack(picked.first(), picked)
@@ -1242,11 +1244,13 @@ private fun SearchSongRow(
         index = index,
         count = count,
         onClick = {
-            if (picking) ctx.selection.toggle(track.id) else ctx.play(track)
+            if (picking) ctx.selection.tap(track.id, ctx.groups.value.drop(1).map { it.id }) else ctx.play(track)
         },
+        selection = ctx.selection,
+        selectionKey = track.id,
         container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = modifier.onMenuKey {
-            if (ctx.selection.active) ctx.selection.toggle(track.id) else ctx.openActions(track)
+            if (ctx.selection.active) ctx.selection.tap(track.id, ctx.groups.value.drop(1).map { it.id }) else ctx.openActions(track)
         },
         playing = ctx.isCurrent(track),
         badges = badges,

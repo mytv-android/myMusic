@@ -224,9 +224,11 @@ private fun PhoneCharts(
                         if (selection.active) {
                             item(key = "selbar", contentType = "selbar") {
                                 SelectionBar(
-                                    count = selection.selected.size,
-                                    allSelected = pool.isNotEmpty() && selection.selected.containsAll(pool.map { it.key }),
-                                    onToggleAll = { selection.toggleAll(pool.map { it.key }) },
+                                    selection = selection,
+                                    orderedKeys = pool.map { it.key },
+                                    // 榜单没有固定左栏：触摸设备沿用悬浮 Dock，电视用可聚焦侧栏。
+                                    showDock = !window.isTv,
+                                    sidePanel = window.isTv,
                                     onPlay = {
                                         val picked = pool.filter { it.key in selection.selected }
                                         if (picked.isNotEmpty()) actions.play(picked.first(), picked)
@@ -265,7 +267,7 @@ private fun PhoneCharts(
                                 ) {
                                     if (hasFeatured) {
                                         Column(Modifier.weight(1.15f)) {
-                                            FeaturedChart(featured!!, featuredSongs, playingKey, actions, onMore, selection)
+                                            FeaturedChart(featured!!, featuredSongs, playingKey, actions, onMore, selection, pool)
                                         }
                                     }
                                     if (more.isNotEmpty()) {
@@ -284,7 +286,7 @@ private fun PhoneCharts(
                             if (hasFeatured) {
                                 item(key = "featured", contentType = "featured") {
                                     Column(Modifier.padding(horizontal = gutter)) {
-                                        FeaturedChart(featured!!, featuredSongs, playingKey, actions, onMore, selection)
+                                        FeaturedChart(featured!!, featuredSongs, playingKey, actions, onMore, selection, pool)
                                     }
                                 }
                             }
@@ -338,7 +340,9 @@ private fun PhoneCharts(
                                                 rank = index + 1,
                                                 playing = playingKey == song.key,
                                                 container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
-                                                onClick = { if (picking) selection.toggle(song.key) else actions.play(song, charts.hotSongs) },
+                                                onClick = { if (picking) selection.tap(song.key, pool.map { it.key }) else actions.play(song, charts.hotSongs) },
+                                                selection = selection,
+                                                selectionKey = song.key,
                                                 trailing = if (picking) {
                                                     {
                                                         Icon(
@@ -483,6 +487,7 @@ private fun FeaturedChart(
     actions: MusicActions,
     onMore: (Song, List<Song>) -> Unit,
     selection: SelectionState,
+    selectionOrder: List<Song>,
 ) {
     val picking = selection.active
     SectionLabel(chart.name.ifBlank { "榜首" }) {
@@ -499,7 +504,7 @@ private fun FeaturedChart(
             single = songs.size == 1,
             selecting = picking,
             selected = first.key in selection.selected,
-            onPlay = { if (picking) selection.toggle(first.key) else actions.play(first, songs) },
+            onPlay = { if (picking) selection.tap(first.key, selectionOrder.map { it.key }) else actions.play(first, songs) },
             onMore = if (picking) null else ({ onMore(first, songs) }),
         )
         songs.drop(1).forEachIndexed { offset, song ->
@@ -523,7 +528,9 @@ private fun FeaturedChart(
                 rank = offset + 2,
                 playing = playingKey == song.key,
                 container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
-                onClick = { if (picking) selection.toggle(song.key) else actions.play(song, songs) },
+                onClick = { if (picking) selection.tap(song.key, selectionOrder.map { it.key }) else actions.play(song, songs) },
+                selection = selection,
+                selectionKey = song.key,
                 trailing = if (picking) {
                     {
                         Icon(

@@ -229,9 +229,8 @@ fun CollectionScreen(
     // 多选期间的批量操作：歌保持列表里的顺序
     val selectedSongs = { songs.filter { it.key in selection.selected } }
     val selectionOps = CollectionSelectionOps(
-        count = selection.selected.size,
-        allSelected = songs.isNotEmpty() && selection.selected.containsAll(songs.map { it.key }),
-        onToggleAll = { selection.toggleAll(songs.map { it.key }) },
+        selection = selection,
+        keys = songs.map { it.key },
         onPlay = {
             val picked = selectedSongs()
             if (picked.isNotEmpty()) actions.play(picked.first(), picked)
@@ -400,9 +399,8 @@ private fun CollectionPoster(
 
 /** 多选操作条的数据，三端布局共用。 */
 private data class CollectionSelectionOps(
-    val count: Int,
-    val allSelected: Boolean,
-    val onToggleAll: () -> Unit,
+    val selection: SelectionState,
+    val keys: List<String>,
     val onPlay: () -> Unit,
     val onPlayNext: () -> Unit,
     val onAddTo: () -> Unit,
@@ -412,9 +410,8 @@ private data class CollectionSelectionOps(
 @Composable
 private fun SelectionBarFor(ops: CollectionSelectionOps, modifier: Modifier = Modifier) {
     SelectionBar(
-        count = ops.count,
-        allSelected = ops.allSelected,
-        onToggleAll = ops.onToggleAll,
+        selection = ops.selection,
+        orderedKeys = ops.keys,
         onPlay = ops.onPlay,
         onPlayNext = ops.onPlayNext,
         onAddTo = ops.onAddTo,
@@ -952,8 +949,10 @@ private fun LazyListScope.collectionSongs(
                     index = index,
                     count = songs.size,
                     onClick = {
-                        if (picking) selection.toggle(song.key) else actions.play(song, songs)
+                        if (picking) selection.tap(song.key, songs.map { it.key }) else actions.play(song, songs)
                     },
+                    selection = selection,
+                    selectionKey = song.key,
                     container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                     modifier = Modifier
                         .padding(horizontal = horizontal)

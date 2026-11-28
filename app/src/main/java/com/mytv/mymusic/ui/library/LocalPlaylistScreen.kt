@@ -380,12 +380,14 @@ fun LocalPlaylistScreen(
                     count = visibleEntries.size,
                     onClick = {
                         when {
-                            picking -> selection.toggle(song.key)
+                            picking -> selection.tap(song.key, shownSongs.map { it.key })
                             unplayable.intercept(song, local) -> Unit
                             else -> actions.playLocalPlaylist(song, shownSongs, playlistId, playlist?.name.orEmpty())
                         }
                     },
                     playing = state.current?.key == song.key,
+                    selection = selection,
+                    selectionKey = song.key,
                     dimmed = local?.gone == true,
                     badges = local?.let { copy -> { LocalSongBadge(copy) } },
                     container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else rowContainer,
@@ -509,9 +511,8 @@ fun LocalPlaylistScreen(
     val playActions: @Composable (showEdit: Boolean) -> Unit = { showEdit ->
         if (selection.active) {
             SelectionBar(
-                count = selection.selected.size,
-                allSelected = shownSongs.isNotEmpty() && selection.selected.containsAll(shownSongs.map { it.key }),
-                onToggleAll = { selection.toggleAll(shownSongs.map { it.key }) },
+                selection = selection,
+                orderedKeys = shownSongs.map { it.key },
                 onPlay = {
                     val picked = shownSongs.filter { it.key in selection.selected }
                     if (picked.isNotEmpty()) actions.playLocalPlaylist(picked.first(), picked, playlistId, playlist?.name.orEmpty())

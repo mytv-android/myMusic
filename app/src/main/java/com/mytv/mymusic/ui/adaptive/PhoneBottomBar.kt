@@ -1,11 +1,7 @@
 package com.mytv.mymusic.ui.adaptive
 
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
@@ -69,8 +65,10 @@ import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.TopTab
 import com.mytv.mymusic.ui.openLabel
+import com.mytv.mymusic.ui.components.LocalSelectionChrome
 import com.mytv.mymusic.ui.components.PlayButtonSize
 import com.mytv.mymusic.ui.components.PlayPauseButton
+import com.mytv.mymusic.ui.components.SelectionActionDock
 import com.mytv.mymusic.ui.components.rememberSettlingOffsetState
 import com.mytv.mymusic.ui.components.sharedNowPlayingCover
 import com.mytv.mymusic.ui.theme.LocalBlurPolicy
@@ -91,7 +89,10 @@ private val FloatingMargin = 16.dp
 fun phoneOverlayHeight(hasMini: Boolean): Dp =
     if (hasMini) NavBarHeight + MiniHeight + MiniGap * 2 else NavBarHeight + FloatingMargin
 
-/** 手机底部：有歌在播时是悬浮迷你播放器 + 贴底短导航栏；没歌在播时换成浮动导航条（[FloatingNavBar]）。 */
+/**
+ * 手机底部：多选时 MiniPlayer 的槽位换成悬浮多选菜单，原项目贴底导航继续保留；
+ * 没歌在播时也使用贴底导航，不再让普通导航项变成批量操作。退出多选后按原状态恢复。
+ */
 @Composable
 fun PhoneBottomBar(
     state: MusicUiState,
@@ -104,15 +105,17 @@ fun PhoneBottomBar(
 ) {
     val blur = LocalBlurPolicy.current.enabled
     val container = MaterialTheme.colorScheme.surfaceContainer
+    val selection = LocalSelectionChrome.current?.current?.takeIf { it.showDock }
     Column(modifier.fillMaxWidth()) {
-        AnimatedVisibility(
-            visible = state.current != null,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
-        ) {
-            MiniPlayer(state, position, actions, onOpenQueue, Modifier.padding(horizontal = 12.dp, vertical = MiniGap))
+        AnimatedContent(targetState = selection != null, label = "miniOrSelection") { selecting ->
+            val content = selection
+            if (selecting && content != null) {
+                SelectionActionDock(content, Modifier.padding(horizontal = 12.dp, vertical = MiniGap))
+            } else if (state.current != null) {
+                MiniPlayer(state, position, actions, onOpenQueue, Modifier.padding(horizontal = 12.dp, vertical = MiniGap))
+            }
         }
-        if (state.current != null) {
+        if (state.current != null || selection != null) {
             ShortNavigationBar(
                 modifier = Modifier.frosted(if (blur) container.copy(alpha = 0.72f) else container),
                 containerColor = Color.Transparent,
@@ -122,7 +125,11 @@ fun PhoneBottomBar(
                     val on = selected == tab.route
                     ShortNavigationBarItem(
                         selected = on,
-                        onClick = { onSelect(tab.route) },
+                        onClick = {
+                            // 普通导航保持可用，但选择状态属于当前页面，不能带去另一个入口。
+                            selection?.state?.exit()
+                            onSelect(tab.route)
+                        },
                         icon = { Icon(if (on) tab.selectedIcon else tab.icon, null) },
                         label = { Text(tab.label) },
                     )

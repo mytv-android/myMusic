@@ -179,9 +179,8 @@ fun FavoritesScreen(
         if (selection.active) {
             stickyHeader(key = "selection", contentType = "actions") {
                 SelectionBar(
-                    count = selection.selected.size,
-                    allSelected = order.isNotEmpty() && selection.selected.containsAll(order),
-                    onToggleAll = { selection.toggleAll(order) },
+                    selection = selection,
+                    orderedKeys = order,
                     onPlay = {
                         val picked = selectedSongs()
                         if (picked.isNotEmpty()) actions.play(picked.first(), picked)
@@ -195,8 +194,6 @@ fun FavoritesScreen(
                         selection.exit()
                     },
                     removeLabel = "取消收藏",
-                    onRangeModeToggle = selection::toggleRangeMode,
-                    rangeMode = selection.rangeMode,
                     onExit = { selection.exit() },
                     modifier = Modifier.selectionBackPreview(selection),
                 )
@@ -250,6 +247,8 @@ fun FavoritesScreen(
                     if (picking) selection.tap(song.key, order)
                     else if (!unplayable.intercept(song, local)) actions.play(song, songs)
                 },
+                selection = selection,
+                selectionKey = song.key,
                 container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                 playing = state.current?.key == song.key,
                 dimmed = local?.gone == true,
@@ -449,9 +448,8 @@ fun HistoryScreen(
         if (selection.active) {
             stickyHeader(key = "selection", contentType = "actions") {
                 SelectionBar(
-                    count = selection.selected.size,
-                    allSelected = order.isNotEmpty() && selection.selected.containsAll(order),
-                    onToggleAll = { selection.toggleAll(order) },
+                    selection = selection,
+                    orderedKeys = order,
                     onPlay = {
                         val picked = selectedSongs()
                         if (picked.isNotEmpty()) actions.play(picked.first(), picked)
@@ -465,8 +463,6 @@ fun HistoryScreen(
                         selection.exit()
                     },
                     removeLabel = "删除",
-                    onRangeModeToggle = selection::toggleRangeMode,
-                    rangeMode = selection.rangeMode,
                     onExit = { selection.exit() },
                     modifier = Modifier.selectionBackPreview(selection),
                 )
@@ -497,6 +493,8 @@ fun HistoryScreen(
                     if (picking) selection.tap(saved.key, order)
                     else if (!unplayable.intercept(song, local)) actions.play(song, queue)
                 },
+                selection = selection,
+                selectionKey = saved.key,
                 container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                 modifier = Modifier
                     .then(if (focusFirst && index == 0) Modifier.focusRequester(firstRow) else Modifier)
@@ -702,16 +700,13 @@ fun DownloadsScreen(
         if (selection.active) {
             stickyHeader(key = "selection", contentType = "actions") {
                 SelectionBar(
-                    count = selection.selected.size,
-                    allSelected = order.isNotEmpty() && selection.selected.containsAll(order),
-                    onToggleAll = { selection.toggleAll(order) },
+                    selection = selection,
+                    orderedKeys = order,
                     onPlay = { actions.playDownloads(selectedItems().map { it.record }) },
                     onPlayNext = { actions.playSongsNext(selectedItems().map { it.song }) },
                     onAddTo = { pickerOpen = true },
                     onRemove = { bulkDeleting = selectedItems().map { it.record } },
                     removeLabel = "删除",
-                    onRangeModeToggle = selection::toggleRangeMode,
-                    rangeMode = selection.rangeMode,
                     onExit = { selection.exit() },
                     modifier = Modifier.selectionBackPreview(selection),
                 )
@@ -800,6 +795,8 @@ fun DownloadsScreen(
                 onClick = {
                     if (picking) selection.tap(item.record.key, order) else actions.playDownload(item.record)
                 },
+                selection = selection,
+                selectionKey = item.record.key,
                 container = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                 // 电视：菜单键删除文件；其余设备用行尾的删除按钮
                 modifier = Modifier
