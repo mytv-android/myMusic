@@ -263,6 +263,7 @@ internal fun WidePlayer(
                             position = position,
                             playing = playing,
                             sizing = if (lyricsMode && !stage.custom) LyricsSizing.TabletFocus else LyricsSizing.Tablet,
+                            songKey = song.key,
                         )
                     }
                 },
@@ -319,6 +320,7 @@ internal fun WidePlayer(
                                 position = position,
                                 playing = playing,
                                 sizing = LyricsSizing.TabletFocus,
+                                songKey = song.key,
                             )
                         }
                     }

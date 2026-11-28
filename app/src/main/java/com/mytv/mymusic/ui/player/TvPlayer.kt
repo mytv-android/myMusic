@@ -252,6 +252,7 @@ internal fun TvPlayer(
                         position = position,
                         playing = playing,
                         sizing = if (ambient && !custom) LyricsSizing.TvAmbient else LyricsSizing.Tv,
+                        songKey = song.key,
                     )
                 },
                 { TvNotice(notice, chromeAlpha) },
@@ -312,6 +313,7 @@ internal fun TvPlayer(
                                 position = position,
                                 playing = playing,
                                 sizing = LyricsSizing.TvAmbient,
+                                songKey = song.key,
                             )
                         }
                     }

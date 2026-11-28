@@ -4,11 +4,17 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.os.Build
 import android.view.accessibility.AccessibilityManager
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -26,6 +32,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.Icon
@@ -60,6 +67,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorProducer
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.TransformOrigin
@@ -75,6 +83,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -87,6 +96,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextMotion
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.dp
@@ -390,11 +400,17 @@ internal fun lyricBlurDp(distance: Float, blurSupported: Boolean): Float =
 internal fun lyricVisualSp(base: Float, grow: Float, lift: Float): Float = base * (1f + (grow - 1f) * lift)
 
 /**
- * 图层缩放：所有行都按放大后的字号 [layoutSp] 排版，这里只缩不放。API 23–27 的 OpenGL 渲染器把放大图层里的文字
- * 按取整后的倍数（至少 1 倍）栅格化再拉伸，1.2–1.4 倍的当前行会发虚；缩小时按原大栅格化再缩，仍然清楚。
- * 弹簧过冲带来的那一点放大也一并截掉。
+ * 当前行放大回弹允许超过排版字号的上限。API 23–27 的 OpenGL 渲染器把放大图层里的文字按取整后的倍数（至少 1 倍）
+ * 栅格化再拉伸，超过 1 倍就发虚，那几版截在 1；API 28 起按最终变换栅格化，fastSpatial 那一下回弹（最多约 3%）照常显示。
  */
-internal fun lyricLayerScale(visualSp: Float, layoutSp: Float): Float = (visualSp / layoutSp).coerceAtMost(1f)
+internal val LyricScaleCap: Float = if (Build.VERSION.SDK_INT >= 28) 1.03f else 1f
+
+/**
+ * 图层缩放：所有行都按放大后的字号 [layoutSp] 排版，这里基本只缩不放：缩小时按原大栅格化再缩，仍然清楚。
+ * 只有弹簧回弹那一点能放大到 [cap]（见 [LyricScaleCap]），排版字号不变，折行不受影响。
+ */
+internal fun lyricLayerScale(visualSp: Float, layoutSp: Float, cap: Float = LyricScaleCap): Float =
+    (visualSp / layoutSp).coerceAtMost(cap)
 
 /**
  * 排版字号：保留的旧字号 [heldSp] 和新预设放大后的字号 [targetSp] 取大。换成更小的预设时，过渡期间仍按旧的大字号排版，
@@ -424,6 +440,9 @@ internal fun anchorScrollStep(scrolled: Float, remaining: Float, progress: Float
  * 运行中换 [sizing]（如电视进入环境模式）会平滑过渡；视口高度逐帧变化（电视环境模式的过渡）时只重新测量，不重组。
  * [loading] 为 true 且没有可显示的同步歌词时显示加载态：既不会把尚未解析误报成“没有歌词”，
  * 也不会把未同步原文里的时间戳当成歌词；已有上一份同步歌词时继续保留到新结果就绪。
+ * 换歌（[songKey] 变了）按 M3 共享轴过渡：旧词 fastEffects 淡出，新词从下方 [LyricSwitchRise] 用 defaultSpatial 升上来、
+ * slowEffects 淡入；回到上一首时从上方落下（[SongTrail]）；减少动画时只淡入淡出。每份歌词各用自己的列表状态，
+ * 淡出的那份停在换歌前那一刻的当前句和进度上。
  */
 @Composable
 fun LyricsList(
@@ -435,24 +454,137 @@ fun LyricsList(
     position: State<Long>? = null,
     playing: Boolean = false,
     sizing: LyricsSizing,
+    songKey: String = "",
 ) {
-    // 列表状态在空/加载分支之前创建：切换歌词时 LazyColumn 重建也能接回原滚动位置。
-    val list = rememberLazyListState()
-    // 换预设时字号、行距、锚点一起过渡；这三个值只在布局阶段读取，过渡期间不重组
+    // 换预设时字号、行距、锚点一起过渡；这三个值只在布局阶段读取，过渡期间不重组。换歌时新旧两份共用
     val spatial = MaterialTheme.motionScheme.slowSpatialSpec<Float>()
     val base = animateFloatAsState(sizing.baseSp, spatial, label = "lyricBase")
     val grow = animateFloatAsState(sizing.grow, spatial, label = "lyricGrow")
     val gap = animateFloatAsState(sizing.gapDp, spatial, label = "lyricGap")
     val anchor = animateFloatAsState(sizing.anchor, spatial, label = "lyricAnchor")
     val layoutSp = rememberLyricLayoutSp(sizing) { base.value == sizing.baseSp && grow.value == sizing.grow }
+    val trail = remember { SongTrail() }
+    // 每换一首只记一次：这首是不是刚才那首之前放过的（按了上一首）
+    val backward = remember(songKey) { trail.visit(songKey) < 0 }
+    val shown = LyricsShown(lyricsContentKey(songKey, lyrics, loading), lyrics, loading, backward)
+    val motion = MaterialTheme.motionScheme
+    val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
+    val rise = with(LocalDensity.current) { LyricSwitchRise.roundToPx() }
+    val enterMove = motion.defaultSpatialSpec<IntOffset>()
+    val enterFade = motion.slowEffectsSpec<Float>()
+    val exitFade = motion.fastEffectsSpec<Float>()
+    AnimatedContent(
+        targetState = shown,
+        modifier = modifier,
+        transitionSpec = {
+            val fadeInNew = fadeIn(enterFade)
+            val enter = if (reduceMotion) {
+                fadeInNew
+            } else {
+                val from = if (targetState.backward) -rise else rise
+                slideInVertically(enterMove) { from } + fadeInNew
+            }
+            (enter togetherWith fadeOut(exitFade)).using(null)
+        },
+        contentKey = { it.key },
+        label = "lyricsSwitch",
+    ) { content ->
+        // 淡出的那份不跟着新歌的当前句和进度走：否则 0.1 秒里旧词会换高亮、逐字填色退回开头
+        val exiting = transition.targetState == EnterExitState.PostExit
+        LyricsColumn(
+            lyrics = content.lyrics,
+            loading = content.loading,
+            active = rememberHeld(active, exiting),
+            onSeek = onSeek,
+            position = position?.let { rememberHeld(it, exiting) },
+            playing = playing,
+            sizing = sizing,
+            base = base,
+            grow = grow,
+            gap = gap,
+            anchor = anchor,
+            layoutSp = layoutSp,
+        )
+    }
+}
+
+/** 换歌时新词升起（或回到上一首时落下）的距离。 */
+private val LyricSwitchRise = 36.dp
+
+/** [LyricsList] 过渡里的一份内容；[key] 相同的两份是同一首歌，原地换内容、不做过渡。 */
+@Immutable
+private data class LyricsShown(val key: String, val lyrics: ParsedLyrics, val loading: Boolean, val backward: Boolean)
+
+/**
+ * 歌词列的内容键：显示歌词列表时是歌曲键，同一首歌重新取词、换翻译设置都原地更新；
+ * 显示「正在加载」「没有歌词」时是占位键，换歌先过渡到占位，新词就绪再从占位过渡进来。
+ */
+internal fun lyricsContentKey(songKey: String, lyrics: ParsedLyrics, loading: Boolean): String = when {
+    loading && (lyrics.raw.isBlank() || !lyrics.synced) -> "\u0000loading"
+    lyrics.raw.isBlank() -> "\u0000none"
+    else -> songKey
+}
+
+/**
+ * 换歌方向：记住依次显示过的歌。新的一首正好是上一首之前那首（按了上一首，或连按几次），算往回，从上方落下；
+ * 其余都算往前。同一首重复出现（单曲循环、重新取词）不算换歌。
+ */
+internal class SongTrail(private val limit: Int = 64) {
+    private val keys = ArrayDeque<String>()
+
+    /** 记下 [key]：往回返回 -1，往前 1，和上一次相同 0。 */
+    fun visit(key: String): Int {
+        if (keys.lastOrNull() == key) return 0
+        if (keys.size >= 2 && keys[keys.size - 2] == key) {
+            keys.removeLast()
+            return -1
+        }
+        keys.addLast(key)
+        if (keys.size > limit) keys.removeFirst()
+        return 1
+    }
+}
+
+/** [frozen] 时停在冻结前最后读到的值，之后不再跟随 [source]，也不再因它重组或重画。 */
+@Composable
+private fun <T> rememberHeld(source: State<T>, frozen: Boolean): State<T> {
+    val frozenState = rememberUpdatedState(frozen)
+    return remember(source) { HeldState(source, frozenState) }
+}
+
+@Stable
+private class HeldState<T>(private val source: State<T>, private val frozen: State<Boolean>) : State<T> {
+    private var last: T = source.value
+
+    override val value: T
+        get() = if (frozen.value) last else source.value.also { last = it }
+}
+
+@Composable
+private fun LyricsColumn(
+    lyrics: ParsedLyrics,
+    loading: Boolean,
+    active: State<Int>,
+    onSeek: (Long) -> Unit,
+    position: State<Long>?,
+    playing: Boolean,
+    sizing: LyricsSizing,
+    base: State<Float>,
+    grow: State<Float>,
+    gap: State<Float>,
+    anchor: State<Float>,
+    layoutSp: Float,
+) {
+    // 列表状态在空/加载分支之前创建：同一首歌的歌词重建时 LazyColumn 也能接回原滚动位置；换歌时整份换新
+    val list = rememberLazyListState()
     if (loading && (lyrics.raw.isBlank() || !lyrics.synced)) {
-        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("正在加载歌词…", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
     if (lyrics.raw.isBlank()) {
-        Box(modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
             Text("这首歌没有歌词", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
@@ -482,7 +614,7 @@ fun LyricsList(
     LyricsAutoScroll(active, list, manualAt, lyrics, sizing, anchor)
     LazyColumn(
         state = list,
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .layout { measurable, constraints ->
                 padding.height = if (constraints.hasBoundedHeight) constraints.maxHeight.toDp() else 0.dp
@@ -631,8 +763,9 @@ private fun LyricRow(
     val motion = MaterialTheme.motionScheme
     // 透明度、模糊、缩放都只在布局和 graphicsLayer 里读取，动画逐帧不重组
     val emphasis = animateFloatAsState(distance.toFloat(), motion.defaultEffectsSpec(), label = "lyricEmphasis")
-    // 放大进度：0 常规行，1 当前行；放大倍数本身在列表层过渡，换预设时不用每行各起一个动画
-    val lift = animateFloatAsState(if (current) 1f else 0f, motion.slowSpatialSpec(), label = "lyricLift")
+    // 放大进度：0 常规行，1 当前行；放大倍数本身在列表层过渡，换预设时不用每行各起一个动画。
+    // 一行字的缩放是小范围变换，按 M3E 用 fastSpatial：当前句先长到位、轻轻回弹一下，整列（slowSpatial）再落定
+    val lift = animateFloatAsState(if (current) 1f else 0f, motion.fastSpatialSpec(), label = "lyricLift")
     // 用户在外观里明确关掉模糊时也只降透明度
     val blurSupported = Build.VERSION.SDK_INT >= 31 && LocalAppearance.current.blur != BlurMode.Off
     val origin = if (LocalLayoutDirection.current == LayoutDirection.Rtl) TransformOrigin(1f, 0.5f) else TransformOrigin(0f, 0.5f)
@@ -706,13 +839,13 @@ private fun LyricRow(
         ) {
             // 逐字数据只用于当前行：其他行保持整行文本，避免列表里出现成倍的字级节点
             if (current && synced && line.words.isNotEmpty() && position != null) {
-                KaraokeLine(line, position, playing.value, style)
+                KaraokeLine(line, position, playing.value, style, weight = LyricWeight, fadeUnsung = true)
             } else {
                 Text(
                     line.text,
                     modifier = Modifier.fillMaxWidth(),
                     style = style,
-                    fontWeight = if (current) FontWeight.Black else FontWeight.SemiBold,
+                    fontWeight = LyricWeight,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
@@ -736,6 +869,8 @@ private fun LyricRow(
  * 电视上和背景、封面旋转共用 30 帧节拍（[TvFrameGate]），十英尺外看不出填色少了一半帧；
  * [capFrames] 为 true 时（海报墙的大卡）手机、平板上也限 30 帧。
  * [playing] 为 false 时停在当前进度，不跑帧循环。
+ * [weight] 是两层的字重；[fadeUnsung] 为 true 时（经典歌词列）没唱到的那层从原亮度用 defaultEffects 降到 [KaraokeUnsungAlpha]，
+ * 和整行透明度同一个弹簧，换句时这半句不会先闪暗（见 [karaokeUnsungBrightness]）；透明度只在绘制时读。
  */
 @Composable
 internal fun KaraokeLine(
@@ -744,6 +879,8 @@ internal fun KaraokeLine(
     playing: Boolean,
     style: TextStyle,
     capFrames: Boolean = LocalAppWindow.current.isTv,
+    weight: FontWeight = FontWeight.Black,
+    fadeUnsung: Boolean = false,
 ) {
     val now = remember { mutableLongStateOf(0L) }
     LaunchedEffect(position.value, playing, capFrames) {
@@ -760,7 +897,15 @@ internal fun KaraokeLine(
         }
     }
     val sung = MaterialTheme.colorScheme.onSurface
-    val unsung = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+    val unsung = MaterialTheme.colorScheme.onSurface.copy(alpha = KaraokeUnsungAlpha)
+    // 停稳判定比默认的 0.01 细：整行透明度（delta 更大）先到位，这层后到，乘积不会在收尾时掉到 45% 以下
+    val unsungLevel = remember { Animatable(if (fadeUnsung) 1f else KaraokeUnsungAlpha, KaraokeFadeThreshold) }
+    if (fadeUnsung) {
+        val fade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+        LaunchedEffect(Unit) { unsungLevel.animateTo(KaraokeUnsungAlpha, fade) }
+    }
+    val unsungStyle = remember(style, weight) { style.copy(fontWeight = weight) }
+    val unsungColor = remember(sung, unsungLevel) { ColorProducer { sung.copy(alpha = sung.alpha * unsungLevel.value) } }
     val words = line.words
     FlowRow(
         // 每个字是暗字、亮字两层 Text，读屏会逐字、每字两遍地读；整行只读一遍原文。点按跳转的语义在外层行上，合并后照常可用
@@ -772,11 +917,15 @@ internal fun KaraokeLine(
                 .let { if (wordIndex == 0) it.trimStart() else it }
                 .let { if (wordIndex == words.lastIndex) it.trimEnd() else it }
             Box {
-                Text(text, style = style, fontWeight = FontWeight.Black, color = unsung)
+                if (fadeUnsung) {
+                    BasicText(text, style = unsungStyle, color = unsungColor)
+                } else {
+                    Text(text, style = style, fontWeight = weight, color = unsung)
+                }
                 Text(
                     text,
                     style = style,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = weight,
                     color = sung,
                     modifier = Modifier
                         .matchParentSize()
@@ -796,3 +945,25 @@ internal fun KaraokeLine(
 }
 
 private val LyricRowShape = RoundedCornerShape(12.dp)
+
+/**
+ * 经典歌词列所有行同一字重：系统中日韩字体和导入的字体都没有可变字重轴，字重做不了过渡；
+ * 当前行只靠大小和亮度区分，换句时没有跳变，拉丁字母也不会因为变宽重新折行。
+ */
+private val LyricWeight = FontWeight.Bold
+
+/** 逐字行没唱到的部分的亮度。 */
+internal const val KaraokeUnsungAlpha = 0.45f
+
+/** 没唱到那层淡下去时的停稳判定。 */
+internal const val KaraokeFadeThreshold = 0.0005f
+
+/**
+ * 换句时当前行没唱到那半句的实际亮度：整行透明度从相邻行的 [lyricAlpha]（distance 1）升到 1，
+ * 逐字层从 1 降到 [KaraokeUnsungAlpha]，两者走同一条弹簧进度 [progress]（0 刚换句，1 到位）。
+ */
+internal fun karaokeUnsungBrightness(progress: Float): Float {
+    val row = lyricAlpha(1f - progress)
+    val layer = 1f + (KaraokeUnsungAlpha - 1f) * progress
+    return row * layer
+}

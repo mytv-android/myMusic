@@ -289,6 +289,7 @@ private fun TabletopStage(
                             position = position,
                             playing = playing,
                             sizing = if (wide) LyricsSizing.TabletFocus else LyricsSizing.Tablet,
+                            songKey = song.key,
                         )
                     }
                 }

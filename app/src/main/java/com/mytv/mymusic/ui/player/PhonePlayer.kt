@@ -654,6 +654,7 @@ private fun PhoneLyricsPage(
                         position = position,
                         playing = playing,
                         sizing = LyricsSizing.PhoneLyrics,
+                        songKey = song.key,
                     )
                 }
             },
