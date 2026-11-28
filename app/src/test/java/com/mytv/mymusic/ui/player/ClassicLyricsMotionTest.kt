@@ -111,6 +111,22 @@ class ClassicLyricsMotionTest {
     }
 
     @Test
+    fun aListBuiltMidSwitchDoesNotClaimTheLyricsItHolds() {
+        val held = ParsedLyrics(emptyList(), "[00:01.00]一", true)
+        // 换歌途中才建出来：手里的词说不清是谁的，不能当成新歌的
+        var owner = initialLyricsOwner("b", held, loading = true)
+        assertEquals(UnknownLyricsOwner, owner)
+        owner = lyricsOwner(owner, "b", loading = true)
+        assertNotEquals("b", owner)
+        // 新词到了才归当前这首
+        owner = lyricsOwner(owner, "b", loading = false)
+        assertEquals("b", owner)
+        // 加载完才建出来、或者手里还没有词：就是当前这首
+        assertEquals("b", initialLyricsOwner("b", held, loading = false))
+        assertEquals("b", initialLyricsOwner("b", ParsedLyrics(emptyList(), "", false), loading = true))
+    }
+
+    @Test
     fun songTrailTellsPreviousFromNext() {
         val trail = SongTrail()
         assertEquals(1, trail.visit("a"))

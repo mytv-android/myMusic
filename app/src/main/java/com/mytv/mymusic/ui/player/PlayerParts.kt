@@ -469,11 +469,16 @@ fun LyricsList(
     // 每换一首只记一次：这首是不是刚才那首之前放过的（按了上一首）
     val backward = remember(songKey) { trail.visit(songKey) < 0 }
     // 这份歌词是哪首歌的：加载中歌词没换时还是上一首的。只在歌词、加载状态（不加载时还有歌曲）变了时重算
-    val ownerState = remember { mutableStateOf(songKey) }
+    val ownerState = remember { mutableStateOf(initialLyricsOwner(songKey, lyrics, loading)) }
     val owner = remember(lyrics, loading, if (loading) null else songKey) { lyricsOwner(ownerState.value, songKey, loading) }
     SideEffect { ownerState.value = owner }
     val stale = owner != songKey && lyrics.raw.isNotBlank()
-    val shown = LyricsShown(lyricsContentKey(if (stale) owner else songKey, lyrics, loading), lyrics, loading, backward, stale)
+    val shown = if (stale && owner == UnknownLyricsOwner) {
+        // 刚建出来就在加载、手里的词说不清是哪首歌的：先显示占位，不拿新歌的进度去滚一份可能是上一首的词
+        LyricsShown(LoadingContentKey, NoParsedLyrics, true, backward, false)
+    } else {
+        LyricsShown(lyricsContentKey(if (stale) owner else songKey, lyrics, loading), lyrics, loading, backward, stale)
+    }
     val motion = MaterialTheme.motionScheme
     val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
     val rise = with(LocalDensity.current) { LyricSwitchRise.roundToPx() }
@@ -553,6 +558,15 @@ internal fun lyricsContentKey(songKey: String, lyrics: ParsedLyrics, loading: Bo
  * 归属不变（[previous]）；不在加载时就是当前这首 [songKey]。在歌词或加载状态变化时调用。
  */
 internal fun lyricsOwner(previous: String, songKey: String, loading: Boolean): String = if (loading) previous else songKey
+
+/** 归属说不清：歌词列在换歌途中才建出来（换布局、重进播放页），解析器手里的词可能还是上一首的。 */
+internal const val UnknownLyricsOwner = "\u0000unknown"
+
+private val NoParsedLyrics = ParsedLyrics(emptyList(), "", false)
+
+/** 歌词列刚建出来时这份歌词的归属：已经加载完就是当前这首，还在加载且手里有词时说不清（[UnknownLyricsOwner]）。 */
+internal fun initialLyricsOwner(songKey: String, lyrics: ParsedLyrics, loading: Boolean): String =
+    if (loading && lyrics.raw.isNotBlank()) UnknownLyricsOwner else songKey
 
 /**
  * 换歌方向：记住依次显示过的歌。新的一首正好是上一首之前那首（按了上一首，或连按几次），算往回，从上方落下；
