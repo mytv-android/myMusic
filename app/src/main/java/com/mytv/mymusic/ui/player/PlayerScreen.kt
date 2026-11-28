@@ -58,6 +58,7 @@ import com.mytv.mymusic.ui.theme.LocalAppearance
 import com.mytv.mymusic.ui.theme.LocalSeedColor
 import com.mytv.mymusic.ui.theme.isTelevision
 import com.mytv.mymusic.ui.AddToPlaylistSheet
+import com.mytv.mymusic.ui.defaultPlaylistGroup
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -571,7 +572,19 @@ fun PlayerScreen(
             )
         }
         playlistSong?.let { target ->
-            AddToPlaylistSheet(song = target, providers = state.providers, actions = actions, onDismiss = { playlistSong = null })
+            AddToPlaylistSheet(
+                song = target,
+                providers = state.providers,
+                actions = actions,
+                // 默认停在当前音源的分组：普通换源跟随实际取流源，lx 取流时回到歌曲原本所属平台
+                defaultGroup = defaultPlaylistGroup(
+                    song = target,
+                    currentSong = state.current,
+                    currentSourceId = state.currentSource?.providerId,
+                    primarySong = state.currentTrack?.sources?.firstOrNull()?.song,
+                ),
+                onDismiss = { playlistSong = null },
+            )
         }
         if (state.rhythmDebug && rhythmDebugAvailable()) {
             RhythmDebugOverlay(pulse, state.rhythmOffsetMs, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp))

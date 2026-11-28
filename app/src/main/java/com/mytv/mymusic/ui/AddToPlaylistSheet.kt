@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.library.libraryPlaylistGroups
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.launch
@@ -27,7 +28,14 @@ import kotlinx.coroutines.launch
  * 提示条放在面板里：面板是单独的窗口，外壳的 Snackbar 被它盖着，看不见也点不到撤销。
  */
 @Composable
-fun AddToPlaylistSheet(song: Song, providers: List<ProviderInfo>, actions: MusicActions, onDismiss: () -> Unit) {
+fun AddToPlaylistSheet(
+    song: Song,
+    providers: List<ProviderInfo>,
+    actions: MusicActions,
+    onDismiss: () -> Unit,
+    /** 默认选中的分组 id（空串是本地）；由调用方按「这首歌的音源」算好，见 [defaultPlaylistGroup]。 */
+    defaultGroup: String? = null,
+) {
     val playlists by actions.localPlaylists.collectAsState()
     val containing by remember(song.key) { actions.playlistsContaining(song) }.collectAsState(initial = null)
     val access by actions.boundAccess.collectAsState()
@@ -51,6 +59,12 @@ fun AddToPlaylistSheet(song: Song, providers: List<ProviderInfo>, actions: Music
     // 第一次查出来之前不出面板：电视的焦点要落在“还没加入的第一个”上，勾也不能先空着再闪出来
     val inPlaylists = containing ?: return
 
+    // 分组跟着歌单列表更新（新建 / 删掉歌单后 tab 要跟上）；打开时的默认选中项只按当前音源算一次
+    val groups = remember(ordered) { libraryPlaylistGroups(ordered).keys.toList() }
+    var chosenGroup by remember { mutableStateOf(resolvePlaylistGroup(defaultGroup, groups)) }
+    // 选中的分组已经被删掉 / 解绑时回到「全部」，和面板里的 tab 显示保持一致
+    val group = chosenGroup?.takeIf { it in groups }
+
     fun binding(playlist: LocalPlaylistSummary): PlaylistBinding {
         if (!playlist.bound) return PlaylistBinding.None
         val info = providers.find { it.id == playlist.linkProvider } ?: return PlaylistBinding.None
@@ -61,6 +75,13 @@ fun AddToPlaylistSheet(song: Song, providers: List<ProviderInfo>, actions: Music
             else -> PlaylistBinding.WriteBack(platform)
         }
     }
+
+    // 电视的焦点落点：当前分组里第一个还没加入、能改的歌单
+    val focusTarget = ordered.firstOrNull {
+        it.id !in inPlaylists &&
+            binding(it) != PlaylistBinding.ReadOnly &&
+            (group == null || playlistGroupOf(it) == group)
+    }?.id
 
     fun show(text: String, undo: (() -> Unit)? = null) {
         if (text.isBlank()) return
@@ -138,8 +159,19 @@ fun AddToPlaylistSheet(song: Song, providers: List<ProviderInfo>, actions: Music
         },
         note = if (tv) "按确认键加入或移出，面板不自动关。" else "点一下加入或移出，面板不自动关；收藏用旁边的心形。",
         snackbar = snackbar,
-        // 电视焦点落在第一个还没加入、能改的歌单上
-        focusId = ordered.firstOrNull { it.id !in inPlaylists && binding(it) != PlaylistBinding.ReadOnly }?.id,
+        // 电视焦点落在当前分组里第一个还没加入、能改的歌单上（tab 上按确认才进列表）
+        focusId = focusTarget,
+        // 只有一类歌单时不显示 tab，保持原来的扁平列表
+        grouping = if (groups.size > 1) {
+            PlaylistGrouping(
+                groups = groups,
+                selected = group,
+                providers = providers,
+                onSelect = { chosenGroup = it },
+            )
+        } else {
+            null
+        },
     )
 }
 
