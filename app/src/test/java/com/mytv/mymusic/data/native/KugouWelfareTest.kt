@@ -68,7 +68,8 @@ class KugouWelfareTest {
 
     @Test
     fun `month record counts this month and flags today`() {
-        val today = KugouWelfare.beijingToday()
+        // 固定「今天」：夹具里的 28 号会在每月 28 号与真实 today 撞车，去重后只剩 2 条
+        val today = "2026-05-20"
         val month = today.substring(0, 7)
         val yesterday = java.time.LocalDate.parse(today).minusDays(1).toString()
         val raw = """
@@ -78,7 +79,7 @@ class KugouWelfareTest {
               {"date":"${month}-28","content":"1天畅听VIP"}
             ]}}
         """.trimIndent()
-        val record = KugouWelfare.parseMonthRecord(raw)
+        val record = KugouWelfare.parseMonthRecord(raw, today)
         assertEquals(3, record?.first)
         assertTrue(record?.second == true)
     }
