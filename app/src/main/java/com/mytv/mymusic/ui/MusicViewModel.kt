@@ -6006,11 +6006,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun startProgress() {
         progressJob = viewModelScope.launch {
             var ticks = 0
+            var mismatchTicks = 0
             while (true) {
                 controller?.let {
                     // 从磁盘接上、还没装进播放器的队列：进度停在存下来的位置
                     if (dormant != null && it.mediaItemCount == 0) return@let
                     val key = base.value.current?.key.orEmpty()
+                    // 播放器已经换到下一首、current 还是上一首（换歌回调之后 onEvents 才更新）：这几拍读到的是新歌的进度，
+                    // 配着上一首的歌词会把歌词拉回开头再换走。进度停在上一拍等歌换过来，最多等 MISMATCH_HOLD_TICKS 拍
+                    val itemKey = it.currentMediaItem?.mediaId.orEmpty()
+                    if (itemKey.isNotEmpty() && key.isNotEmpty() && itemKey != key && mismatchTicks < MISMATCH_HOLD_TICKS) {
+                        mismatchTicks++
+                        return@let
+                    }
+                    mismatchTicks = 0
                     val raw = it.currentPosition.coerceAtLeast(0)
                     val now = SystemClock.elapsedRealtime()
                     val clock = progressClock
@@ -7984,6 +7993,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 播放器新报的进度和本地外推差这么多才重新对齐，避免把正常的会话推送误差变成跳变。 */
         const val POSITION_RESYNC_MS = 300L
+
+        /** 播放器和 current 对不上时进度最多停这么多拍（每拍 PROGRESS_TICK_MS），再对不上就照常走，不会一直卡住。 */
+        const val MISMATCH_HOLD_TICKS = 15
 
         /** 继续播放最多往后试几首、总共等多久：系统要求前台服务 10 秒内起来。 */
         const val RESUME_TRIES = 3
