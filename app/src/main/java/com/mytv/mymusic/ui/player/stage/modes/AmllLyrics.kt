@@ -365,4 +365,5 @@ internal fun amllInterludes(starts: DoubleArray, ends: DoubleArray): List<AmllIn
 
 internal const val AMLL_MIN_INTERLUDE_MS = 7_000.0
 private val VOICE_PREFIX = Regex("^\\s*([男女合])\\s*[:：]\\s*")
-private val WHITESPACE = Regex("(?U)\\s+")
+// JS 的 \s 含全角空格、不换行空格和 BOM；Android 的 ICU 正则不认 (?U)（UNICODE_CHARACTER_CLASS），一编译就抛异常，所以写成显式字符类
+private val WHITESPACE = Regex("[\\s\\p{Z}\\uFEFF]+")

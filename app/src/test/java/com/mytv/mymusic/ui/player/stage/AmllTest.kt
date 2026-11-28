@@ -10,10 +10,12 @@ import com.mytv.mymusic.ui.player.stage.modes.AmllLayout
 import com.mytv.mymusic.ui.player.stage.modes.AmllLineText
 import com.mytv.mymusic.ui.player.stage.modes.AmllTimeline
 import com.mytv.mymusic.ui.player.stage.modes.AmllVisualizer
+import com.mytv.mymusic.ui.player.stage.modes.AmllWord
 import com.mytv.mymusic.ui.player.stage.modes.RushVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.amllBackgroundSplit
 import com.mytv.mymusic.ui.player.stage.modes.amllBlur
 import com.mytv.mymusic.ui.player.stage.modes.amllBlurLabel
+import com.mytv.mymusic.ui.player.stage.modes.amllChunkWords
 import com.mytv.mymusic.ui.player.stage.modes.amllDetectSeek
 import com.mytv.mymusic.ui.player.stage.modes.amllInterludeAnchor
 import com.mytv.mymusic.ui.player.stage.modes.amllInterludes
@@ -386,6 +388,15 @@ class AmllTest {
             field.setBoolean(null, previous)
         }
         assertSame(on, AmllVisualizer.settings)
+    }
+
+    @Test
+    fun fullWidthAndNoBreakSpacesSplitWordsLikeAsciiSpaces() {
+        // JS 的 \s 含 U+3000、U+00A0：和半角空格分出一样的词组
+        fun chunks(space: Char) = amllChunkWords(listOf(AmllWord("你好${space}世界", 0.0, 1000.0), AmllWord("ok", 1000.0, 1500.0)))
+            .map { group -> group.map { it.text.replace(space, ' ') to it.startMs } }
+        assertEquals(chunks(' '), chunks('\u3000'))
+        assertEquals(chunks(' '), chunks('\u00A0'))
     }
 
     private fun AmllLineText.text(): String = units.joinToString("") { it.text }
