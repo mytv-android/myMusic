@@ -117,12 +117,15 @@ class PosterWallStateTest {
 
     @Test
     fun idleWaitIsTheNextThreshold() {
-        assertEquals(6.0, idleWaitSeconds(isTv = true, chromeIdle = false, idleSeconds = 0.0, driftEnabled = true, drifting = false)!!, 1e-9)
-        assertEquals(26.0, idleWaitSeconds(isTv = true, chromeIdle = true, idleSeconds = 4.0, driftEnabled = true, drifting = false)!!, 1e-9)
-        assertEquals(2.0, idleWaitSeconds(isTv = true, chromeIdle = false, idleSeconds = 4.0, driftEnabled = false, drifting = false)!!, 1e-9)
-        assertNull(idleWaitSeconds(isTv = true, chromeIdle = true, idleSeconds = 40.0, driftEnabled = true, drifting = true))
-        assertNull(idleWaitSeconds(isTv = false, chromeIdle = false, idleSeconds = 0.0, driftEnabled = false, drifting = false))
-        assertEquals(0.0, idleWaitSeconds(isTv = true, chromeIdle = false, idleSeconds = 9.0, driftEnabled = false, drifting = false)!!, 1e-9)
+        // 电视：浮层 6 秒、起漂 30 秒
+        assertEquals(6.0, idleWaitSeconds(chromeAfter = 6.0, chromeIdle = false, idleSeconds = 0.0, driftEnabled = true, drifting = false)!!, 1e-9)
+        assertEquals(26.0, idleWaitSeconds(chromeAfter = 6.0, chromeIdle = true, idleSeconds = 4.0, driftEnabled = true, drifting = false)!!, 1e-9)
+        assertEquals(2.0, idleWaitSeconds(chromeAfter = 6.0, chromeIdle = false, idleSeconds = 4.0, driftEnabled = false, drifting = false)!!, 1e-9)
+        assertNull(idleWaitSeconds(chromeAfter = 6.0, chromeIdle = true, idleSeconds = 40.0, driftEnabled = true, drifting = true))
+        // 手机 / 平板：只有 4 秒的浮层，没有漂移
+        assertEquals(4.0, idleWaitSeconds(chromeAfter = 4.0, chromeIdle = false, idleSeconds = 0.0, driftEnabled = false, drifting = false)!!, 1e-9)
+        assertNull(idleWaitSeconds(chromeAfter = 4.0, chromeIdle = true, idleSeconds = 4.0, driftEnabled = false, drifting = false))
+        assertEquals(0.0, idleWaitSeconds(chromeAfter = 6.0, chromeIdle = false, idleSeconds = 9.0, driftEnabled = false, drifting = false)!!, 1e-9)
     }
 
     // ------------------------------------------------------------------ 状态机
@@ -338,10 +341,35 @@ class PosterWallStateTest {
         assertFalse(s.chromeVisible)
         assertFalse(s.wake())
         assertTrue(s.chromeVisible)
-        // 手机不淡出
+    }
+
+    @Test
+    fun touchChromeFadesAfterFourIdleSeconds() {
         val p = wall(phone(current = 4), phoneView)
-        p.tick(10f)
+        p.tick(3.5f)
         assertTrue(p.chromeVisible)
+        p.tick(1f)
+        assertFalse(p.chromeVisible)
+        // 碰一下屏幕（拖动、按键、点格子都走 wake）就回来，然后再过一次 4 秒
+        assertFalse(p.wake())
+        assertTrue(p.chromeVisible)
+        p.tick(4f)
+        assertFalse(p.chromeVisible)
+    }
+
+    @Test
+    fun draggingKeepsTheTouchChromeUp() {
+        val s = wall(phone(current = 4), phoneView)
+        // 手指按着拖了 10 秒：帧循环睡着，手势那段时间不算空闲，墙在动就不该顺带把浮层淡掉
+        s.beginDrag()
+        s.dragBy(120f, 0f)
+        now += 10_000_000_000L
+        s.resumeAfterSleep()
+        assertTrue(s.chromeVisible)
+        // 松手后照旧 4 秒
+        s.endDrag(0f, 0f)
+        s.tick(4f)
+        assertFalse(s.chromeVisible)
     }
 
     @Test

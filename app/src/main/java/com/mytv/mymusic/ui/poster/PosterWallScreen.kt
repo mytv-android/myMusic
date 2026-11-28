@@ -29,8 +29,6 @@ import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -89,7 +87,7 @@ import kotlin.coroutines.cancellation.CancellationException
  * 队列海报墙：播放队列铺成的墙（[PosterWall]）加上浮层——顶栏胶囊（返回 + 标题）、“定位”和设置。
  * 挂在 MyMusicApp 里主界面之上、播放页之下，外面套 PlayerTheme（深色，随当前封面取色、450ms 过渡）。
  *
- * - 手机 / 平板：胶囊在左上，“定位”48dp 圆钮和设置 56dp FAB 在右下，都让开系统栏；
+ * - 手机 / 平板：胶囊在左上，“定位”48dp 圆钮和设置 56dp 钮在右下，都让开系统栏；右下这一排 4 秒不操作淡出，墙一动就回来；
  * - 电视：顶部 80dp 一排只有胶囊和时钟（“电视时钟”开着时），大卡放在它下面；空闲 6 秒浮层淡出，时钟留着。
  *   墙是无限的、方向键永远留在墙里，一排上没有任何能拿方向的按钮：返回靠遥控器的返回键，
  *   “回到正在播放”和“海报墙设置”都在长按 OK 的单曲操作面板末尾（焦点够得到的入口只放在那一处）；
@@ -385,6 +383,9 @@ private const val ChromeScrimAlpha = 0.86f
  * 手机 / 平板：胶囊在左上，定位和设置在右下（平板留得更宽）。读屏开着时胶囊下面多一个“以列表浏览”。
  * 书本 / 双竖时胶囊收在左页里（[leftPage]，dp），长标题省略，不压折痕；右下的按钮本来就在右页。
  * 桌面 / 双横时胶囊挪到下半屏顶上（[lowerTop]，墙本地 dp），上半屏整块留给大卡。
+ *
+ * 右下角那一排 4 秒不操作就淡出（[PosterWallState.chromeVisible]），墙在动、或者碰一下屏幕就回来；
+ * 淡出后两个按钮一起置为不可点、也不再进读屏——看不见的按钮不该还能点。
  */
 @Composable
 private fun TouchChrome(
@@ -403,6 +404,9 @@ private fun TouchChrome(
     val pillTop = if (phone) PhonePillTop else 20.dp
     // 这一层按安全区内缩过，墙本地的 lowerTop 要先扣掉顶上的安全区
     val safeTop = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
+    // 标题胶囊一直留着（返回钮在那儿，读屏的入口也在那儿），只有右下角这一排跟着空闲计时淡出
+    val buttonsShown = wall.chromeVisible
+    val alpha = rememberChromeAlpha(wall)
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(
             Modifier
@@ -421,19 +425,31 @@ private fun TouchChrome(
         Row(
             Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = if (phone) 16.dp else 36.dp, bottom = if (phone) 30.dp else 28.dp),
+                .padding(end = if (phone) 16.dp else 36.dp, bottom = if (phone) 30.dp else 28.dp)
+                .graphicsLayer { this.alpha = alpha.value }
+                .then(if (buttonsShown) Modifier else Modifier.clearAndSetSemantics {}),
             horizontalArrangement = Arrangement.spacedBy(if (phone) 12.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            LocateButton(wall)
-            FloatingActionButton(
-                onClick = onSettings,
-                shape = RoundedCornerShape(16.dp),
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = ChromeShadow),
-            ) { Icon(Icons.Filled.Tune, "海报墙设置") }
+            LocateButton(wall, enabled = buttonsShown)
+            SettingsButton(onSettings, enabled = buttonsShown)
         }
+    }
+}
+
+/** 海报墙设置：56dp FAB 的样子，[enabled] 跟着浮层的淡出——看不见的时候点不到。 */
+@Composable
+private fun SettingsButton(onSettings: () -> Unit, enabled: Boolean) {
+    Surface(
+        onClick = onSettings,
+        enabled = enabled,
+        modifier = Modifier.size(56.dp).tvFocusRing(RoundedCornerShape(16.dp)),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shadowElevation = ChromeShadow,
+    ) {
+        Box(contentAlignment = Alignment.Center) { Icon(Icons.Filled.Tune, "海报墙设置") }
     }
 }
 
@@ -476,7 +492,7 @@ private fun TvTopRow(
     }
 }
 
-/** 浮层跟着 [PosterWallState.chromeVisible] 淡入淡出（电视空闲 6 秒）；在效果里收集，只改图层透明度，不重组。 */
+/** 浮层跟着 [PosterWallState.chromeVisible] 淡入淡出（电视空闲 6 秒、手机 / 平板 4 秒）；在效果里收集，只改图层透明度，不重组。 */
 @Composable
 private fun rememberChromeAlpha(wall: PosterWallState): State<Float> {
     val alpha = remember { Animatable(1f) }
@@ -531,7 +547,7 @@ private fun WallTitlePill(title: String, subtitle: String, onBack: (() -> Unit)?
 
 /** 手机 / 平板的“定位正在播放”：正在播放的那首没放大时高亮成主色。高亮只在这个小组件里读墙的状态。 */
 @Composable
-private fun LocateButton(wall: PosterWallState) {
+private fun LocateButton(wall: PosterWallState, enabled: Boolean) {
     val hot = wall.hasCurrent && !wall.currentGrown
     val scheme = MaterialTheme.colorScheme
     val effects = MaterialTheme.motionScheme.defaultEffectsSpec<androidx.compose.ui.graphics.Color>()
@@ -543,6 +559,7 @@ private fun LocateButton(wall: PosterWallState) {
     val content by animateColorAsState(if (hot) scheme.onPrimary else scheme.onSurface, effects, label = "posterLocateIcon")
     Surface(
         onClick = wall::locate,
+        enabled = enabled,
         modifier = Modifier.size(48.dp).tvFocusRing(CircleShape),
         shape = CircleShape,
         color = container,

@@ -352,9 +352,10 @@ internal fun CollectionPosterView(
                     contentAlignment = Alignment.Center,
                 ) { message() }
             }
-            // 电视空闲 6 秒浮层淡出（墙的 chromeVisible）；手机、平板一直显示
+            // 电视空闲 6 秒浮层淡出（墙的 chromeVisible）；手机、平板一直显示——队列海报墙右下角那一排另按 4 秒淡出，
+            // 那是队列墙自己的事（见 PosterWallScreen），海报视图这一层整块留着，胶囊上的返回钮和工具栏不淡
             val chromeAlpha = rememberPosterChromeAlpha(wall)
-            val fade = Modifier.graphicsLayer { alpha = chromeAlpha.value }
+            val fade = Modifier.graphicsLayer { alpha = if (tv) chromeAlpha.value else 1f }
             // 书本 / 双竖：工具栏收在右页里（约 356dp），平板的 48dp 图标钮会把“播放全部”挤成“播…”，换手机的 40dp
             val toolbarChrome = if (segment?.vertical == true) chrome.copy(itemWidth = minOf(chrome.itemWidth, 40f)) else chrome
             val toolbar: @Composable (Modifier) -> Unit = { modifier ->

@@ -92,13 +92,14 @@ internal fun rememberPosterWallState(): PosterWallState = remember { PosterWallS
  * - 只组合视口外扩两个格距内的格子，按 (块, 位) 复用；镜头平移只在摆放阶段读、对齐整像素，格子不重组；
  * - 点格子放大（不是播放），拖动带惯性，长按交给 [onLongPress]；
  * - 电视上墙自己收方向键、自己记焦点（见 WallFocus.kt），OK 放大，焦点在大卡上按 OK 交给 [onGrownConfirm]，
- *   长按 OK / 菜单键交给 [onLongPress]（菜单键 fromMenu 为 true）；空闲 6 秒浮层淡出（[PosterWallState.chromeVisible]），30 秒起漂；
+ *   长按 OK / 菜单键交给 [onLongPress]（菜单键 fromMenu 为 true）；空闲到阈值浮层淡出（[PosterWallState.chromeVisible]：
+ *   电视 6 秒、手机 / 平板 4 秒，各页面自己决定淡掉哪些），30 秒起漂；
  * - [grownContent] 是大卡内容（GrownPoster），墙负责槽位、圆角裁切、描边、阴影和放大动画，底下垫着小封面；
  *   `settled` 在放大的弹簧落定或 1 秒后为 true；
  * - [insetTop] / [insetBottom] 是浮层占的高度，大卡居中在两者之间；墙自己画背景（surface + 两团主题色光晕 + 暗角）。
  * - [active] 为 false（播放页盖在墙上）时帧循环停下，切歌跟随直接到位；大卡里的动画由页面按它停（GrownPoster 的 settled）；
  * - [resetKey] 换了一份队列（首数一样也算）时变，整面墙重新入场；[currentKey] 正在播放那首的 key，用来分辨队列重排和切歌；
- * - [holdAwake] 墙上开着面板时为 true：空闲计时不走（电视浮层不淡出、不起漂）。
+ * - [holdAwake] 墙上开着面板时为 true：空闲计时不走（浮层不淡出、不起漂）。
  * - 折叠屏书本 / 桌面姿态（含双屏）：大卡居中到右页 / 上半屏，格距按那一段选（[rememberWallSpec]）；墙上的格子照常跨折痕铺满。
  *
  * 页面要接：BackHandler → [PosterWallState.handleBack]（返回 false 再离开），根节点挂 [posterWallWake]
@@ -261,7 +262,7 @@ private fun Modifier.wallZoomLayer(state: PosterWallState): Modifier = graphicsL
 
 /**
  * 页面根节点挂这个：漂移中第一下按键 / 触摸只唤醒（连同自动重复和松开一起吞掉，浮层按钮也收不到），
- * 平时任何按键、触摸都把空闲计时归零。返回键不经过这里，见 [PosterWallState.handleBack]。
+ * 平时任何按键、触摸都把空闲计时归零（浮层到阈值淡出后，碰一下屏幕就回来）。返回键不经过这里，见 [PosterWallState.handleBack]。
  */
 internal fun Modifier.posterWallWake(state: PosterWallState): Modifier = this
     .onPreviewKeyEvent { e -> state.previewKey(wallKeyOf(e.key), e.type == KeyEventType.KeyDown) }

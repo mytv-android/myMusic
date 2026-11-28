@@ -245,6 +245,22 @@ class WallCameraTest {
     }
 
     @Test
+    fun theChromeIdleThresholdFollowsTheDevice() {
+        // 默认（电视）6 秒
+        val tv = WallCamera(0f, 0f, Random(1))
+        repeat(5 * 30) { tv.step(1f / 30f) }
+        assertFalse(tv.chromeIdle)
+        tv.step(1f)
+        assertTrue(tv.chromeIdle)
+        // 手机 / 平板 4 秒
+        val touch = WallCamera(0f, 0f, Random(1)).apply { chromeIdleAfter = WallCamera.TOUCH_CHROME_AFTER }
+        repeat(3 * 30) { touch.step(1f / 30f) }
+        assertFalse(touch.chromeIdle)
+        touch.step(1f)
+        assertTrue(touch.chromeIdle)
+    }
+
+    @Test
     fun feedDriftTravelsAlongTheBandAndBouncesOffItsEdges() {
         val b = tvFeed.bounds(tvView)!!
         for (seed in 0 until 4) {

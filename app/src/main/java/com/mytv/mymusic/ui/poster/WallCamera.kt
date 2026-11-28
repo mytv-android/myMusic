@@ -122,8 +122,14 @@ internal class WallCamera(
     var idleSeconds = 0.0
         private set
 
-    /** 浮层该淡出了：空闲 [IDLE_CHROME_AFTER] 秒，或已在漂移。 */
-    val chromeIdle: Boolean get() = drift != null || idleSeconds >= IDLE_CHROME_AFTER
+    /**
+     * 浮层淡出前允许多少秒不操作：电视 [IDLE_CHROME_AFTER]，手机 / 平板 [TOUCH_CHROME_AFTER]。
+     * 由 [PosterWallState.configure] 按设备写进来（和 [driftEnabled] 一样）。
+     */
+    var chromeIdleAfter = IDLE_CHROME_AFTER
+
+    /** 浮层该淡出了：空闲 [chromeIdleAfter] 秒，或已在漂移。 */
+    val chromeIdle: Boolean get() = drift != null || idleSeconds >= chromeIdleAfter
 
     val isDrifting: Boolean get() = drift != null
     val isFlinging: Boolean get() = fling != null
@@ -353,6 +359,12 @@ internal class WallCamera(
         /** 电视：多少秒不操作浮层淡出、镜头开始漂移。 */
         const val IDLE_CHROME_AFTER = 6.0
         const val DRIFT_AFTER = 30.0
+
+        /**
+         * 手机 / 平板：多少秒不操作，右下角那一排浮层按钮（“定位正在播放”、海报墙设置）淡出。
+         * 比电视短——触屏上手指一直悬在屏幕前点来点去，淡出快点墙更干净；碰一下屏幕（拖动也算）就回来。
+         */
+        const val TOUCH_CHROME_AFTER = 4.0
 
         /** 漂移速度 dp/s、起步加速时间 s。 */
         const val DRIFT_SPEED = 10.0

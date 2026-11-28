@@ -127,18 +127,19 @@ internal fun WallScene.cullTiles(cx: Int, cy: Int, viewport: WallViewport): List
 }
 
 /**
- * 镜头不动时，帧循环最多睡多久就得醒来推进空闲计时（秒）：电视浮层 6 秒淡出、开着漂移时 30 秒起漂。
+ * 镜头不动时，帧循环最多睡多久就得醒来推进空闲计时（秒）：浮层到 [chromeAfter] 秒淡出
+ * （电视 [WallCamera.IDLE_CHROME_AFTER]，手机 / 平板 [WallCamera.TOUCH_CHROME_AFTER]），开着漂移时 30 秒起漂。
  * null 表示没有定时的事，等下一次操作。
  */
 internal fun idleWaitSeconds(
-    isTv: Boolean,
+    chromeAfter: Double,
     chromeIdle: Boolean,
     idleSeconds: Double,
     driftEnabled: Boolean,
     drifting: Boolean,
 ): Double? {
     var wait: Double? = null
-    if (isTv && !chromeIdle) wait = WallCamera.IDLE_CHROME_AFTER - idleSeconds
+    if (!chromeIdle) wait = chromeAfter - idleSeconds
     if (driftEnabled && !drifting) {
         val d = WallCamera.DRIFT_AFTER - idleSeconds
         wait = if (wait == null) d else min(wait, d)
@@ -155,8 +156,8 @@ internal fun idleWaitSeconds(
  * - [locate] “定位”：镜头弹到离屏幕中心最近的那一份并放大；[growSong] 放大某一首（“下一首播放”之后跟着它）；
  * - [takeFocus] 电视进页面时调：焦点交给墙并选中离可用区中心最近的那格（顶排没有能拿焦点的按钮，焦点只能在墙上）；
  * - [handleBack] 墙这一层的返回（见 [wallBackStep]），返回 false 时页面离开；面板由页面自己先关；
- * - [chromeVisible] 电视空闲 6 秒或漂移中为 false，浮层跟着淡出；[wake] 有操作时调，返回 true 表示刚才在漂移、这一下只用来唤醒；
- *   页面根节点挂 [posterWallWake] 就不用自己调；
+ * - [chromeVisible] 空闲超过阈值（电视 6 秒、手机 / 平板 4 秒）或电视漂移中为 false，浮层跟着淡出；[wake] 有操作时调，返回 true 表示刚才在漂移、这一下只用来唤醒；
+ *   页面根节点挂 [posterWallWake] 就不用自己调（拖动、捏合、按键、触摸都算操作）；
  * - [grownFocused] 墙的方向键焦点停在大卡上（给 GrownPoster 的 focused），[grownCoverKey] 大卡底下那格小封面的内存缓存键；
  * - [focusRequester] 墙节点的 Compose 焦点；电视上 PosterWall 默认自己请求一次。
  *
@@ -353,6 +354,8 @@ internal class PosterWallState internal constructor(
             camera.driftEnabled = c.drift
             lastTick = clock()
         }
+        // 浮层淡出的空闲阈值按设备：电视 6 秒（和起漂一个数），手机 / 平板 4 秒
+        camera.chromeIdleAfter = if (c.isTv) WallCamera.IDLE_CHROME_AFTER else WallCamera.TOUCH_CHROME_AFTER
         // 面板开、关都算一次操作：关上之后空闲计时从这时算起，不会一关就淡出
         if (prev != null && prev.holdAwake != c.holdAwake) {
             camera.wake()
@@ -843,7 +846,7 @@ internal class PosterWallState internal constructor(
         }
 
     /**
-     * 帧循环。只在 [needsFrames] 时按帧走；静止时按空闲阈值定时醒来推进计时（电视浮层淡出、到点起漂），
+     * 帧循环。只在 [needsFrames] 时按帧走；静止时按空闲阈值定时醒来推进计时（浮层该淡出了、到点该起漂），
      * 不空转 60 帧。在 PosterWall 的 LaunchedEffect 里跑。
      */
     internal suspend fun runFrames() {
@@ -854,7 +857,7 @@ internal class PosterWallState internal constructor(
                 withFrameNanos(frame)
             } else {
                 val wait = idleWaitSeconds(
-                    isTv = config?.isTv == true,
+                    chromeAfter = camera.chromeIdleAfter,
                     chromeIdle = camera.chromeIdle,
                     idleSeconds = camera.idleSeconds,
                     driftEnabled = camera.driftEnabled,
@@ -872,15 +875,16 @@ internal class PosterWallState internal constructor(
 
     /**
      * 帧循环从睡着里醒来（[runFrames] 调用）。睡着这段时间镜头没动，这段时长不能当成一帧推给弹簧或惯性：
-     * 拖得越久，松手时惯性第一帧就跳得越远（issue #24 录下来的正是这个）。时间只推进空闲计时（电视浮层该淡出、
+     * 拖得越久，松手时惯性第一帧就跳得越远（issue #24 录下来的正是这个）。时间只推进空闲计时（浮层该淡出、
      * 到点该起漂），镜头从此刻重新开始走。
+     * 手指还按着在拖 / 捏合时这段时间不算空闲：帧循环睡着，手势自己不走帧，墙在动就不该顺带把浮层淡掉。
      */
     internal fun resumeAfterSleep() {
         val now = clock()
         val dt = (now - lastTick).coerceAtLeast(0L) / 1e9f
         lastTick = max(lastTick, now)
         lastFrame = NO_FRAME
-        camera.advanceIdle(dt)
+        if (dragFrom == null && !pinching) camera.advanceIdle(dt)
         tick(0f)
     }
 
@@ -924,7 +928,7 @@ internal class PosterWallState internal constructor(
         cellX = cullCell(camera.x, p)
         cellY = cullCell(camera.y, p)
         isDrifting = camera.isDrifting
-        chromeVisible = !(config?.isTv == true && camera.chromeIdle)
+        chromeVisible = !camera.chromeIdle
     }
 
     private fun signal() {
