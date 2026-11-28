@@ -108,7 +108,7 @@ class AnimationDraftTest {
             listOf(
                 "换法：固定 → 随机",
                 "所有歌都用：Rush → 黑胶唱片",
-                "随机池：9 个 → 6 个",
+                "随机池：10 个 → 6 个",
                 "「慢」：黑胶唱片 → Rush",
                 "频谱：关 → 开",
                 "「Rush」的设置：改了 3 项",
@@ -126,7 +126,7 @@ class AnimationDraftTest {
         val rush = saved.copy(pluginSettings = mapOf("rush" to mapOf("align" to "end")))
         assertEquals(listOf("「Rush」的设置：改了 1 项"), animationDiff(rush, draftOf(rush).copy(pluginSettings = emptyMap())))
         val cleared = draftOf(saved).copy(auto = LyricAutoSwitch.Random, randomPool = emptySet())
-        assertEquals(listOf("换法：固定 → 随机", "随机池：9 个 → 0 个"), animationDiff(saved, cleared))
+        assertEquals(listOf("换法：固定 → 随机", "随机池：10 个 → 0 个"), animationDiff(saved, cleared))
     }
 
     // ---- 舞台预览哪个 ----

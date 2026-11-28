@@ -114,8 +114,10 @@ import com.mytv.mymusic.data.LyricTextPrefs
 import com.mytv.mymusic.ui.LyricPipeline
 import com.mytv.mymusic.ui.withSubline
 import com.mytv.mymusic.ui.player.stage.AnimationSheet
+import com.mytv.mymusic.ui.player.stage.LocalStageBackdrop
 import com.mytv.mymusic.ui.player.stage.SongDecision
 import com.mytv.mymusic.ui.player.stage.SongRowState
+import com.mytv.mymusic.ui.player.stage.StageBackdrop
 import com.mytv.mymusic.ui.player.stage.StageBinding
 import com.mytv.mymusic.ui.player.stage.StageTag
 import com.mytv.mymusic.ui.player.stage.isDirty
@@ -378,6 +380,15 @@ fun PlayerScreen(
             ),
     ) {
         val wideBackdrop = !tabletop && (window.isTv || wideLayout)
+        // 手机歌词页、平板专注歌词整体压暗一些；电视底部额外加深，给控制条和细进度留对比度。
+        // 桌面姿态上下排：上半屏是歌词或时钟时按手机歌词页压暗，是封面时按手机播放页
+        val scrim = when {
+            window.isTv -> BackdropScrim.Tv
+            tabletop -> if (tabletopShown == TabletopTop.Cover) BackdropScrim.Phone else BackdropScrim.PhoneLyrics
+            wideBackdrop -> if (lyricsMode) BackdropScrim.WideFocus else BackdropScrim.Wide
+            lyricsMode -> BackdropScrim.PhoneLyrics
+            else -> BackdropScrim.Phone
+        }
         LyricsBackdrop(
             cover = song.cover,
             playing = state.playing,
@@ -386,16 +397,27 @@ fun PlayerScreen(
             wide = wideBackdrop,
             pulse = pulse,
             rhythmOffsetMs = state.rhythmOffsetMs,
-            // 手机歌词页、平板专注歌词整体压暗一些；电视底部额外加深，给控制条和细进度留对比度。
-            // 桌面姿态上下排：上半屏是歌词或时钟时按手机歌词页压暗，是封面时按手机播放页
-            scrim = when {
-                window.isTv -> BackdropScrim.Tv
-                tabletop -> if (tabletopShown == TabletopTop.Cover) BackdropScrim.Phone else BackdropScrim.PhoneLyrics
-                wideBackdrop -> if (lyricsMode) BackdropScrim.WideFocus else BackdropScrim.Wide
-                lyricsMode -> BackdropScrim.PhoneLyrics
-                else -> BackdropScrim.Phone
-            },
+            scrim = scrim,
         )
+        // 自己画背景、又想用流光当背景的模式（AMLL 选“流光”）：宿主的流光停掉以后由模式按同样的参数再画一份
+        val stagePulse = rememberBackdropPulse()
+        val stageBackdrop = remember(
+            stageCoversBackdrop, song.cover, state.playing, state.lyricsBackground, state.rhythmIntensity, wideBackdrop, state.rhythmOffsetMs, scrim,
+        ) {
+            StageBackdrop(hostVisible = !stageCoversBackdrop) { m ->
+                LyricsBackdrop(
+                    cover = song.cover,
+                    playing = state.playing,
+                    mode = state.lyricsBackground,
+                    intensity = state.rhythmIntensity,
+                    wide = wideBackdrop,
+                    pulse = stagePulse,
+                    modifier = m,
+                    rhythmOffsetMs = state.rhythmOffsetMs,
+                    scrim = scrim,
+                )
+            }
+        }
         val shareFade = if (LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()) {
             snap()
         } else {
@@ -405,7 +427,7 @@ fun PlayerScreen(
         // 盖着的这层读屏也不该再读到
         val stageAlpha = animateFloatAsState(if (share != null) 0.2f else 1f, shareFade, label = "shareStageAlpha")
         val stageCover = if (share != null) Modifier.clearAndSetSemantics {} else Modifier
-        Box(Modifier.fillMaxSize().graphicsLayer { alpha = stageAlpha.value }.then(stageCover)) { CompositionLocalProvider(LocalLyricPickProbe provides pickProbe.takeIf { shareAllowed }) {
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = stageAlpha.value }.then(stageCover)) { CompositionLocalProvider(LocalLyricPickProbe provides pickProbe.takeIf { shareAllowed }, LocalStageBackdrop provides stageBackdrop) {
             when {
                 window.isTv -> TvPlayer(
                     song = song,

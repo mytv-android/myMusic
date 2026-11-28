@@ -2,6 +2,7 @@ package com.mytv.mymusic.ui.player.stage
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.mytv.mymusic.ui.player.stage.modes.AmllVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.AuroraVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.CineramaVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.JumpVisualizer
@@ -17,6 +18,7 @@ object LyricVisualizers {
     val all: List<LyricVisualizer> = listOf(
         ClassicVisualizer,
         RushVisualizer,
+        AmllVisualizer,
         AuroraVisualizer,
         Rings52HzVisualizer,
         MisideDropVisualizer,

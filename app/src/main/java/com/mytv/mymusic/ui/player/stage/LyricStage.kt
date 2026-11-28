@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -145,6 +146,16 @@ internal fun LyricStage(
         if (tag != null) StageTagChip(tag, insets)
     }
 }
+
+/**
+ * 播放页的流光背景，给想直接用它当背景的模式（AMLL 的“流光”）：[draw] 按播放页当前的参数画一份 LyricsBackdrop。
+ * [hostVisible] 时宿主自己的流光还铺在舞台下面（电视、桌面姿态），模式什么都不画、让它透出来就行；
+ * 手机歌词页、平板专注里宿主背景会停掉，这时模式在自己的 Background 里画这一份。缩略图、预览里没有（null）。
+ */
+@androidx.compose.runtime.Stable
+internal class StageBackdrop(val hostVisible: Boolean, val draw: @Composable (Modifier) -> Unit)
+
+internal val LocalStageBackdrop = compositionLocalOf<StageBackdrop?> { null }
 
 /** 舞台左上角的标签：[preview] 时是草稿预览（黄底），否则是“正在用”（半透明黑底）。 */
 @androidx.compose.runtime.Immutable

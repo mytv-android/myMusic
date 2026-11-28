@@ -278,6 +278,57 @@ These features were written from the mods' public descriptions only; none of the
   work is distributed under AGPL-3.0, and the Rush-derived files remain
   available under GPL-3.0-or-later.
 
+## AMLL (full-screen lyric animation "AMLL")
+
+- Upstream: https://github.com/amll-dev/applemusic-like-lyrics (`packages/core`, version 0.7.2)
+- Revision checked: 4d8e0270e95c49cb061599de9d08ecf93c0147eb (2026-11-28)
+- Copyright (C) the AMLL contributors (amll-dev)
+- License: GNU Affero General Public License v3.0
+- Location: `app/src/main/java/com/mytv/mymusic/ui/player/stage/modes/Amll*.kt`
+- Usage: the "AMLL" lyric animation is a Kotlin / Jetpack Compose rewrite of
+  AMLL's lyric player and mesh background: line grouping with background
+  vocals and duet sides, the timeline that decides which lines are playing and
+  highlighted, the layout (focus at 35 % of the viewport, interlude gap,
+  staggered spring delays, depth blur levels), the per-line position and scale
+  springs with the interval-based stiffness table, the word-by-word mask sweep
+  and float, the emphasis of long notes, the three-dot interlude indicator,
+  the cover processing (contrast, saturation, brightness, box blur), the
+  control-point presets and generator and the bicubic Hermite mesh. Options
+  the app does not expose keep the upstream defaults. Bezier easings use
+  Compose's own `CubicBezierEasing`; the mesh is drawn with
+  `Canvas.drawBitmapMesh` instead of WebGL, with per-vertex colors sampled on
+  the CPU. No upstream JavaScript, shaders, fonts, images or other assets are
+  bundled.
+- These files keep the upstream AGPL-3.0 notice and carry a notice of the
+  changes made and the date. Modifications must retain this notice and the
+  AGPL-3.0 terms.
+- The spring solver in AMLL's `utils/spring.ts` (ported in `AmllSpring.kt`) is
+  marked "MIT License github.com/pushkine/" and is used under that license:
+
+```
+MIT License
+
+Copyright (c) pushkine (https://github.com/pushkine)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## MaterialKolor
 
 - Upstream: https://github.com/jordond/MaterialKolor
