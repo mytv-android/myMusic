@@ -274,6 +274,7 @@ fun ListRow(
     selected: Boolean = false,
     danger: Boolean = false,
     showChevron: Boolean = onClick != null,
+    singleLine: Boolean = false,
     leading: @Composable (() -> Unit)? = null,
     trailing: @Composable (RowScope.() -> Unit)? = null,
 ) {
@@ -302,6 +303,8 @@ fun ListRow(
                 title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
+                maxLines = if (singleLine) 1 else Int.MAX_VALUE,
+                overflow = if (singleLine) TextOverflow.Ellipsis else TextOverflow.Clip,
                 color = when {
                     danger -> MaterialTheme.colorScheme.error
                     selected -> MaterialTheme.colorScheme.onSecondaryContainer
@@ -312,6 +315,8 @@ fun ListRow(
                 Text(
                     summary,
                     style = MaterialTheme.typography.bodyMedium,
+                    maxLines = if (singleLine) 1 else Int.MAX_VALUE,
+                    overflow = if (singleLine) TextOverflow.Ellipsis else TextOverflow.Clip,
                     color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

@@ -175,7 +175,6 @@ fun AddToPlaylistSheet(
                 locked = binding == PlaylistBinding.ReadOnly,
             )
         },
-        note = if (tv) "按确认键加入或移出，面板不自动关。" else "点一下加入或移出，面板不自动关；收藏用旁边的心形。",
         snackbar = snackbar,
         // 电视焦点落在当前分组里第一个还没加入、能改的歌单上（tab 上按确认才进列表）
         focusId = focusTarget,

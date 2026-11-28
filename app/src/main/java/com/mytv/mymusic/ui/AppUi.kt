@@ -10,6 +10,7 @@ import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.library.CountTag
 import com.mytv.mymusic.ui.library.libraryPlaylistGroups
+import com.mytv.mymusic.ui.library.libraryPlaylistTabCounts
 import androidx.compose.material3.toShape
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.verticalScroll
@@ -51,6 +52,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LibraryAdd
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
@@ -86,6 +88,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
@@ -987,9 +990,11 @@ fun PlaylistPickerSheet(
     val tabs = grouping?.takeIf { grouped }
     // 选中的分组已经不在（歌单解绑 / 删除）时按「全部」显示，和 PlaylistGroupTabs 的内部判断保持一致
     val selected = tabs?.selected?.takeIf { it in tabs.groups }
+    val groupedPlaylists = remember(playlists) { libraryPlaylistGroups(playlists) }
+    val tabCounts = remember(groupedPlaylists) { libraryPlaylistTabCounts(groupedPlaylists) }
     val sections: List<Pair<String, List<LocalPlaylistSummary>>> = when {
         tabs == null -> listOf("" to playlists)
-        selected == null -> libraryPlaylistGroups(playlists).toList()
+        selected == null -> groupedPlaylists.toList()
         else -> listOf(selected to playlists.filter { playlistGroupOf(it) == selected })
     }
     // 「全部」下每段有小标题；选中单个分组时不重复显示
@@ -1121,6 +1126,12 @@ fun PlaylistPickerSheet(
                         selected = selected,
                         providers = tabs.providers,
                         onSelect = tabs.onSelect,
+                        counts = tabCounts,
+                        containerColor = if (window.isTv) {
+                            MaterialTheme.colorScheme.surfaceContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
+                        },
                         focus = focusTabs,
                         onFocusChange = { tabFocused = it },
                         onConfirm = ::enterList,
@@ -1143,6 +1154,7 @@ fun PlaylistPickerSheet(
                     ),
                     icon = Icons.Filled.Add,
                     summary = if (checks != null) "建好后直接把这首加进去" else "",
+                    singleLine = true,
                     showChevron = false,
                 )
                 // 这一行搬出了 LazyColumn，补上和列表里一样的缝，不然和第一个歌单贴在一起
@@ -1153,6 +1165,34 @@ fun PlaylistPickerSheet(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
+                    if (tabs != null && visible.isEmpty()) {
+                        item(key = "pickerEmpty", contentType = "pickerEmpty") {
+                            Column(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 28.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.QueueMusic,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(30.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    "这个分组还没有歌单",
+                                    Modifier.padding(top = 12.dp),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                Text(
+                                    "可以新建本地歌单，或切到「全部」查看。",
+                                    Modifier.padding(top = 4.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    }
                     sections.forEach { (groupId, group) ->
                         if (group.isEmpty()) return@forEach
                         // 「全部」下按组插小标题，和歌单库的样子一致
@@ -1179,7 +1219,7 @@ fun PlaylistPickerSheet(
                                     index = index,
                                     count = group.size,
                                     onClick = if (check.locked) null else ({ if (!check.busy) onPick(playlist.id) }),
-                                    // 行内勾选框不带语义，勾没勾由整行提供（同 SwitchRow）
+                                    // 行内勾选框不带语义，勾没勾由整行提供（同 SwitchRow）；只读不是另一种「未勾选」
                                     modifier = Modifier
                                         .then(
                                             if (playlist.id == rowTarget) {
@@ -1189,21 +1229,44 @@ fun PlaylistPickerSheet(
                                             },
                                         )
                                         .semantics {
-                                            role = androidx.compose.ui.semantics.Role.Checkbox
-                                            toggleableState = androidx.compose.ui.state.ToggleableState(check.checked)
+                                            if (check.locked) {
+                                                stateDescription = "只读"
+                                            } else {
+                                                role = androidx.compose.ui.semantics.Role.Checkbox
+                                                toggleableState = androidx.compose.ui.state.ToggleableState(check.checked)
+                                            }
                                         },
-                                    icon = Icons.AutoMirrored.Filled.QueueMusic,
+                                    selected = check.checked,
+                                    singleLine = true,
+                                    leading = {
+                                        if (playlist.linkCover.isNotBlank()) {
+                                            Cover(playlist.linkCover, playlist.name, size = 40.dp)
+                                        } else {
+                                            com.mytv.mymusic.ui.components.ToneIcon(
+                                                Icons.AutoMirrored.Filled.QueueMusic,
+                                                tone = if (check.checked) {
+                                                    com.mytv.mymusic.ui.components.IconTone.Primary
+                                                } else {
+                                                    com.mytv.mymusic.ui.components.IconTone.Secondary
+                                                },
+                                            )
+                                        }
+                                    },
                                     summary = listOf("${playlist.trackCount} 首", check.note).filter { it.isNotBlank() }.joinToString(" · "),
                                     showChevron = false,
                                     trailing = {
                                         Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                                            if (check.busy) {
-                                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
-                                            } else {
-                                                androidx.compose.material3.Checkbox(
+                                            when {
+                                                check.busy -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                                                check.locked -> Icon(
+                                                    Icons.Filled.Lock,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                                else -> androidx.compose.material3.Checkbox(
                                                     checked = check.checked,
                                                     onCheckedChange = null,
-                                                    enabled = !check.locked,
                                                 )
                                             }
                                         }
@@ -1213,8 +1276,8 @@ fun PlaylistPickerSheet(
                         }
                     }
                 }
-                // 提示条压在说明那一块上，那块按提示条的高度留够：压在列表上会挡住刚点的那一行的勾
-                Box(Modifier.fillMaxWidth().heightIn(min = if (snackbar != null) 72.dp else 0.dp)) {
+                // 提示出现时才留高度，并压在说明区上；平时不为了空 Snackbar 白白撑高面板
+                Box(Modifier.fillMaxWidth().heightIn(min = if (snackbar?.currentSnackbarData != null) 72.dp else 0.dp)) {
                     if (note.isNotBlank()) {
                         Text(
                             note,

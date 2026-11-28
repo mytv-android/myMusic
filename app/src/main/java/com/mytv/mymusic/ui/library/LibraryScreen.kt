@@ -349,6 +349,16 @@ internal fun libraryPlaylistGroups(playlists: List<LocalPlaylistSummary>): Map<S
     playlists.groupBy { playlistGroupOf(it) }
         .entries.sortedBy { it.key.isNotEmpty() }.associate { it.key to it.value }
 
+/** 分组 tab 的数量：null 是「全部」；歌单库的本地 tab 没有本地歌单时也保留，显示 0。 */
+internal fun libraryPlaylistTabCounts(
+    groups: Map<String, List<LocalPlaylistSummary>>,
+    includeEmptyLocal: Boolean = false,
+): Map<String?, Int> = buildMap {
+    put(null, groups.values.sumOf { it.size })
+    if (includeEmptyLocal || "" in groups) put("", groups[""]?.size ?: 0)
+    groups.forEach { (id, playlists) -> if (id.isNotBlank()) put(id, playlists.size) }
+}
+
 private fun playlistGroupName(providerId: String, providers: List<ProviderInfo>): String =
     if (providerId.isBlank()) "本地歌单" else providerName(providers, providerId)
 
@@ -367,6 +377,7 @@ private fun PlaylistSourceTabs(
         providers = providers,
         onSelect = playlists.selectSource,
         modifier = modifier,
+        counts = libraryPlaylistTabCounts(playlists.groups, includeEmptyLocal = true),
         focus = focus,
     )
 }

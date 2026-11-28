@@ -31,7 +31,8 @@ import com.mytv.mymusic.ui.providerName
  *
  * [groups] 是分组 id（空串 = 本地），是否包含本地组由调用方决定；平台之间按名称排。
  * [selected] 为 null 表示「全部」；点已选中的 tab 不重复回调 [onSelect]，而是走 [onConfirm]
- * （电视上用确认键从 tab 进入下面的列表）。
+ * （电视上用确认键从 tab 进入下面的列表）。[counts] 的 null 键对应「全部」，空串对应本地；
+ * 面板通过 [containerColor] 让 tab 与自己的底色接上，歌单库沿用默认 surface。
  */
 @Composable
 fun PlaylistGroupTabs(
@@ -40,6 +41,8 @@ fun PlaylistGroupTabs(
     providers: List<ProviderInfo>,
     onSelect: (String?) -> Unit,
     modifier: Modifier = Modifier,
+    counts: Map<String?, Int> = emptyMap(),
+    containerColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surface,
     focus: FocusRequester? = null,
     onFocusChange: ((Boolean) -> Unit)? = null,
     onConfirm: (() -> Unit)? = null,
@@ -49,15 +52,14 @@ fun PlaylistGroupTabs(
         groups.filter { it.isNotBlank() }.sortedBy { providerName(providers, it) }
     // 选中的分组已经不在（歌单解绑、被删）时按「全部」显示，别让 Tab 行越界
     val active = selected?.takeIf { it in groups }
-    val container = MaterialTheme.colorScheme.surface
     val selectedIndex = sources.indexOf(active).coerceAtLeast(0)
     SecondaryScrollableTabRow(
         selectedTabIndex = selectedIndex,
         // 背景铺满整行、传入的 modifier（页边距等）在背景里面，和歌单库原来的样子一致
-        modifier = Modifier.fillMaxWidth().background(container).then(modifier),
+        modifier = Modifier.fillMaxWidth().background(containerColor).then(modifier),
         edgePadding = 0.dp,
         minTabWidth = 64.dp,
-        containerColor = container,
+        containerColor = containerColor,
     ) {
         sources.forEach { source ->
             val isSelected = source == active
@@ -90,6 +92,9 @@ fun PlaylistGroupTabs(
                         ProviderIcon(id = source.ifBlank { "local" }, name = label, size = 20.dp, active = isSelected)
                     }
                     Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    counts[source]?.let { count ->
+                        Text(count.toString(), style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
         }

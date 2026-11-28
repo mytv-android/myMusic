@@ -20,6 +20,7 @@ import com.mytv.mymusic.data.native.QQProvider
 import com.mytv.mymusic.data.native.findAccountPlaylist
 import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.library.libraryPlaylistGroups
+import com.mytv.mymusic.ui.library.libraryPlaylistTabCounts
 import com.mytv.mymusic.ui.favoriteFailureReason
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -120,6 +121,14 @@ class FavoriteSyncTest {
         assertEquals(listOf(local, incompleteLink), groups[""])
         assertEquals(listOf(qqFirst, qqSecond), groups["qq"])
         assertEquals(listOf(server), groups["subsonic:home"])
+        assertEquals(
+            mapOf(null to 5, "" to 2, "qq" to 2, "subsonic:home" to 1),
+            libraryPlaylistTabCounts(groups),
+        )
+        assertEquals(
+            mapOf(null to 1, "" to 0, "qq" to 1),
+            libraryPlaylistTabCounts(mapOf("qq" to listOf(qqFirst)), includeEmptyLocal = true),
+        )
         val unbound = qqFirst.copy(linkProvider = "", linkId = "")
         assertEquals(listOf(unbound), libraryPlaylistGroups(listOf(unbound, qqSecond))[""])
     }
