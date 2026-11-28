@@ -1790,17 +1790,9 @@ class SyncCoordinator(
      */
     private suspend fun readBaseSnapshot(accountId: String): String? {
         val total = syncDao.baseSnapshotLength(accountId) ?: return null
-        if (total <= 0) return ""
-        val out = StringBuilder(total)
-        var offset = 1 // SQLite substr 的下标从 1 开始
-        while (offset <= total) {
-            val chunk = syncDao.baseSnapshotChunk(accountId, offset, BASE_SNAPSHOT_CHUNK_CHARS)
-                ?: return null
-            if (chunk.isEmpty()) break
-            out.append(chunk)
-            offset += chunk.length
+        return readChunkedText(total, BASE_SNAPSHOT_CHUNK_CHARS) { offset, size ->
+            syncDao.baseSnapshotChunk(accountId, offset, size)
         }
-        return out.toString()
     }
 
     private suspend fun saveBase(snapshot: SyncSnapshot, revision: String) {
@@ -1869,6 +1861,32 @@ class SyncCoordinator(
         // 分块读基线的字符数：中文按 UTF-8 约 3 字节/字，256K 字符仍远低于 2 MB 的 CursorWindow 上限
         private const val BASE_SNAPSHOT_CHUNK_CHARS = 256 * 1024
     }
+}
+
+/**
+ * 把超过 CursorWindow 单行上限的大文本按字符分块读全，用于同步基线这类整份 JSON。
+ *
+ * [length] 是 SQLite `length()` 的结果，[read] 的 offset/size 是 SQLite `substr()` 的参数，
+ * 两边数的都是 **Unicode 码位**；而 Kotlin `String.length` 数的是 **UTF-16 码元**。
+ * 一个非 BMP 字符（emoji、CJK 扩展区等）在 SQLite 里算 1 个字符、在 Kotlin 里算 2 个，
+ * 所以推进 offset 必须按码位算——用 `chunk.length` 每跨一次块边界就会多跳 1 个字符，
+ * 静默丢字，拼回来的 JSON 解析失败后会一路掉进「首次同步」分支。
+ */
+internal suspend fun readChunkedText(
+    length: Int,
+    chunkChars: Int,
+    read: suspend (offset: Int, size: Int) -> String?,
+): String? {
+    if (length <= 0) return ""
+    val out = StringBuilder(length)
+    var offset = 1 // SQLite substr 的下标从 1 开始
+    while (offset <= length) {
+        val chunk = read(offset, chunkChars) ?: return null
+        if (chunk.isEmpty()) break
+        out.append(chunk)
+        offset += chunk.codePointCount(0, chunk.length)
+    }
+    return out.toString()
 }
 
 /** 进入页面时是否值得拉取：比前台 15 分钟阈值短得多，但避免页面切换连续请求。 */
