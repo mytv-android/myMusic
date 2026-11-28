@@ -142,7 +142,24 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
 .am.classic .am-main { font-weight: 600; line-height: 1.3; }
 .am.classic .ag.on .am-main { font-weight: 900; }
 .am.classic .am-sub { opacity: 1; color: var(--pl-on-surface-variant); font-size: .62em; margin-top: 2px; }
-.am.reduce .ag, .am.reduce .w { transition: none !important; }
+.am.reduce:not(.classic) .ag, .am.reduce:not(.classic) .w { transition: none !important; }
+/* 经典没有句子上下内边距，行距由 LyricsSizing.gapDp 给 */
+.am.classic .ag { padding-top: 0; padding-bottom: 0; }
+/* 经典 · M3E：所有句同一字重，换句不跳 */
+.am.classic.m3e .am-main, .am.classic.m3e .ag.on .am-main { font-weight: 700; }
+/* 经典 · M3E 换歌：旧词 fastEffects 淡出，新词等旧词走完再淡入 */
+.am .ag.out { opacity: 0 !important; transition: opacity .1s linear !important; }
+.am .ag.in { opacity: 0 !important; transition: none !important; }
+.am.m3e .ag { transition: opacity .22s cubic-bezier(.2, 0, 0, 1), filter .18s ease; }
+.clsplot { background: var(--paper); border: 1px solid var(--line); border-radius: 22px; padding: 16px 18px 12px; margin-top: 22px; }
+.clsplot h4 { margin: 0 0 4px; font-size: 14.5px; }
+.clsplot p { margin: 0 0 10px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+.tokgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 16px 0 6px; }
+.tok { background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; }
+.tok b { display: block; font: 800 13px/1.3 var(--mono); }
+.tok span { display: block; font: 600 20px/1.3 var(--body); margin-top: 4px; }
+.tok small { color: var(--muted); font-size: 11.5px; }
+.tok.sp { border-color: #f3c6cf; background: var(--soft-red); }
 
 /* ── 位移曲线 ── */
 .chart { background: var(--paper); border: 1px solid var(--line); border-radius: 22px; padding: 16px 16px 12px; width: 420px; max-width: 100%; }
@@ -405,8 +422,8 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
     <span class="chip2">新模式 <b>1</b> 个 · 新依赖 <b>0</b> 个</span>
   </div>
   <nav class="toc">
-    <a href="#verdict"><b>00</b>结论</a><a href="#line"><b>01</b>上下句怎么过渡</a><a href="#word"><b>02</b>一句之内</a><a href="#dots"><b>03</b>间奏三点</a><a href="#bg"><b>04</b>封面网格背景</a>
-    <a href="#skipvis"><b>05</b>切歌：画面</a><a href="#skipaudio"><b>06</b>切歌：声音</a><a href="#devices"><b>07</b>平板、折叠屏和电视</a><a href="#panel"><b>08</b>动画面板</a><a href="#impl"><b>09</b>实现和分期</a>
+    <a href="#verdict"><b>00</b>结论</a><a href="#line"><b>01</b>上下句怎么过渡</a><a href="#classic"><b>02</b>经典按 M3E 调</a><a href="#word"><b>03</b>一句之内</a><a href="#dots"><b>04</b>间奏三点</a><a href="#bg"><b>05</b>封面网格背景</a>
+    <a href="#skipvis"><b>06</b>切歌：画面</a><a href="#skipaudio"><b>07</b>切歌：声音</a><a href="#devices"><b>08</b>平板、折叠屏和电视</a><a href="#panel"><b>09</b>动画面板</a><a href="#impl"><b>10</b>实现和分期</a>
   </nav>
 </header>
 
@@ -423,15 +440,15 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
     <div class="tile"><b>7 秒</b><span>空档到这么长才出三点</span><small>Rush 是 5 秒；三点会呼吸、退场前蓄力</small></div>
     <div class="tile"><b>1–12 秒</b><span>Apple 的交叉淡化时长</span><small>我们现在只有 4 / 6 / 8 / 10</small></div>
   </div>
-  <div class="note"><b>一句话：</b>动画面板选「AMLL」后，换句时下面的句子像被上一句一个个推上去；唱到的字从左往右亮起并微微上浮，拖长的字会一个个放大发光；和声在轮到时从句子下面展开，「男：」「女：」对唱分左右；间奏出三颗会呼吸的点；背景是封面揉成的网格。
+  <div class="note"><b>一句话：</b>默认的经典不换掉，按 M3E 的弹簧分工改几处：当前句单独用快弹簧、字重不跳、没唱到的字不闪、换歌有方向；整列滚动保持原样（第 02 节）。动画面板选「AMLL」后，换句时下面的句子像被上一句一个个推上去；唱到的字从左往右亮起并微微上浮，拖长的字会一个个放大发光；和声在轮到时从句子下面展开，「男：」「女：」对唱分左右；间奏出三颗会呼吸的点；背景是封面揉成的网格。
     切歌时，自动接歌过了交叉点（或下一首第一句快开始时）页面就换到下一首，新歌词从下面整体飞上来；智能过渡会先裁掉首尾静音，整张专辑连着放时不叠；交叉淡化可以设 1–12 秒；播放队列里当前这首下面多一行「切歌过渡」开关。</div>
 </section>
 
 <section class="block" id="line">
   <div class="block-head"><span class="kicker">01</span><h2>上下句怎么过渡（交互稿）</h2></div>
-  <p class="sub">左边是全屏歌词页，右边是每次换句时各句的位移曲线。用上面的按钮在<strong>「AMLL（新）」和「经典（现在）」</strong>之间切换对比；<strong>慢放</strong>能看清一句推一句；「到下一句前」直接跳到换句前 0.8 秒。歌词能拖动、滚轮滚动，点一句跳过去。歌名、歌词和封面都是为这份稿子写的示例。</p>
+  <p class="sub">左边是全屏歌词页，右边是每次换句时各句的位移曲线。用上面的按钮在<strong>「AMLL（新）」「经典（现在）」「经典（M3E 调后）」</strong>之间切换对比；<strong>慢放</strong>能看清一句推一句；「到下一句前」直接跳到换句前 0.8 秒。歌词能拖动、滚轮滚动，点一句跳过去。歌名、歌词和封面都是为这份稿子写的示例。</p>
   <div class="demo-bar" id="barMain">
-    <div class="grp"><button data-mode="amll" class="on">AMLL（新）</button><button data-mode="classic">经典（现在）</button></div>
+    <div class="grp"><button data-mode="amll" class="on">AMLL（新）</button><button data-mode="classic">经典（现在）</button><button data-mode="m3e">经典（M3E 调后）</button></div>
     <span class="sep"></span>
     <div class="grp"><button id="btnPlay" class="on">播放中</button><button id="btnSlow">慢放 ×0.25</button><button id="btnNextLine" class="act">到下一句前</button><button id="btnSkip" class="act">切到下一首</button></div>
     <span class="sep"></span>
@@ -440,7 +457,7 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
   <div class="demo">
     <figure>
       <div class="phone"><div class="scr" id="phA"></div></div>
-      <figcaption><b>① 全屏歌词页 · AMLL</b>背景是这个模式自己画的封面网格（第 04 节），铺到状态栏和导航条下面。歌词排在页头和控件之间，上下两端渐隐。页头和控件颜色仍跟着封面，换歌时一起变。</figcaption>
+      <figcaption><b>① 全屏歌词页 · AMLL</b>背景是这个模式自己画的封面网格（第 05 节），铺到状态栏和导航条下面。歌词排在页头和控件之间，上下两端渐隐。页头和控件颜色仍跟着封面，换歌时一起变。</figcaption>
     </figure>
     <figure>
       <div class="chart">
@@ -471,8 +488,72 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
   <div class="note plain"><b>为什么错峰看起来像「推」：</b>上面的句子先走，下面的句子还停着，句与句之间被临时拉开，后面的句子再依次追上来、合拢。所有弹簧都略过阻尼，没有回弹，所以整体是稳的；只有跳转这种大跨度才用会轻微回弹的慢弹簧。</div>
 </section>
 
+<section class="block" id="classic">
+  <div class="block-head"><span class="kicker">02</span><h2>经典模式：现在怎么换句，按 M3E 怎么调</h2></div>
+  <p class="sub">默认的「经典」就是宿主自己的歌词列（<code>PlayerParts.kt</code> 的 <code>LyricsList</code>），手机、平板、折叠屏、电视用的都是它。现在换一句时：
+    <strong>整列一个弹簧</strong>把当前句的中心滚到视口 42% 处（平板 44–46%），用的是 <code>MotionScheme.expressive</code> 的 <strong>slowSpatial（阻尼比 0.8、刚度 200）</strong>；
+    当前句用<strong>同一个弹簧</strong>从 82% 长到 100%（手机放大 1.22 倍，平板、电视 1.36–1.42 倍），所有句按放大后的字号排版、只缩不放；
+    透明度 100 / 60 / 38%、隔两句以上模糊 1.4 dp，用 <strong>defaultEffects</strong>（临界阻尼、刚度 1600）；
+    字重从 SemiBold 直接换成 Black；逐字填色层直接换上，没唱到的部分 45%。
+    换歌时直接换成新歌词、定位到当前句，没有过渡；手动滚动后停 3 秒滚回来。</p>
+
+  <h3>M3E 的弹簧怎么分工</h3>
+  <p class="sub" style="margin-top:0">位置、大小、形状用 <b>spatial</b>（阻尼比小于 1，会回弹一点）；颜色、透明度用 <b>effects</b>（临界阻尼，不回弹）。再按动的东西多大分 fast / default / slow：按钮、一行字这种小范围变换用 fast，卡片、面板用 default，整屏的移动用 slow。弹簧随时可以改终点，改的时候<b>接着当前速度走</b>。下面是项目里 material3 1.5.0-alpha25 的实际取值；开「减少动画」时整套换成 standard 方案。</p>
+  <div class="tokgrid">
+    <div class="tok sp"><b>fastSpatial</b><span>0.6 / 800</span><small>standard 0.9 / 1400</small></div>
+    <div class="tok sp"><b>defaultSpatial</b><span>0.8 / 380</span><small>standard 0.9 / 700</small></div>
+    <div class="tok sp"><b>slowSpatial</b><span>0.8 / 200</span><small>standard 0.9 / 300</small></div>
+    <div class="tok"><b>fastEffects</b><span>1 / 3800</span><small>两套相同</small></div>
+    <div class="tok"><b>defaultEffects</b><span>1 / 1600</span><small>两套相同</small></div>
+    <div class="tok"><b>slowEffects</b><span>1 / 800</span><small>两套相同</small></div>
+  </div>
+
+  <h3>对照：同一首歌、同一个时钟</h3>
+  <p class="sub" style="margin-top:0">左边是现在的经典，右边是按 M3E 调后的经典，两台用同一个播放时钟。<b>快歌</b>里夹着 0.22 秒一句的衬词（「嘿」「一二三」），看换句很密时当前句放大和字重的差别；<b>慢放</b>看当前句放大和逐字填色的那一下；<b>上一首 / 下一首</b>看换歌。点任意一句两边一起跳过去。</p>
+  <div class="demo-bar" id="barCls">
+    <div class="grp"><button id="clsPlay" class="on">播放中</button><button id="clsSlow">慢放 ×0.25</button></div>
+    <span class="sep"></span>
+    <div class="grp"><button data-cs="normal" class="on">普通歌</button><button data-cs="fast">快歌（夹 0.22 秒的衬词句）</button></div>
+    <span class="sep"></span>
+    <div class="grp"><button id="clsPrev" class="act">上一首</button><button id="clsNext" class="act">下一首</button></div>
+    <span class="sep"></span>
+    <div class="grp"><button id="clsReduce">减少动画</button></div>
+  </div>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr" id="phN"></div></div>
+      <figcaption><b>① 经典 · 现在</b>整列和当前句共用 slowSpatial。当前句的字重在换句那一帧从 SemiBold 跳到 Black，逐字填色层换上时没唱到的半句先暗一下。换歌直接换。</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr" id="phM"></div></div>
+      <figcaption><b>② 经典 · 按 M3E 调后</b>整列滚动不变；当前句单独用 fastSpatial，先长到位、带一点回弹。所有句同一字重。没唱到的半句跟着整行透明度一起降到 45%。换歌时旧词淡出，新词从下方升起。</figcaption>
+    </figure>
+  </div>
+  <div class="clsplot">
+    <h4>③ 三处差别的曲线</h4>
+    <p>左：每 0.18 秒换一句（衬词、快嘴、连续点句）时整列的位置，虚线是每次换句后的终点。灰线每次换句速度归零（现在），红线接着速度走（M3E 的做法）：只差一点点，所以滚动不改。中：当前句从常规大小长到当前大小。右：当前句里还没唱到的半句的实际亮度（逐字层亮度 × 整行透明度）。灰线是现在，红线是改后。</p>
+    <canvas id="clsPlot" width="860" height="250" style="width:100%;height:auto"></canvas>
+  </div>
+
+  <h3>逐项改法</h3>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:12%">项目</th><th style="width:24%">现在</th><th style="width:24%">改后</th><th style="width:16%">M3E 弹簧</th><th>为什么</th></tr></thead>
+    <tbody>
+      <tr><td>当前句变大、上一句变小</td><td>和滚动同一个 slowSpatial；超过 100% 的那点回弹被截掉</td><td>单独用 <b>fastSpatial</b>；回弹允许超过 100%（最多 3%）。排版字号不变，折行不受影响；API 23–27 仍截在 100%（那几版的渲染器放大图层里的字会发虚）</td><td>fastSpatial 0.6 / 800</td><td>一行字的缩放是小范围变换。当前句先长到位、轻轻弹一下，整列再落定，焦点先到</td></tr>
+      <tr><td>字重</td><td>常规 SemiBold，当前 Black，换句那一帧直接跳；拉丁字母变宽时还可能重新折行</td><td>所有句统一 <b>Bold</b>，当前句只靠大小和亮度区分</td><td>—</td><td>字重做不了弹簧：系统中日韩字体和导入的字体都没有可变字重轴。去掉换句时没有动画的跳变，也不会再折行</td></tr>
+      <tr><td>没唱到的字</td><td>换句时直接换成填色层：那半句从 60% 先掉到 27%，再随整行透明度回到 45%</td><td>填色层换上时没唱到的部分先保持原亮度，再降到 45%</td><td>defaultEffects 1 / 1600，和整行透明度同一个</td><td>颜色、透明度属于 effects。两个透明度用同一个弹簧一起走，这半句从 60% 几乎一条线降到 45%，不先闪暗，也不先闪亮</td></tr>
+      <tr><td>透明度、模糊</td><td>defaultEffects</td><td>不变</td><td>defaultEffects 1 / 1600</td><td>已经符合</td></tr>
+      <tr><td>整列滚动</td><td>slowSpatial；每次换句重新起一个 0→1 的动画，速度归零</td><td>不变</td><td>slowSpatial 0.8 / 200</td><td>整屏级的移动用 slow，没错。按 M3E 打断时应该接着当前速度走，但这个弹簧大约 0.35 秒就停稳：普通歌两三秒一句完全看不出；每 0.18 秒换一句时两条线也只差一点点（曲线 ①），不值得为它重写自动滚动</td></tr>
+      <tr><td>换歌</td><td>直接换成新歌词，定位到当前句</td><td>旧词 0.1 秒淡出；新词从下方 36 dp 升上来，同时淡入；切到上一首时从上方落下</td><td>出：fastEffects；进：defaultSpatial + slowEffects</td><td>M3 的共享轴过渡：前后两首是先后关系，下一首在下、上一首在上，方向和歌词滚动方向一致</td></tr>
+      <tr><td>减少动画</td><td>整套换成 standard 方案</td><td>不变；换歌只淡入淡出、不位移</td><td>standard（阻尼比 0.9）</td><td>0.9 基本看不出回弹</td></tr>
+      <tr><td>手动滚动</td><td>停手 3 秒滚回来</td><td>不变</td><td>—</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note plain"><b>不照搬 AMLL：</b>经典仍是一整列一起动、滚动弹簧不变，不错峰、不按句间隔调刚度、不加景深和网格背景，只把 M3E 的弹簧分工用对。想要「一句推一句」的效果就在动画面板里选 AMLL。第 08 节的设备帧可以切到「经典（M3E 调后）」，看平板、横屏、折叠屏和电视上的样子。</div>
+</section>
+
 <section class="block" id="word">
-  <div class="block-head"><span class="kicker">02</span><h2>一句之内：逐字、长音、和声、对唱</h2></div>
+  <div class="block-head"><span class="kicker">03</span><h2>一句之内：逐字、长音、和声、对唱</h2></div>
   <p class="sub">左边循环放一句带长音的中文和一句英文，右边循环放一段对唱和和声。都可以慢放看细节。</p>
   <div class="demo-bar static" id="barWord">
     <div class="grp"><button id="wSlow" class="on">慢放 ×0.35</button><button id="wEmp" class="on">长音强调</button><button id="wFloat" class="on">逐字上浮</button><button id="wFade" class="on">羽化 0.5 字</button></div>
@@ -496,7 +577,7 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
 </section>
 
 <section class="block" id="dots">
-  <div class="block-head"><span class="kicker">03</span><h2>间奏三点</h2></div>
+  <div class="block-head"><span class="kicker">04</span><h2>间奏三点</h2></div>
   <p class="sub">上一句唱完到下一句开始隔了 <strong>7 秒以上</strong>（第一句开始前也算），焦点就从句子换到三颗点上。下面左边是三点本身，右边是同一段 7.8 秒间奏里整组的缩放和三颗点的亮度。</p>
   <div class="dotsdemo">
     <div class="dotsbox" id="dotsBox"></div>
@@ -515,7 +596,7 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
 </section>
 
 <section class="block" id="bg">
-  <div class="block-head"><span class="kicker">04</span><h2>背景：封面揉成的网格</h2></div>
+  <div class="block-head"><span class="kicker">05</span><h2>背景：封面揉成的网格</h2></div>
   <p class="sub">AMLL 的默认背景是把封面<strong>压低对比 → 饱和度 ×3 → 对比 ×1.7 → 亮度 0.75</strong> 再模糊，贴到一张由控制点生成的网格上（每张封面随机挑一套控制点），网格本身不动，纹理慢慢转；四周压暗到 60%；低频响度越大纹理放得越大。换封面时新网格叠在上面 <strong>0.5 秒</strong>内淡入，淡完删掉旧的。点下面的封面看换封面的过渡。</p>
   <div class="demo-bar static" id="barBg">
     <div class="grp" id="bgCovers"></div><span class="sep"></span><div class="grp"><button id="bgBeat">跟低频</button></div>
@@ -527,7 +608,7 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
 </section>
 
 <section class="block" id="skipvis">
-  <div class="block-head"><span class="kicker">05</span><h2>切歌：画面怎么换</h2></div>
+  <div class="block-head"><span class="kicker">06</span><h2>切歌：画面怎么换</h2></div>
   <p class="sub">分两种。<strong>手动切歌</strong>（点下一首、通知栏、耳机）：AMLL 把旧歌词撤掉，新歌词的每一句都从视口下方两个屏高处同时出发，用慢弹簧（刚度 90、阻尼 15）飞到各自的位置，不错峰；因为起点相同，句子一开始挤在一起，越接近越散开。封面背景 0.5 秒淡入。第 01 节的「切到下一首」就是这个。
   <strong>自动接歌</strong>是我们自己的问题：现在要等淡化<strong>全部做完</strong>才换主播放器，播放页、通知栏、状态栏歌词才换到下一首；8–12 秒的淡化里，下一首可能已经唱了一两句。</p>
   <div class="demo-bar static" id="barMix">
@@ -562,7 +643,7 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
 </section>
 
 <section class="block" id="skipaudio">
-  <div class="block-head"><span class="kicker">06</span><h2>切歌：声音怎么接</h2></div>
+  <div class="block-head"><span class="kicker">07</span><h2>切歌：声音怎么接</h2></div>
   <p class="sub">Apple 的做法以官方文档为准：iPhone 在<strong>设置 › App › 音乐 › 歌曲过渡</strong>里选 AutoMix 或交叉淡化；AutoMix 从 iOS 26 起有、默认打开，「像 DJ 一样」接歌，会按音乐挑接法，例如<strong>去掉开头和结尾的静音</strong>或简单交叉淡化，新闻稿说它用<strong>变速（time stretching）和对拍（beat matching）</strong>；交叉淡化时长是 <strong>1–12 秒</strong>的滑块；「待播清单」里有 AutoMix / 交叉淡化按钮，打开时高亮；<strong>专辑和部分流派不过渡</strong>，按顺序播专辑、流派或速度不搭、上传或购买的内容可能不做动态过渡；开着 Hi-Res 无损时两者都不可用。</p>
   <div class="scroll"><table>
     <thead><tr><th style="width:14%">项目</th><th style="width:28%">Apple Music</th><th style="width:26%">myMusic 现在</th><th style="width:8%">处理</th><th>做法</th></tr></thead>
@@ -588,14 +669,15 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
 </section>
 
 <section class="block" id="devices">
-  <div class="block-head"><span class="kicker">07</span><h2>平板、折叠屏和电视</h2></div>
-  <p class="sub">舞台只拿安全区，页头、专注栏、控制条都是各自布局原有的。字号按宿主基准等比；视口宽度超过 1024 时模糊不乘 0.8。电视没有触摸，不接收拖动和点按，景深模糊默认关、帧率按宿主的 30 fps；窗口太矮时和其它模式一样回到经典。每台都是真跑的，切过去才开始动。</p>
+  <div class="block-head"><span class="kicker">08</span><h2>平板、折叠屏和电视</h2></div>
+  <p class="sub">舞台只拿安全区，页头、专注栏、控制条都是各自布局原有的。字号按宿主基准等比；视口宽度超过 1024 时模糊不乘 0.8。电视没有触摸，不接收拖动和点按，景深模糊默认关、帧率按宿主的 30 fps；窗口太矮时和其它模式一样回到经典。每台都是真跑的，切过去才开始动。下面的按钮可以把所有设备换成「经典（M3E 调后）」，经典按各布局现有的 <code>LyricsSizing</code> 预设排版。</p>
+  <div class="demo-bar static" id="barDev"><div class="grp"><button data-dmode="amll" class="on">AMLL（新）</button><button data-dmode="m3e">经典（M3E 调后）</button><button data-dmode="classic">经典（现在）</button></div></div>
   <div id="dvStage"></div>
 </section>
 
 <section class="block" id="panel">
-  <div class="block-head"><span class="kicker">08</span><h2>动画面板里的设置</h2></div>
-  <p class="sub">AMLL 原组件的选项大多是给开发者调的（锚点、弹簧参数、隐藏已唱句……），面板里只放用户看得懂、会想改的五项，其余 8 项保持原默认值，面板底部照其它移植模式的写法注明。改这里的设置，第 01、07 节的舞台会跟着变。</p>
+  <div class="block-head"><span class="kicker">09</span><h2>动画面板里的设置</h2></div>
+  <p class="sub">AMLL 原组件的选项大多是给开发者调的（锚点、弹簧参数、隐藏已唱句……），面板里只放用户看得懂、会想改的五项，其余 8 项保持原默认值，面板底部照其它移植模式的写法注明。改这里的设置，第 01、03、08 节里 AMLL 的舞台会跟着变。</p>
   <div class="demo">
     <figure>
       <div class="phone"><div class="scr" id="phC"></div></div>
@@ -618,11 +700,12 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
 </section>
 
 <section class="block" id="impl">
-  <div class="block-head"><span class="kicker">09</span><h2>实现和分期</h2></div>
-  <p class="sub">歌词部分是 <code>ui/player/stage/modes/</code> 下一个新模式，<code>LyricVisualizer</code> 接口不用改（Rush 已经加过 <code>interactive</code> 和 <code>seek</code>）。切歌部分改 <code>playback/</code> 里的三个类和队列面板、设置页各一处。</p>
+  <div class="block-head"><span class="kicker">10</span><h2>实现和分期</h2></div>
+  <p class="sub">经典的改动都在 <code>PlayerParts.kt</code> 一个文件里，和别的部分互不依赖，可以先做。歌词部分是 <code>ui/player/stage/modes/</code> 下一个新模式，<code>LyricVisualizer</code> 接口不用改（Rush 已经加过 <code>interactive</code> 和 <code>seek</code>）。切歌部分改 <code>playback/</code> 里的三个类和队列面板、设置页各一处。</p>
   <div class="scroll"><table>
     <thead><tr><th style="width:24%">文件</th><th>内容</th></tr></thead>
     <tbody>
+      <tr><td><code>PlayerParts.kt</code>（经典）</td><td>自动滚动不动；<code>LyricRow</code> 的放大进度改 <code>fastSpatialSpec</code>，<code>lyricLayerScale</code> 的上限在 API 28 起放到 1.03；所有句统一 <code>FontWeight.Bold</code>；<code>KaraokeLine</code> 没唱到的透明度从 1 用 <code>defaultEffectsSpec</code> 降到 0.45（和行透明度同一个弹簧）；<code>LyricsList</code> 外面包 <code>AnimatedContent</code>（按歌曲区分，每份歌词各自的 <code>LazyListState</code>）：进 <code>slideInVertically(defaultSpatial) + fadeIn(slowEffects)</code>，出 <code>fadeOut(fastEffects)</code>，上一首反向</td></tr>
       <tr><td><code>AmllVisualizer.kt</code></td><td>id <code>"amll"</code>、显示名「AMLL」、order 2（Rush 后面）；<code>ModOrigin("AMLL", "core 0.7.2", "amll-dev", "AGPL-3.0", kind = "开源组件")</code>；<code>interactive = true</code>；<code>hostSubtitles = false</code>（翻译排在句子里）；<code>hostBackground = false</code>，背景选「流光」时在 <code>Background()</code> 里直接画宿主的 <code>LyricsBackdrop</code></td></tr>
       <tr><td><code>AmllLyrics.kt</code></td><td><code>StageLine</code> → 句组（主句 / 和声 / 对唱），「男：女：合：」前缀和括号和声在这里识别；算 ≥7 秒的间奏区间</td></tr>
       <tr><td><code>AmllTimeline.kt</code></td><td>正在唱的集合、亮着的集合（新句开始才熄旧句）、焦点句、跳转判定</td></tr>
@@ -642,10 +725,15 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
 
   <h3>分期和验收</h3>
   <div class="phases">
+    <div class="phase"><header><span class="tag">P0</span><h3>经典按 M3E 调</h3></header><ul>
+      <li>当前句 fastSpatial、统一字重、没唱到的字跟行透明度同步、换歌共享轴过渡；自动滚动不动</li>
+      <li>单测：没唱到那半句的亮度曲线不低于 45%；fastSpatial 的最大回弹不超过 3%；换歌时新旧两份歌词各用各的列表状态</li>
+      <li>手机、平板、横屏、折叠屏、电视各录一段快歌和换歌</li>
+    </ul></div>
     <div class="phase"><header><span class="tag">P1</span><h3>歌词核心</h3></header><ul>
       <li>句组、时间线、布局、弹簧、错峰、亮暗两层、逐字扫光和上浮、间奏三点、拖动与点按、减少动画静帧</li>
       <li>金样本：用 AMLL 的 TS 源码直接跑出弹簧轨迹、错峰延迟序列、刚度表、三点在关键时刻的缩放和亮度，Kotlin 单测逐值比对</li>
-      <li>经典和其它模式一个像素不变</li>
+      <li>经典（P0 之后）和其它模式一个像素不变</li>
     </ul></div>
     <div class="phase"><header><span class="tag">P2</span><h3>一句之内和背景</h3></header><ul>
       <li>长音强调、和声展开、对唱分边、新歌词飞入</li>
@@ -664,6 +752,7 @@ canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: a
 
 <footer>
   <b>参考</b>：AMLL core（packages/core/src/lyric-player、bg-render/mesh-renderer，@4d8e0270，2026-11-28 拉取）；Apple 支持文档「在 iPhone 上的“音乐”中过渡歌曲」、「在 Apple Music 中打开或关闭 AutoMix 或交叉淡化」（support.apple.com/en-us/105067）；Apple Newsroom「iOS 26」新闻稿。<br>
+  <b>M3E 弹簧</b>：项目依赖的 material3 1.5.0-alpha25 里 <code>ExpressiveMotionTokens</code> / <code>StandardMotionTokens</code> 的取值（从本地 Gradle 缓存的 aar 反查字节码）。<br>
   <b>本地代码对照</b>：<code>PlayerParts.kt</code>（LyricsList / LyricsSizing）、<code>RushLyricList.kt</code>、<code>CrossfadeController.kt</code>、<code>AutomixPlanner.kt</code>、<code>AutomixAnalysis.kt</code>、<code>PlayerSheets.kt</code>（QueueSheet）、<code>SettingsSubScreens.kt</code>（切歌过渡、PlayerVolumeCard）。<br>
   稿子里的歌名、歌词、封面都是为本稿编写的示例。
 </footer>
@@ -726,6 +815,12 @@ class Spring {
     if (Math.abs(to - this.to) < 1e-3) return;
     const v = this.vel(); this.from = this.p; this.v0 = v; this.t = 0; this.to = to; this.rest = false;
   }
+  /* 经典的自动滚动：每次换句重新起一个 0→1 的动画，速度从 0 开始（M3E 调后也不改，见第 02 节曲线 ①） */
+  target0(to) {
+    this.q = null;
+    if (Math.abs(to - this.to) < 1e-3) return;
+    this.from = this.p; this.v0 = 0; this.t = 0; this.to = to; this.rest = false;
+  }
   snap(p) { this.p = this.to = this.from = p; this.v0 = 0; this.t = 0; this.q = null; this.rest = true; }
   step(dt) {
     if (this.q) { this.q.d -= dt; if (this.q.d <= 0) { const to = this.q.to; this.q = null; this.target(to); } }
@@ -743,6 +838,14 @@ function posYPolicy(slow, intervalMs) {
 const SCALE_SPRING = { mass: 2, damping: 25, stiffness: 100 }, BG_SCALE_SPRING = { mass: 1, damping: 20, stiffness: 50 };
 /* 经典：MotionScheme.expressive 的 slowSpatial（阻尼比 0.8、刚度 200） */
 const CLASSIC_SPRING = { mass: 1, stiffness: 200, damping: 2 * .8 * Math.sqrt(200) };
+/* material3 1.5.0-alpha25 的 ExpressiveMotionTokens / StandardMotionTokens（阻尼比、刚度） */
+const m3 = (z, k) => ({ mass: 1, stiffness: k, damping: 2 * z * Math.sqrt(k) });
+const M3E = { fastSpatial: m3(.6, 800), defaultSpatial: m3(.8, 380), slowSpatial: m3(.8, 200), fastEffects: m3(1, 3800), defaultEffects: m3(1, 1600), slowEffects: m3(1, 800) };
+const M3S = { fastSpatial: m3(.9, 1400), defaultSpatial: m3(.9, 700), slowSpatial: m3(.9, 300) };
+/* 经典 · M3E：排版不变（不影响折行）；API 28 起当前句放大的回弹允许超过 100%，最多 3%（API 23–27 仍截在 100%） */
+const M3E_HEAD = 1, M3E_CAP = 1.03;
+/* 临界阻尼弹簧从 0 走到 1 的进度（effects 类，不回弹） */
+const critical = (w, t) => 1 - (1 + w * t) * Math.exp(-w * t);
 /* base/consts.ts 的排版策略 */
 const STRAT = {
   tick: { stagger: true, snap: false }, seek: { stagger: false, snap: false }, rebuild: { stagger: false, snap: false },
@@ -906,30 +1009,50 @@ class AmStage {
     this.dotsY = new Spring(0);
     this.groups = []; this.scroll = 0; this.suspended = false; this.touching = false; this.lastInteract = -1e9;
     this.playing = true; this.reduce = false; this.onTransition = null; this.onSeek = null;
+    this.enterY = new Spring(0); this.enterY.params(M3E.defaultSpatial);
     if (this.o.interactive) this.bindInput(); else this.el.classList.add('static');
     STAGES.add(this);
   }
   get amll() { return this.mode === 'amll'; }
+  /* 'classic' 是现在的经典，'m3e' 是按 M3E 调后的经典；两者排版相同 */
+  get m3e() { return this.mode === 'm3e'; }
+  /* LyricsSizing：常规字号、当前句放大倍数、行距、锚点 */
+  get cls() { const c = this.o.cls || {}; return { base: c.base ?? this.o.fs * .77, grow: c.grow ?? 1.22, gap: c.gap ?? 18, anchor: c.anchor ?? .42 }; }
+  /* 经典的图层缩放：所有句按放大后的字号排版，只缩不放 */
+  restScale(active) { const c = this.cls; return (active ? 1 : 1 / c.grow) / (this.m3e ? M3E_HEAD : 1); }
   get fs() { return this.o.fs * SET.size; }
-  setSong(song, fly = false) { this.song = song; this.build(fly); }
+  setSong(song, fly = false, dir = 1) { this.song = song; this.build(fly, false, dir); }
   setMode(m) { if (m === this.mode) return; this.mode = m; this.build(false); }
   refresh(kind) { if (!this.song) return; if (kind === 'rebuild') this.build(false, true); else this.pending = 'config'; }
 
-  build(fly, keepPos) {
-    const old = this.groups, amll = this.amll, song = this.song;
-    old.forEach(G => { if (fly) { G.el.classList.add('old'); setTimeout(() => G.el.remove(), 320); } else G.el.remove(); });
+  build(fly, keepPos, dir = 1) {
+    const old = this.groups, amll = this.amll, m3e = this.m3e, song = this.song;
+    old.forEach(G => {
+      if (fly && amll) { G.el.classList.add('old'); setTimeout(() => G.el.remove(), 320); }
+      else if (fly && m3e) { G.el.classList.add('out'); setTimeout(() => G.el.remove(), 160); }
+      else G.el.remove();
+    });
     this.groups = [];
     this.el.classList.toggle('classic', !amll);
+    this.el.classList.toggle('m3e', m3e);
     this.el.classList.toggle('song-duet', amll && SET.duet && song.hasDuet);
-    this.el.style.fontSize = (amll ? this.fs : this.o.fs * SET.size * .78 * 1.22) + 'px';
+    const c = this.cls;
+    this.el.style.fontSize = (amll ? this.fs : c.base * c.grow * (m3e ? M3E_HEAD : 1)) + 'px';
     this.el.style.setProperty('--px', this.o.px + 'px');
     this.inters = amll ? interludesOf(song.lines) : [];
     song.lines.forEach((L, i) => this.groups.push(this.makeGroup(L, i)));
     this.measure();
     this.started = false; this.hi = new Set(); this.prevPlaying = new Set(); this.scrollTo = 0; this.latest = 0; this.inter = null; this.sig = '';
     this.scroll = 0; this.suspended = false; this.frozen = null; this.ppKey = '';
-    if (fly) { this.groups.forEach(G => G.posY.snap(this.o.h * 2)); this.pending = 'rebuild'; }
+    if (fly && amll) { this.groups.forEach(G => G.posY.snap(this.o.h * 2)); this.pending = 'rebuild'; }
     else this.pending = 'place';
+    /* 经典 · M3E 换歌：M3 共享轴——旧词 fastEffects 淡出，新词从下方（上一首从上方）升起并淡入；减少动画时只淡入淡出 */
+    this.enterY.snap(0);
+    if (fly && m3e) {
+      const fresh = this.groups; fresh.forEach(G => G.el.classList.add('in'));
+      setTimeout(() => fresh.forEach(G => G.el.classList.remove('in')), 90);
+      if (!this.reduce) { this.enterY.snap(36 * dir); this.enterY.target(0, .09); }
+    }
     this.lastMs = null;
   }
 
@@ -954,8 +1077,8 @@ class AmStage {
     this.el.insertBefore(el, this.dotsEl);
     const G = { el, line, L, i, ws, bgEl, bgWs, posY: new Spring(0), scale: new Spring(1), bgScale: new Spring(.75), active: false, bgOn: false,
       B: amll ? .2 : 1, D: amll ? .2 : 1, fade: null, dirty: true, h0: 0, h1: 0, lastT: '', lastS: '', lastBS: '', lastOp: '', lastBlur: -1 };
-    G.scale.params(amll ? SCALE_SPRING : CLASSIC_SPRING); G.bgScale.params(BG_SCALE_SPRING);
-    if (!amll) { G.scale.snap(1 / 1.22); }
+    G.scale.params(amll ? SCALE_SPRING : this.m3e ? (this.reduce ? M3S.fastSpatial : M3E.fastSpatial) : this.reduce ? M3S.slowSpatial : CLASSIC_SPRING); G.bgScale.params(BG_SCALE_SPRING);
+    if (!amll) { G.scale.snap(this.restScale(false)); }
     else G.scale.snap(.97);
     return G;
   }
@@ -1017,7 +1140,7 @@ class AmStage {
     const L = this.song.lines;
     const slow = reason === 'seek' || reason === 'rebuild' || reason === 'place';
     const interval = this.scrollTo > 0 ? L[this.scrollTo].s - L[this.scrollTo - 1].s : null;
-    const pp = amll ? { mass: .9, ...posYPolicy(slow || !!this.inter, interval) } : CLASSIC_SPRING;
+    const pp = amll ? { mass: .9, ...posYPolicy(slow || !!this.inter, interval) } : this.reduce ? M3S.slowSpatial : CLASSIC_SPRING;
     const key = pp.stiffness.toFixed(2) + '/' + pp.damping.toFixed(2);
     if (key !== this.ppKey) { this.ppKey = key; this.groups.forEach(G => G.posY.params(pp)); this.dotsY.params(pp); }
     this.springInfo = { ...pp, interval, reason };
@@ -1028,7 +1151,7 @@ class AmStage {
     const act = this.groups.map((G, i) => this.hi.has(i) || (i >= this.scrollTo && i < this.latest));
     const slot = this.groups.map((G, i) => {
       if (amll) return (G.bgEl && (act[i] || !this.playing)) ? G.h1 : G.h0;
-      const sc = act[i] ? 1 : 1 / 1.22; return (act[i] ? G.h1 : G.h0) * sc + this.fs * .25;
+      return (act[i] ? G.h1 : G.h0) * this.restScale(act[i]) + this.cls.gap;
     });
     const pre = [0]; for (let i = 0; i < n; i++) pre.push(pre[i] + slot[i]);
     const ia = focal.type === 'inter' ? focal.anchor : (showDots ? this.inter.anchor : null);
@@ -1036,12 +1159,12 @@ class AmStage {
     let ft, fh;
     if (focal.type === 'line') { const k = Math.min(focal.index, n - 1); ft = pre[k] + (ia != null && k > ia ? ih : 0); fh = slot[k]; }
     else { ft = pre[focal.anchor + 1]; fh = ih; }
-    const align = amll ? .35 : .42;
+    const align = amll ? .35 : this.cls.anchor;
     const total = pre[n] + ih;
     this.scroll = clamp(this.scroll, Math.min(0, -ft), Math.max(0, H * align - ft - fh / 2 + total - H / 2));
     const base = H * align - ft - fh / 2 - this.scroll;
     let delay = 0, step = st.stagger && amll && !this.reduce ? .05 : 0;
-    const snap = st.snap || this.reduce;
+    const snap = st.snap || (this.reduce && amll);
     this.lastDelays = [];
     for (let i = 0; i < n; i++) {
       const G = this.groups[i];
@@ -1061,15 +1184,16 @@ class AmStage {
   }
   applyGroup(G, i, y, snap, delay, active, inView) {
     const amll = this.amll;
-    if (snap) G.posY.snap(y); else G.posY.target(y, delay);
-    const sT = amll ? (active || !this.playing ? 1 : .97) : (active ? 1 : 1 / 1.22);
+    if (snap) G.posY.snap(y); else if (!amll) G.posY.target0(y); else G.posY.target(y, delay);
+    const sT = amll ? (active || !this.playing ? 1 : .97) : this.restScale(active);
     if (snap) G.scale.snap(sT); else G.scale.target(sT, delay);
     if (G.bgEl) { const t = active || !this.playing ? 1 : .75; if (snap) G.bgScale.snap(t); else G.bgScale.target(t, delay); }
     if (active !== G.active) {
       G.active = active; G.el.classList.toggle('on', active);
       const to = amll ? (active ? { B: 1, D: .4 } : { B: .2, D: .2 }) : (active ? { B: 1, D: .45 } : { B: 1, D: 1 });
-      G.fade = this.reduce ? null : { from: { B: G.B, D: G.D }, to, t: 0, dur: amll ? (active ? .3 : .45) : .12 };
-      if (this.reduce) { G.B = to.B; G.D = to.D; }
+      // 现在的经典换句时直接换成逐字填色层（没唱到的 45%），不过渡；M3E 用和整行透明度同一个 defaultEffects 淡过去
+      if ((this.reduce && amll) || this.mode === 'classic') { G.B = to.B; G.D = to.D; G.fade = null; }
+      else G.fade = { from: { B: G.B, D: G.D }, to, t: 0, dur: amll ? (active ? .3 : .45) : 0, w: amll ? 0 : Math.sqrt(M3E.defaultEffects.stiffness) };
       if (!active) this.resetWords(G);
       G.dirty = true;
     }
@@ -1111,23 +1235,29 @@ class AmStage {
       this.layout('tick');
       if (this.onTransition) this.onTransition(this);
     }
-    const sdt = this.reduce ? 10 : dt;
+    const sdt = this.reduce && this.amll ? 10 : dt;
+    this.enterY.step(dt);
+    const ey = this.enterY.p, cap = this.amll ? Infinity : this.m3e ? M3E_CAP : 1;
     for (const G of this.groups) {
       G.posY.step(sdt); G.scale.step(sdt); if (G.bgEl) G.bgScale.step(sdt);
-      const t = `translate3d(0,${G.posY.p.toFixed(2)}px,0)`; if (t !== G.lastT) { G.lastT = t; G.el.style.transform = t; }
-      const s = `scale(${G.scale.p.toFixed(4)})`; if (s !== G.lastS) { G.lastS = s; G.line.style.transform = s; }
+      const t = `translate3d(0,${(G.posY.p + ey).toFixed(2)}px,0)`; if (t !== G.lastT) { G.lastT = t; G.el.style.transform = t; }
+      const s = `scale(${Math.min(cap, G.scale.p).toFixed(4)})`; if (s !== G.lastS) { G.lastS = s; G.line.style.transform = s; }
       if (G.bgEl) { const b = `scale(${G.bgScale.p.toFixed(4)})`; if (b !== G.lastBS) { G.lastBS = b; G.bgEl.style.transform = b; } }
-      if (G.fade) { G.fade.t += dt; const k = cssEaseOut(clamp(G.fade.t / G.fade.dur)); G.B = lerp(G.fade.from.B, G.fade.to.B, k); G.D = lerp(G.fade.from.D, G.fade.to.D, k); if (G.fade.t >= G.fade.dur) G.fade = null; G.dirty = true; }
+      if (G.fade) {
+        const f = G.fade; f.t += dt;
+        const done = f.w ? f.t * f.w >= 9 : f.t >= f.dur, k = done ? 1 : f.w ? critical(f.w, f.t) : cssEaseOut(clamp(f.t / f.dur));
+        G.B = lerp(f.from.B, f.to.B, k); G.D = lerp(f.from.D, f.to.D, k); if (done) G.fade = null; G.dirty = true;
+      }
       if (G.active || G.dirty) { this.paint(G, ms); G.dirty = !!G.fade; }
     }
     this.dotsY.step(sdt);
     this.paintDots(ms);
   }
   paint(G, ms) {
-    const amll = this.amll, live = G.active && !this.reduce;
+    const amll = this.amll, still = this.reduce && amll, live = G.active && !still;
     for (const W of [...G.ws, ...(G.bgWs || [])]) {
       const w = W.w, fsz = this.fs * (W.isBg ? .7 : 1);
-      const p = this.reduce && G.active ? 1 : (w.e <= w.s ? (ms >= w.s ? 1 : 0) : clamp((ms - w.s) / (w.e - w.s)));
+      const p = still && G.active ? 1 : (w.e <= w.s ? (ms >= w.s ? 1 : 0) : clamp((ms - w.s) / (w.e - w.s)));
       let m;
       if (Math.abs(G.B - G.D) < .002) m = G.B >= .999 ? 'none' : `linear-gradient(rgba(0,0,0,${G.B.toFixed(3)}),rgba(0,0,0,${G.B.toFixed(3)}))`;
       else {
@@ -1314,13 +1444,13 @@ class StagePage {
     if (this.o.chrome != null) scr.innerHTML = this.o.chrome;
     this.mesh = new MeshBg(scr, this.o.w, this.o.h); this.flow = new FlowBg(scr, this.o.w, this.o.h);
     const b = this.o.box;
-    this.stage = new AmStage(scr, { x: b.x, y: b.y, w: b.w, h: b.h, fs: this.o.fs, px: this.o.px, interactive: this.o.interactive, tv: this.o.tv, zoom: this.o.zoom, mode: this.o.mode });
+    this.stage = new AmStage(scr, { x: b.x, y: b.y, w: b.w, h: b.h, fs: this.o.fs, px: this.o.px, interactive: this.o.interactive, tv: this.o.tv, zoom: this.o.zoom, mode: this.o.mode, cls: this.o.cls });
     this.stage.onSeek = ms => { this.ms = ms; };
     this.ms = 0; this.playing = true; this.speed = 1; this.auto = true; this.acc = 0; this.coverSlot = 0;
   }
-  setSong(song, fly, startMs) {
+  setSong(song, fly, startMs, dir = 1) {
     this.song = song; if (startMs != null) this.ms = startMs;
-    this.stage.setSong(song, fly);
+    this.stage.setSong(song, fly, dir);
     this.mesh.setCover(song.cover, !fly); this.flow.setCover(song.cover, !fly);
     applyTokens(this.scr, song.cover.hue);
     $$('.p-title, .js-title', this.scr).forEach(e => e.textContent = song.title);
@@ -1329,7 +1459,7 @@ class StagePage {
     if (cvs.length) { this.coverSlot = fly ? 1 - this.coverSlot : this.coverSlot; const a = cvs[this.coverSlot], z = cvs[1 - this.coverSlot]; a.style.backgroundImage = `url(${song.cover.url})`; a.style.opacity = 1; z.style.opacity = 0; if (!fly) z.style.backgroundImage = a.style.backgroundImage; }
     $$('.js-cover', this.scr).forEach(e => e.style.backgroundImage = `url(${song.cover.url})`);
   }
-  bgKind() { return this.stage.mode === 'classic' ? 'flow' : SET.bg; }
+  bgKind() { return this.stage.mode === 'amll' ? SET.bg : 'flow'; }
   setPlaying(v) { this.playing = v; this.stage.playing = v; this.stage.pending = 'config'; $$('.js-play i', this.scr).forEach(i => i.innerHTML = ico(v ? 'pause' : 'play')); }
   frame(dtMs) {
     if (!this.song) return;
@@ -1357,10 +1487,11 @@ pageA.setSong(SONG_A, false, 6200);
 watch(phA, pageA);
 let songIdx = 0;
 const modeChip = $('.modechip', phA);
+const MODE_CHIP = { amll: '正在用：AMLL', classic: '正在用：经典（现在）', m3e: '正在用：经典（M3E 调后）' };
 function setMainMode(m) {
   pageA.stage.setMode(m);
   $$('#barMain [data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
-  modeChip.innerHTML = `${ico('spark', 's16')}${m === 'amll' ? '正在用：AMLL' : '正在用：经典（现在）'}`;
+  modeChip.innerHTML = `${ico('spark', 's16')}${MODE_CHIP[m]}`;
   curve.rec = null; drawCurve();
 }
 $$('#barMain [data-mode]').forEach(b => b.onclick = () => setMainMode(b.dataset.mode));
@@ -1373,7 +1504,7 @@ $('#btnNextLine').onclick = () => {
   const L = pageA.song.lines, ms = pageA.ms; const next = L.find(l => l.s > ms + 900) || L[0];
   pageA.ms = Math.max(0, next.s - 800); if (!pageA.playing) setMainPlaying(true);
 };
-function skipSong(dir = 1) { songIdx = (songIdx + (dir > 0 ? 1 : 1)) % 2; const s = songIdx ? SONG_B : SONG_A; pageA.setSong(s, true, s.lines[0].s - 1400); }
+function skipSong(dir = 1) { songIdx = (songIdx + 1) % 2; const s = songIdx ? SONG_B : SONG_A; pageA.setSong(s, true, s.lines[0].s - 1400, dir); }
 $('#btnSkip').onclick = () => skipSong(1);
 $('.js-next', phA).onclick = () => skipSong(1); $('.js-prev', phA).onclick = () => skipSong(-1);
 $('#btnReduce').onclick = e => { const v = !pageA.stage.reduce; pageA.stage.reduce = v; pageA.stage.el.classList.toggle('reduce', v); e.currentTarget.classList.toggle('on', v); pageA.stage.pending = 'place'; };
@@ -1392,7 +1523,9 @@ pageA.stage.onTransition = st => {
   legend.innerHTML = r.items.map((it, k) => `<span><i style="background:${it.active ? '#1d1b20' : LINE_COLORS[k % LINE_COLORS.length]}"></i>第 ${it.G.i + 1} 句${it.active ? '（当前）' : ''}</span>`).join('');
   $('#readout').textContent = (r.mode === 'amll'
     ? `AMLL · 焦点第 ${r.idx + 1} 句\n纵向弹簧 质量 ${s.mass ?? 1} · 刚度 ${s.stiffness.toFixed(0)} · 阻尼 ${s.damping.toFixed(1)}\n（这句和上一句开始隔 ${s.interval == null ? '—' : (s.interval / 1000).toFixed(1) + ' 秒'}）\n出发延迟：${r.items.map(it => Math.round(it.delay * 1000)).join(' / ')} ms`
-    : `经典 · 当前第 ${r.idx + 1} 句\n整列一个弹簧 阻尼比 0.8 · 刚度 200\n所有句同时出发`);
+    : r.mode === 'm3e'
+      ? `经典（M3E 调后） · 当前第 ${r.idx + 1} 句\n整列 slowSpatial 0.8 / 200（不改）\n当前句 fastSpatial 0.6 / 800；所有句同时出发`
+      : `经典（现在） · 当前第 ${r.idx + 1} 句\n整列一个弹簧 slowSpatial 0.8 / 200\n每次换句从零速度起步；所有句同时出发`);
 };
 function drawCurve() {
   const g = curveG, W = 388, H = 230, L = 34, R = 10, T = 12, B = 30, pw = W - L - R, ph = H - T - B;
@@ -1417,7 +1550,90 @@ DEMOS.push({ visible: true, frame(dt) {
 drawCurve();
 setMainMode('amll');
 
-/* ---------- 02 单句放大 ---------- */
+/* ---------- 02 经典：现在 vs 按 M3E 调后（同一个时钟） ---------- */
+/* 快歌：0.7 秒一句，中间夹 0.22 秒一句的衬词（「嘿」「一二三」），比 slowSpatial 停稳（约 0.35 秒）还快 */
+const FAST_PLAN = [['跑|过|红|绿|灯'], ['追|上|末|班|车'], ['嘿', 1], ['嘿', 1], ['走', 1], ['耳|机|里|的|鼓'], ['比|心|跳|还|快'], ['一', 1], ['二', 1], ['三', 1],
+  ['左|脚|踩|节|拍'], ['右|手|打|响|指'], ['嘿', 1], ['嘿', 1], ['走', 1], ['灯|光|往|后|退'], ['风|在|往|前|推'], ['我|在|往|前|跑']];
+const SONG_FAST = makeSong({ title: '末班车', artist: '示例歌手', cover: COVERS[2], dur: 12000, loop: 10600,
+  lines: (() => { let t = 1200; return FAST_PLAN.map(([s, short]) => { const len = short ? 200 : 650, L = [t, t + len, s]; t += short ? 220 : 700; return L; }); })() });
+const CLS = { ms: 0, playing: true, speed: 1, kind: 'normal', idx: 0 };
+const clsSongs = () => CLS.kind === 'fast' ? [SONG_FAST, SONG_B] : [SONG_A, SONG_B];
+function clsPage(id, mode, chip) {
+  const scr = $(id); scr.innerHTML = phoneChrome();
+  const page = new StagePage(scr, { mode });
+  page.auto = false; page.stage.onSeek = ms => { CLS.ms = ms; };
+  $('.modechip', scr).innerHTML = `${ico('spark', 's16')}${chip}`;
+  $('.js-play', scr).onclick = () => setClsPlaying(!CLS.playing);
+  $('.js-next', scr).onclick = () => clsSkip(1); $('.js-prev', scr).onclick = () => clsSkip(-1);
+  return page;
+}
+const pageN = clsPage('#phN', 'classic', '经典 · 现在'), pageM = clsPage('#phM', 'm3e', '经典 · M3E 调后'), CLS_PAGES = [pageN, pageM];
+function clsSetSong(fly, dir) {
+  const s = clsSongs()[CLS.idx]; CLS.ms = Math.max(0, s.lines[0].s - 1200);
+  CLS_PAGES.forEach(p => p.setSong(s, fly, CLS.ms, dir));
+}
+function clsSkip(dir) { CLS.idx = (CLS.idx + 1) % 2; clsSetSong(true, dir); if (!CLS.playing) setClsPlaying(true); }
+function setClsPlaying(v) { CLS.playing = v; CLS_PAGES.forEach(p => p.setPlaying(v)); $('#clsPlay').classList.toggle('on', v); $('#clsPlay').textContent = v ? '播放中' : '已暂停'; }
+$('#clsPlay').onclick = () => setClsPlaying(!CLS.playing);
+$('#clsSlow').onclick = e => { CLS.speed = CLS.speed === 1 ? .25 : 1; e.currentTarget.classList.toggle('on', CLS.speed !== 1); };
+$$('#barCls [data-cs]').forEach(b => b.onclick = () => {
+  CLS.kind = b.dataset.cs; CLS.idx = 0; $$('#barCls [data-cs]').forEach(x => x.classList.toggle('on', x === b)); clsSetSong(false, 1);
+});
+$('#clsPrev').onclick = () => clsSkip(-1); $('#clsNext').onclick = () => clsSkip(1);
+$('#clsReduce').onclick = e => {
+  const v = !pageN.stage.reduce;
+  CLS_PAGES.forEach(p => { p.stage.reduce = v; p.stage.el.classList.toggle('reduce', v); p.stage.build(false); });
+  e.currentTarget.classList.toggle('on', v);
+};
+clsSetSong(false, 1);
+watch($('#phN'), { frame(dt) {
+  if (CLS.playing) { CLS.ms += dt * CLS.speed; const loop = pageN.song.loop; if (CLS.ms >= loop) CLS.ms %= loop; }
+  CLS_PAGES.forEach(p => { p.ms = CLS.ms; p.speed = CLS.speed; p.frame(dt); });
+} });
+
+/* 三处差别的曲线：直接用上面的弹簧算 */
+(() => {
+  const cv = $('#clsPlot'), W = 860, H = 250, g = cv.getContext('2d');
+  cv.width = W * DPR; cv.height = H * DPR; g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const GREY = '#9a95a0', RED = '#c8102e', step = 1 / 240;
+  const run = (tMax, init, at) => { const out = []; for (let t = 0; t <= tMax + 1e-9; t += step) { out.push([t, at(t)]); init(t); } return out; };
+  // ① 快歌连续换四句：终点每 0.45 秒往下一格
+  const scrollSeries = keepV => {
+    const sp = new Spring(0); sp.params(CLASSIC_SPRING); const hits = [0, .18, .36, .54]; let k = 0;
+    return run(1.2, () => sp.step(step), t => { while (k < hits.length && t >= hits[k] - 1e-9) { k++; keepV ? sp.target(k) : sp.target0(k); } return sp.p; });
+  };
+  const stair = []; [0, .18, .36, .54].forEach((h, i) => { stair.push([h, i], [h, i + 1]); }); stair.push([1.2, 4]);
+  // ② 当前句从常规大小长到当前大小（按停稳后的大小归一）
+  const grow = 1.22;
+  const scaleNow = (() => { const sp = new Spring(1 / grow); sp.params(CLASSIC_SPRING); sp.target(1); return run(.8, () => sp.step(step), () => Math.min(1, sp.p)); })();
+  const scaleM3 = (() => { const sp = new Spring(1 / grow / M3E_HEAD); sp.params(M3E.fastSpatial); sp.target(1 / M3E_HEAD); return run(.8, () => sp.step(step), () => Math.min(M3E_CAP, sp.p * M3E_HEAD)); })();
+  // ③ 没唱到那半句的亮度 = 逐字层 × 整行透明度（60% → 100%，defaultEffects）
+  const op = t => .6 + .4 * critical(40, t);
+  const dimNow = run(.6, () => {}, t => t === 0 ? .6 : .45 * op(t));
+  const dimM3 = run(.6, () => {}, t => (1 - .55 * critical(40, t)) * op(t));
+  const panel = (x, w, o) => {
+    const L = x + 40, R = x + w - 12, T = 44, B = H - 40, pw = R - L, ph = B - T;
+    const X = t => L + pw * t / o.tMax, Y = v => B - ph * (v - o.y0) / (o.y1 - o.y0);
+    g.fillStyle = '#1d1b20'; g.font = '700 13px Roboto Flex, Noto Sans SC, sans-serif'; g.fillText(o.title, x + 4, 18);
+    g.font = '11.5px Roboto Flex, Noto Sans SC, sans-serif';
+    o.yTicks.forEach(([v, s]) => { g.strokeStyle = '#ece8eb'; g.lineWidth = 1; g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(R, Y(v)); g.stroke(); g.fillStyle = '#8f8b95'; g.fillText(s, x + 4, Y(v) + 4); });
+    o.xTicks.forEach(t => { g.fillStyle = '#8f8b95'; g.fillText(t + 's', X(t) - 8, B + 16); });
+    (o.extra || []).forEach(s => { g.setLineDash([4, 4]); g.strokeStyle = '#c9c4cc'; g.lineWidth = 1.5; g.beginPath(); s.forEach(([t, v], i) => i ? g.lineTo(X(t), Y(v)) : g.moveTo(X(t), Y(v))); g.stroke(); g.setLineDash([]); });
+    o.series.forEach(([pts, col]) => { g.strokeStyle = col; g.lineWidth = col === RED ? 2.6 : 2.2; g.beginPath(); pts.forEach(([t, v], i) => i ? g.lineTo(X(t), Y(v)) : g.moveTo(X(t), Y(v))); g.stroke(); });
+    (o.notes || []).forEach(([t, v, s, col]) => { g.fillStyle = col; g.fillText(s, X(t) + 4, Y(v) - 6); });
+  };
+  const pw = W / 3;
+  panel(0, pw, { title: '① 每 0.18 秒换一句：整列位置（行）', tMax: 1.2, y0: 0, y1: 4.4, yTicks: [[0, '0'], [1, '1'], [2, '2'], [3, '3'], [4, '4']], xTicks: [0, .3, .6, .9, 1.2],
+    extra: [stair], series: [[scrollSeries(false), GREY], [scrollSeries(true), RED]] });
+  panel(pw, pw, { title: '② 当前句的大小', tMax: .8, y0: .8, y1: 1.04, yTicks: [[.82, '82%'], [.9, '90%'], [1, '100%']], xTicks: [0, .2, .4, .6, .8],
+    series: [[scaleNow, GREY], [scaleM3, RED]], notes: [[.16, Math.max(...scaleM3.map(p => p[1])), '回弹 ' + ((Math.max(...scaleM3.map(p => p[1])) - 1) * 100).toFixed(1) + '%', RED]] });
+  panel(pw * 2, pw, { title: '③ 没唱到那半句的亮度', tMax: .6, y0: .2, y1: .7, yTicks: [[.27, '27%'], [.45, '45%'], [.6, '60%']], xTicks: [0, .2, .4, .6],
+    series: [[dimNow, GREY], [dimM3, RED]], notes: [[.02, .27, '现在：先掉到 27%', '#6b6772']] });
+  g.font = '12px Roboto Flex, Noto Sans SC, sans-serif';
+  [[GREY, '现在'], [RED, '按 M3E 调后'], ['#c9c4cc', '终点（虚线）']].forEach(([col, s], i) => { const x = 40 + i * 120; g.fillStyle = col; g.fillRect(x, H - 14, 16, 3); g.fillStyle = '#1d1b20'; g.fillText(s, x + 22, H - 9); });
+})();
+
+/* ---------- 03 单句放大 ---------- */
 /* 挑几句首尾相接重新排时间，句间留 gap 毫秒，末尾留 tail 毫秒再循环 */
 function compactSong(src, idx, lead, gap, tail) {
   let t = lead;
@@ -1585,12 +1801,14 @@ function tvChrome() {
       ${['timer', 'heart-o', 'queue', 'grid', 'swap'].map(i => `<span class="c48">${ico(i)}</span>`).join('')}<span class="chip48">${ico('person', 's18')}歌手：示例歌手</span><span class="c48">${ico('spark')}</span></div>
       <div class="r2"><span>0:31</span><svg viewBox="0 0 400 20" preserveAspectRatio="none" style="flex:1;height:20px"><path d="${d}" fill="none" stroke="var(--pl-primary)" stroke-width="4" stroke-linecap="round"/><path d="M162 10 L400 10" stroke="var(--pl-secondary-container)" stroke-width="4" stroke-linecap="round"/></svg><span>0:54</span></div></div>`;
 }
+/* PlayerParts.kt 的 LyricsSizing 预设：常规字号、放大倍数、行距、锚点 */
+const SIZING = { Tablet: { base: 28, grow: 1.36, gap: 24, anchor: .44 }, TabletFocus: { base: 34, grow: 1.42, gap: 28, anchor: .46 }, Tv: { base: 22, grow: 1.36, gap: 12, anchor: .42 } };
 function stagePane(kind, o) {
   const d = DEV[kind];
   return {
     kind, tab: o.tab, title: o.title, cap: o.cap, html: '',
     init(scr) {
-      scr.innerHTML = o.chrome(); this.page = new StagePage(scr, { w: d.w, h: d.h, box: o.box, fs: o.fs, px: o.px ?? 8, interactive: !o.tv, tv: !!o.tv, zoom: d.k, chrome: null });
+      scr.innerHTML = o.chrome(); this.page = new StagePage(scr, { w: d.w, h: d.h, box: o.box, fs: o.fs, px: o.px ?? 8, interactive: !o.tv, tv: !!o.tv, zoom: d.k, chrome: null, cls: o.cls });
       this.page.setSong(SONG_A, false, o.start ?? 9800);
       const self = this; DEMOS.push({ get visible() { return self.on && devVis.on; }, frame(dt) { self.page.frame(dt); } });
     },
@@ -1599,30 +1817,35 @@ function stagePane(kind, o) {
   };
 }
 const devVis = { on: false }; new IntersectionObserver(es => es.forEach(e => devVis.on = e.isIntersecting), { rootMargin: '200px' }).observe($('#dvStage'));
-devBlock($('#dvStage'), [
-  stagePane('tab', { tab: '平板 · 专注歌词', title: '平板 · 专注歌词', fs: 44, px: 16, box: { x: 168, y: 96, w: 1016, h: 650 },
+const stagePanes = devBlock($('#dvStage'), [
+  stagePane('tab', { tab: '平板 · 专注歌词', title: '平板 · 专注歌词', cls: SIZING.TabletFocus, fs: 44, px: 16, box: { x: 168, y: 96, w: 1016, h: 650 },
     chrome: () => dstat() + fdock(24, 800) + `<div class="fhead" style="left:168px;top:36px"><span class="js-title"></span>&nbsp;·&nbsp;<span class="js-artist"></span></div>`,
     cap: '专注歌词（<code>WidePlayer</code> 的 <code>TabletFocus</code>）：左边 88dp 专注栏，舞台占右边全部。字号按宿主基准放大到 44；宽度 1016dp 仍小于 1024，模糊照手机乘 0.8。' }),
-  stagePane('tab', { tab: '平板 · 常规', title: '平板 · 左封面右歌词', fs: 34, px: 12, box: { x: 600, y: 80, w: 624, h: 660 },
+  stagePane('tab', { tab: '平板 · 常规', title: '平板 · 左封面右歌词', cls: SIZING.Tablet, fs: 34, px: 12, box: { x: 600, y: 80, w: 624, h: 660 },
     chrome: () => dstat() + wideColumn(40, 0, 520, 800),
     cap: '常规宽布局：左栏封面、歌名、进度和按钮组不动，右栏整列给舞台。网格背景铺满整屏，左栏的控件压在背景上，和现在的流光一样。' }),
-  stagePane('land', { tab: '手机横屏', title: '手机横屏 · 专注歌词', fs: 24, px: 6, box: { x: 16 + dockW(360) + 28, y: 44, w: 800 - (16 + dockW(360) + 28) - 24, h: 308 },
+  stagePane('land', { tab: '手机横屏', title: '手机横屏 · 专注歌词', cls: SIZING.TabletFocus, fs: 24, px: 6, box: { x: 16 + dockW(360) + 28, y: 44, w: 800 - (16 + dockW(360) + 28) - 24, h: 308 },
     chrome: () => fdock(16, 360) + `<div class="fhead" style="left:${16 + dockW(360) + 28}px;top:10px"><span class="js-title"></span>&nbsp;·&nbsp;<span class="js-artist"></span></div>`,
     cap: '横屏手机进专注歌词，专注栏缩到约 0.7。文字区只有 300dp 左右高，焦点仍在 35% 处，所以上面只露一句、下面露两三句；高度不够 160dp 时退回经典。' }),
-  stagePane('book', { tab: '折叠屏 · 书本', title: '折叠屏书本姿态 · 右页歌词', fs: 28, px: 6, box: { x: 452, y: 60, w: 353, h: 593 },
+  stagePane('book', { tab: '折叠屏 · 书本', title: '折叠屏书本姿态 · 右页歌词', cls: SIZING.Tablet, fs: 28, px: 6, box: { x: 452, y: 60, w: 353, h: 593 },
     chrome: () => wideColumn(24, 24, 372, 653),
     cap: '书本姿态按铰链分栏：左页是播放控件，右页整页给舞台，文字不跨折痕。对唱靠右的句子贴着右页右边。' }),
-  stagePane('table', { tab: '折叠屏 · 桌面', title: '折叠屏桌面姿态 · 上半屏歌词', fs: 28, px: 4, box: { x: 32, y: 56, w: 637, h: 350 },
+  stagePane('table', { tab: '折叠屏 · 桌面', title: '折叠屏桌面姿态 · 上半屏歌词', cls: SIZING.Tablet, fs: 28, px: 4, box: { x: 32, y: 56, w: 637, h: 350 },
     chrome: () => `<div class="tt-top"><div class="ttbar"><span class="ib">${ico('down')}</span><span class="sp"></span><span class="srcpill" style="align-self:center">网易云音乐</span><span class="sp"></span><span class="ib">${ico('more')}</span></div></div>
       <div class="tt-bot" style="background:color-mix(in srgb,var(--pl-surface) 55%,transparent)"><div class="ttc"><div class="ttmeta"><div class="cv js-cover"></div><div class="tt"><b class="js-title"></b><span class="js-artist"></span></div><span class="favbtn">${ico('heart-o')}</span></div>${waveRow()}
       <div class="ptgL"><span class="side l">${ico('prev')}</span><span class="pp" style="clip-path:${cookieClip}">${ico('pause')}</span><span class="side r">${ico('next')}</span></div></div></div>`,
     cap: '<code>TabletopPlayer</code>：上半屏立着当舞台，下半屏平放着是控件。背景铺满整屏，下半屏盖一层半透明底色，和现在桌面姿态下宿主背景不关的规则一致。' }),
-  stagePane('tv', { tab: '电视', title: '电视 · 封面左、歌词右', fs: 28, px: 0, tv: true, box: { x: 400, y: 118, w: 500, h: 272 },
+  stagePane('tv', { tab: '电视', title: '电视 · 封面左、歌词右', cls: SIZING.Tv, fs: 28, px: 0, tv: true, box: { x: 400, y: 118, w: 500, h: 272 },
     chrome: () => tvChrome(),
-    cap: '<code>TvPlayer</code> 的歌词区在封面右边、控制条上面。电视不接收拖动和点按，景深模糊默认关（第 08 节的设置在电视上也能打开），帧率 30 fps；错峰、亮暗和逐字照常。' }),
+    cap: '<code>TvPlayer</code> 的歌词区在封面右边、控制条上面。电视不接收拖动和点按，景深模糊默认关（第 09 节的设置在电视上也能打开），帧率 30 fps；错峰、亮暗和逐字照常。' }),
 ]);
 
-/* ---------- 06 设置页手机（浅色） ---------- */
+$$('#barDev [data-dmode]').forEach(b => b.onclick = () => {
+  $$('#barDev [data-dmode]').forEach(x => x.classList.toggle('on', x === b));
+  stagePanes.forEach(p => { p.page.stage.setMode(b.dataset.dmode); if (p.on) p.show(); });
+});
+
+/* ---------- 07 设置页手机（浅色） ---------- */
 function lphone(inner, cap, title) { return `<figure class="dv2"><div class="lphone"><div class="m-app"><div class="m-fit">${inner}</div></div></div><figcaption><b>${title}</b>${cap}</figcaption></figure>`; }
 const setTop = `<div class="m-status"><span>9:41</span><span>▮▮▮ 86%</span></div><div class="m-appbar"><span style="width:48px;height:48px;display:grid;place-items:center">${ico('back')}</span></div><div class="m-big"><h5>播放与换源</h5></div>
   <div class="s-label">播放音量</div><div class="vcard"><div class="hd">${ico('volume')}<div><b>播放器音量</b><small>只改应用内的音量，和系统音量相乘</small></div><em>100%</em></div><div class="lsl"><div class="tr"></div><div class="fi" style="width:100%"></div><div class="hd2" style="left:100%"></div></div></div>
