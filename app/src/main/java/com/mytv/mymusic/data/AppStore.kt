@@ -289,6 +289,8 @@ class SettingsStore(private val context: Context) {
     private val dynamicColorKey = booleanPreferencesKey("dynamic_color")
     private val reduceMotionKey = booleanPreferencesKey("reduce_motion")
     private val volumeNormalizationKey = booleanPreferencesKey("volume_normalization")
+    /** 播放器音量（百分比），独立于系统音量；100 等于不改动。 */
+    private val playerVolumeKey = intPreferencesKey("player_volume")
     private val audioQualityKey = stringPreferencesKey("audio_quality")
     private val showBottomNavKey = booleanPreferencesKey("show_bottom_nav")
     private val equalizerEnabledKey = booleanPreferencesKey("equalizer_enabled")
@@ -411,6 +413,7 @@ class SettingsStore(private val context: Context) {
             dynamicColor = values[dynamicColorKey] ?: false,
             reduceMotion = values[reduceMotionKey] ?: false,
             volumeNormalization = values[volumeNormalizationKey] ?: false,
+            playerVolume = (values[playerVolumeKey] ?: 100).coerceIn(0, 100),
             audioQuality = values[audioQualityKey] ?: "auto",
             showBottomNav = values[showBottomNavKey] ?: true,
             lyricsBackground = values[lyricsBackgroundKey].toLyricsBackgroundMode(),
@@ -495,6 +498,8 @@ class SettingsStore(private val context: Context) {
     suspend fun dynamicColor(value: Boolean) = context.dataStore.edit { it[dynamicColorKey] = value }
     suspend fun reduceMotion(value: Boolean) = context.dataStore.edit { it[reduceMotionKey] = value }
     suspend fun volumeNormalization(value: Boolean) = context.dataStore.edit { it[volumeNormalizationKey] = value }
+    suspend fun playerVolume(value: Int) =
+        context.dataStore.edit { it[playerVolumeKey] = value.coerceIn(0, 100) }
     suspend fun audioQuality(value: String) = context.dataStore.edit { it[audioQualityKey] = value }
     suspend fun showBottomNav(value: Boolean) = context.dataStore.edit { it[showBottomNavKey] = value }
     suspend fun colorSource(value: String) = context.dataStore.edit { it[colorSourceKey] = value }
@@ -1141,6 +1146,11 @@ data class AppSettings(
     val dynamicColor: Boolean = false,
     val reduceMotion: Boolean = false,
     val volumeNormalization: Boolean = false,
+    /**
+     * 播放器音量（0..100 的百分比）。应用内的增益，和系统音量相乘：
+     * 系统音量不动，只把这一路音频按这个比例缩放。100 是默认值，等于不改动。
+     */
+    val playerVolume: Int = 100,
     /** 播放音质偏好：`auto` 或某个 `AudioQuality.id`。平台不支持所选档位时按 auto 处理。 */
     val audioQuality: String = "auto",
     val showBottomNav: Boolean = true,

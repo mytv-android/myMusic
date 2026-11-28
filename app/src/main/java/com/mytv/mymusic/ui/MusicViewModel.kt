@@ -323,6 +323,8 @@ data class MusicUiState(
     val githubMirror: com.mytv.mymusic.data.GithubMirror = com.mytv.mymusic.data.GithubMirror.Auto,
     val reduceMotion: Boolean = false,
     val volumeNormalization: Boolean = false,
+    /** 播放器音量（0..100），独立于系统音量；100 等于不改动，见 [setPlayerVolume]。 */
+    val playerVolume: Int = 100,
     /** 播放音质偏好（AudioQuality.id）；平台不支持所选档位时按 auto 取。 */
     val audioQuality: String = AudioQuality.Auto.id,
     val showBottomNav: Boolean = true,
@@ -700,6 +702,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             githubMirror = settings.githubMirror,
             reduceMotion = settings.reduceMotion,
             volumeNormalization = settings.volumeNormalization,
+            playerVolume = settings.playerVolume,
             audioQuality = settings.audioQuality,
             showBottomNav = settings.showBottomNav,
             cookies = settings.cookies,
@@ -6730,6 +6733,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setReduceMotion(value: Boolean) = viewModelScope.launch { app.settings.reduceMotion(value) }
     fun setVolumeNormalization(value: Boolean) =
         viewModelScope.launch { app.settings.volumeNormalization(value) }
+
+    /**
+     * 播放器音量：应用内的增益，和系统音量相乘，互不影响。写进 DataStore 后由
+     * MyMusicApp 的收集任务同步到音频处理链，改完下一帧就生效，不用重开播放器。
+     */
+    fun setPlayerVolume(value: Int) =
+        viewModelScope.launch { app.settings.playerVolume(value) }
     fun setAudioQuality(value: AudioQuality) =
         viewModelScope.launch { app.settings.audioQuality(value.id) }
     fun setLyricsBackground(value: LyricsBackgroundMode) = viewModelScope.launch { app.settings.lyricsBackground(value) }

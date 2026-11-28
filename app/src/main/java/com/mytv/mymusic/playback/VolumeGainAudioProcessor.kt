@@ -17,6 +17,9 @@ import kotlin.math.sqrt
  * 有平台响度元数据时施加固定增益（带约 30ms 平滑）；
  * 没有元数据时改用实时 AGC + 峰值限幅，把不同歌曲的响度拉近。
  * 负增益、压缩和限幅都在这里做，不走系统 LoudnessEnhancer（那个只能加不能减）。
+ *
+ * 最后再乘上设置里的「播放器音量」（[PlayerVolumeState]）：那是应用内独立于系统音量的增益，
+ * 和这里的响度归一化、和切歌过渡的音量包络都是相乘关系，互不覆盖。
  */
 @UnstableApi
 class VolumeGainAudioProcessor : BaseAudioProcessor() {
@@ -119,7 +122,8 @@ class VolumeGainAudioProcessor : BaseAudioProcessor() {
         val scaled = abs(sample * agcGain)
         peakEnv = max(scaled, peakEnv * limiterDecay)
         val limiter = if (peakEnv > LIMIT) LIMIT / peakEnv else 1f
-        return agcGain * limiter
+        // 播放器音量放在最后：限幅是按缩放前的电平判的，缩小音量只会更不容易削顶
+        return agcGain * limiter * PlayerVolumeState.fraction
     }
 
     private fun resetFallback() {
@@ -131,12 +135,16 @@ class VolumeGainAudioProcessor : BaseAudioProcessor() {
     private fun coefficient(seconds: Double): Float =
         (1.0 - exp(-1.0 / (sampleRate * seconds))).toFloat()
 
-    private fun targetGain(): Float =
-        if (VolumeNormalizationState.enabled && !VolumeNormalizationState.fallback) {
-            10f.pow(VolumeNormalizationState.gainDb / 20f)
-        } else {
-            1f
-        }
+    /** 响度归一化的目标增益，再乘上设置里的播放器音量。 */
+    private fun targetGain(): Float {
+        val normalization =
+            if (VolumeNormalizationState.enabled && !VolumeNormalizationState.fallback) {
+                10f.pow(VolumeNormalizationState.gainDb / 20f)
+            } else {
+                1f
+            }
+        return normalization * PlayerVolumeState.fraction
+    }
 
     override fun isActive(): Boolean = true
 

@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -71,6 +72,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -128,6 +130,7 @@ import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.lx.LxPlatform
 import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.data.playreport.PlayReportHub
+import com.mytv.mymusic.playback.PlayerVolumeState
 import com.mytv.mymusic.ui.AccountProfile
 import com.mytv.mymusic.ui.Cover
 import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
@@ -153,6 +156,7 @@ import com.mytv.mymusic.ui.components.segmentShape
 import com.mytv.mymusic.ui.components.tvFocusRing
 import com.mytv.mymusic.ui.formatBytes
 import com.mytv.mymusic.ui.providerName
+import com.mytv.mymusic.ui.player.stage.tvSliderKeys
 import com.mytv.mymusic.ui.theme.BlurMode
 import com.mytv.mymusic.ui.theme.BrandSeed
 import com.mytv.mymusic.ui.theme.ColorSource
@@ -165,6 +169,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 // ======================= 外观 =======================
 
@@ -538,6 +543,65 @@ private fun StyleChips(label: String, selected: SchemeStyle, onSelect: (SchemeSt
 
 // ======================= 播放与换源 =======================
 
+/**
+ * 播放器音量：应用内的增益，和系统音量相乘——调小它不影响系统音量，系统音量变了也不会覆盖它。
+ * 滑块只停在整数百分点上；电视遥控器左右键每次 ±5，按住不放越按越快（见 [tvSliderKeys]）。
+ */
+@Composable
+private fun PlayerVolumeCard(percent: Int, onChange: (Int) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val tv = LocalAppWindow.current.isTv
+    val full = PlayerVolumeState.FULL
+    val range = 0f..full.toFloat()
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(segmentShape(0, 1))
+            .background(scheme.surfaceContainer)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.AutoMirrored.Filled.VolumeUp,
+                null,
+                Modifier.size(24.dp),
+                tint = scheme.primary,
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "播放器音量",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "只改应用内的音量，和系统音量相乘；系统音量怎么动都不影响这一档",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                if (percent == 0) "静音" else "$percent%",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (percent == 0) scheme.error else scheme.primary,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Slider(
+            value = percent.toFloat(),
+            onValueChange = { onChange(it.roundToInt().coerceIn(0, full)) },
+            valueRange = range,
+            steps = full - 1,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (tv) Modifier.tvSliderKeys(percent.toFloat(), 5f, range) { onChange(it.roundToInt()) } else Modifier)
+                .semantics { contentDescription = "播放器音量" }
+                .tvFocusRing(RoundedCornerShape(12.dp)),
+        )
+    }
+}
+
 /** 音质偏好：常用档 + 洛雪源普遍声明的全景声/母带；锁了档取不到时换源层会自动退回自动档。 */
 private val QUALITY_PREFERENCE_OPTIONS = listOf(
     AudioQuality.Auto,
@@ -566,6 +630,10 @@ internal fun PlaybackSettingsScreen(
     val pinnable = searchable + listOfNotNull(lxProvider.takeIf { lxRecords.isNotEmpty() })
     val priority = aggregation.priorityFor(searchable.map { it.id } + LxPlatform.PROVIDER_ID)
     SettingsPage(SettingsSection.Playback, embedded, onBack) {
+        item(key = "volumeHead", contentType = "sectionHeader") { SectionLabel("播放音量") }
+        item(key = "volume", contentType = "slider") {
+            PlayerVolumeCard(state.playerVolume) { actions.setPlayerVolume(it) }
+        }
         item(key = "crossHead", contentType = "sectionHeader") { SectionLabel("切歌过渡") }
         item(key = "crossSwitch", contentType = "switch") {
             SwitchRow(

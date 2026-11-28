@@ -171,6 +171,12 @@ class MyMusicApp : Application(), ViewModelStoreOwner, Configuration.Provider {
             }
         }
         appScope.launch(Dispatchers.IO) {
+            settings.state.map { it.playerVolume }.distinctUntilChanged().collect { percent ->
+                // 播放器音量：应用内独立于系统音量的那一份，音频处理链每帧读它（见 PlayerVolumeState）
+                com.mytv.mymusic.playback.PlayerVolumeState.update(percent)
+            }
+        }
+        appScope.launch(Dispatchers.IO) {
             settings.state
                 .map { Triple(it.sodaSignerUrl, it.sodaSignerToken, it.sodaSignerEnabled) }
                 .distinctUntilChanged()

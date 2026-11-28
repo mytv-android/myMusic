@@ -331,6 +331,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun setCrossfadeMode(value: CrossfadeMode) = model.setCrossfadeMode(value)
     fun setReduceMotion(value: Boolean) = model.setReduceMotion(value)
     fun setVolumeNormalization(value: Boolean) = model.setVolumeNormalization(value)
+    fun setPlayerVolume(value: Int) = model.setPlayerVolume(value)
     fun setAudioQuality(value: AudioQuality) = model.setAudioQuality(value)
     fun toggleAggregateProvider(id: String) = model.toggleAggregateProvider(id)
     fun moveSource(id: String, delta: Int) = model.moveSource(id, delta)

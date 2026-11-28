@@ -54,6 +54,7 @@ import com.mytv.mymusic.data.sync.SyncUiState
 import com.mytv.mymusic.data.update.UpdateUiState
 import com.mytv.mymusic.playback.EqPresets
 import com.mytv.mymusic.playback.EqualizerUiState
+import com.mytv.mymusic.playback.PlayerVolumeState
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.adaptive.FoldRow
 import com.mytv.mymusic.ui.components.ListRow
@@ -110,8 +111,11 @@ internal fun settingsOverview(
                 append("封面${state.coverShape.label} · 背景${state.lyricsBackground.label}")
                 lyricStageSummary(state)?.let { append(" · 动画$it") }
             },
-            SettingsSection.Playback to playbackModeSummary(state.aggregation.playbackMode) +
-                if (state.aggregation.matchStrictness == MatchStrictness.Strict) " · 严格匹配" else "",
+            SettingsSection.Playback to buildString {
+                append(playbackModeSummary(state.aggregation.playbackMode))
+                if (state.aggregation.matchStrictness == MatchStrictness.Strict) append(" · 严格匹配")
+                if (state.playerVolume != PlayerVolumeState.FULL) append(" · 音量 ${state.playerVolume}%")
+            },
             SettingsSection.Report to if (state.playReportEnabled) "已开启" else "已关闭",
             SettingsSection.Equalizer to "$eqLabel · ${if (equalizer.enabled) "已开启" else "已关闭"}",
             SettingsSection.Sources to sourceSummary(state),
