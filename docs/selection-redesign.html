@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="myMusic 多选模式重设计：手机竖屏、平板、手机横屏、折叠屏和电视的完整界面，含逐首点选、区间选择、全选、空选择、删除确认、遥控器焦点与实现规格。">
+<title>多选模式重设计 · myMusic</title>
+<style>
+:root{
+  --font-d:"Roboto Flex","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-b:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-m:"Cascadia Mono","SFMono-Regular",Consolas,monospace;
+  /* 与当前 Compose 浅色 M3 方案一致，种子色 #006B5F。 */
+  --primary:#206a5f;--on-primary:#e2fff8;--primary-container:#a9f0e2;--on-primary-container:#095c52;
+  --secondary:#4b645f;--secondary-container:#cde8e1;--on-secondary-container:#3e5751;
+  --tertiary-container:#afe2f6;--on-tertiary-container:#1d5364;
+  --surface:#f6faf8;--surface-lowest:#fff;--surface-low:#eef5f2;--surface-c:#e7f0ec;
+  --surface-high:#e1eae7;--surface-highest:#dae5e1;--on-surface:#2a3532;--on-variant:#56615e;
+  --outline:#727d7a;--outline-v:#a9b4b1;--error:#a83836;--error-c:#ffdad6;--on-error-c:#6e0a12;
+  --doc:#f6faf8;--doc-card:#fff;--doc-line:#d8e4de;--doc-muted:#56615e;--bezel:#111615;
+  --shadow:0 20px 60px rgb(22 47 40/.12);--shadow-soft:0 6px 20px rgb(22 47 40/.08);
+  --ease:cubic-bezier(.2,0,0,1);--spring:cubic-bezier(.34,1.35,.64,1);color-scheme:light;
+}
+html[data-theme="dark"]{
+  --primary:#9cd1c6;--on-primary:#114840;--primary-container:#275b52;--on-primary-container:#b9eee3;
+  --secondary:#b1ccc6;--secondary-container:#27403b;--on-secondary-container:#aac5be;
+  --tertiary-container:#275b6d;--on-tertiary-container:#c7eeff;
+  --surface:#0a0f0e;--surface-lowest:#000;--surface-low:#0e1513;--surface-c:#131b19;
+  --surface-high:#19211f;--surface-highest:#1e2826;--on-surface:#dde8e4;--on-variant:#a2adaa;
+  --outline:#6d7875;--outline-v:#3f4a47;--error:#fa746f;--error-c:#871f21;--on-error-c:#ff9993;
+  --doc:#0a0f0e;--doc-card:#111916;--doc-line:#2d3b36;--doc-muted:#a2adaa;--bezel:#050706;
+  --shadow:0 24px 64px rgb(0 0 0/.44);--shadow-soft:0 8px 22px rgb(0 0 0/.3);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:78px}
+body{margin:0;background:var(--doc);color:var(--on-surface);font:15px/1.75 var(--font-b);-webkit-font-smoothing:antialiased}
+button,a{font-family:inherit}button{color:inherit}button:focus-visible,a:focus-visible{outline:3px solid var(--primary);outline-offset:3px}
+a{color:inherit}h1,h2,h3,h4,p,figure{margin:0}h1,h2,h3,h4{font-family:var(--font-d);line-height:1.22;letter-spacing:-.025em}
+svg{display:block}.icon{width:24px;height:24px;fill:currentColor;flex:none}.icon.s18{width:18px;height:18px}.icon.s20{width:20px;height:20px}
+.wrap{width:min(1220px,calc(100% - 40px));margin-inline:auto}
+.doc-nav{position:sticky;top:0;z-index:100;border-bottom:1px solid var(--doc-line);background:color-mix(in srgb,var(--doc) 88%,transparent);backdrop-filter:blur(18px)}
+.doc-nav .wrap{height:62px;display:flex;align-items:center;gap:24px}.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:800;font-size:18px}
+.brand-mark{width:27px;height:27px;border-radius:9px;background:var(--primary);display:grid;place-items:center;color:var(--on-primary)}.brand-mark .icon{width:17px;height:17px}
+.doc-links{display:flex;gap:20px;margin-left:auto}.doc-links a{color:var(--doc-muted);font-size:13.5px;text-decoration:none}.doc-links a:hover{color:var(--on-surface)}
+.icon-btn{width:40px;height:40px;padding:0;border:0;border-radius:50%;background:transparent;display:grid;place-items:center;cursor:pointer}.icon-btn:hover{background:var(--surface-c)}
+.hero{padding:68px 0 54px;overflow:hidden}.hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(420px,.95fr);gap:64px;align-items:center}
+.kicker{color:var(--primary);font-size:13px;font-weight:750;letter-spacing:.04em;margin-bottom:16px}.hero h1{font-size:clamp(42px,5.5vw,70px);font-weight:850;max-width:760px}
+.lede{margin-top:24px;max-width:42em;color:var(--doc-muted);font-size:17px;line-height:1.9}.lede strong{color:var(--on-surface)}
+.hero-facts{display:flex;gap:0;flex-wrap:wrap;margin-top:32px;border-top:1px solid var(--doc-line)}.hero-facts div{padding:16px 28px 0 0;min-width:118px}.hero-facts b{display:block;font-size:18px}.hero-facts span{font-size:12.5px;color:var(--doc-muted)}
+.hero-visual{position:relative;min-height:390px;border-radius:36px;background:var(--surface-low);padding:28px;display:flex;flex-direction:column;justify-content:center;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--outline-v) 40%,transparent)}
+.old-strip{background:var(--surface-high);border-radius:20px;padding:12px 14px;transform:rotate(-2deg);opacity:.72}.old-line{display:flex;gap:5px;align-items:center;flex-wrap:wrap}.old-line i{display:block;width:54px;height:28px;border-radius:9px;background:var(--surface-highest)}.old-line i:nth-child(3){width:86px}.old-line i:nth-child(5){background:var(--error-c)}
+.hero-arrow{align-self:center;margin:8px 0;color:var(--primary);transform:rotate(90deg)}
+.new-stack{display:grid;gap:12px;transform:rotate(1deg)}.new-head,.new-dock{background:var(--doc-card);box-shadow:var(--shadow-soft);display:flex;align-items:center;gap:12px}.new-head{height:64px;padding:0 16px;border-radius:20px}.new-head b{flex:1;font-size:18px}.new-head span{padding:7px 12px;background:var(--primary-container);color:var(--on-primary-container);border-radius:14px;font-weight:700}
+.new-rows{display:grid;gap:3px;padding:0 8px}.new-rows i{height:36px;border-radius:8px;background:var(--surface-low)}.new-rows i:nth-child(2),.new-rows i:nth-child(3){background:var(--secondary-container);box-shadow:inset 3px 0 var(--primary)}
+.new-dock{height:64px;border-radius:32px;padding:8px 14px;justify-content:space-around}.new-dock span{display:grid;place-items:center;gap:1px;font-size:11px}.new-dock .icon{width:21px;height:21px}.new-dock span:first-child{color:var(--primary)}
+section{padding:58px 0;border-top:1px solid var(--doc-line)}.section-head{display:flex;justify-content:space-between;gap:32px;align-items:end;margin-bottom:28px}.section-head h2{font-size:clamp(28px,3.5vw,40px);font-weight:800}.section-head p{margin-top:10px;color:var(--doc-muted);max-width:780px}.section-no{font:700 13px var(--font-m);color:var(--primary);white-space:nowrap}
+.decision-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.decision{padding:24px;border-radius:26px;background:var(--doc-card);border:1px solid var(--doc-line)}.decision h3{font-size:20px;margin-bottom:8px}.decision p{color:var(--doc-muted);font-size:14px}.decision-diagram{height:150px;margin-top:20px;border-radius:18px;background:var(--surface-low);position:relative;overflow:hidden}
+.decision-diagram.single::before{content:"已选 4 首                         逐首  区间";white-space:pre;position:absolute;left:12px;right:12px;top:12px;height:42px;padding:10px 14px;border-radius:14px;background:var(--surface-high);font-size:12px;font-weight:700}.decision-diagram.single::after{content:"播放          下一首          加入歌单          取消收藏";white-space:pre;position:absolute;left:12px;right:12px;bottom:12px;height:46px;padding:12px 10px;border-radius:23px;background:var(--doc-card);box-shadow:var(--shadow-soft);font-size:10px;text-align:center;color:var(--primary)}
+.decision-diagram.split{display:grid;grid-template-columns:36% 1fr;gap:12px;padding:12px}.decision-diagram.split::before,.decision-diagram.split::after{content:"";border-radius:14px;background:var(--surface-high)}.decision-diagram.split::after{background:repeating-linear-gradient(to bottom,var(--surface-low) 0 25px,var(--secondary-container) 25px 51px,var(--surface-low) 51px 76px)}
+.swap-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}.swap-card{padding:18px 20px;border-radius:22px;background:var(--surface-low)}.swap-card h3{font-size:15px}.swap-card>p{font-size:12.5px;color:var(--doc-muted);margin-top:3px}.swap-flow{display:grid;grid-template-columns:1fr 28px 1fr;gap:10px;align-items:center;margin-top:14px}.swap-before,.swap-after{height:82px;border-radius:16px;background:var(--doc-card);padding:9px;display:flex;flex-direction:column;justify-content:center;gap:6px}.swap-before i{display:block;height:25px;border-radius:13px;background:var(--surface-high)}.swap-before i:last-child{height:28px;border-radius:8px;background:repeating-linear-gradient(90deg,var(--surface-c) 0 20%,transparent 20% 25%)}.swap-before.floating{justify-content:end}.swap-before.floating i:last-child{height:34px;border-radius:17px;width:90%;margin:0 auto 3px;box-shadow:var(--shadow-soft)}.swap-arrow{color:var(--primary);transform:rotate(180deg);margin:auto}.swap-after{background:var(--surface-high);box-shadow:inset 0 0 0 1px var(--outline-v)}.swap-after span{display:flex;justify-content:space-around;align-items:center;color:var(--primary);font-size:10px;font-weight:700}.swap-after .icon{width:18px;height:18px}.swap-note{margin-top:10px;color:var(--doc-muted);font-size:13px}
+.principles{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:18px}.principle{padding:20px 0;border-top:2px solid var(--primary-container)}.principle h3{font-size:16px;margin-bottom:7px}.principle p{color:var(--doc-muted);font-size:13.5px}
+.demo-controls{display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap;margin-bottom:18px;padding:12px 14px;background:var(--doc-card);border:1px solid var(--doc-line);border-radius:20px}.control-group{display:flex;gap:4px;align-items:center;flex-wrap:wrap}.control-label{font-size:12.5px;color:var(--doc-muted);margin-right:4px}.demo-controls button{min-height:36px;padding:7px 13px;border:1px solid transparent;border-radius:11px;background:var(--surface-c);font-size:13px;font-weight:600;cursor:pointer}.demo-controls button[aria-pressed="true"]{background:var(--secondary-container);color:var(--on-secondary-container);border-radius:18px}.control-divider{width:1px;height:26px;background:var(--doc-line)}
+.device-lab{border-radius:32px;background:var(--surface-low);padding:26px;overflow:hidden}.device-stage{min-height:540px;display:grid;place-items:center;overflow:hidden}.device-scale{position:relative;margin:auto}.device-physical{position:absolute;left:0;top:0;background:var(--bezel);box-shadow:var(--shadow);transform-origin:0 0}.device-screen{position:relative;overflow:hidden;background:var(--surface);color:var(--on-surface);font-family:var(--font-b);user-select:none}
+.device-caption{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.65fr);gap:24px;margin-top:20px;padding-top:20px;border-top:1px solid var(--doc-line)}.device-caption h3{font-size:18px;margin-bottom:6px}.device-caption p{font-size:13.5px;color:var(--doc-muted)}.device-caption dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:5px 16px;font-size:12.5px}.device-caption dt{color:var(--doc-muted)}.device-caption dd{margin:0;font-family:var(--font-m)}
+.fold-control{display:none}.fold-control.on{display:flex}.chrome-control{display:none}.chrome-control.on{display:flex}
+/* 设备里的共同组件 */
+.system-bar{height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font-size:11px;font-weight:650;position:relative;z-index:4}.system-icons{display:flex;gap:5px;align-items:center}.system-icons i{display:block;width:13px;height:8px;border:1.5px solid currentColor;border-radius:2px}.system-icons i:first-child{width:11px;border-width:0 0 2px;transform:skew(-18deg)}
+.context-bar{height:64px;display:flex;align-items:center;gap:8px;padding:0 16px;background:var(--surface-c);position:relative;z-index:3}.context-title{flex:1;min-width:0}.context-title b{display:block;font-size:20px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.context-title small{display:block;color:var(--on-variant);font-size:11.5px;line-height:1.35}.context-action{height:48px;min-width:48px;padding:0 12px;border:0;border-radius:24px;background:transparent;font-size:14px;font-weight:650;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;white-space:nowrap}.context-action:hover{background:var(--surface-high)}.context-action.active{background:var(--primary-container);color:var(--on-primary-container)}
+.mode-controls{min-height:56px;padding:4px 16px;display:flex;align-items:center;gap:10px;background:var(--surface-c);position:relative;z-index:3}.mode-segment{display:grid;grid-template-columns:1fr 1fr;gap:2px;min-width:152px}.mode-option{height:48px;border:0;background:var(--surface-highest);padding:0 16px;font-size:14px;font-weight:600;cursor:pointer}.mode-option:first-child{border-radius:24px 8px 8px 24px}.mode-option:last-child{border-radius:8px 24px 24px 8px}.mode-option[aria-pressed="true"]{background:var(--primary);color:var(--on-primary);border-radius:24px}.all-button{margin-left:auto;height:48px;padding:0 10px;border:0;background:transparent;border-radius:24px;display:flex;align-items:center;gap:6px;font-size:14px;font-weight:650;cursor:pointer}.all-button:hover{background:var(--surface-high)}
+.range-guide{min-height:40px;margin:8px 16px;padding:8px 12px;border-radius:14px;background:var(--tertiary-container);color:var(--on-tertiary-container);display:flex;align-items:center;gap:8px;font-size:13px;line-height:1.45;position:relative;z-index:2}.range-guide b{font-weight:750}.range-guide .icon{width:19px;height:19px}
+.song-list{display:grid;gap:2px;align-content:start}.song-scroll{overflow:auto;scrollbar-width:none}.song-scroll::-webkit-scrollbar{display:none}.song-row{width:100%;min-height:64px;border:0;padding:8px 12px;display:flex;align-items:center;gap:12px;text-align:left;background:var(--surface-low);color:var(--on-surface);cursor:pointer;border-radius:6px;position:relative;font-family:inherit}.song-row:first-child{border-radius:20px 20px 6px 6px}.song-row:last-child{border-radius:6px 6px 20px 20px}.song-row.selected{background:var(--secondary-container);color:var(--on-secondary-container)}.song-row.selected.range-start{box-shadow:inset 3px 0 var(--primary)}.song-row.selected.range-end{box-shadow:inset 3px 0 var(--primary)}
+.cover{width:48px;height:48px;border-radius:12px;flex:none;display:grid;place-items:center;color:rgb(255 255 255/.9);font-size:17px;font-weight:800;text-shadow:0 1px 4px rgb(0 0 0/.2);box-shadow:inset 0 0 0 1px rgb(255 255 255/.12)}.song-copy{flex:1;min-width:0}.song-title{display:block;font-size:14.5px;line-height:1.4;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.song-sub{display:block;color:var(--on-variant);font-size:11.5px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.selected .song-sub{color:color-mix(in srgb,var(--on-secondary-container) 75%,transparent)}
+.endpoint{font-size:10.5px;line-height:20px;height:20px;padding:0 6px;border-radius:7px;background:var(--primary-container);color:var(--on-primary-container);font-weight:750;flex:none}.row-check{width:40px;height:40px;display:grid;place-items:center;flex:none;color:var(--on-variant)}.selected .row-check{color:var(--primary)}.row-more{width:40px;height:40px;display:grid;place-items:center;color:var(--on-variant)}
+.action-dock{position:absolute;z-index:8;height:64px;border-radius:32px;background:color-mix(in srgb,var(--surface-high) 94%,transparent);box-shadow:0 4px 16px rgb(0 0 0/.16),inset 0 0 0 1px color-mix(in srgb,var(--outline-v) 45%,transparent);display:grid;padding:4px 6px;backdrop-filter:blur(16px)}.dock-action{min-width:0;border:0;background:transparent;border-radius:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:3px 4px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap}.dock-action .icon{width:22px;height:22px}.dock-action.primary-action{color:var(--primary)}.dock-action.danger{color:var(--error)}.dock-action:disabled{opacity:.38;cursor:not-allowed}.dock-action:not(:disabled):hover{background:var(--surface-highest)}
+.phone-nav{position:absolute;left:0;right:0;bottom:0;height:72px;background:var(--surface-c);display:grid;grid-template-columns:repeat(4,1fr);padding:6px 8px 10px;z-index:7}.phone-nav.floating{left:50%;right:auto;bottom:16px;width:304px;height:64px;transform:translateX(-50%);border-radius:32px;padding:6px 8px;background:color-mix(in srgb,var(--surface-c) 92%,transparent);box-shadow:0 4px 16px rgb(0 0 0/.14),inset 0 0 0 1px color-mix(in srgb,var(--outline-v) 40%,transparent)}.single-screen.no-track:not(.selection-on) .single-list{padding-bottom:104px}.single-screen.no-track:not(.selection-on) .toast{bottom:96px}.nav-item{border:0;background:transparent;display:flex;flex-direction:column;align-items:center;gap:1px;font-size:10.5px;color:var(--on-variant)}.nav-item .nav-icon{height:32px;width:56px;border-radius:16px;display:grid;place-items:center}.nav-item.on{color:var(--on-surface)}.nav-item.on .nav-icon{background:var(--secondary-container);color:var(--on-secondary-container)}.nav-item .icon{width:22px;height:22px}
+.mini-player{position:absolute;z-index:7;height:64px;border-radius:32px;background:var(--surface-high);display:flex;align-items:center;padding:8px 12px;gap:10px;box-shadow:var(--shadow-soft)}.mini-player .cover{width:44px;height:44px;border-radius:50%}.mini-copy{flex:1;min-width:0}.mini-copy b,.mini-copy span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mini-copy b{font-size:13px}.mini-copy span{font-size:11px;color:var(--on-variant)}.mini-play{width:44px;height:44px;border:0;border-radius:50%;background:var(--primary);color:var(--on-primary);display:grid;place-items:center}
+.normal-hero{margin:8px 16px 12px;padding:14px 16px;border-radius:22px;background:var(--surface-low);display:flex;align-items:center;gap:12px}.normal-hero .hero-count{flex:1}.normal-hero .hero-count b{display:block;font-size:22px}.normal-hero .hero-count span{font-size:12px;color:var(--on-variant)}.hero-play{height:44px;padding:0 18px;border:0;border-radius:22px;background:var(--primary);color:var(--on-primary);font-weight:700;display:flex;align-items:center;gap:6px}
+.single-list{flex:1;min-height:0;padding:4px 16px 154px}.single-screen{height:100%;display:flex;flex-direction:column}.single-screen .context-bar,.single-screen .mode-controls,.single-screen .system-bar{flex:none}.single-screen .range-guide{flex:none}.single-screen .action-dock,.single-screen .mini-player{left:12px;right:12px;bottom:78px}.single-screen.selection-on .single-list{padding-bottom:96px}.single-screen.selection-on .action-dock{bottom:16px}.single-screen .action-dock{grid-template-columns:repeat(4,1fr)}
+.toast{position:absolute;z-index:20;left:16px;right:16px;bottom:152px;min-height:48px;padding:12px 16px;border-radius:16px;background:var(--on-surface);color:var(--surface);font-size:13px;display:flex;align-items:center;gap:12px;box-shadow:var(--shadow)}.toast b{margin-left:auto;color:var(--primary-container)}
+/* 手机横屏：导航轨 + 紧凑顶栏 + 底部操作坞 */
+.landscape-screen .rail{position:absolute;left:0;top:0;bottom:0;width:96px}.landscape-content{position:absolute;left:96px;right:0;top:0;bottom:0;display:flex;flex-direction:column}.landscape-content .system-bar{height:20px}.landscape-content .context-bar{height:54px}.landscape-content .context-title b{font-size:18px}.landscape-content .mode-controls{min-height:52px;padding-block:2px}.landscape-content .mode-option,.landscape-content .all-button{height:44px}.landscape-content .range-guide{min-height:32px;margin-block:4px;padding-block:5px}.landscape-content .single-list{padding-bottom:86px}.landscape-content .action-dock,.landscape-content .mini-player{left:12px;right:12px;bottom:10px}.landscape-content .action-dock{grid-template-columns:repeat(4,1fr)}.landscape-content .toast{bottom:82px}
+.rail{position:absolute;left:0;top:0;bottom:0;width:96px;background:var(--surface);display:flex;flex-direction:column;align-items:center;padding:14px 8px;z-index:5}.rail-logo{width:40px;height:40px;border-radius:14px;background:var(--primary);color:var(--on-primary);display:grid;place-items:center;margin-bottom:20px}.rail-item{width:72px;min-height:58px;border:0;background:transparent;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--on-variant);font-size:11px}.rail-item .nav-icon{height:32px;width:56px;border-radius:16px;display:grid;place-items:center}.rail-item.on .nav-icon{background:var(--secondary-container);color:var(--on-secondary-container)}.rail-spacer{flex:1}
+/* 双栏：左侧固定选择面板，右侧列表，底部播放条保留 */
+.wide-screen{height:100%}.wide-screen>.system-bar{position:absolute;left:96px;right:0;top:0}.wide-main{position:absolute;left:96px;right:0;top:24px;bottom:0}.wide-main .context-bar{height:72px;padding-inline:24px}.wide-main .context-title b{font-size:25px}.wide-columns{position:absolute;left:24px;right:24px;top:72px;bottom:88px;display:grid;grid-template-columns:340px minmax(0,1fr);gap:24px}.selection-side{align-self:start;border-radius:26px;background:var(--surface-c);padding:16px}.side-label{font-size:13px;font-weight:700;color:var(--on-variant);margin:0 4px 8px}.selection-side .mode-segment{width:100%}.selection-side .mode-option{padding-inline:8px}.side-all{width:100%;height:48px;margin-top:6px;border:0;border-radius:16px;background:transparent;display:flex;align-items:center;gap:10px;padding:0 12px;font-size:14px;font-weight:650;cursor:pointer}.side-all:hover{background:var(--surface-high)}.selection-side .range-guide{margin:10px 0 0;font-size:12.5px}.side-actions{display:grid;gap:8px;margin-top:16px}.side-action{height:48px;border:0;border-radius:18px;background:var(--surface-highest);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:700;cursor:pointer}.side-action.main{height:54px;border-radius:24px;background:var(--primary);color:var(--on-primary)}.side-action.danger{background:transparent;color:var(--error)}.side-action:disabled{opacity:.38;cursor:not-allowed}.side-action-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}.wide-list{min-width:0;overflow:auto;scrollbar-width:none;padding-bottom:8px}.wide-list .song-sub{font-size:12px}.wide-list .song-title{font-size:15px}
+.bottom-player{position:absolute;left:0;right:0;bottom:0;height:88px;background:var(--surface-c);display:flex;align-items:center;padding:12px 24px;gap:14px}.bottom-player .cover{width:52px;height:52px}.bottom-player .mini-copy b{font-size:14px}.bottom-controls{margin-left:auto;display:flex;align-items:center;gap:10px}.bottom-controls .icon-btn{background:var(--surface-highest)}.bottom-controls .play{background:var(--primary);color:var(--on-primary)}
+/* 折叠屏书本：所有内容和焦点都避开中间铰链 */
+.book-main .wide-columns{display:block;left:0;right:0}.book-main .selection-side{position:absolute;left:16px;top:0;width:228px}.book-main .wide-list{position:absolute;left:337px;right:12px;top:0;bottom:0}.book-main .context-bar{padding-left:16px}.book-main .context-title{max-width:210px}.book-main .context-title b{font-size:19px}.book-main .context-action{padding-inline:9px}.book-hinge{position:absolute;z-index:12;left:408px;top:0;bottom:0;width:25px;background:linear-gradient(90deg,#080a0a,#272c2b 48%,#080a0a);box-shadow:0 0 12px rgb(0 0 0/.35);pointer-events:none}.book-main .bottom-player{left:0;right:433px;padding:12px 16px}.book-main .bottom-player .bottom-controls{display:none}
+/* 折叠屏桌面：上屏选择，下屏列表，不跨折痕 */
+.tabletop-screen .rail{bottom:0}.tabletop-main{position:absolute;left:96px;right:0;top:24px;bottom:0}.tabletop-main .context-bar{height:60px;padding-inline:20px}.tabletop-top{position:absolute;left:20px;right:20px;top:60px;height:310px}.tabletop-top .selection-side{height:100%;padding:14px 16px}.tabletop-top .side-actions{grid-template-columns:1.2fr 1fr 1fr;gap:8px}.tabletop-top .side-action-pair{display:contents}.tabletop-top .side-action.main{height:48px;border-radius:20px}.tabletop-top .side-action.danger{grid-column:1/-1;height:40px}.tabletop-top .range-guide{margin-top:8px}.tabletop-list{position:absolute;left:20px;right:20px;top:433px;bottom:76px}.tabletop-hinge{position:absolute;z-index:12;left:0;right:0;top:408px;height:25px;background:linear-gradient(#080a0a,#272c2b 48%,#080a0a);box-shadow:0 0 12px rgb(0 0 0/.35);pointer-events:none}.tabletop-main .bottom-player{height:76px;padding-block:8px}.tabletop-main .bottom-player .cover{width:44px;height:44px}
+/* 电视：固定左栏 + 3dp 主色焦点环 */
+.tv-screen{height:100%;background:radial-gradient(70% 90% at 90% 0,color-mix(in srgb,var(--primary) 7%,transparent),transparent),var(--surface)}.tv-header{height:100px;padding:26px 48px 14px;display:flex;align-items:center;gap:12px}.tv-header .context-title b{font-size:28px}.tv-header .context-title small{font-size:13px}.tv-header .context-action{background:var(--surface-c)}.tv-columns{position:absolute;left:48px;right:48px;top:100px;bottom:48px;display:grid;grid-template-columns:320px minmax(0,1fr);gap:32px}.tv-columns .selection-side{padding:14px 16px;background:var(--surface-c)}.tv-columns .mode-option,.tv-columns .side-all{height:44px}.tv-columns .side-actions{margin-top:10px;gap:6px}.tv-columns .side-action{height:44px}.tv-columns .side-action.main{height:50px}.tv-columns .range-guide{margin-top:8px;min-height:36px;padding-block:6px}.tv-list{overflow:hidden}.tv-list .song-row{min-height:58px;padding-block:5px}.tv-list .cover{width:44px;height:44px}.tv-list .song-title{font-size:14px}.tv-focus{position:relative;z-index:2;outline:3px solid var(--primary);outline-offset:3px;transform:scale(1.025);box-shadow:0 0 0 2px var(--surface)}.tv-hint{position:absolute;left:48px;right:48px;bottom:13px;display:flex;justify-content:space-between;color:var(--on-variant);font-size:12px}.tv-hint span{display:flex;align-items:center;gap:6px}.key{display:inline-grid;place-items:center;min-width:24px;height:22px;padding:0 6px;border:1px solid var(--outline-v);border-radius:6px;font-size:11px;color:var(--on-surface);background:var(--surface-c)}
+/* 区间选择步骤 */
+.range-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.range-step{background:var(--doc-card);border:1px solid var(--doc-line);border-radius:24px;padding:20px;min-width:0}.range-step-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}.step-num{width:28px;height:28px;border-radius:10px;background:var(--primary);color:var(--on-primary);display:grid;place-items:center;font:750 13px var(--font-m)}.range-step h3{font-size:17px}.range-step p{font-size:13.5px;color:var(--doc-muted)}.mini-rows{margin-top:16px;display:grid;gap:3px}.mini-row{height:38px;border-radius:7px;background:var(--surface-low);display:flex;align-items:center;padding:0 10px;gap:8px;font-size:12px}.mini-row::before{content:"";width:22px;height:22px;border-radius:7px;background:var(--surface-highest)}.mini-row span{flex:1}.mini-row.selected{background:var(--secondary-container)}.mini-row.selected::before{background:var(--primary);box-shadow:inset 0 0 0 6px var(--primary-container)}.mini-row em{font-style:normal;color:var(--primary);font-weight:700;font-size:11px}.range-rules{margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:16px}.rule-card{padding:18px 20px;border-radius:20px;background:var(--surface-low)}.rule-card h3{font-size:15px;margin-bottom:6px}.rule-card p{color:var(--doc-muted);font-size:13.5px}
+/* 状态、删除确认与规范 */
+.state-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.state-card{padding:18px;border:1px solid var(--doc-line);border-radius:22px;background:var(--doc-card);min-width:0}.state-card h3{font-size:15px;margin-bottom:5px}.state-card p{font-size:12.5px;color:var(--doc-muted)}.state-visual{height:104px;margin-top:14px;border-radius:16px;background:var(--surface-low);padding:12px;display:flex;flex-direction:column;justify-content:center;gap:8px}.state-top{display:flex;align-items:center;gap:8px;font-weight:750;font-size:13px}.state-top span{flex:1}.state-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.state-actions i{height:30px;border-radius:10px;background:var(--surface-highest);opacity:.35}.state-actions i.on{opacity:1;background:var(--primary)}.state-snack{padding:10px 12px;border-radius:12px;background:var(--on-surface);color:var(--surface);font-size:11px}.state-snack b{color:var(--primary-container);margin-left:8px}
+.confirm-demo{display:grid;grid-template-columns:1fr 1.3fr;gap:20px;margin-top:22px}.confirm-frame{position:relative;min-height:360px;border-radius:26px;overflow:hidden;background:var(--surface);border:8px solid var(--bezel)}.confirm-frame .fake-bg{position:absolute;inset:0;padding:20px;display:grid;gap:8px;align-content:start}.fake-bg i{height:48px;border-radius:12px;background:var(--surface-low)}.fake-bg i:nth-child(2),.fake-bg i:nth-child(3){background:var(--secondary-container)}.dialog-scrim{position:absolute;inset:0;background:rgb(0 0 0/.4);display:grid;place-items:center;padding:24px}.confirm-dialog{width:min(100%,360px);border-radius:28px;background:var(--surface-high);padding:24px;box-shadow:var(--shadow)}.confirm-dialog .dialog-icon{width:44px;height:44px;border-radius:16px;background:var(--error-c);color:var(--error);display:grid;place-items:center;margin-bottom:14px}.confirm-dialog h3{font-size:21px}.confirm-dialog p{margin-top:10px;color:var(--on-variant);font-size:14px;line-height:1.75}.dialog-buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:22px}.dialog-buttons button{height:44px;padding:0 18px;border:0;border-radius:22px;background:transparent;font-weight:700;cursor:pointer}.dialog-buttons .confirm{background:var(--error);color:#fff}.tv-confirm .dialog-scrim{place-items:center end}.tv-confirm .confirm-dialog{margin-right:24px}.tv-confirm .dialog-buttons button:first-child{outline:3px solid var(--primary);outline-offset:3px}
+.spec-table{width:100%;border-collapse:collapse;background:var(--doc-card);border:1px solid var(--doc-line);border-radius:20px;overflow:hidden;font-size:13.5px}.spec-scroll{overflow:auto;border-radius:20px}.spec-table th,.spec-table td{padding:12px 15px;text-align:left;vertical-align:top;border-bottom:1px solid var(--doc-line)}.spec-table th{background:var(--surface-low);color:var(--doc-muted);font-size:12.5px;white-space:nowrap}.spec-table tr:last-child td{border-bottom:0}.spec-table code,.code{font:12px var(--font-m);background:var(--surface-c);padding:2px 6px;border-radius:6px}.spec-table td:first-child{font-weight:700;white-space:nowrap}
+.spec-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:24px}.spec-block{padding:22px;border-radius:22px;background:var(--doc-card);border:1px solid var(--doc-line)}.spec-block h3{font-size:17px;margin-bottom:10px}.spec-block ul{padding-left:20px;margin:0;color:var(--doc-muted);font-size:13.5px}.spec-block li{margin:6px 0}.spec-block b{color:var(--on-surface)}.file-link{color:var(--primary);text-underline-offset:3px}
+.accept{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 24px;margin-top:20px;padding:20px 24px;border-radius:22px;background:var(--surface-low)}.accept div{display:flex;gap:9px;align-items:flex-start;font-size:13px}.accept .icon{width:18px;height:18px;color:var(--primary);margin-top:4px}
+footer{padding:34px 0 64px;color:var(--doc-muted);font-size:13px;border-top:1px solid var(--doc-line)}footer .wrap{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap}
+@media(max-width:1000px){.hero-grid{grid-template-columns:1fr}.hero-visual{min-height:340px}.principles{grid-template-columns:1fr}.decision-grid,.range-rules,.spec-grid,.swap-grid{grid-template-columns:1fr}.state-grid{grid-template-columns:repeat(2,1fr)}.range-steps{grid-template-columns:1fr}.confirm-demo{grid-template-columns:1fr}.doc-links{display:none}.device-caption{grid-template-columns:1fr}.device-lab{padding:18px}.wide-caption{display:none}}
+@media(max-width:560px){.wrap{width:min(100% - 24px,1220px)}.hero{padding-top:42px}.hero h1{font-size:40px}.hero-visual{padding:18px;border-radius:26px}.hero-facts div{min-width:100px}.section-head{align-items:start}.section-no{display:none}.state-grid{grid-template-columns:1fr}.demo-controls{align-items:flex-start}.control-divider{display:none}.device-lab{padding:10px;border-radius:22px}.device-stage{min-height:430px}.accept{grid-template-columns:1fr}.new-head span{padding:6px 8px}.hero-facts{gap:0}.old-line i{width:40px}.old-line i:nth-child(3){width:64px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="m20 11-12.2 0 5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m9.2 16.2-4.4-4.4-1.4 1.4 5.8 5.8L21 7.2l-1.4-1.4z"/></symbol>
+<symbol id="i-circle" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20m0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16"/></symbol>
+<symbol id="i-checked" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20m-1.2 14.6-4-4 1.4-1.4 2.6 2.6 5.6-5.6 1.4 1.4z"/></symbol>
+<symbol id="i-indeterminate" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20M7 11h10v2H7z"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+<symbol id="i-next" viewBox="0 0 24 24"><path d="M5 6v12l8.5-6zm9 0h2v12h-2zm3 0h2v12h-2z"/></symbol>
+<symbol id="i-queue-next" viewBox="0 0 24 24"><path d="M3 6h12v2H3zm0 4h12v2H3zm0 4h8v2H3zm12 0v6l5-3zM19 6h2v8h-2z"/></symbol>
+<symbol id="i-addlist" viewBox="0 0 24 24"><path d="M3 5h12v2H3zm0 4h12v2H3zm0 4h8v2H3zm12-1h2v-3h3v-2h-3V4h-2v3h-3v2h3zm0 3v6h2v-6z"/></symbol>
+<symbol id="i-heart" viewBox="0 0 24 24"><path d="m12 21-1.5-1.3C5.4 15.4 2 12.3 2 8.5 2 5.4 4.4 3 7.5 3c1.7 0 3.4.8 4.5 2.1A6 6 0 0 1 16.5 3C19.6 3 22 5.4 22 8.5c0 3.8-3.4 6.9-8.5 11.2z"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4m0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4m0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4"/></symbol>
+<symbol id="i-range" viewBox="0 0 24 24"><path d="M6 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6m12 12a3 3 0 1 0 0 6 3 3 0 0 0 0-6M8 7h4a4 4 0 0 1 4 4v4h-2v-4a2 2 0 0 0-2-2H8z"/></symbol>
+<symbol id="i-select" viewBox="0 0 24 24"><path d="M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 0h2v6h-6v-2h4zM8 11h8v2H8z"/></symbol>
+<symbol id="i-charts" viewBox="0 0 24 24"><path d="M4 20V10h3v10zm6.5 0V4h3v16zM17 20v-7h3v7z"/></symbol>
+<symbol id="i-playlists" viewBox="0 0 24 24"><path d="M3 6h14v2H3zm0 4h14v2H3zm0 4h9v2H3zm13 0v5a3 3 0 1 0 2 2.8V12h5v-2z"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="m20.5 19.3-4.8-4.8a7.5 7.5 0 1 0-1.2 1.2l4.8 4.8zM5 10.5a5.5 5.5 0 1 1 11 0 5.5 5.5 0 0 1-11 0"/></symbol>
+<symbol id="i-library" viewBox="0 0 24 24"><path d="M4 3h2v18H4zm5 0h2v18H9zm4.5.4 5.7 17.1-2 .7-5.7-17.1z"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="m19.4 13 .1-1-.1-1 2-1.6-2-3.4-2.5 1a8 8 0 0 0-1.7-1L14.8 3h-4L10 6a8 8 0 0 0-1.7 1l-2.5-1-2 3.4 2 1.6-.1 1 .1 1-2 1.6 2 3.4 2.5-1a8 8 0 0 0 1.7 1l.8 3h4l.4-3a8 8 0 0 0 1.7-1l2.5 1 2-3.4zM12.8 15a3 3 0 1 1 0-6 3 3 0 0 1 0 6"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M11 3h2v10l3.5-3.5L18 11l-6 6-6-6 1.5-1.5L11 13zM5 19h14v2H5z"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M8 4V2h8v2h5v2h-2l-1 16H6L5 6H3V4zm2 2h4V4h-4zM8 8l.5 11h7L16 8z"/></symbol>
+</defs></svg>
+<nav class="doc-nav"><div class="wrap">
+  <a class="brand" href="#top"><span class="brand-mark"><svg class="icon"><use href="#i-select"/></svg></span>myMusic · 多选重设计</a>
+  <div class="doc-links"><a href="#decision">方案</a><a href="#devices">五端界面</a><a href="#range">区间选择</a><a href="#states">状态</a><a href="#specs">实现规格</a></div>
+  <button class="icon-btn" id="themeToggle" aria-label="切换深浅色" title="切换深浅色"><svg class="icon"><use href="#i-settings"/></svg></button>
+</div></nav>
+<header class="hero" id="top"><div class="wrap hero-grid">
+  <div><p class="kicker">多选模式 · 交互与界面稿</p><h1>给选择让位，<br>不给按钮让路。</h1>
+    <p class="lede">把现在挤在两行里的操作条拆成<strong>选择控制</strong>和<strong>批量操作</strong>。歌曲仍然是画面的主体；逐首与区间不再靠猜，手机的迷你播放器和电视的遥控器焦点也各有明确去处。</p>
+    <div class="hero-facts"><div><b>5 类设备</b><span>含折叠屏双姿态</span></div><div><b>8 个列表</b><span>共用一套状态</span></div><div><b>48dp 起</b><span>触摸与焦点目标</span></div></div>
+  </div>
+  <div class="hero-visual" aria-label="现有两行操作条重构为顶部选择控制和底部操作坞的示意">
+    <div class="old-strip"><div class="old-line"><i></i><i></i><i></i><i></i><i></i></div><div class="old-line" style="margin-top:7px"><i></i><i style="flex:1"></i></div></div>
+    <svg class="icon hero-arrow"><use href="#i-back"/></svg>
+    <div class="new-stack"><div class="new-head"><svg class="icon"><use href="#i-close"/></svg><b>已选 4 首</b><span>区间</span></div><div class="new-rows"><i></i><i></i><i></i><i></i></div><div class="new-dock"><span><svg class="icon"><use href="#i-play"/></svg>播放</span><span><svg class="icon"><use href="#i-queue-next"/></svg>下一首</span><span><svg class="icon"><use href="#i-addlist"/></svg>加入歌单</span><span><svg class="icon"><use href="#i-heart"/></svg>取消收藏</span></div></div>
+  </div>
+</div></header>
+<main>
+<section id="decision"><div class="wrap">
+  <div class="section-head"><div><h2>一套状态，两种承载方式</h2><p>不再让同一个 <span class="code">SelectionBar</span> 靠 FlowRow 勉强适配所有宽度。断点决定操作放在哪里，数量、选择结果和动作顺序在所有设备上保持一致。</p></div><span class="section-no">01 / 方案</span></div>
+  <div class="decision-grid">
+    <article class="decision"><h3>单屏：顶部选择，底部执行</h3><p>手机竖屏和 800×360 横屏使用上下文顶栏；Dock 替换整条底部外壳，迷你播放器和底部导航都退出，不与 Dock 叠放。列表底部自动让位。</p><div class="decision-diagram single"></div></article>
+    <article class="decision"><h3>双栏：左侧控制，右侧选歌</h3><p>平板、折叠屏和电视把控制固定在左栏。右侧列表滚动时操作不动；电视从任一行按左方向键即可到达，无需先穿到底部。</p><div class="decision-diagram split"></div></article>
+  </div>
+  <div class="swap-grid">
+    <article class="swap-card"><h3>有播放：MiniPlayer 与底栏一起退出</h3><p>进入多选前是「迷你播放器 + 贴底导航」，进入后只留一条 Dock。</p><div class="swap-flow"><div class="swap-before"><i></i><i></i></div><svg class="icon swap-arrow"><use href="#i-back"/></svg><div class="swap-after"><span><svg class="icon"><use href="#i-play"/></svg><svg class="icon"><use href="#i-queue-next"/></svg><svg class="icon"><use href="#i-addlist"/></svg><svg class="icon"><use href="#i-heart"/></svg></span><span>Dock</span></div></div></article>
+    <article class="swap-card"><h3>无播放：悬浮底栏直接换成 Dock</h3><p>不为 Dock 再保留一条悬浮导航；位置、圆角与安全区继承原悬浮底栏。</p><div class="swap-flow"><div class="swap-before floating"><i></i></div><svg class="icon swap-arrow"><use href="#i-back"/></svg><div class="swap-after"><span><svg class="icon"><use href="#i-play"/></svg><svg class="icon"><use href="#i-queue-next"/></svg><svg class="icon"><use href="#i-addlist"/></svg><svg class="icon"><use href="#i-heart"/></svg></span><span>Dock</span></div></div></article>
+  </div>
+  <p class="swap-note">退出多选、完成批量操作或返回手势结束后，按进入前的状态恢复迷你播放器与底栏；有歌 / 无歌两种布局都不与 Dock 同时出现。</p>
+  <div class="principles">
+    <article class="principle"><h3>模式不再突然消失</h3><p>从「多选」进入时可以是 0 首；取消最后一首也停留在多选，操作禁用。只有关闭、返回或批量操作成功才退出。</p></article>
+    <article class="principle"><h3>区间是一条明确的路径</h3><p>第一次点起点，第二次点终点；两端带文字标记，结果按当前可见列表顺序选择。切换模式保留已选歌曲。</p></article>
+    <article class="principle"><h3>沿用当前组件，不另造皮肤</h3><p>SongRow 仍为 64dp、48dp 封面、2dp 分段间距；连接式切换组、浮动工具栏、M3 色板和电视焦点环都来自现有实现。</p></article>
+  </div>
+</div></section>
+<section id="devices"><div class="wrap">
+  <div class="section-head"><div><h2>五种设备，逐帧操作</h2><p>默认是「喜欢」列表的区间选择。点设备里的歌曲、逐首/区间、全选和操作按钮都能看到状态变化；手机可先用「进入前底栏」切换有 MiniPlayer / 悬浮导航，再点设备里的「多选」查看整条底栏替换。</p></div><span class="section-no">02 / 设备</span></div>
+  <div class="demo-controls" aria-label="原型控制">
+    <div class="control-group" id="deviceTabs"><span class="control-label">设备</span><button data-device="phone" aria-pressed="true">手机竖屏</button><button data-device="tablet" aria-pressed="false">平板</button><button data-device="landscape" aria-pressed="false">手机横屏</button><button data-device="fold" aria-pressed="false">折叠屏</button><button data-device="tv" aria-pressed="false">电视</button></div>
+    <span class="control-divider"></span><div class="control-group" id="scenarioTabs"><span class="control-label">状态</span><button data-scenario="range" aria-pressed="true">区间 4 首</button><button data-scenario="picked" aria-pressed="false">逐首 3 首</button><button data-scenario="empty" aria-pressed="false">空选择</button><button data-scenario="all" aria-pressed="false">全选</button></div>
+    <span class="control-divider"></span><div class="control-group fold-control" id="foldTabs"><span class="control-label">姿态</span><button data-fold="book" aria-pressed="true">书本</button><button data-fold="tabletop" aria-pressed="false">桌面</button></div>
+    <div class="control-group chrome-control on" id="chromeTabs"><span class="control-label">进入前底栏</span><button data-chrome="track" aria-pressed="true">有 MiniPlayer</button><button data-chrome="floating" aria-pressed="false">悬浮导航</button></div>
+    <button id="resetDemo">重置</button>
+  </div>
+  <div class="device-lab">
+    <div class="device-stage" id="deviceStage"><div class="device-scale" id="deviceScale"><div class="device-physical" id="devicePhysical"><div class="device-screen" id="deviceScreen"></div></div></div></div>
+    <div class="device-caption"><div><h3 id="deviceTitle">手机竖屏 · 360×780dp</h3><p id="deviceDescription"></p></div><dl><dt>选择控制</dt><dd id="deviceControl">顶部固定</dd><dt>批量操作</dt><dd id="deviceAction">底部操作坞</dd><dt>返回手势</dt><dd>先退出多选</dd></dl></div>
+  </div>
+</div></section>
+<section id="range"><div class="wrap">
+  <div class="section-head"><div><h2>区间选择，把两次点击说清楚</h2><p>保留落雪式「起点 → 终点」的效率，但不依赖长按或隐藏手势。区间按钮切换模式；真正的选择仍发生在歌曲行。</p></div><span class="section-no">03 / 区间</span></div>
+  <div class="range-steps">
+    <article class="range-step"><div class="range-step-head"><span class="step-num">1</span><h3>点「区间」</h3></div><p>已选中的歌保留，锚点清空。提示条直接说明下一步，不再只把「区间」二字染成主色。</p><div class="mini-rows"><div class="mini-row"><span>红豆</span></div><div class="mini-row selected"><span>天黑黑</span></div><div class="mini-row"><span>晴天</span></div></div></article>
+    <article class="range-step"><div class="range-step-head"><span class="step-num">2</span><h3>点起点</h3></div><p>这一首立即选中并标「起点」。提示条显示它的列表序号；再点同一首可以取消，不生成空区间。</p><div class="mini-rows"><div class="mini-row"><span>红豆</span></div><div class="mini-row selected"><span>天黑黑</span><em>起点</em></div><div class="mini-row"><span>晴天</span></div></div></article>
+    <article class="range-step"><div class="range-step-head"><span class="step-num">3</span><h3>点终点</h3></div><p>起终点之间全部选中，包含两端；向上选也有效。已选结果保持列表原顺序，批量播放不按点击先后重排。</p><div class="mini-rows"><div class="mini-row selected"><span>天黑黑</span><em>起点</em></div><div class="mini-row selected"><span>晴天</span></div><div class="mini-row selected"><span>交换余生</span><em>终点</em></div></div></article>
+  </div>
+  <div class="range-rules"><article class="rule-card"><h3>连续选择多段</h3><p>完成一段后，再点一行成为新区间的起点；之前的选择不清空。回到「逐首」可单独取消任意一首，区间标记随锚点状态消失。</p></article><article class="rule-card"><h3>筛选、搜索与分组</h3><p>区间只按当前可见且可选择的歌曲计算，跳过日期标题和「正在下载」等不可选行。筛选或搜索条件变化先退出多选，避免误带不可见歌曲。</p></article></div>
+</div></section>
+<section id="states"><div class="wrap">
+  <div class="section-head"><div><h2>空、满、撤销与危险操作</h2><p>所有按钮的禁用和退出时机一致；破坏性操作按页面语义处理，不把「取消收藏」和「删除文件」混成同一个红色按钮。</p></div><span class="section-no">04 / 状态</span></div>
+  <div class="state-grid">
+    <article class="state-card"><h3>0 首：留在多选</h3><p>标题显示「选择歌曲」，操作全部禁用，全选仍可用。</p><div class="state-visual"><div class="state-top"><svg class="icon s18"><use href="#i-close"/></svg><span>选择歌曲</span><svg class="icon s18"><use href="#i-circle"/></svg></div><div class="state-actions"><i></i><i></i><i></i></div></div></article>
+    <article class="state-card"><h3>部分选择：三态全选</h3><p>数量实时更新；全选图标用横线表示部分选择，再点选满当前列表。</p><div class="state-visual"><div class="state-top"><svg class="icon s18"><use href="#i-close"/></svg><span>已选 4 首</span><svg class="icon s18"><use href="#i-indeterminate"/></svg></div><div class="state-actions"><i class="on"></i><i></i><i></i></div></div></article>
+    <article class="state-card"><h3>全选：动作变成全不选</h3><p>勾号与文字共同表达状态，不只换颜色；再次点击清空但仍停留在多选。</p><div class="state-visual"><div class="state-top"><svg class="icon s18"><use href="#i-close"/></svg><span>已选 8 首</span><svg class="icon s18"><use href="#i-checked"/></svg></div><div class="state-actions"><i class="on"></i><i></i><i></i></div></div></article>
+    <article class="state-card"><h3>移除：撤销，不追问</h3><p>取消收藏、最近播放删除、歌单移除沿用撤销条；操作完成后退出多选并恢复迷你播放器与底部导航。</p><div class="state-visual"><div class="state-snack">已取消收藏 4 首 <b>撤销</b></div></div></article>
+  </div>
+  <div class="confirm-demo">
+    <figure class="confirm-frame"><div class="fake-bg"><i></i><i></i><i></i><i></i><i></i></div><div class="dialog-scrim"><div class="confirm-dialog"><div class="dialog-icon"><svg class="icon"><use href="#i-download"/></svg></div><h3>删除 4 个下载文件？</h3><p>音频和歌词会一起从本机删除，收藏和歌单不受影响。</p><div class="dialog-buttons"><button type="button">取消</button><button type="button" class="confirm">删除</button></div></div></div></figure>
+    <figure class="confirm-frame tv-confirm"><div class="fake-bg"><i></i><i></i><i></i><i></i></div><div class="dialog-scrim"><div class="confirm-dialog"><div class="dialog-icon"><svg class="icon"><use href="#i-trash"/></svg></div><h3>删除下载文件</h3><p>将删除 4 首歌曲的音频和歌词，不影响收藏和歌单。电视默认焦点在「取消」，避免误删。</p><div class="dialog-buttons"><button type="button">取消</button><button type="button" class="confirm">删除</button></div></div></div></figure>
+  </div>
+  <p style="margin-top:12px;color:var(--doc-muted);font-size:13px">左：手机对话框；右：电视默认焦点在「取消」，按确认键不会直接删除。</p>
+</div></section>
+<section id="specs"><div class="wrap">
+  <div class="section-head"><div><h2>落地规格</h2><p>范围覆盖目前已使用多选的喜欢、最近播放、下载、自建歌单、本地音乐、聚合搜索、榜单和歌单/专辑详情，不重写业务操作。</p></div><span class="section-no">05 / 实现</span></div>
+  <div class="spec-scroll"><table class="spec-table"><thead><tr><th>部件</th><th>规格</th><th>设备与行为</th></tr></thead><tbody>
+    <tr><td>上下文顶栏</td><td>64dp；关闭 48dp；标题 20sp；进入多选时替换原标题和返回键</td><td>单屏固定顶部。双栏仍沿用 PageScaffold，但标题变为「已选 N 首 / 选择歌曲」</td></tr>
+    <tr><td>选择方式</td><td><span class="code">ConnectedToggleGroup</span>：逐首 / 区间；每项至少 48dp 高</td><td>切换保留 selected，清空 anchor；不截字，宽度不足时使用现有 WrapToggleGroup</td></tr>
+    <tr><td>全选</td><td>未选 / 部分 / 全选三态图标；全选时文案为「全不选」</td><td>只作用当前可见可选行；部分选择时再点 = 全选</td></tr>
+    <tr><td>歌曲行</td><td>SongRow 64dp、封面 48dp、分段间距 2dp；选中 = secondaryContainer + 实心勾</td><td>整行 Role.Checkbox；未选勾圈用 onSurfaceVariant，不提前染主色；起终点有文字标记</td></tr>
+    <tr><td>底部操作坞</td><td>64dp 高、全圆角、左右 12dp、底部 16dp + 手势安全区；图标 22dp + 12sp 标签；4 项等宽</td><td>单屏用 Dock 替换整个 PhoneBottomBar：MiniPlayer、贴底 ShortNavigationBar 或 FloatingNavBar 都隐藏；列表底部让位 96dp</td></tr>
+    <tr><td>左侧操作面板</td><td>26–28dp 圆角；播放为 54dp 主按钮；下一首与加入歌单并列；上下文操作独立一行</td><td>平板 340dp 左栏；电视 320dp；书本按折痕实际宽度收缩，不跨铰链</td></tr>
+    <tr><td>电视焦点</td><td>沿用 tvFocusRing：3dp 主色描边、1.04 倍放大；焦点顺序与视觉顺序一致</td><td>从歌曲行左键到操作面板；返回先退出多选，关闭后回到进入时的行或「多选」入口</td></tr>
+    <tr><td>动效与读屏</td><td>顶栏交叉淡入；操作坞快速空间弹簧；预测性返回沿用 selectionBackPreview</td><td>减少动态效果时取消位移；区间完成播报「已选择第 3 至第 6 首，共 4 首」</td></tr>
+  </tbody></table></div>
+  <div class="spec-grid">
+    <article class="spec-block"><h3>动作顺序与页面文案</h3><ul><li>固定顺序：<b>播放 → 下一首 → 加入歌单 → 上下文操作</b>；「下一首播放」在窄坞中简称「下一首」，读屏仍读完整含义。</li><li>喜欢：取消收藏；最近播放：删除；下载：删除（先确认）；自建歌单：从歌单移除；本地音乐：上传。</li><li>没有上下文操作的搜索、榜单、详情页只显示 3 项并等分宽度，不放空槽。</li><li>播放、下一首、加入歌单和移除成功后统一退出多选；失败时保留选择，Snackbar 给出原因。</li></ul></article>
+    <article class="spec-block"><h3>组件拆分与状态</h3><ul><li>现有 <a class="file-link" href="../app/src/main/java/com/mytv/mymusic/ui/components/Selection.kt">Selection.kt</a> 拆出 SelectionHeader、SelectionModeControl、SelectionActionDock、SelectionSidePanel；页面不再各自摆按钮。</li><li>SelectionState 暴露只读 anchor / rangeEnd 供标记和播报；0 首不再自动把 active 改为 false。</li><li>单屏外壳在多选时用 Dock 替换整个 PhoneBottomBar，MiniPlayer 与导航不保留在组合树里；退出时按 current 是否存在恢复原来的有歌 / 无歌底栏。双栏和电视保留 BottomPlayerBar。</li><li>窗口尺寸、折痕和导航继续读 <a class="file-link" href="../app/src/main/java/com/mytv/mymusic/ui/components/Window.kt">Window.kt</a>，不按设备名硬编码另一套断点。</li></ul></article>
+  </div>
+  <div class="accept">
+    <div><svg class="icon"><use href="#i-check"/></svg>360dp 竖屏与 800×360dp 横屏无按钮截字；多选期间只有一条 Dock，MiniPlayer 与底部导航均不共存</div><div><svg class="icon"><use href="#i-check"/></svg>1280×800dp 平板滚动右栏时，左侧操作保持可达</div><div><svg class="icon"><use href="#i-check"/></svg>841×701 书本与 701×841 桌面姿态不跨折痕、不丢焦点</div><div><svg class="icon"><use href="#i-check"/></svg>960×540 电视仅方向键即可完成进入、区间、操作、退出</div><div><svg class="icon"><use href="#i-check"/></svg>0 首、部分、全选、向上区间、多段区间、筛选变化都有单测</div><div><svg class="icon"><use href="#i-check"/></svg>深浅色、大字体、减少动态效果、TalkBack 与删除确认均走查</div>
+  </div>
+</div></section>
+</main>
+<footer><div class="wrap"><span>myMusic · 多选模式重设计 · 2026-11-28</span><span>这是 HTML 设计稿，本轮未修改应用代码。</span></div></footer>
+<script>
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const ico=(name,cls='')=>`<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const songs=[
+  ['富士山下','陈奕迅','富','linear-gradient(135deg,#657a80,#233a43)'],
+  ['红豆','王菲','红','linear-gradient(135deg,#c07868,#633d4d)'],
+  ['天黑黑','孙燕姿','天','linear-gradient(135deg,#829a86,#314c45)'],
+  ['晴天','周杰伦','晴','linear-gradient(135deg,#c79e61,#665345)'],
+  ['交换余生','林俊杰','换','linear-gradient(135deg,#7886ac,#333957)'],
+  ['小幸运','田馥甄','幸','linear-gradient(135deg,#c28e9e,#694052)'],
+  ['爱人错过','告五人','爱','linear-gradient(135deg,#9c786b,#493c3a)'],
+  ['句号','邓紫棋','句','linear-gradient(135deg,#6a9698,#283f50)']
+];
+const devices={
+  phone:{w:360,h:780,b:10,r:44,title:'手机竖屏 · 360×780dp',control:'顶部固定',action:'底部操作坞',desc:'上下文顶栏收纳数量与选择方式。进入多选后 MiniPlayer 与整条底部导航一起隐藏，只留 64dp Dock 悬浮在底部 16dp；退出后按有歌 / 无歌恢复原来的底栏。点取消收藏可看到撤销与底栏恢复。'},
+  tablet:{w:1280,h:800,b:14,r:32,title:'平板 · 1280×800dp',control:'左栏 340dp',action:'左侧固定面板',desc:'96dp 导航轨与 88dp 底部播放条沿用现状。选择面板固定在左栏，右侧歌曲独立滚动；「播放」是唯一主按钮，其它操作按使用频率分组。'},
+  landscape:{w:800,h:360,b:10,r:32,title:'手机横屏 · 800×360dp',control:'紧凑顶部',action:'替换底部播放条',desc:'宽度达到 600dp 后保留 96dp 导航轨。顶栏与模式行压紧但仍保留 48dp 触摸目标；操作坞替换底部播放条，避免 360dp 高度被操作控件吃光。'},
+  fold:{w:841,h:701,b:12,r:30,title:'折叠屏 · 书本 841×701dp',control:'左页，避开铰链',action:'左页固定',desc:'书本姿态按真实折痕把控制放左页、歌曲放右页；标题和操作不跨铰链。切到桌面姿态后，上屏放选择控制，下屏放歌曲，底部播放条留在下屏。'},
+  tv:{w:960,h:540,b:10,r:8,title:'电视 · 960×540dp',control:'左栏 320dp',action:'方向键直达',desc:'不使用触摸悬浮坞。任一歌曲行按左键到选择面板，右键回到原行；确认键选择，返回先退出多选。描边焦点落在「播放」，关闭后回到进入多选的位置。'}
+};
+const demo={device:'phone',fold:'book',active:true,hasTrack:true,range:true,selected:new Set([2,3,4,5]),anchor:2,end:5,toast:''};
+function currentDevice(){if(demo.device!=='fold')return devices[demo.device];if(demo.fold==='tabletop')return {...devices.fold,w:701,h:841,title:'折叠屏 · 桌面 701×841dp',control:'上屏固定',action:'上屏分组',desc:'桌面姿态把选择方式、全选和批量操作全部收进上屏，歌曲列表放在下屏；中间铰链不承载内容，底部播放条只占据下屏底部。'};return devices.fold}
+function systemBar(){return `<div class="system-bar"><span>9:41</span><span class="system-icons"><i></i><i></i></span></div>`}
+function contextHeader(tv=false){
+  const count=demo.selected.size;
+  return `<${tv?'div':'header'} class="${tv?'tv-header':'context-bar'}"><button class="context-action" data-action="${demo.active?'exit':'back'}" aria-label="${demo.active?'退出多选':'返回'}">${ico(demo.active?'close':'back')}</button><div class="context-title"><b>${demo.active?(count?`已选 ${count} 首`:'选择歌曲'):'喜欢'}</b><small>${demo.active?`当前列表 ${songs.length} 首`:'8 首 · 只保存在本机'}</small></div>${demo.active?'':`<button class="context-action" data-action="enter" aria-label="进入多选">${ico('select')}<span>多选</span></button>`}</${tv?'div':'header'}>`;
+}
+function modeControls(){
+  const all=demo.selected.size===songs.length;
+  return `<div class="mode-controls"><div class="mode-segment" role="group" aria-label="选择方式"><button class="mode-option" data-action="single" aria-pressed="${!demo.range}">逐首</button><button class="mode-option" data-action="range" aria-pressed="${demo.range}">区间</button></div><button class="all-button" data-action="all" aria-label="${all?'全不选':'全选'}">${ico(all?'checked':demo.selected.size?'indeterminate':'circle','s20')}<span>${all?'全不选':'全选'}</span></button></div>`;
+}
+function rangeGuide(){
+  if(!demo.active||!demo.range)return '';
+  let text='先点一首作为起点';
+  if(demo.anchor!=null&&demo.end==null)text=`<b>起点：第 ${demo.anchor+1} 首</b> · 再点一首完成连选`;
+  else if(demo.anchor!=null&&demo.end!=null)text=`<b>第 ${Math.min(demo.anchor,demo.end)+1}–${Math.max(demo.anchor,demo.end)+1} 首已选</b> · 再点一首开始新区间`;
+  return `<div class="range-guide">${ico('range')}<span>${text}</span></div>`;
+}
+function songRows(limit=songs.length){
+  return `<div class="song-list">${songs.slice(0,limit).map((s,i)=>{
+    const selected=demo.active&&demo.selected.has(i), start=selected&&demo.range&&demo.anchor===i, end=selected&&demo.range&&demo.end!=null&&demo.end===i&&demo.end!==demo.anchor;
+    return `<button class="song-row${selected?' selected':''}${start?' range-start':''}${end?' range-end':''}" data-song="${i}" aria-pressed="${selected}" aria-label="${s[0]}，${s[1]}${demo.active?(selected?'，已选择':'，未选择'):''}"><span class="cover" style="background:${s[3]}">${s[2]}</span><span class="song-copy"><span class="song-title">${s[0]}</span><span class="song-sub">${s[1]} · ${['网易云','QQ 音乐','酷狗','酷我'][i%4]}</span></span>${start?'<span class="endpoint">起点</span>':''}${end?'<span class="endpoint">终点</span>':''}${demo.active?`<span class="row-check">${ico(selected?'checked':'circle')}</span>`:`<span class="row-more">${ico('more','s20')}</span>`}</button>`;
+  }).join('')}</div>`;
+}
+const actionData=[['play','play','播放','primary-action'],['playNext','queue-next','下一首',''],['add','addlist','加入歌单',''],['remove','heart','取消收藏','danger']];
+function actionButtons(){
+  const disabled=demo.selected.size===0?'disabled':'';
+  return actionData.map(([a,i,l,c])=>`<button class="dock-action ${c}" data-action="${a}" ${disabled} aria-label="${a==='playNext'?'下一首播放':l}">${ico(i)}<span>${l}</span></button>`).join('');
+}
+function dock(){return demo.active?`<div class="action-dock">${actionButtons()}</div>`:demo.hasTrack?`<div class="mini-player"><span class="cover" style="background:${songs[0][3]}">富</span><span class="mini-copy"><b>富士山下</b><span>陈奕迅 · 正在播放</span></span><button class="mini-play" aria-label="暂停">${ico('pause')}</button></div>`:''}
+function navBar(){return `<nav class="phone-nav${demo.hasTrack?'':' floating'}" aria-label="主导航">${[['charts','榜单'],['playlists','歌单'],['search','搜索'],['library','我的']].map(([i,l],n)=>`<button class="nav-item ${n===3?'on':''}"><span class="nav-icon">${ico(i)}</span><span>${l}</span></button>`).join('')}</nav>`}
+function rail(){return `<nav class="rail" aria-label="主导航"><span class="rail-logo">${ico('library')}</span>${[['charts','榜单'],['playlists','歌单'],['search','搜索'],['library','我的']].map(([i,l],n)=>`<button class="rail-item ${n===3?'on':''}"><span class="nav-icon">${ico(i)}</span><span>${l}</span></button>`).join('')}<span class="rail-spacer"></span><button class="rail-item"><span class="nav-icon">${ico('settings')}</span><span>设置</span></button></nav>`}
+function normalHero(){return demo.active?'':`<div class="normal-hero"><span class="hero-count"><b>喜欢</b><span>8 首收藏歌曲</span></span><button class="hero-play">${ico('play','s18')}播放</button></div>`}
+function toast(single=true){return demo.toast?`<div class="toast"${single?'':' style="left:auto;right:24px;bottom:100px;width:360px"'}><span>${demo.toast}</span><b>撤销</b></div>`:''}
+function singleScreen(landscape=false){
+  const body=`${systemBar()}${contextHeader()}${demo.active?modeControls()+rangeGuide():''}<div class="single-list song-scroll">${normalHero()}${songRows()}</div>${dock()}${!landscape&&!demo.active?navBar():''}${toast()}`;
+  return landscape?`${rail()}<div class="landscape-content">${body}</div>`:body;
+}
+function selectionSide(tv=false){
+  const all=demo.selected.size===songs.length,disabled=demo.selected.size===0?'disabled':'';
+  return `<aside class="selection-side"><p class="side-label">选择方式</p><div class="mode-segment"><button class="mode-option" data-action="single" aria-pressed="${!demo.range}">逐首</button><button class="mode-option" data-action="range" aria-pressed="${demo.range}">区间</button></div><button class="side-all" data-action="all">${ico(all?'checked':demo.selected.size?'indeterminate':'circle','s20')}<span>${all?'全不选':'全选当前列表'}</span></button>${rangeGuide()}<div class="side-actions"><button class="side-action main ${tv&&demo.active?'tv-focus':''}" data-action="play" ${disabled}>${ico('play','s20')}播放</button><div class="side-action-pair"><button class="side-action" data-action="playNext" ${disabled}>${ico('queue-next','s18')}下一首</button><button class="side-action" data-action="add" ${disabled}>${ico('addlist','s18')}加入歌单</button></div><button class="side-action danger" data-action="remove" ${disabled}>${ico('heart','s18')}取消收藏</button></div></aside>`;
+}
+function bottomPlayer(){return `<div class="bottom-player"><span class="cover" style="background:${songs[0][3]}">富</span><span class="mini-copy"><b>富士山下</b><span>陈奕迅 · 正在播放</span></span><div class="bottom-controls"><button class="icon-btn">${ico('back','s20')}</button><button class="icon-btn play">${ico('pause','s20')}</button><button class="icon-btn">${ico('next','s20')}</button></div></div>`}
+function wideScreen(book=false){
+  return `${rail()}${systemBar()}<div class="wide-main ${book?'book-main':''}">${contextHeader()}<div class="wide-columns">${demo.active?selectionSide():`<aside class="selection-side"><p class="side-label">我的收藏</p><div class="normal-hero" style="margin:0"><span class="hero-count"><b>喜欢</b><span>8 首收藏歌曲</span></span></div><div class="side-actions"><button class="side-action main" data-action="enter">${ico('select','s20')}多选歌曲</button><button class="side-action">${ico('play','s20')}播放全部</button></div></aside>`}<div class="wide-list">${songRows()}</div></div>${bottomPlayer()}${toast(false)}</div>${book?'<div class="book-hinge"></div>':''}`;
+}
+function tabletopScreen(){
+  return `${rail()}<div class="tabletop-main">${systemBar()}${contextHeader()}<div class="tabletop-top">${demo.active?selectionSide():`<aside class="selection-side"><p class="side-label">我的收藏</p><div class="side-actions"><button class="side-action main" data-action="enter">${ico('select')}多选歌曲</button></div></aside>`}</div><div class="tabletop-list song-scroll">${songRows()}</div>${bottomPlayer()}${toast(false)}</div><div class="tabletop-hinge"></div>`;
+}
+function tvScreen(){return `${contextHeader(true)}<div class="tv-columns">${demo.active?selectionSide(true):`<aside class="selection-side"><p class="side-label">我的收藏</p><button class="side-action main tv-focus" data-action="enter">${ico('select')}多选歌曲</button></aside>`}<div class="tv-list">${songRows()}</div></div><div class="tv-hint"><span><i class="key">确认</i> 选择歌曲</span><span><i class="key">←</i> 操作面板　<i class="key">返回</i> ${demo.active?'退出多选':'返回上一页'}</span></div>${toast(false)}`}
+function render(){
+  const d=currentDevice(),screen=$('#deviceScreen');
+  screen.className=`device-screen ${demo.device==='phone'?`single-screen ${demo.active?'selection-on':''} ${demo.hasTrack?'':'no-track'}`:''} ${demo.device==='landscape'?'single-screen landscape-screen':''} ${demo.device==='tablet'?'wide-screen':''} ${demo.device==='fold'&&demo.fold==='book'?'wide-screen':''} ${demo.device==='fold'&&demo.fold==='tabletop'?'tabletop-screen':''} ${demo.device==='tv'?'tv-screen':''}`;
+  screen.style.width=d.w+'px';screen.style.height=d.h+'px';screen.style.borderRadius=Math.max(2,d.r-d.b)+'px';
+  if(demo.device==='phone')screen.innerHTML=singleScreen();
+  else if(demo.device==='landscape')screen.innerHTML=singleScreen(true);
+  else if(demo.device==='tablet')screen.innerHTML=wideScreen();
+  else if(demo.device==='fold')screen.innerHTML=demo.fold==='book'?wideScreen(true):tabletopScreen();
+  else screen.innerHTML=tvScreen();
+  const p=$('#devicePhysical');p.style.width=d.w+d.b*2+'px';p.style.height=d.h+d.b*2+'px';p.style.padding=d.b+'px';p.style.borderRadius=d.r+'px';
+  $('#deviceTitle').textContent=d.title;$('#deviceDescription').textContent=d.desc;$('#deviceControl').textContent=d.control;$('#deviceAction').textContent=d.action;
+  $$('#deviceTabs button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.device===demo.device));
+  $$('#foldTabs button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.fold===demo.fold));$('#foldTabs').classList.toggle('on',demo.device==='fold');
+  $$('#chromeTabs button').forEach(b=>b.setAttribute('aria-pressed',(b.dataset.chrome==='track')===demo.hasTrack));$('#chromeTabs').classList.toggle('on',demo.device==='phone');
+  requestAnimationFrame(fitDevice);
+}
+function fitDevice(){const d=currentDevice(),stage=$('#deviceStage'),scale=Math.min(1,(stage.clientWidth-4)/(d.w+d.b*2),(Math.max(stage.clientHeight,430)-8)/(d.h+d.b*2));const s=Math.max(.12,scale);$('#deviceScale').style.width=(d.w+d.b*2)*s+'px';$('#deviceScale').style.height=(d.h+d.b*2)*s+'px';$('#devicePhysical').style.transform=`scale(${s})`}
+function setScenario(name){demo.active=true;demo.toast='';demo.end=null;if(name==='range'){demo.range=true;demo.selected=new Set([2,3,4,5]);demo.anchor=2;demo.end=5}else if(name==='picked'){demo.range=false;demo.selected=new Set([0,3,6]);demo.anchor=null}else if(name==='empty'){demo.range=false;demo.selected=new Set();demo.anchor=null}else{demo.range=false;demo.selected=new Set(songs.map((_,i)=>i));demo.anchor=null}$$('#scenarioTabs button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.scenario===name));render()}
+function tapSong(i){if(!demo.active)return;if(demo.range){if(demo.anchor==null||demo.end!=null){demo.anchor=i;demo.end=null;demo.selected.add(i)}else if(i===demo.anchor){demo.selected.delete(i);demo.anchor=null}else{demo.end=i;for(let n=Math.min(i,demo.anchor);n<=Math.max(i,demo.anchor);n++)demo.selected.add(n)}}else{demo.selected.has(i)?demo.selected.delete(i):demo.selected.add(i)}demo.toast='';render()}
+function action(a){if(a==='exit'){demo.active=false;demo.selected.clear();demo.anchor=null;demo.end=null;demo.toast=''}else if(a==='enter'){demo.active=true;demo.selected.clear();demo.anchor=null;demo.end=null;demo.toast=''}else if(a==='single'||a==='range'){demo.range=a==='range';demo.anchor=null;demo.end=null}else if(a==='all'){demo.selected=demo.selected.size===songs.length?new Set():new Set(songs.map((_,i)=>i));demo.anchor=null;demo.end=null}else if(a==='back')return;else if(demo.selected.size){const n=demo.selected.size;demo.toast=a==='play'?`开始播放 ${n} 首歌曲`:a==='playNext'?`已将 ${n} 首设为下一首播放`:a==='add'?`已把 ${n} 首加入歌单`:`已取消收藏 ${n} 首`;demo.active=false;demo.selected.clear();demo.anchor=null;demo.end=null}render()}
+$('#deviceTabs').addEventListener('click',e=>{const b=e.target.closest('[data-device]');if(b){demo.device=b.dataset.device;render()}});
+$('#scenarioTabs').addEventListener('click',e=>{const b=e.target.closest('[data-scenario]');if(b)setScenario(b.dataset.scenario)});
+$('#foldTabs').addEventListener('click',e=>{const b=e.target.closest('[data-fold]');if(b){demo.fold=b.dataset.fold;render()}});
+$('#chromeTabs').addEventListener('click',e=>{const b=e.target.closest('[data-chrome]');if(b){demo.hasTrack=b.dataset.chrome==='track';demo.active=false;demo.selected.clear();demo.anchor=null;demo.end=null;demo.toast='';$$('#scenarioTabs button').forEach(x=>x.setAttribute('aria-pressed','false'));render()}});
+$('#deviceScreen').addEventListener('click',e=>{const row=e.target.closest('[data-song]');if(row){tapSong(Number(row.dataset.song));return}const b=e.target.closest('[data-action]');if(b&&!b.disabled)action(b.dataset.action)});
+$('#resetDemo').addEventListener('click',()=>{demo.hasTrack=true;setScenario('range')});
+$('#themeToggle').addEventListener('click',()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'});
+new ResizeObserver(fitDevice).observe($('#deviceStage'));window.addEventListener('resize',fitDevice);render();
+</script>
+</body></html>
