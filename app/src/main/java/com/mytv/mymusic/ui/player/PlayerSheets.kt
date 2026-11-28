@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Equalizer
@@ -33,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
@@ -46,6 +48,8 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mytv.mymusic.data.RepeatMode
+import com.mytv.mymusic.data.Song
+import com.mytv.mymusic.playback.CrossfadeStatus
 import com.mytv.mymusic.playback.SleepTimerState
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
@@ -182,6 +186,55 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
             }
         }
         Spacer(Modifier.height(8.dp))
+        // 正在放的这首下面一行「切歌过渡」：开关就是总开关，下面一行写这次会怎么接（下一首预载好之前写方式本身）。
+        // 顶上那排按钮已经放满，不往里塞；这一行和队列连成一组，后面的歌往后挪一格
+        val upcoming by CrossfadeStatus.upcoming.collectAsState()
+        val mixLine = CrossfadeStatus.queueLine(
+            enabled = state.crossfadeEnabled,
+            mode = state.crossfadeMode,
+            seconds = state.crossfadeSeconds,
+            upcoming = upcoming?.takeIf { it.fromKey == state.current?.key },
+        )
+        val showMix = currentIndex >= 0
+        val head = if (showMix) currentIndex + 1 else state.queue.size
+        val rowCount = state.queue.size + if (showMix) 1 else 0
+        val queueEntry: @Composable (Int, Song) -> Unit = { index, song ->
+            val playing = index == currentIndex
+            val local = localCopies(song)
+            SongRow(
+                title = song.title,
+                subtitle = if (local != null) localSubtitle(song, local) else song.artist,
+                cover = song.cover,
+                index = if (showMix && index > currentIndex) index + 1 else index,
+                count = rowCount,
+                onClick = { if (!unplayable.intercept(song, local)) actions.playQueueIndex(index) },
+                playing = playing,
+                dimmed = local?.gone == true,
+                badges = local?.let { copy -> { LocalSongBadge(copy) } },
+                trailing = {
+                    if (playing) {
+                        // “正在播放”由 SongRow 的状态读出，这里只是装饰
+                        Icon(Icons.Filled.Equalizer, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                    } else if (song.duration > 0) {
+                        Text(formatTime(song.duration * 1000L), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                // 左滑「移出」= 移出播放队列，撤销插回原位置；正在放的这首不能移
+                swipe = rememberRowSwipe(
+                    song,
+                    state.queue,
+                    delete = if (playing) {
+                        null
+                    } else {
+                        SwipeDelete("移出", "移出播放队列") {
+                            actions.removeQueueIndex(index, song.key)?.let { removal ->
+                                sheetNotifier.show("已移出「${song.title}」") { actions.restoreQueueItem(removal) }
+                            }
+                        }
+                    },
+                ),
+            )
+        }
         CompositionLocalProvider(LocalSwipeNotifier provides sheetNotifier) {
         Box {
         LazyColumn(
@@ -195,46 +248,29 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             itemsIndexed(
-                state.queue,
+                state.queue.subList(0, head),
                 key = { index, _ -> queueKeys[index] },
                 contentType = { _, _ -> "queue" },
-            ) { index, song ->
-                val playing = index == currentIndex
-                val local = localCopies(song)
-                SongRow(
-                    title = song.title,
-                    subtitle = if (local != null) localSubtitle(song, local) else song.artist,
-                    cover = song.cover,
-                    index = index,
-                    count = state.queue.size,
-                    onClick = { if (!unplayable.intercept(song, local)) actions.playQueueIndex(index) },
-                    playing = playing,
-                    dimmed = local?.gone == true,
-                    badges = local?.let { copy -> { LocalSongBadge(copy) } },
-                    trailing = {
-                        if (playing) {
-                            // “正在播放”由 SongRow 的状态读出，这里只是装饰
-                            Icon(Icons.Filled.Equalizer, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
-                        } else if (song.duration > 0) {
-                            Text(formatTime(song.duration * 1000L), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    },
-                    // 左滑「移出」= 移出播放队列，撤销插回原位置；正在放的这首不能移
-                    swipe = rememberRowSwipe(
-                        song,
-                        state.queue,
-                        delete = if (playing) {
-                            null
-                        } else {
-                            SwipeDelete("移出", "移出播放队列") {
-                                actions.removeQueueIndex(index, song.key)?.let { removal ->
-                                    sheetNotifier.show("已移出「${song.title}」") { actions.restoreQueueItem(removal) }
-                                }
-                            }
-                        },
-                    ),
-                )
+            ) { index, song -> queueEntry(index, song) }
+            if (showMix) {
+                item(key = QUEUE_CROSSFADE_KEY, contentType = "crossfade") {
+                    // 电视上遥控器上下键停到这一行，确认键切换开关（整行可点，焦点描边和歌曲行一样）
+                    SwitchRow(
+                        title = mixLine.title,
+                        checked = mixLine.on,
+                        onCheckedChange = { actions.setCrossfadeFromQueue(it) },
+                        index = currentIndex + 1,
+                        count = rowCount,
+                        summary = mixLine.summary,
+                        icon = Icons.Filled.AutoAwesome,
+                    )
+                }
             }
+            itemsIndexed(
+                state.queue.subList(head, state.queue.size),
+                key = { index, _ -> queueKeys[head + index] },
+                contentType = { _, _ -> "queue" },
+            ) { index, song -> queueEntry(head + index, song) }
         }
         SnackbarHost(sheetSnackbar, Modifier.align(Alignment.BottomCenter))
         }
@@ -243,6 +279,9 @@ fun QueueSheet(state: MusicUiState, actions: MusicActions, onDismiss: () -> Unit
     // 放不了的本地歌：面板只给“找一首平台版本”（移出队列在行上左滑）
     LocalUnplayableSheets(host = unplayable)
 }
+
+/** 播放队列里「切歌过渡」那一行的列表 key：和歌曲 key（来源:id）不会撞。 */
+private const val QUEUE_CROSSFADE_KEY = "#crossfade"
 
 /**
  * 定时关闭：15 / 30 / 45 / 60 分钟，或播完当前歌曲再停；结束前 30 秒淡出。

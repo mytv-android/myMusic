@@ -43,6 +43,8 @@ class SleepTimer(private val scope: CoroutineScope) {
     }
 
     fun attach(player: ExoPlayer) {
+        // 自动接歌换主后旧播放器还会作为「尾巴」放几秒：别让它放到头时的暂停被当成「播完这首再停」
+        this.player?.takeIf { it !== player }?.removeListener(listener)
         this.player = player
         player.addListener(listener)
     }

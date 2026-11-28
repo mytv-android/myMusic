@@ -27,6 +27,9 @@ import kotlin.math.sin
 /** 媒体项里带上完整时长（毫秒）：在线流常常没有 Content-Length，播放器直到快放完才知道时长。 */
 internal const val MEDIA_EXTRA_DURATION_MS = "mymusic_duration_ms"
 
+/** 媒体项里带上专辑（「来源:专辑 id」）：同一张专辑连着放时不叠，直接无缝接。 */
+internal const val MEDIA_EXTRA_ALBUM_KEY = "mymusic_album_key"
+
 private fun String.toMode(): CrossfadeMode =
     CrossfadeMode.entries.firstOrNull { it.name == this } ?: CrossfadeMode.Automix
 
@@ -41,9 +44,13 @@ internal fun crossfadeGains(t: Float): Pair<Float, Float> {
 
 /**
  * 自动接下一首时的交叉淡化：在原播放器还在放上一首结尾时，另起一个 ExoPlayer 预载并播放下一首，
- * 两路各按等功率曲线淡出 / 淡入；淡完把会话整体换到新播放器（见 [PlaybackService.promoteTo]）。
+ * 两路各按等功率曲线淡出 / 淡入。到换页点（[AutomixPlanner.switchAtMs]：交叉点或下一首第一句前，
+ * 但不早于上一首最后一句唱完）就把会话整体换到新播放器（见 [PlaybackService.promoteTo]），
+ * 播放页、通知栏、状态栏歌词跟着换到下一首；上一首转成「尾巴」，按原曲线淡完再释放。
  *
- * 只处理自动衔接。手动切歌、直播、带 DRM 的整曲、队列编辑、暂停和睡眠定时都不接，直接取消或根本不开始。
+ * 只处理自动衔接。手动切歌、直播、带 DRM 的整曲、队列编辑、暂停和睡眠定时都不接，直接取消或根本不开始；
+ * 换页之后用户暂停、跳转、切歌就把尾巴收掉，下一首回到正常音量。
+ * 同一张专辑连着放（没开随机）时不叠，交给播放器自己无缝接。
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 internal class CrossfadeController(
@@ -80,13 +87,34 @@ internal class CrossfadeController(
     /** 上一首因为条件不满足被跳过时的下标，只用来少打点日志。 */
     private var lastIneligible = C.INDEX_UNSET
 
+    /** 同一张专辑直接接的那一首（下标）和上一首的歌名：真的自然接过去了才记进「上一次接歌」。 */
+    private var gaplessIndex = C.INDEX_UNSET
+    private var gaplessFrom = ""
+
+    /** 换页后新主播放器申请音频焦点的那一步：要等尾巴先放开，见 [requestFocusAfter]。 */
+    private var pendingFocus: Runnable? = null
+
+    /**
+     * 一次淡化。换页前 [outgoing] 是主播放器、[incoming] 是预载的那一路；换页后（[switched]）
+     * [incoming] 成了主播放器，[outgoing] 只是还在淡出的尾巴，淡完或被打断时释放（[tailReleased]）。
+     */
     private class Fade(
-        val player: ExoPlayer,
+        val outgoing: ExoPlayer,
+        val outgoingSlot: Int,
+        val incoming: ExoPlayer,
+        val incomingSlot: Int,
         val startAtMs: Long,
         val durationMs: Long,
         val index: Int,
+        val outgoingKey: String,
         val plan: TransitionPlan,
-    )
+        val switchAtMs: Long,
+        val report: CrossfadeReport,
+    ) {
+        var switched = false
+        var tailReleased = false
+        var speed = 1f
+    }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -109,6 +137,8 @@ internal class CrossfadeController(
                     enabled = on
                     seconds = value
                     mode = nextMode
+                    // 队列那一行按新设置重写；下一次检查时再按新方式把这次的接法补上
+                    CrossfadeStatus.announce(null)
                     when {
                         !on -> cancel("总开关关掉了")
                         changed && (fade != null || secondary != null) -> cancel("方式换了")
@@ -124,8 +154,13 @@ internal class CrossfadeController(
         handler.removeCallbacksAndMessages(null)
         settingsJob?.cancel()
         settingsJob = null
+        pendingFocus = null
+        val fading = fade
         fade = null
         CrossfadeStatus.end()
+        CrossfadeStatus.announce(null)
+        // 换页前的上一首就是主播放器，由服务自己释放；换页后它只是尾巴，归这里
+        if (fading != null && fading.switched) releaseTail(fading)
         secondary?.release()
         secondary = null
         preparedIndex = C.INDEX_UNSET
@@ -134,6 +169,11 @@ internal class CrossfadeController(
 
     private fun onTick() {
         val player = primary ?: return
+        // 换过页了：只管把尾巴按原曲线淡完，不管设置怎么变，也不预载再下一首（两路播放器都占着）
+        fade?.takeIf { it.switched }?.let { active ->
+            tickTail(active, player)
+            return
+        }
         // 不过渡：整首放完由播放器自己接下一首，不预载也不叠
         if (!enabled || mode == CrossfadeMode.None) return
         // nextMediaItemIndex 为手动切歌忽略单曲循环，自动过渡不能沿用它。
@@ -174,8 +214,19 @@ internal class CrossfadeController(
         if (remaining > leadMs + PREPARE_AHEAD_MS) {
             releasePrepared()
             plan = null
+            CrossfadeStatus.announce(null)
             return
         }
+        if (sameAlbum(player, next)) {
+            // 整张专辑连着放：不叠，播放器自己无缝接
+            releasePrepared()
+            plan = null
+            gaplessIndex = next
+            gaplessFrom = currentTitle()
+            announce(player, next, SAME_ALBUM_METHOD)
+            return
+        }
+        gaplessIndex = C.INDEX_UNSET
         if (secondary == null || preparedIndex != next) {
             releasePrepared()
             if (!eligible(player, next)) return
@@ -183,50 +234,63 @@ internal class CrossfadeController(
             prepare(player, next, candidate?.incomingStartMs ?: 0L)
             return
         }
-        if (remaining > leadMs) return
         // 预载和分析是并行的：到这里再取一次接法，分析刚赶上就直接用，不沿用预载时的判断
-        val current = planFor(player, next) ?: plan
+        val target = planFor(player, next) ?: plan ?: AutomixPlanner.fixedFade(seconds)
         val playerReady = secondary?.playbackState == Player.STATE_READY
-        val wanted = min(current?.fadeMs ?: leadMs, remaining - TAIL_MARGIN_MS)
-        val minimum = if (current?.method == AutomixMethod.BeatCut) BEAT_CUT_MIN_MS else MIN_FADE_MS
-        if (!playerReady || wanted < minimum) {
-            // 预载来不及：这一首直接硬切，不再反复尝试
-            skipForIndex = next
-            cancel("下一首还没准备好")
+        if (remaining > leadMs) {
+            // 下一首已经能放了：队列那一行写这次会怎么接
+            if (playerReady) announce(player, next, upcomingLabel(target))
             return
         }
-        val target = current ?: equalPowerPlan()
+        val wanted = min(target.fadeMs, remaining - target.endMarginMs)
+        // 下限跟着设定走：交叉淡化可以短到 1 秒
+        val minimum = if (target.method == AutomixMethod.BeatCut) BEAT_CUT_MIN_MS else min(MIN_FADE_MS, target.fadeMs / 2)
+        if (!playerReady || wanted < minimum) {
+            // 预载来不及：这一首直接硬切，不再反复尝试
+            fallBack(player, next, "下一首还没准备好")
+            return
+        }
         if (target.incomingStartMs != preparedStartMs) {
             secondary?.seekTo(next, target.incomingStartMs)
             preparedStartMs = target.incomingStartMs
         }
         plan = target
+        announce(player, next, upcomingLabel(target))
         startFade(player, target, wanted)
     }
 
     /** 当前两首都分析过就按分析挑接法；没有分析结果时等功率淡化。 */
     private fun planFor(player: ExoPlayer, nextIndex: Int): TransitionPlan? {
         if (mode == CrossfadeMode.None) return null
-        if (mode == CrossfadeMode.Fade) return equalPowerPlan()
+        if (mode == CrossfadeMode.Fade) return AutomixPlanner.fixedFade(seconds)
         val duration = durationOf(player)
         if (duration <= 0L) return null
         val currentKey = player.currentMediaItem?.mediaId.orEmpty()
         val nextKey = runCatching { player.getMediaItemAt(nextIndex).mediaId }.getOrNull().orEmpty()
         val outgoing = app.automixStore.cached(currentKey)
         val incoming = app.automixStore.cached(nextKey)
-        if (outgoing == null && incoming == null) return equalPowerPlan()
         return AutomixPlanner.plan(outgoing, incoming, seconds, duration)
     }
 
-    private fun equalPowerPlan(): TransitionPlan = TransitionPlan(
-        method = AutomixMethod.EqualPowerFade,
-        startAtRemainingMs = seconds * 1000L,
-        fadeMs = seconds * 1000L,
-        incomingStartMs = 0L,
-        outgoingSpeed = 1f,
-        bassCutoffHz = 0f,
-        echoMix = 0f,
-    )
+    /** 队列那一行写的接法：交叉淡化就是它自己和时长，智能过渡写挑中的接法。 */
+    private fun upcomingLabel(target: TransitionPlan): String {
+        val method = if (mode == CrossfadeMode.Fade) CrossfadeMode.Fade.label else target.method.label
+        return "$method · ${transitionSecondsLabel(target.fadeMs)}"
+    }
+
+    private fun announce(player: ExoPlayer, nextIndex: Int, label: String) {
+        val nextKey = runCatching { player.getMediaItemAt(nextIndex).mediaId }.getOrNull().orEmpty()
+        CrossfadeStatus.announce(
+            CrossfadeUpcoming(fromKey = player.currentMediaItem?.mediaId.orEmpty(), toKey = nextKey, label = label),
+        )
+    }
+
+    /** 这一首放弃过渡、到时候直接切：记下来不再反复试，队列那一行也照实写。 */
+    private fun fallBack(player: ExoPlayer, index: Int, reason: String) {
+        skipForIndex = index
+        cancel(reason)
+        if (primary === player && player.nextMediaItemIndex == index) announce(player, index, "直接切")
+    }
 
     /**
      * 播放器给的时长，拿不到就用媒体项里带的完整时长。在线 Progressive 流没有 Content-Length 时
@@ -241,19 +305,31 @@ internal class CrossfadeController(
             ?: C.TIME_UNSET
     }
 
+    private fun sameAlbum(player: ExoPlayer, nextIndex: Int): Boolean {
+        val current = player.currentMediaItem ?: return false
+        val upcoming = runCatching { player.getMediaItemAt(nextIndex) }.getOrNull() ?: return false
+        return AutomixPlanner.sameAlbum(albumKeyOf(current), albumKeyOf(upcoming), player.shuffleModeEnabled)
+    }
+
+    private fun albumKeyOf(item: MediaItem): String =
+        item.mediaMetadata.extras?.getString(MEDIA_EXTRA_ALBUM_KEY).orEmpty()
+
     private fun eligible(player: ExoPlayer, index: Int): Boolean {
         if (index == skipForIndex) return false
         val item = runCatching { player.getMediaItemAt(index) }.getOrNull() ?: return false
         val config = item.localConfiguration ?: return false
         val uri = config.uri
+        val pending = uri.toString().isBlank()
         val reason = when {
-            uri.toString().isBlank() -> "下一首还没有地址（等解析）"
+            pending -> "下一首还没有地址（等解析）"
             // 加密整曲要另建一套 DRM 会话，P1 不接；直播流没有「下一首」的终点
             config.drmConfiguration != null -> "下一首是加密整曲"
             uri.path.orEmpty().endsWith(".m3u8", ignoreCase = true) -> "下一首是直播流"
             else -> null
         }
         if (reason == null) return true
+        // 还在解析地址不算定局；加密整曲、直播是这一次一定直接切
+        if (!pending) announce(player, index, "直接切 · $reason")
         if (lastIneligible != index) {
             lastIneligible = index
             AppLog.i("Crossfade", "跳过过渡：$reason")
@@ -288,8 +364,8 @@ internal class CrossfadeController(
         next.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (secondary === next) {
-                    skipForIndex = index
-                    cancel("下一首预载失败：${error.errorCodeName}")
+                    val owner = primary ?: return
+                    fallBack(owner, index, "下一首预载失败：${error.errorCodeName}")
                 }
             }
         })
@@ -301,7 +377,7 @@ internal class CrossfadeController(
         val analysis = app.automixStore.cached(mediaId)
         AppLog.i(
             "Crossfade",
-            "预载下一首 index=$index（$mediaId）" + if (analysis != null) {
+            "预载下一首 index=$index（$mediaId）从 ${startPositionMs}ms" + if (analysis != null) {
                 "，已分析 ${"%.0f".format(analysis.bpm)} BPM · ${keyLabel(analysis.keyIndex, analysis.keyMinor)}"
             } else {
                 "，还没有分析结果"
@@ -317,80 +393,203 @@ internal class CrossfadeController(
             params[secondarySlot].highPassHz = plan.bassCutoffHz
         }
         if (plan.echoMix > 0f) params[primarySlot].echoMix = plan.echoMix
-        if (plan.outgoingSpeed != 1f) player.playbackParameters = PlaybackParameters(plan.outgoingSpeed)
+        // 变速不在这里一下到位：advance 里按淡化进度分 8 步渐变（AutomixPlanner.tempoAt）
         next.play()
         val startedAt = SystemClock.elapsedRealtime()
-        fade = Fade(next, startedAt, durationMs, player.currentMediaItemIndex, plan)
-        // 固定交叉淡化不画动画，只有智能过渡才让播放页把这次接歌画出来
+        val outgoingKey = player.currentMediaItem?.mediaId.orEmpty()
+        val incomingKey = next.currentMediaItem?.mediaId.orEmpty()
+        val outgoingLyrics = CrossfadeLyrics.get(outgoingKey)
+        val incomingLyrics = CrossfadeLyrics.get(incomingKey)
+        val switchAt = AutomixPlanner.switchAtMs(plan, durationMs, player.currentPosition, outgoingLyrics, incomingLyrics)
+        val fromTitle = currentTitle()
+        val toTitle = next.currentMediaItem?.mediaMetadata?.title?.toString().orEmpty()
+        fade = Fade(
+            outgoing = player,
+            outgoingSlot = primarySlot,
+            incoming = next,
+            incomingSlot = secondarySlot,
+            startAtMs = startedAt,
+            durationMs = durationMs,
+            index = player.currentMediaItemIndex,
+            outgoingKey = outgoingKey,
+            plan = plan,
+            switchAtMs = switchAt,
+            report = CrossfadeReport(fromTitle, toTitle, plan.method.label, durationMs / 1000f),
+        )
+        // 固定交叉淡化不画动画，只有智能过渡才让播放页把这次接歌画出来；换页后接着画在新封面上，直到淡完
         if (mode == CrossfadeMode.Automix) CrossfadeStatus.begin(
             CrossfadeTransition(
-                fromTitle = currentTitle(),
-                toTitle = next.currentMediaItem?.mediaMetadata?.title?.toString().orEmpty(),
+                fromTitle = fromTitle,
+                toTitle = toTitle,
                 method = plan.method.label,
                 durationMs = durationMs,
                 startedAtMs = startedAt,
             ),
         )
-        AppLog.i("Crossfade", "开始${plan.method.label} ${durationMs}ms，原速 ${"%.3f".format(plan.outgoingSpeed)}")
+        AppLog.i(
+            "Crossfade",
+            "开始${plan.method.label} ${durationMs}ms，${switchAt}ms 换页" +
+                "（歌词${if (outgoingLyrics != null && incomingLyrics != null) "已知" else "不全，按交叉点"}）" +
+                "，目标速度 ${"%.3f".format(plan.outgoingSpeed)}",
+        )
     }
 
+    /** 推一次音量、变速和滤波；到了换页点就换主播放器，淡完收尾。换页前后都走这里。 */
     private fun advance(fade: Fade) {
-        val player = primary ?: run { cancel("没有主播放器"); return }
-        if (player.currentMediaItemIndex != fade.index) {
-            cancel("已经切到下一首")
-            return
+        if (!fade.switched) {
+            val player = primary ?: run { cancel("没有主播放器"); return }
+            if (player.currentMediaItemIndex != fade.index) {
+                // 上一首比预计的早放完（在线流的时长可能差几秒），原播放器自己接到了下一首：
+                // 直接换到已经放到位的新播放器，别让下一首从 0 再放一遍
+                if (player.currentMediaItemIndex == fade.incoming.currentMediaItemIndex) {
+                    switchTo(fade, keepTail = false)
+                } else {
+                    cancel("已经切到下一首")
+                }
+                return
+            }
+            if (fade.incoming.playbackState == Player.STATE_ENDED) {
+                cancel("下一首提前放完")
+                return
+            }
         }
-        if (fade.player.playbackState == Player.STATE_ENDED) {
-            cancel("下一首提前放完")
-            return
-        }
-        val t = ((SystemClock.elapsedRealtime() - fade.startAtMs).toFloat() / fade.durationMs).coerceIn(0f, 1f)
+        val elapsed = SystemClock.elapsedRealtime() - fade.startAtMs
+        val t = (elapsed.toFloat() / fade.durationMs).coerceIn(0f, 1f)
         val (out, incoming) = crossfadeGains(t)
-        player.volume = out
-        fade.player.volume = incoming
+        if (!fade.tailReleased) {
+            fade.outgoing.volume = out
+            val speed = AutomixPlanner.tempoAt(t, fade.plan.outgoingSpeed)
+            if (speed != fade.speed) {
+                fade.speed = speed
+                fade.outgoing.playbackParameters = PlaybackParameters(speed)
+            }
+        }
+        fade.incoming.volume = incoming
         if (fade.plan.bassCutoffHz > 0f) {
             // 上一首低通往下压、下一首高通往上开，低频在中间交接
             val cutoff = fade.plan.bassCutoffHz
-            params[primarySlot].lowPassHz =
-                (FILTER_MAX_HZ.toDouble() * (cutoff / FILTER_MAX_HZ).toDouble().pow(t.toDouble())).toFloat()
-            params[secondarySlot].highPassHz =
+            if (!fade.tailReleased) {
+                params[fade.outgoingSlot].lowPassHz =
+                    (FILTER_MAX_HZ.toDouble() * (cutoff / FILTER_MAX_HZ).toDouble().pow(t.toDouble())).toFloat()
+            }
+            params[fade.incomingSlot].highPassHz =
                 (FILTER_MIN_HZ.toDouble() * (cutoff / FILTER_MIN_HZ).toDouble().pow((1f - t).toDouble())).toFloat()
         }
-        if (t >= 1f) {
-            CrossfadeStatus.publish(
-                CrossfadeReport(
-                    fromTitle = currentTitle(),
-                    toTitle = fade.player.currentMediaItem?.mediaMetadata?.title?.toString().orEmpty(),
-                    method = fade.plan.method.label,
-                    seconds = fade.durationMs / 1000f,
-                ),
-            )
-            promote(fade.player)
+        if (!fade.switched && (elapsed >= fade.switchAtMs || t >= 1f)) {
+            // 淡完才到换页点：上一首已经没声了，不用留尾巴
+            switchTo(fade, keepTail = t < 1f)
+        }
+        if (t >= 1f) finish(fade)
+    }
+
+    /** 换页后的检查：用户暂停就收掉尾巴；缓冲照样按墙钟推完。 */
+    private fun tickTail(fade: Fade, player: ExoPlayer) {
+        when {
+            !player.playWhenReady -> stopTail(fade, "暂停了")
+            app.sleepTimer.state.value.active -> stopTail(fade, "睡眠定时优先")
+            else -> advance(fade)
         }
     }
 
-    private fun promote(next: ExoPlayer) {
-        if (primary == null) return
-        CrossfadeStatus.end()
-        fade?.let { fading ->
-            CrossfadeHandoff.mark(primary?.getMediaItemAt(fading.index)?.mediaId)
-        }
-        fade = null
+    /**
+     * 换页：下一首成为主播放器，会话、通知栏、律动、音效、睡眠定时跟着换过去。[keepTail] 时上一首接着按原曲线淡完，
+     * 否则（淡完了、或者它自己已经接到了下一首）立刻释放。
+     */
+    private fun switchTo(fade: Fade, keepTail: Boolean) {
+        if (fade.switched || primary !== fade.outgoing || this.fade !== fade) return
+        fade.switched = true
+        CrossfadeStatus.publish(fade.report)
+        CrossfadeStatus.announce(null)
+        CrossfadeHandoff.mark(fade.outgoingKey)
         plan = null
-        next.playbackParameters = PlaybackParameters(1f, 1f)
-        next.volume = 1f
-        params[primarySlot].clear()
-        params[secondarySlot].clear()
-        val newSlot = secondarySlot
+        val tail = fade.outgoing
+        val next = fade.incoming
+        // 先让尾巴放开音频焦点，再让新主播放器申请：反过来尾巴会收到焦点丢失，淡到一半被暂停
+        runCatching { tail.setAudioAttributes(tail.audioAttributes, false) }
+        if (keepTail) {
+            // 尾巴放到头就停（在线流的时长可能报短），不能自己接着放下一首
+            tail.pauseAtEndOfMediaItems = true
+            tail.addListener(tailListener(fade))
+        }
         primary = next
-        primarySlot = newSlot
+        primarySlot = fade.incomingSlot
         secondary = null
-        secondarySlot = 1 - newSlot
+        secondarySlot = fade.outgoingSlot
         preparedIndex = C.INDEX_UNSET
         skipForIndex = C.INDEX_UNSET
         observe(next)
-        onPromote(next, newSlot)
-        AppLog.i("Crossfade", "切换到下一首 index=${next.currentMediaItemIndex}")
+        onPromote(next, fade.incomingSlot)
+        if (!keepTail) releaseTail(fade)
+        requestFocusAfter(if (keepTail) tail else null, next)
+        val elapsed = SystemClock.elapsedRealtime() - fade.startAtMs
+        AppLog.i(
+            "Crossfade",
+            "换页到下一首 index=${next.currentMediaItemIndex}（淡化第 ${elapsed}ms）" + if (keepTail) "，上一首转成尾巴" else "",
+        )
+    }
+
+    /**
+     * 新主播放器申请音频焦点。尾巴放开焦点是在它自己的播放线程上做的：在它的消息队列里排一条，
+     * 轮到了（说明前面那条放开焦点已经处理完）再申请，保证先放后要；尾巴先被释放时有超时兜底。
+     */
+    private fun requestFocusAfter(tail: ExoPlayer?, next: ExoPlayer) {
+        val request = object : Runnable {
+            override fun run() {
+                if (pendingFocus !== this) return
+                pendingFocus = null
+                handler.removeCallbacks(this)
+                if (primary === next) runCatching { next.setAudioAttributes(next.audioAttributes, true) }
+            }
+        }
+        pendingFocus = request
+        if (tail == null) {
+            request.run()
+            return
+        }
+        runCatching { tail.createMessage { _, _ -> request.run() }.setLooper(Looper.getMainLooper()).send() }
+        handler.postDelayed(request, FOCUS_HANDOFF_TIMEOUT_MS)
+    }
+
+    /** 尾巴自己放到头、停了或出错：提前收掉，下一首的淡入照旧走完。 */
+    private fun tailListener(fade: Fade) = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying) return
+            val tail = fade.outgoing
+            if (!tail.playWhenReady || tail.playbackState == Player.STATE_ENDED) handler.post { releaseTail(fade) }
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            handler.post { releaseTail(fade) }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            handler.post { releaseTail(fade) }
+        }
+    }
+
+    private fun releaseTail(fade: Fade) {
+        if (fade.tailReleased) return
+        fade.tailReleased = true
+        params[fade.outgoingSlot].clear()
+        runCatching { fade.outgoing.release() }
+    }
+
+    /** 淡完：尾巴释放，下一首回到正常音量，滤波清掉，过渡动画收起。 */
+    private fun finish(fade: Fade) {
+        if (this.fade !== fade) return
+        this.fade = null
+        // 没换页就淡完不会走到这里（advance 先换页）；保险起见，主播放器绝不当尾巴释放
+        if (fade.switched) releaseTail(fade)
+        fade.incoming.volume = 1f
+        params[fade.incomingSlot].clear()
+        CrossfadeStatus.end()
+    }
+
+    /** 换页后被用户打断（暂停、跳转、切歌）：尾巴不再淡，直接收掉。 */
+    private fun stopTail(fade: Fade, reason: String) {
+        if (this.fade !== fade || !fade.switched) return
+        if (!fade.tailReleased) AppLog.i("Crossfade", "收掉尾巴：$reason")
+        finish(fade)
     }
 
     private fun releasePrepared() {
@@ -400,17 +599,18 @@ internal class CrossfadeController(
         next.release()
     }
 
+    /** 放弃还没换页的这次过渡；已经换过页的不回退，尾巴自己淡完。 */
     private fun cancel(reason: String) {
+        if (fade?.switched == true) return
         val fading = fade
         val next = secondary
-        val fromTitle = if (fading != null) currentTitle() else ""
-        val toTitle = fading?.player?.currentMediaItem?.mediaMetadata?.title?.toString().orEmpty()
         fade = null
         secondary = null
         plan = null
         preparedIndex = C.INDEX_UNSET
-        if (fading != null) CrossfadeStatus.end()
+        CrossfadeStatus.announce(null)
         if (fading != null) {
+            CrossfadeStatus.end()
             primary?.volume = 1f
             primary?.playbackParameters = PlaybackParameters(1f, 1f)
             params.forEach { it.clear() }
@@ -423,8 +623,8 @@ internal class CrossfadeController(
         if (fading != null) {
             CrossfadeStatus.publish(
                 CrossfadeReport(
-                    fromTitle = fromTitle,
-                    toTitle = toTitle,
+                    fromTitle = fading.report.fromTitle,
+                    toTitle = fading.report.toTitle,
                     method = "直接切",
                     seconds = 0f,
                     fallbackReason = reason,
@@ -433,6 +633,7 @@ internal class CrossfadeController(
         }
     }
 
+    /** 主播放器的事件；换页后旧主播放器上的这个监听还挂着，只认当前主播放器。 */
     private fun observe(player: ExoPlayer) {
         player.addListener(object : Player.Listener {
             override fun onPositionDiscontinuity(
@@ -440,31 +641,73 @@ internal class CrossfadeController(
                 newPosition: Player.PositionInfo,
                 reason: Int,
             ) {
+                if (player !== primary) return
+                val active = fade
+                if (active != null && active.switched) {
+                    // 换页后用户拖进度、切歌、移走这首：尾巴收掉。播放器内部的位置校正不算
+                    if (reason != Player.DISCONTINUITY_REASON_INTERNAL &&
+                        reason != Player.DISCONTINUITY_REASON_SILENCE_SKIP
+                    ) {
+                        stopTail(active, "跳转 / 手动切歌")
+                    }
+                    return
+                }
                 if (secondary != null) cancel("跳转 / 手动切歌")
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (player !== primary) return
                 val active = fade
+                if (active != null && active.switched) {
+                    stopTail(active, "换歌了")
+                    return
+                }
                 if (active != null) {
-                    // 淡得慢了一点，原播放器自己先接到了下一首：别让它从 0 重放，直接换到已经放到位的新播放器
-                    handler.post { fade?.let { promote(it.player) } }
+                    // 淡得慢了一点，原播放器自己先接到了下一首：别让它从 0 重放，直接换到已经放到位的新播放器。
+                    // 它这会儿放的已经是下一首的开头，先静音，等这一轮事件走完再换
+                    player.volume = 0f
+                    handler.post { fade?.takeIf { !it.switched }?.let { switchTo(it, keepTail = false) } }
                     return
                 }
                 if (secondary != null) cancel("换歌了")
+                // 同一张专辑直接接：真的自然接过去了才记「上一次接歌」
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && gaplessIndex != C.INDEX_UNSET &&
+                    player.currentMediaItemIndex == gaplessIndex && enabled && mode != CrossfadeMode.None
+                ) {
+                    CrossfadeStatus.publish(
+                        CrossfadeReport(
+                            fromTitle = gaplessFrom,
+                            toTitle = mediaItem?.mediaMetadata?.title?.toString().orEmpty(),
+                            method = SAME_ALBUM_METHOD,
+                            seconds = 0f,
+                        ),
+                    )
+                    AppLog.i("Crossfade", "同一张专辑，直接接 index=$gaplessIndex")
+                }
+                gaplessIndex = C.INDEX_UNSET
+                CrossfadeStatus.announce(null)
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                if (player !== primary) return
                 // 队列一改，预载的那一份就旧了（换地址、插歌、挪位都算）
                 if (secondary != null) cancel("队列变了")
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying || fade == null) return
+                if (player !== primary) return
+                val active = fade ?: return
+                if (isPlaying) return
+                if (active.switched) {
+                    // 换页后用户按了暂停：尾巴跟着停；缓冲就等它回来
+                    if (!player.playWhenReady) stopTail(active, "暂停了")
+                    return
+                }
                 when {
                     // 上一首正好在这几秒里放完：下一首已经淡入了一部分，直接换过去。
                     // 取消的话，正常换歌会把下一首从 0 再放一遍，听感上是重来。
                     player.playbackState == Player.STATE_ENDED ->
-                        handler.post { fade?.let { promote(it.player) } }
+                        handler.post { fade?.takeIf { !it.switched }?.let { switchTo(it, keepTail = false) } }
                     // 用户按了暂停：回到上一首，下次再淡
                     !player.playWhenReady -> cancel("主播放器暂停了")
                     // 只是缓冲或换段：等它自己回来，墙钟继续推
@@ -472,15 +715,18 @@ internal class CrossfadeController(
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED && fade != null) {
+                if (player !== primary) return
+                if (playbackState == Player.STATE_ENDED && fade?.switched == false) {
                     // 淡入这一路已经完整在放，主播放器也收尾了：直接换过去。
                     // 回调里不释放当前播放器，等这一轮事件走完再换
-                    handler.post { fade?.let { promote(it.player) } }
+                    handler.post { fade?.takeIf { !it.switched }?.let { switchTo(it, keepTail = false) } }
                 }
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                if (fade != null) cancel("主播放器出错")
+                if (player !== primary) return
+                val active = fade ?: return
+                if (active.switched) stopTail(active, "主播放器出错") else cancel("主播放器出错")
             }
         })
     }
@@ -499,7 +745,7 @@ internal class CrossfadeController(
         const val FILTER_MAX_HZ = 20_000f
         const val FILTER_MIN_HZ = 20f
 
-        /** 不把上一首最后这一点吃掉：淡完立刻换主，尾巴本来也已经听不见了。 */
-        const val TAIL_MARGIN_MS = 250L
+        /** 尾巴放开焦点的消息一直没轮到（比如它先被释放了）时，最多等这么久就让新主播放器申请。 */
+        const val FOCUS_HANDOFF_TIMEOUT_MS = 300L
     }
 }

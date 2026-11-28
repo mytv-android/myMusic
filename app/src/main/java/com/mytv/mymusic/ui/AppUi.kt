@@ -335,6 +335,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun setSleepFade(value: Boolean) = model.setSleepFade(value)
     fun setCrossfadeEnabled(value: Boolean) = model.setCrossfadeEnabled(value)
     fun setCrossfadeSeconds(value: Int) = model.setCrossfadeSeconds(value)
+    fun setCrossfadeFromQueue(on: Boolean) = model.setCrossfadeFromQueue(on)
     fun setCrossfadeAnimation(value: CrossfadeAnimation) = model.setCrossfadeAnimation(value)
     fun setCrossfadeMode(value: CrossfadeMode) = model.setCrossfadeMode(value)
     fun setReduceMotion(value: Boolean) = model.setReduceMotion(value)

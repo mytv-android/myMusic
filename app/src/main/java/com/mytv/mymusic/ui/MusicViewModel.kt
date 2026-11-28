@@ -149,6 +149,8 @@ import com.mytv.mymusic.lyricon.LyriconMapper
 import com.mytv.mymusic.lyricon.LyriconTrackInput
 import com.mytv.mymusic.playback.AppleWidevineDrmCallback
 import com.mytv.mymusic.playback.CrossfadeHandoff
+import com.mytv.mymusic.playback.CrossfadeLyrics
+import com.mytv.mymusic.playback.MEDIA_EXTRA_ALBUM_KEY
 import com.mytv.mymusic.playback.MEDIA_EXTRA_DURATION_MS
 import com.mytv.mymusic.playback.NowPlayingShape
 import com.mytv.mymusic.playback.PlaybackService
@@ -176,6 +178,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
@@ -215,6 +219,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -444,6 +449,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var analysisRequested = ""
     /** 当前这首也要分析：第一首的接法同样需要它。 */
     private var analysisCurrentRequested = ""
+    /**
+     * 自动接歌预取的下一首歌词（Song.key → 取词任务）：换页点上 [loadLyrics] 直接拿，不用等网络。
+     * 只留一份，预取再下一首时换掉。
+     */
+    private var lyricsPrefetch: Pair<String, Deferred<FetchedLyrics>>? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private val connected = MutableStateFlow<MediaController?>(null)
     private var progressJob: Job? = null
@@ -4973,42 +4983,26 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lyricsJob: Job? = null
 
+    /** 取回来的一首歌词，和顺手补到的封面（公共兜底给的；没有就是空串）。 */
+    private class FetchedLyrics(val lyrics: String, val cover: String)
+
     private fun loadLyrics(song: Song) {
         // 快速切歌时上一首的请求可能比新歌晚返回，只保留最新一次
         lyricsJob?.cancel()
+        // 自动接歌预载下一首时已经取过：换页点上直接有，第一句不会已经过去。
+        // 预取那次没取到（多半是网络一时不通）就当没有，现取一次
+        val prefetched = lyricsPrefetch?.takeIf { it.first == song.key }?.second
         lyricsJob = viewModelScope.launch {
-            // 下载的歌把歌词存成了同名 .lrc：先从本机读，断网也能出词
-            val downloadFile = if (song.source == LOCAL_SOURCE) null else downloadFilePath(song)
-            val savedLyrics = downloadFile?.let { withContext(Dispatchers.IO) { LocalLrc.readSidecar(it) } }
-            val nativeLyrics = savedLyrics ?: try {
-                // 本地歌：同名 .lrc 或匹配到的平台的歌词，由本地音乐库决定用哪份
-                if (song.source == LOCAL_SOURCE) {
-                    app.localLibrary.lyrics(song, settingsState.value.cookies)
-                } else {
-                    app.repository.lyrics(song, cookieFor(song.source))
-                }
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (_: Exception) {
-                ""
-            }
-            val needCover = song.cover.isBlank()
-            val fallback = if (settingsState.value.metadataFallback && (nativeLyrics.isBlank() || needCover)) {
-                CommunityMetadata.fetch(song, needLyrics = nativeLyrics.isBlank(), needCover = needCover)
-            } else {
-                null
-            }
+            val fetched = prefetched?.let { awaitPrefetched(it) }?.takeIf { it.lyrics.isNotBlank() } ?: fetchLyrics(song)
+            // 预取命中时上面不挂起：让出一下，等这次换歌的 onEvents 把 current 换成这首再读
+            yield()
             if (!isActive) return@launch
             // 请求完成后再读 base：先取 base.value 再挂起会把请求期间更新的当前歌曲、播放状态写回旧值
             val state = base.value
             val currentSong = state.current ?: return@launch
             if (currentSong.key != song.key) return@launch
-            val finalLyrics = nativeLyrics.ifBlank { fallback?.lyrics.orEmpty() }
-            // 在线播这首下载歌时顺手把歌词补存下来，老下载不用重下也能离线看词
-            if (downloadFile != null && savedLyrics == null && finalLyrics.isNotBlank()) {
-                withContext(Dispatchers.IO) { LocalLrc.writeSidecar(downloadFile, finalLyrics) }
-            }
-            val cover = fallback?.cover.orEmpty()
+            val finalLyrics = fetched.lyrics
+            val cover = fetched.cover
             val current = if (cover.isNotBlank()) currentSong.copy(cover = cover) else currentSong
             val currentSource = state.currentSource?.let { source ->
                 if (cover.isNotBlank() && source.song.key == song.key) source.copy(song = source.song.copy(cover = cover)) else source
@@ -5025,6 +5019,61 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 lyricsKey = song.key,
             )
         }
+    }
+
+    /** 预取的那份；被取消或出错就当没有，回去现取。 */
+    private suspend fun awaitPrefetched(task: Deferred<FetchedLyrics>): FetchedLyrics? = try {
+        task.await()
+    } catch (cancel: CancellationException) {
+        currentCoroutineContext().ensureActive()
+        null
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * 自动接歌预载下一首地址时顺手把歌词取进缓存（见 [lyricsPrefetch]），同一首只取一次。
+     * 唱词时间也随之登记给播放服务，换页点按两首的歌词挑。
+     */
+    private fun prefetchLyrics(song: Song) {
+        if (song.key.isBlank() || lyricsPrefetch?.first == song.key) return
+        lyricsPrefetch = song.key to viewModelScope.async { fetchLyrics(song) }
+    }
+
+    /**
+     * 取一首歌的歌词：下载的歌先读同名 .lrc，本地歌由本地音乐库决定用哪份，其余问平台；
+     * 都没有再用公共歌词兜底（封面缺了也一并补）。顺手把唱词时间登记给自动接歌（[CrossfadeLyrics]）。
+     */
+    private suspend fun fetchLyrics(song: Song): FetchedLyrics {
+        // 下载的歌把歌词存成了同名 .lrc：先从本机读，断网也能出词
+        val downloadFile = if (song.source == LOCAL_SOURCE) null else downloadFilePath(song)
+        val savedLyrics = downloadFile?.let { withContext(Dispatchers.IO) { LocalLrc.readSidecar(it) } }
+        val nativeLyrics = savedLyrics ?: try {
+            // 本地歌：同名 .lrc 或匹配到的平台的歌词，由本地音乐库决定用哪份
+            if (song.source == LOCAL_SOURCE) {
+                app.localLibrary.lyrics(song, settingsState.value.cookies)
+            } else {
+                app.repository.lyrics(song, cookieFor(song.source))
+            }
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Exception) {
+            ""
+        }
+        val needCover = song.cover.isBlank()
+        val fallback = if (settingsState.value.metadataFallback && (nativeLyrics.isBlank() || needCover)) {
+            CommunityMetadata.fetch(song, needLyrics = nativeLyrics.isBlank(), needCover = needCover)
+        } else {
+            null
+        }
+        val finalLyrics = nativeLyrics.ifBlank { fallback?.lyrics.orEmpty() }
+        // 在线播这首下载歌时顺手把歌词补存下来，老下载不用重下也能离线看词
+        if (downloadFile != null && savedLyrics == null && finalLyrics.isNotBlank()) {
+            withContext(Dispatchers.IO) { LocalLrc.writeSidecar(downloadFile, finalLyrics) }
+        }
+        val span = withContext(Dispatchers.Default) { LyricPipeline.sungSpan(LyricsParser.parse(finalLyrics).lines) }
+        CrossfadeLyrics.put(song.key, span)
+        return FetchedLyrics(finalLyrics, fallback?.cover.orEmpty())
     }
 
     /** 正在放的是下载完成的本机文件时，返回音频文件本身（歌词就在它旁边）。 */
@@ -5514,6 +5563,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // 交叉淡化要靠它算“还差几秒”
         val extras = android.os.Bundle().apply {
             putLong(MEDIA_EXTRA_DURATION_MS, song.duration * 1000L)
+            // 同一张专辑连着放时不叠：按「来源:专辑 id」比，别的平台同号的专辑不算
+            if (song.albumId.isNotBlank()) putString(MEDIA_EXTRA_ALBUM_KEY, "${song.source}:${song.albumId}")
             if (introUrl.isNotBlank()) putString(AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL, introUrl)
         }
         val builder = MediaItem.Builder().setMediaId(song.key).setUri(song.url).setMediaMetadata(
@@ -6037,6 +6088,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 analysisRequested = song.key
                 app.automixAnalyzer.request(song)
             }
+            // 换页点比淡完早：下一首的歌词得先在缓存里
+            prefetchLyrics(song)
             return
         }
         val track = base.value.canonicalQueue.getOrNull(nextIndex) ?: return
@@ -6069,6 +6122,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             )
             analysisRequested = resolved.key
             app.automixAnalyzer.request(resolved)
+            prefetchLyrics(resolved)
         }
     }
 
@@ -6754,6 +6808,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setSleepFade(value: Boolean) = viewModelScope.launch { app.settings.sleepFade(value) }
     fun setCrossfadeEnabled(value: Boolean) = viewModelScope.launch { app.settings.crossfadeEnabled(value) }
     fun setCrossfadeSeconds(value: Int) = viewModelScope.launch { app.settings.crossfadeSeconds(value) }
+
+    /**
+     * 播放队列「切歌过渡」那一行的开关：就是总开关。方式是「不过渡」时打开等于什么都不变，改成智能过渡。
+     */
+    fun setCrossfadeFromQueue(on: Boolean) = viewModelScope.launch {
+        if (on && settingsState.value.crossfadeMode == com.mytv.mymusic.data.CrossfadeMode.None.name) {
+            app.settings.crossfadeMode(com.mytv.mymusic.data.CrossfadeMode.Automix)
+        }
+        app.settings.crossfadeEnabled(on)
+    }
 
     fun setCrossfadeAnimation(value: com.mytv.mymusic.data.CrossfadeAnimation) =
         viewModelScope.launch { app.settings.crossfadeAnimation(value) }

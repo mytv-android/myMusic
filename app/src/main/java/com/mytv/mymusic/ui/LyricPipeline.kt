@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import com.mytv.mymusic.data.LyricSubline
 import com.mytv.mymusic.data.LyricTextPrefs
+import com.mytv.mymusic.playback.LyricSpan
 
 /**
  * 歌词文字变换：播放页、通知栏歌词、桌面小组件、海报墙都从这里拿歌词，几处看到的一致。
@@ -22,6 +23,30 @@ object LyricPipeline {
         if (prefs.autoRomanize && converter.romanizeAvailable) lines = lines.map { romanize(it, converter) }
         return if (lines === parsed.lines) parsed else parsed.copy(lines = lines)
     }
+
+    /**
+     * 唱词的时间范围，给自动接歌挑换页点：第一句真唱的开始、最后一句唱完。署名行（作词、作曲……）和间奏标记不算。
+     * 最后一句有逐字时间就取最后一个字的结束；只有行时间时按这首歌一句的常见长度估——相邻两句开头间隔的中位数，
+     * 限在 2–6 秒。没有时间轴（或者只有署名行）返回 null，接歌时按「不知道」处理。
+     */
+    fun sungSpan(lines: List<LyricLine>): LyricSpan? {
+        val sung = lines.filterNot { excludedFromSplit(it.text) }
+        if (sung.isEmpty()) return null
+        val last = sung.last()
+        val lastEnd = last.words.lastOrNull()?.endMs?.takeIf { it > last.timeMs }
+            ?: (last.timeMs + typicalLineMs(sung))
+        return LyricSpan(firstStartMs = sung.first().timeMs, lastEndMs = lastEnd)
+    }
+
+    private fun typicalLineMs(lines: List<LyricLine>): Long {
+        val gaps = lines.zipWithNext { a, b -> b.timeMs - a.timeMs }.filter { it > 0L }.sorted()
+        if (gaps.isEmpty()) return TYPICAL_LINE_FALLBACK_MS
+        return gaps[gaps.size / 2].coerceIn(TYPICAL_LINE_MIN_MS, TYPICAL_LINE_MAX_MS)
+    }
+
+    private const val TYPICAL_LINE_MIN_MS = 2_000L
+    private const val TYPICAL_LINE_MAX_MS = 6_000L
+    private const val TYPICAL_LINE_FALLBACK_MS = 4_000L
 
     // ---------- 拆单行双语（lyric-split-translation 的规则，按说明自己实现） ----------
 

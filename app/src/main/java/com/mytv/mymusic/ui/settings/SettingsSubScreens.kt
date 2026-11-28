@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -102,6 +103,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -130,6 +132,7 @@ import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.lx.LxPlatform
 import com.mytv.mymusic.data.lx.LxSources
 import com.mytv.mymusic.data.playreport.PlayReportHub
+import com.mytv.mymusic.playback.AutomixPlanner
 import com.mytv.mymusic.playback.PlayerVolumeState
 import com.mytv.mymusic.ui.AccountProfile
 import com.mytv.mymusic.ui.Cover
@@ -550,9 +553,57 @@ private fun StyleChips(label: String, selected: SchemeStyle, onSelect: (SchemeSt
 @Composable
 private fun PlayerVolumeCard(percent: Int, onChange: (Int) -> Unit) {
     val scheme = MaterialTheme.colorScheme
+    SliderCard(
+        icon = Icons.AutoMirrored.Filled.VolumeUp,
+        title = "播放器音量",
+        summary = "只改应用内的音量，和系统音量相乘；系统音量怎么动都不影响这一档",
+        valueText = if (percent == 0) "静音" else "$percent%",
+        valueColor = if (percent == 0) scheme.error else scheme.primary,
+        value = percent,
+        range = 0..PlayerVolumeState.FULL,
+        tvStep = 5,
+        onChange = onChange,
+    )
+}
+
+/**
+ * 交叉淡化时长：1–12 秒、每格 1 秒，和播放器音量同一种滑块卡片；电视遥控器左右键一格 1 秒。
+ * 智能过渡不用它，自己按 4–10 秒挑。
+ */
+@Composable
+private fun CrossfadeLengthCard(seconds: Int, onChange: (Int) -> Unit) {
+    SliderCard(
+        icon = Icons.Filled.Timer,
+        title = "交叉淡化时长",
+        summary = "上一首最后几秒和下一首开头叠在一起",
+        valueText = "$seconds 秒",
+        valueColor = MaterialTheme.colorScheme.primary,
+        value = seconds,
+        range = AutomixPlanner.FADE_MIN_SECONDS..AutomixPlanner.FADE_MAX_SECONDS,
+        tvStep = 1,
+        onChange = onChange,
+    )
+}
+
+/**
+ * 设置页的整格滑块卡片：图标、标题和说明、右边写当前值，下面一条滑块，只停在整数上。
+ * 电视遥控器左右键每次走 [tvStep]，按住不放越按越快（见 [tvSliderKeys]）。
+ */
+@Composable
+private fun SliderCard(
+    icon: ImageVector,
+    title: String,
+    summary: String,
+    valueText: String,
+    valueColor: Color,
+    value: Int,
+    range: IntRange,
+    tvStep: Int,
+    onChange: (Int) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
     val tv = LocalAppWindow.current.isTv
-    val full = PlayerVolumeState.FULL
-    val range = 0f..full.toFloat()
+    val bounds = range.first.toFloat()..range.last.toFloat()
     Column(
         Modifier
             .fillMaxWidth()
@@ -562,7 +613,7 @@ private fun PlayerVolumeCard(percent: Int, onChange: (Int) -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                Icons.AutoMirrored.Filled.VolumeUp,
+                icon,
                 null,
                 Modifier.size(24.dp),
                 tint = scheme.primary,
@@ -570,33 +621,33 @@ private fun PlayerVolumeCard(percent: Int, onChange: (Int) -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    "播放器音量",
+                    title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    "只改应用内的音量，和系统音量相乘；系统音量怎么动都不影响这一档",
+                    summary,
                     style = MaterialTheme.typography.bodyMedium,
                     color = scheme.onSurfaceVariant,
                 )
             }
             Text(
-                if (percent == 0) "静音" else "$percent%",
+                valueText,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = if (percent == 0) scheme.error else scheme.primary,
+                color = valueColor,
             )
         }
         Spacer(Modifier.height(6.dp))
         Slider(
-            value = percent.toFloat(),
-            onValueChange = { onChange(it.roundToInt().coerceIn(0, full)) },
-            valueRange = range,
-            steps = full - 1,
+            value = value.toFloat(),
+            onValueChange = { onChange(it.roundToInt().coerceIn(range.first, range.last)) },
+            valueRange = bounds,
+            steps = range.last - range.first - 1,
             modifier = Modifier
                 .fillMaxWidth()
-                .then(if (tv) Modifier.tvSliderKeys(percent.toFloat(), 5f, range) { onChange(it.roundToInt()) } else Modifier)
-                .semantics { contentDescription = "播放器音量" }
+                .then(if (tv) Modifier.tvSliderKeys(value.toFloat(), tvStep.toFloat(), bounds) { onChange(it.roundToInt()) } else Modifier)
+                .semantics { contentDescription = title }
                 .tvFocusRing(RoundedCornerShape(12.dp)),
         )
     }
@@ -660,15 +711,9 @@ internal fun PlaybackSettingsScreen(
             when (state.crossfadeMode) {
                 CrossfadeMode.Fade -> {
                     item(key = "crossLengthHead", contentType = "sectionHeader") { SectionLabel("过渡时长") }
-                    item(key = "crossLength", contentType = "toggleGroup") {
+                    item(key = "crossLength", contentType = "slider") {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ConnectedToggleGroup(
-                                options = listOf(4, 6, 8, 10),
-                                selected = state.crossfadeSeconds,
-                                onSelect = { actions.setCrossfadeSeconds(it) },
-                                label = { "$it 秒" },
-                                modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(),
-                            )
+                            CrossfadeLengthCard(state.crossfadeSeconds) { actions.setCrossfadeSeconds(it) }
                             SettingsNote("淡化发生在这首歌结尾的最后几秒。手动切歌、直播和带版权的整曲仍然直接切。")
                         }
                     }

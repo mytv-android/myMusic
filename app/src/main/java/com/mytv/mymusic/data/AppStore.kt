@@ -479,7 +479,7 @@ class SettingsStore(private val context: Context) {
             lastSeed = values[lastSeedKey] ?: 0,
             sleepFade = values[sleepFadeKey] ?: true,
             crossfadeEnabled = values[crossfadeEnabledKey] ?: false,
-            crossfadeSeconds = (values[crossfadeSecondsKey] ?: 6).coerceIn(4, 10),
+            crossfadeSeconds = (values[crossfadeSecondsKey] ?: 6).coerceIn(1, 12),
             crossfadeAnimation = values[crossfadeAnimationKey] ?: CrossfadeAnimation.Ring.name,
             crossfadeMode = values[crossfadeModeKey] ?: CrossfadeMode.Automix.name,
             cacheLimitMb = values[cacheLimitKey] ?: 0,
@@ -776,7 +776,7 @@ class SettingsStore(private val context: Context) {
     suspend fun lastSeed(value: Int) = context.dataStore.edit { it[lastSeedKey] = value }
     suspend fun sleepFade(value: Boolean) = context.dataStore.edit { it[sleepFadeKey] = value }
     suspend fun crossfadeEnabled(value: Boolean) = context.dataStore.edit { it[crossfadeEnabledKey] = value }
-    suspend fun crossfadeSeconds(value: Int) = context.dataStore.edit { it[crossfadeSecondsKey] = value.coerceIn(4, 10) }
+    suspend fun crossfadeSeconds(value: Int) = context.dataStore.edit { it[crossfadeSecondsKey] = value.coerceIn(1, 12) }
     suspend fun crossfadeAnimation(value: CrossfadeAnimation) =
         context.dataStore.edit { it[crossfadeAnimationKey] = value.name }
     suspend fun crossfadeMode(value: CrossfadeMode) =
@@ -1237,7 +1237,7 @@ data class AppSettings(
     val sleepFade: Boolean = true,
     /** 切歌过渡总开关：自动接下一首时把上一首的结尾和下一首的开头叠起来。 */
     val crossfadeEnabled: Boolean = false,
-    /** 交叉淡化的时长（秒），只在这一步用；智能过渡在后续阶段自己决定长度。 */
+    /** 交叉淡化的时长（秒），1–12；智能过渡按自己的 4–10 秒取，见 AutomixPlanner。 */
     val crossfadeSeconds: Int = 6,
     /** 播放页上画不画这次过渡：`Off` / `Ring` / `Outline`，见 [CrossfadeAnimation]。 */
     val crossfadeAnimation: String = "Ring",

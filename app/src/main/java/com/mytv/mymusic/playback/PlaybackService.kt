@@ -196,7 +196,7 @@ class PlaybackService : MediaSessionService() {
         val builder = ExoPlayer.Builder(this).setAudioAttributes(
             MEDIA_ATTRIBUTES,
             // 预载的下一首不抢音频焦点：两路都申请的话，后起的那一路会把正在放的那一路暂停。
-            // 换主播放器时再在 [promoteTo] 里打开。
+            // 换主播放器时由 CrossfadeController 等上一首放开焦点后再打开。
             false,
         ).setHandleAudioBecomingNoisy(true)
             // 息屏后在线播放也要保持网络和 CPU，避免 Wi-Fi 休眠导致卡住
@@ -238,16 +238,17 @@ class PlaybackService : MediaSessionService() {
         return created
     }
 
-    /** 交叉淡化结束：会话整体换到新播放器，音效、睡眠定时和律动分析跟着换过去。 */
+    /**
+     * 自动接歌到了换页点：会话整体换到新播放器，音效、睡眠定时和律动分析跟着换过去。
+     * 旧播放器这时可能还是在淡出的「尾巴」，由 [CrossfadeController] 淡完再释放；
+     * 音频焦点也由它交接（先让尾巴放开、再让新播放器申请），这里不碰。
+     */
     private fun promoteTo(next: ExoPlayer, slot: Int) {
-        val previous = player
         player = next
-        next.setAudioAttributes(MEDIA_ATTRIBUTES, true)
         session?.setPlayer(next)
         (application as? MyMusicApp)?.rhythmAnalyzer?.useSource(slot)
         equalizer?.let { controller -> attachEqualizer(next, controller) }
         (application as? MyMusicApp)?.sleepTimer?.attach(next)
-        previous?.release()
     }
 
     private fun attachEqualizer(player: ExoPlayer, controller: EqualizerController) {
