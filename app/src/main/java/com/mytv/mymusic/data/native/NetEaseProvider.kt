@@ -871,7 +871,7 @@ class NetEaseProvider internal constructor(
         return fetchTopListSongs(cookie, HOT_SONG_TOP_LIST_ID, safeLimit)
     }
 
-    /** 私人漫游（原私人 FM）：默认 / 熟悉 / 探索三种口味，外加场景子模式。 */
+    /** 私人漫游（原私人 FM）：默认 / 熟悉 / 探索三种口味，外加场景子模式；心动模式排在最前。 */
     override suspend fun listeningModes(cookie: String): List<ListeningMode> {
         val heartbeat = ListeningMode(
             id = "heartbeat",
@@ -879,7 +879,10 @@ class NetEaseProvider internal constructor(
             subtitle = "按我喜欢的音乐智能推荐",
             source = info.id,
             group = "私人漫游",
-            extra = mapOf("heartbeat" to "1"),
+            // 心动模式拿「我喜欢的音乐」当种子，账号里没收藏过歌就一首都出不来。
+            // 标出来让小组件的「自动」别拿它当默认——没收藏过的账号点一次组件报一次错；
+            // 用户仍然可以在组件配置里显式选它，那时候的提示是具体的「先收藏几首」。
+            extra = mapOf("need_saved_songs" to "true"),
         )
         val roam = listOf(
             Triple("DEFAULT", "默认模式", "按你的口味推荐"),

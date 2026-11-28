@@ -23,6 +23,16 @@ class NeteaseListeningModeTest {
     }
 
     @Test
+    fun heartbeatIsFirstAndMarkedAsNeedingSavedSongs() = runBlocking {
+        // 心动模式排最前，但要靠「我喜欢的音乐」当种子：小组件的「自动」靠这个标记把它跳过
+        val modes = NetEaseProvider().listeningModes("")
+        assertEquals("heartbeat", modes.first().id)
+        assertEquals("true", modes.first().extra["need_saved_songs"])
+        // 私人漫游那几个不带这个标记，「自动」仍然会落到默认模式
+        assertTrue(modes.filter { it.id.startsWith("fm:") }.none { it.extra["need_saved_songs"] == "true" })
+    }
+
+    @Test
     fun heartbeatWithoutLoginAsksForLogin() = runBlocking {
         // 未登录时先给出可读提示，不去打接口
         val provider = NetEaseProvider()

@@ -283,10 +283,19 @@ object ModeStore {
                 app.appScope.launch(Dispatchers.IO) { runCatching { loadModes(app, provider.id) } }
                 return null
             }
-            list.firstOrNull()?.let { return provider.id to it }
+            autoDefault(list)?.let { return provider.id to it }
         }
         return null
     }
+
+    /**
+     * 「自动」挑的模式：列表里第一个不要求账号里先有歌的。
+     * 心动模式这类要靠「我喜欢的音乐」当种子，账号没收藏过就一首都出不来——当默认就是点一次报一次。
+     * 全都要求的话退回第一个，别因为这个把整个平台跳过（显式选过它的用户照样能放）。
+     * 放开到 internal 只为了单测能直接喂模式列表，不在模块外使用。
+     */
+    internal fun autoDefault(list: List<ListeningMode>): ListeningMode? =
+        list.firstOrNull { it.extra["need_saved_songs"] != "true" } ?: list.firstOrNull()
 
     /** 没登录时放不了的模式：私人漫游和平台标了要登录的；组件上点过一次、错误里说要登录的也算。 */
     fun needsLogin(mode: ListeningMode, cookie: String): Boolean {

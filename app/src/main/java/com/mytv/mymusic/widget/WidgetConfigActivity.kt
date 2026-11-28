@@ -294,7 +294,7 @@ private fun ChartPicker(app: MyMusicApp, config: WidgetConfig, onChange: (ChartT
     }
 }
 
-/** 听歌模式：先选平台，再选模式；“自动”用第一个已登录平台的第一个模式。没登录时要登录的模式标出来。 */
+/** 听歌模式：先选平台，再选模式；“自动”用第一个能直接开播的模式。没登录时要登录的模式标出来。 */
 @Composable
 private fun ModePicker(app: MyMusicApp, config: WidgetConfig, onChange: (String, ListeningMode?) -> Unit) {
     val settings by WidgetData.get(app).settings.collectAsState()
@@ -327,7 +327,7 @@ private fun ModePicker(app: MyMusicApp, config: WidgetConfig, onChange: (String,
         SectionLabel("放哪个模式")
         PickRow(
             title = "自动",
-            summary = "第一个已登录平台的第一个模式",
+            summary = "第一个能直接开播的模式",
             selected = config.mode == null,
             index = 0,
             count = 1,
