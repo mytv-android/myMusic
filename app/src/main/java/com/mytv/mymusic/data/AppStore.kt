@@ -183,7 +183,7 @@ enum class CoverShapeChoice { Random, Cookie12, Cookie9, Cookie7, Sunny, SoftBur
 private fun String?.toCoverShapeChoice(): CoverShapeChoice =
     CoverShapeChoice.entries.firstOrNull { it.name == this } ?: CoverShapeChoice.Random
 
-/** 方式：先分析再挑接法、固定长度的等功率淡化，或者干脆不过渡。 */
+/** 方式：先分析再挑接法、固定长度的交叉淡化（Apple Music 的曲线），或者干脆不过渡。 */
 enum class CrossfadeMode(val label: String) {
     Automix("智能过渡"),
     Fade("交叉淡化"),

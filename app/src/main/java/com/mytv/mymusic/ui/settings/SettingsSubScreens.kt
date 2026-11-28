@@ -739,7 +739,7 @@ internal fun PlaybackSettingsScreen(
                             count = 1,
                             onClick = { onOpen(SettingsSection.Storage) },
                             icon = Icons.Filled.History,
-                            summary = "分析要完整读完两首歌；缓存不够时会退回等功率淡化",
+                            summary = "分析要完整读完两首歌；缓存不够时会退回交叉淡化",
                         )
                     }
                 }

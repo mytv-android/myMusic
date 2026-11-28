@@ -1671,11 +1671,14 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                     source = "qq",
                     cover = cover,
                     link = "https://y.qq.com/n/ryqq/songDetail/${songInfo.mid}",
-                    extra = mapOf(
-                        "songmid" to songInfo.mid,
-                        "album_mid" to songInfo.album.mid,
-                        "album_id" to songInfo.album.id.toString(),
-                    ),
+                    extra = buildMap {
+                        put("songmid", songInfo.mid)
+                        put("album_mid", songInfo.album.mid)
+                        put("album_id", songInfo.album.id.toString())
+                        // 专辑里的轨号、碟号：切歌过渡判断「同一张专辑的下一轨」用
+                        if (songInfo.indexAlbum > 0) put("track", songInfo.indexAlbum.toString())
+                        if (songInfo.indexCd > 0) put("disc", songInfo.indexCd.toString())
+                    },
                 )
             }
             if (pageSongs.size < batchSize) break
@@ -1780,11 +1783,14 @@ class QQProvider : BaseNativeProvider(QQ_INFO) {
                     source = "qq",
                     cover = cover,
                     link = "https://y.qq.com/n/ryqq/songDetail/${songInfo.mid}",
-                    extra = mapOf(
-                        "songmid" to songInfo.mid,
-                        "album_mid" to songInfo.album.mid,
-                        "album_id" to songInfo.album.id.toString(),
-                    ),
+                    extra = buildMap {
+                        put("songmid", songInfo.mid)
+                        put("album_mid", songInfo.album.mid)
+                        put("album_id", songInfo.album.id.toString())
+                        // 专辑里的轨号、碟号：切歌过渡判断「同一张专辑的下一轨」用
+                        if (songInfo.indexAlbum > 0) put("track", songInfo.indexAlbum.toString())
+                        if (songInfo.indexCd > 0) put("disc", songInfo.indexCd.toString())
+                    },
                 )
             }
             if (pageSongs.size < batchSize) break
@@ -3509,6 +3515,8 @@ private data class QQAlbumSongInfo(
     val mid: String = "",
     val name: String = "",
     val interval: Int = 0,
+    @SerialName("index_album") val indexAlbum: Int = 0,
+    @SerialName("index_cd") val indexCd: Int = 0,
     val singer: List<QQSinger> = emptyList(),
     val album: QQAlbumRef = QQAlbumRef(),
     val file: QQFileSize = QQFileSize(),

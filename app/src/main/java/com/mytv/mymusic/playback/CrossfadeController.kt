@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.ln
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
@@ -27,14 +28,22 @@ import kotlin.math.sin
 /** 媒体项里带上完整时长（毫秒）：在线流常常没有 Content-Length，播放器直到快放完才知道时长。 */
 internal const val MEDIA_EXTRA_DURATION_MS = "mymusic_duration_ms"
 
-/** 媒体项里带上专辑（「来源:专辑 id」）：同一张专辑连着放时不叠，直接无缝接。 */
+/** 媒体项里带上专辑（「来源:专辑 id」）：同一张专辑的下一轨不叠，直接无缝接。 */
 internal const val MEDIA_EXTRA_ALBUM_KEY = "mymusic_album_key"
+
+/** 媒体项里带上专辑里的轨号、碟号（没有就不带）。 */
+internal const val MEDIA_EXTRA_TRACK = "mymusic_track"
+internal const val MEDIA_EXTRA_DISC = "mymusic_disc"
+
+/** 歌曲附加信息里的轨号 / 碟号（各平台的键名不一样，取第一个能读成正整数的）。 */
+internal fun albumTrackNumber(extra: Map<String, String>, vararg keys: String): Int? =
+    keys.firstNotNullOfOrNull { key -> extra[key]?.trim()?.substringBefore('/')?.toIntOrNull()?.takeIf { it > 0 } }
 
 private fun String.toMode(): CrossfadeMode =
     CrossfadeMode.entries.firstOrNull { it.name == this } ?: CrossfadeMode.Automix
 
 /**
- * 等功率交叉淡化的两条音量曲线：功率恒定，叠在一起时总响度不会在中间塌下去。
+ * 等功率交叉淡化的两条音量曲线：功率恒定，叠在一起时总响度不会在中间塌下去。智能过渡的低频交接、尾奏承接、切拍用它。
  * [t] 0 → 只有上一首，1 → 只有下一首。
  */
 internal fun crossfadeGains(t: Float): Pair<Float, Float> {
@@ -43,14 +52,31 @@ internal fun crossfadeGains(t: Float): Pair<Float, Float> {
 }
 
 /**
+ * 交叉淡化（[AutomixMethod.Crossfade]）照 Apple Music 的两条曲线：上一首按指数曲线淡出（系数 10：
+ * (10^(1−t) − 1) / 9），下一首按对数曲线淡入（系数 2：log₂(1 + t)）——Android 版 Apple Music 7.0.3
+ * 的淡出 EXPONENTIAL、淡入 LOGARITHMIC 和这两个默认系数。上一首退得快、下一首起得快，
+ * 两边在 t ≈ 0.33 时一样响（[APPLE_CROSSOVER]）。
+ */
+internal fun appleCrossfadeGains(t: Float): Pair<Float, Float> {
+    val p = t.coerceIn(0f, 1f).toDouble()
+    val out = (10.0.pow(1.0 - p) - 1.0) / 9.0
+    val incoming = ln(1.0 + p) / ln(2.0)
+    return out.toFloat().coerceIn(0f, 1f) to incoming.toFloat().coerceIn(0f, 1f)
+}
+
+/** [appleCrossfadeGains] 两边一样响（都是 0.41）的那一刻。 */
+internal const val APPLE_CROSSOVER = 0.3288
+
+/**
  * 自动接下一首时的交叉淡化：在原播放器还在放上一首结尾时，另起一个 ExoPlayer 预载并播放下一首，
- * 两路各按等功率曲线淡出 / 淡入。到换页点（[AutomixPlanner.switchAtMs]：交叉点或下一首第一句前，
+ * 两路各按接法的曲线淡出 / 淡入（交叉淡化是 Apple 的指数 / 对数曲线，智能过渡的几种接法是等功率）。
+ * 到换页点（[AutomixPlanner.switchAtMs]：交叉点或下一首第一句前，
  * 但不早于上一首最后一句唱完）就把会话整体换到新播放器（见 [PlaybackService.promoteTo]），
  * 播放页、通知栏、状态栏歌词跟着换到下一首；上一首转成「尾巴」，按原曲线淡完再释放。
  *
  * 只处理自动衔接。手动切歌、直播、带 DRM 的整曲、队列编辑、暂停和睡眠定时都不接，直接取消或根本不开始；
  * 换页之后用户暂停、跳转、切歌就把尾巴收掉，下一首回到正常音量。
- * 同一张专辑连着放（没开随机）时不叠，交给播放器自己无缝接。
+ * 同一张专辑的下一轨不叠，交给播放器自己无缝接（见 [AutomixPlanner.sameAlbum]）。
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 internal class CrossfadeController(
@@ -72,13 +98,13 @@ internal class CrossfadeController(
 
     private var fade: Fade? = null
 
-    /** 预载时定下的接法；分析结果没赶上就是等功率淡化。 */
+    /** 预载时定下的接法；分析结果没赶上就是交叉淡化。 */
     private var plan: TransitionPlan? = null
 
     private var enabled = false
     private var seconds = 6
 
-    /** 交叉淡化时永远等功率；智能过渡才看分析结果挑接法。 */
+    /** 交叉淡化时永远是 Apple 的曲线；智能过渡才看分析结果挑接法。 */
     private var mode = CrossfadeMode.Automix
 
     /** 这一首已经试过、放弃过渡了：不要每 200ms 重新预载一次。 */
@@ -259,7 +285,7 @@ internal class CrossfadeController(
         startFade(player, target, wanted)
     }
 
-    /** 当前两首都分析过就按分析挑接法；没有分析结果时等功率淡化。 */
+    /** 当前两首都分析过就按分析挑接法；没有分析结果时交叉淡化。 */
     private fun planFor(player: ExoPlayer, nextIndex: Int): TransitionPlan? {
         if (mode == CrossfadeMode.None) return null
         if (mode == CrossfadeMode.Fade) return AutomixPlanner.fixedFade(seconds)
@@ -308,7 +334,13 @@ internal class CrossfadeController(
     private fun sameAlbum(player: ExoPlayer, nextIndex: Int): Boolean {
         val current = player.currentMediaItem ?: return false
         val upcoming = runCatching { player.getMediaItemAt(nextIndex) }.getOrNull() ?: return false
-        return AutomixPlanner.sameAlbum(albumKeyOf(current), albumKeyOf(upcoming), player.shuffleModeEnabled)
+        return AutomixPlanner.sameAlbum(
+            albumKeyOf(current),
+            albumKeyOf(upcoming),
+            player.shuffleModeEnabled,
+            AlbumSlot.of(current),
+            AlbumSlot.of(upcoming),
+        )
     }
 
     private fun albumKeyOf(item: MediaItem): String =
@@ -381,7 +413,7 @@ internal class CrossfadeController(
                 "，已分析 ${"%.0f".format(analysis.bpm)} BPM · ${keyLabel(analysis.keyIndex, analysis.keyMinor)}"
             } else {
                 "，还没有分析结果"
-            } + "，接法 ${plan?.method?.label ?: "等功率淡化"}",
+            } + "，接法 ${plan?.method?.label ?: AutomixMethod.Crossfade.label}",
         )
     }
 
@@ -455,7 +487,7 @@ internal class CrossfadeController(
         }
         val elapsed = SystemClock.elapsedRealtime() - fade.startAtMs
         val t = (elapsed.toFloat() / fade.durationMs).coerceIn(0f, 1f)
-        val (out, incoming) = crossfadeGains(t)
+        val (out, incoming) = if (fade.plan.method == AutomixMethod.Crossfade) appleCrossfadeGains(t) else crossfadeGains(t)
         if (!fade.tailReleased) {
             fade.outgoing.volume = out
             val speed = AutomixPlanner.tempoAt(t, fade.plan.outgoingSpeed)

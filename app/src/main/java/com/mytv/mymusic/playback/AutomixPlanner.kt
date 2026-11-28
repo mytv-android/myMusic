@@ -10,7 +10,21 @@ enum class AutomixMethod(val label: String) {
     BeatCut("切拍"),
     BassHandoff("低频交接"),
     OutroCarry("尾奏承接"),
-    EqualPowerFade("等功率淡化"),
+
+    /** 交叉淡化：Apple Music 的曲线（见 appleCrossfadeGains）；智能过渡没有合适接法、分析没赶上时也退回它。 */
+    Crossfade("交叉淡化"),
+}
+
+/** 一首歌在专辑里的位置：第几张碟、第几轨（不知道是 0）。 */
+internal data class AlbumSlot(val disc: Int, val track: Int) {
+    companion object {
+        val Unknown = AlbumSlot(0, 0)
+
+        fun of(item: androidx.media3.common.MediaItem): AlbumSlot {
+            val extras = item.mediaMetadata.extras ?: return Unknown
+            return AlbumSlot(extras.getInt(MEDIA_EXTRA_DISC, 0), extras.getInt(MEDIA_EXTRA_TRACK, 0))
+        }
+    }
 }
 
 /**
@@ -45,7 +59,8 @@ internal data class TransitionPlan(
 
 /**
  * 按两首歌的离线分析挑一种接法。原则和参考文档一致：能对齐拍子就切拍，尾奏收得干净就让它自然承接，
- * 两首都有明显低频就用频段交接，其余情况退回等功率淡化。分析缺一项就退一档，不硬凑。
+ * 两首都有明显低频就用频段交接，其余情况退回交叉淡化（Apple 的 AutoMix 没有分析数据时也是退回普通交叉淡化）。
+ * 分析缺一项就退一档，不硬凑。
  *
  * 智能过渡先裁首尾静音：上一首的淡出在分析出的「最后有声处」结束，下一首从「第一个有声处 − 150ms」开始放。
  */
@@ -124,7 +139,7 @@ internal object AutomixPlanner {
         }
 
         return TransitionPlan(
-            method = AutomixMethod.EqualPowerFade,
+            method = AutomixMethod.Crossfade,
             startAtRemainingMs = fadeMs + margin,
             fadeMs = fadeMs,
             incomingStartMs = introStart,
@@ -135,11 +150,11 @@ internal object AutomixPlanner {
         )
     }
 
-    /** 交叉淡化（不是智能过渡）：固定等功率，不看分析、不裁静音、不变速。 */
+    /** 交叉淡化（不是智能过渡）：Apple 的曲线，不看分析、不裁静音、不变速。 */
     fun fixedFade(seconds: Int): TransitionPlan {
         val fadeMs = seconds.coerceIn(FADE_MIN_SECONDS, FADE_MAX_SECONDS) * 1000L
         return TransitionPlan(
-            method = AutomixMethod.EqualPowerFade,
+            method = AutomixMethod.Crossfade,
             startAtRemainingMs = fadeMs + END_MARGIN_MS,
             fadeMs = fadeMs,
             incomingStartMs = 0L,
@@ -150,11 +165,14 @@ internal object AutomixPlanner {
     }
 
     /**
-     * 交叉点（距淡化开始）：两边一样响的那一刻。等功率、低频交接、尾奏承接都是淡化正中间（t = 0.5）；
-     * 切拍就是切点，也就是淡化开始那一下。
+     * 交叉点（距淡化开始）：两边一样响的那一刻。低频交接、尾奏承接是等功率，在淡化正中间（t = 0.5）；
+     * 交叉淡化是 Apple 的曲线，在 t ≈ 0.33（[APPLE_CROSSOVER]）；切拍就是切点，也就是淡化开始那一下。
      */
-    fun crossoverMs(method: AutomixMethod, fadeMs: Long): Long =
-        if (method == AutomixMethod.BeatCut) 0L else fadeMs / 2
+    fun crossoverMs(method: AutomixMethod, fadeMs: Long): Long = when (method) {
+        AutomixMethod.BeatCut -> 0L
+        AutomixMethod.Crossfade -> (fadeMs * APPLE_CROSSOVER).roundToLong()
+        else -> fadeMs / 2
+    }
 
     /**
      * 换页点（距淡化开始的毫秒数）：交叉点和下一首第一句前 0.3 秒取早的，但不早于上一首最后一句唱完。
@@ -207,9 +225,24 @@ internal object AutomixPlanner {
         return (wall + left / target).roundToLong()
     }
 
-    /** 下一首和这首是同一张专辑、没开随机：不叠，直接无缝接（专辑本来就是连着听的）。 */
-    fun sameAlbum(currentAlbumKey: String, nextAlbumKey: String, shuffle: Boolean): Boolean =
-        !shuffle && currentAlbumKey.isNotBlank() && currentAlbumKey == nextAlbumKey
+    /**
+     * 下一首是不是同一张专辑的下一轨：是就不叠，直接无缝接。两首都知道轨号时照 Apple Music 的判据
+     * （Android 版 PlayerAudioFadeControl.areSequentialItems）：同一张专辑、同一张碟、轨号正好加一，随机播放时碰上也算；
+     * 同专辑跳着放（第 3 首到第 5 首）照样过渡。有一首不知道轨号（多数平台的歌单不带）时退回：同一张专辑、没开随机。
+     */
+    fun sameAlbum(
+        currentAlbumKey: String,
+        nextAlbumKey: String,
+        shuffle: Boolean,
+        current: AlbumSlot = AlbumSlot.Unknown,
+        next: AlbumSlot = AlbumSlot.Unknown,
+    ): Boolean {
+        if (currentAlbumKey.isBlank() || currentAlbumKey != nextAlbumKey) return false
+        if (current.track > 0 && next.track > 0) {
+            return current.disc.coerceAtLeast(1) == next.disc.coerceAtLeast(1) && next.track == current.track + 1
+        }
+        return !shuffle
+    }
 
     /** 上一首最后有声处；没分析或者结果不可信（不到一半）就是文件末尾。 */
     private fun audibleEnd(outgoing: AutomixAnalysis?, durationMs: Long): Long {

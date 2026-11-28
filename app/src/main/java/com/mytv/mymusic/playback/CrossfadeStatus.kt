@@ -19,7 +19,7 @@ fun transitionSecondsLabel(ms: Long): String =
 data class CrossfadeReport(
     val fromTitle: String,
     val toTitle: String,
-    /** 例如「切拍」「等功率淡化」「同一张专辑，直接接」「直接切」。 */
+    /** 例如「切拍」「交叉淡化」「同一张专辑，直接接」「直接切」。 */
     val method: String,
     val seconds: Float,
     /** 退回直接切的原因；没有退回时为 null。 */

@@ -1,6 +1,7 @@
 package com.mytv.mymusic
 
 import com.mytv.mymusic.data.CrossfadeMode
+import com.mytv.mymusic.playback.AlbumSlot
 import com.mytv.mymusic.playback.AutomixAnalysis
 import com.mytv.mymusic.playback.AutomixMethod
 import com.mytv.mymusic.playback.AutomixPlanner
@@ -179,17 +180,17 @@ class AutomixTest {
     }
 
     @Test
-    fun `without analysis it falls back to an equal power fade`() {
+    fun `without analysis it falls back to a plain crossfade`() {
         val plan = AutomixPlanner.plan(null, null, 8, durationMs = 200_000)
-        assertEquals(AutomixMethod.EqualPowerFade, plan.method)
+        assertEquals(AutomixMethod.Crossfade, plan.method)
         assertEquals(8_000L, plan.fadeMs)
         assertEquals(1f, plan.outgoingSpeed, 0.001f)
         // 没分析就没有静音可裁：淡化在文件末尾前 250ms 收完，下一首从头放
         assertEquals(AutomixPlanner.END_MARGIN_MS, plan.endMarginMs)
         assertEquals(8_000L + AutomixPlanner.END_MARGIN_MS, plan.startAtRemainingMs)
         assertEquals(0L, plan.incomingStartMs)
-        // 交叉点在正中间
-        assertEquals(4_000L, plan.switchAtMs)
+        // 交叉淡化是 Apple 的曲线：两边在 t ≈ 0.33 一样响
+        assertEquals(2_630L, plan.switchAtMs)
     }
 
     // ---------- 首尾静音 ----------
@@ -202,7 +203,7 @@ class AutomixTest {
             6,
             durationMs = 200_000,
         )
-        assertEquals(AutomixMethod.EqualPowerFade, plan.method)
+        assertEquals(AutomixMethod.Crossfade, plan.method)
         // 最后 6 秒是静音：淡化在 194 秒收完，所以提前 6 + 6 秒开始
         assertEquals(6_000L, plan.endMarginMs)
         assertEquals(12_000L, plan.startAtRemainingMs)
@@ -244,6 +245,7 @@ class AutomixTest {
         assertEquals(1_000L + AutomixPlanner.END_MARGIN_MS, one.startAtRemainingMs)
         assertEquals(0L, one.incomingStartMs)
         assertEquals(1f, one.outgoingSpeed, 0f)
+        assertEquals(AutomixMethod.Crossfade, one.method)
         assertEquals(12_000L, AutomixPlanner.fixedFade(12).fadeMs)
         // 范围外的旧值按边界取
         assertEquals(12_000L, AutomixPlanner.fixedFade(30).fadeMs)
@@ -255,7 +257,18 @@ class AutomixTest {
 
     // ---------- 换页点 ----------
 
-    private val equalPower8s = AutomixPlanner.plan(null, null, 8, durationMs = 200_000)
+    /** 等功率的接法（这里用低频交接）：交叉点在淡化正中间。 */
+    private val equalPower8s = AutomixPlanner.plan(null, null, 8, durationMs = 200_000).copy(method = AutomixMethod.BassHandoff)
+
+    @Test
+    fun `a plain crossfade crosses over a third of the way in`() {
+        val crossfade = AutomixPlanner.fixedFade(6)
+        assertEquals(1_973L, AutomixPlanner.crossoverMs(AutomixMethod.Crossfade, 6_000))
+        assertEquals(1_973L, AutomixPlanner.switchAtMs(crossfade, 6_000, 190_000, null, null))
+        assertEquals(3_000L, AutomixPlanner.crossoverMs(AutomixMethod.BassHandoff, 6_000))
+        assertEquals(3_000L, AutomixPlanner.crossoverMs(AutomixMethod.OutroCarry, 6_000))
+        assertEquals(0L, AutomixPlanner.crossoverMs(AutomixMethod.BeatCut, 6_000))
+    }
 
     @Test
     fun `without lyrics on either side the page turns at the crossover`() {
@@ -406,6 +419,26 @@ class AutomixTest {
     }
 
     @Test
+    fun `with track numbers only the very next track plays gaplessly`() {
+        // Apple Music 的判据：同一张专辑、同一张碟、轨号正好加一
+        assertTrue(AutomixPlanner.sameAlbum("qq:7", "qq:7", false, AlbumSlot(1, 3), AlbumSlot(1, 4)))
+        // 同一张专辑跳着放照样过渡
+        assertFalse(AutomixPlanner.sameAlbum("qq:7", "qq:7", false, AlbumSlot(1, 3), AlbumSlot(1, 5)))
+        assertFalse(AutomixPlanner.sameAlbum("qq:7", "qq:7", false, AlbumSlot(1, 4), AlbumSlot(1, 3)))
+        // 换碟不算（第一张的末轨到第二张的首轨也不算）
+        assertFalse(AutomixPlanner.sameAlbum("qq:7", "qq:7", false, AlbumSlot(1, 3), AlbumSlot(2, 4)))
+        // 不知道碟号按第一张
+        assertTrue(AutomixPlanner.sameAlbum("qq:7", "qq:7", false, AlbumSlot(0, 3), AlbumSlot(1, 4)))
+        // 随机播放碰巧排到下一轨也无缝接
+        assertTrue(AutomixPlanner.sameAlbum("qq:7", "qq:7", true, AlbumSlot(1, 3), AlbumSlot(1, 4)))
+        // 只有一首知道轨号：退回只看专辑和随机
+        assertTrue(AutomixPlanner.sameAlbum("qq:7", "qq:7", false, AlbumSlot(1, 3), AlbumSlot.Unknown))
+        assertFalse(AutomixPlanner.sameAlbum("qq:7", "qq:7", true, AlbumSlot(1, 3), AlbumSlot.Unknown))
+        // 专辑不同时轨号连着也不算
+        assertFalse(AutomixPlanner.sameAlbum("qq:7", "qq:8", false, AlbumSlot(1, 3), AlbumSlot(1, 4)))
+    }
+
+    @Test
     fun `a gapless handover is reported without a duration`() {
         val report = CrossfadeReport("潮汐来信", "雾港", SAME_ALBUM_METHOD, 0f)
         assertEquals("同一张专辑，直接接", report.headline)
@@ -479,8 +512,8 @@ class AutomixTest {
 
     @Test
     fun `a report explains the method or the fallback`() {
-        val mixed = CrossfadeReport("晴天", "稻香", "等功率淡化", 5.6f)
-        assertEquals("等功率淡化 · 5.6 秒", mixed.headline)
+        val mixed = CrossfadeReport("晴天", "稻香", "交叉淡化", 5.6f)
+        assertEquals("交叉淡化 · 5.6 秒", mixed.headline)
         assertEquals("《晴天》→《稻香》", mixed.detail)
 
         val fallback = CrossfadeReport("晴天", "稻香", "直接切", 0f, "下一首是加密整曲")

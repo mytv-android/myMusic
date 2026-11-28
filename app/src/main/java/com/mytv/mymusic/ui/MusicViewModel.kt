@@ -151,7 +151,10 @@ import com.mytv.mymusic.playback.AppleWidevineDrmCallback
 import com.mytv.mymusic.playback.CrossfadeHandoff
 import com.mytv.mymusic.playback.CrossfadeLyrics
 import com.mytv.mymusic.playback.MEDIA_EXTRA_ALBUM_KEY
+import com.mytv.mymusic.playback.MEDIA_EXTRA_DISC
 import com.mytv.mymusic.playback.MEDIA_EXTRA_DURATION_MS
+import com.mytv.mymusic.playback.MEDIA_EXTRA_TRACK
+import com.mytv.mymusic.playback.albumTrackNumber
 import com.mytv.mymusic.playback.NowPlayingShape
 import com.mytv.mymusic.playback.PlaybackService
 import com.mytv.mymusic.playback.PlaybackOrigin
@@ -5565,6 +5568,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             putLong(MEDIA_EXTRA_DURATION_MS, song.duration * 1000L)
             // 同一张专辑连着放时不叠：按「来源:专辑 id」比，别的平台同号的专辑不算
             if (song.albumId.isNotBlank()) putString(MEDIA_EXTRA_ALBUM_KEY, "${song.source}:${song.albumId}")
+            // 轨号、碟号：同一张专辑只有「下一轨」才无缝接（Apple Music 的判据），没有轨号的来源退回只看专辑
+            albumTrackNumber(song.extra, "track", "track_number")?.let { putInt(MEDIA_EXTRA_TRACK, it) }
+            albumTrackNumber(song.extra, "disc", "disc_number")?.let { putInt(MEDIA_EXTRA_DISC, it) }
             if (introUrl.isNotBlank()) putString(AppleWidevineDrmCallback.EXTRA_DRM_INTRO_URL, introUrl)
         }
         val builder = MediaItem.Builder().setMediaId(song.key).setUri(song.url).setMediaMetadata(

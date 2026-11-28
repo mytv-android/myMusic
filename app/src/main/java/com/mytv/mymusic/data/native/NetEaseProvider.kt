@@ -1223,6 +1223,9 @@ class NetEaseProvider internal constructor(
                     put("song_id", item.id.toString())
                     val level = privilege.bestLevel().trim().lowercase()
                     if (level.isNotBlank()) put("netease_level", level)
+                    // 专辑里的轨号、碟号：切歌过渡判断「同一张专辑的下一轨」用
+                    if (item.no > 0) put("track", item.no.toString())
+                    item.cd.trim().toIntOrNull()?.takeIf { it > 0 }?.let { put("disc", it.toString()) }
                 },
             )
         }
@@ -1276,10 +1279,12 @@ class NetEaseProvider internal constructor(
                 source = "netease",
                 cover = item.al.picUrl,
                 link = "https://music.163.com/#/song?id=${item.id}",
-                extra = mapOf(
-                    "song_id" to item.id.toString(),
-                    "album_id" to item.al.id.toString(),
-                ),
+                extra = buildMap {
+                    put("song_id", item.id.toString())
+                    put("album_id", item.al.id.toString())
+                    if (item.no > 0) put("track", item.no.toString())
+                    item.cd.trim().toIntOrNull()?.takeIf { it > 0 }?.let { put("disc", it.toString()) }
+                },
             )
         }
         return playlist to songs
@@ -1855,6 +1860,9 @@ private data class NeteaseDetailSong(
     val ar: List<NeteaseArtist> = emptyList(),
     val al: NeteaseAlbum = NeteaseAlbum(),
     val dt: Int = 0,
+    /** 专辑里的第几轨、第几张碟（cd 是字符串，常见 "01"）。 */
+    val no: Int = 0,
+    val cd: String = "",
     val privilege: NeteasePrivilege = NeteasePrivilege(),
 )
 
@@ -1973,6 +1981,8 @@ private data class NeteaseAlbumSong(
     val ar: List<NeteaseArtist> = emptyList(),
     val al: NeteaseAlbum = NeteaseAlbum(),
     val dt: Int = 0,
+    val no: Int = 0,
+    val cd: String = "",
     val fee: Int = 0,
     val privilege: NeteasePrivilege = NeteasePrivilege(),
     val h: NeteaseSize = NeteaseSize(),
