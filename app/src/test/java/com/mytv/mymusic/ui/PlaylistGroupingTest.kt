@@ -12,7 +12,7 @@ class PlaylistGroupingTest {
     fun playingSongFollowsStreamingSource() {
         val original = song("netease", "n1")
         val playing = song("qq", "q1")
-        // 普通换源：默认分组跟随实际取流源（和收藏写回原平台的规则不同，见 favoriteSourceSong）
+        // 普通换源：默认分组跟随实际取流源（写回哪个平台仍按歌单绑定走，见 playlistGroupOf）
         assertEquals("qq", defaultPlaylistGroup(playing, playing, "qq", original))
     }
 

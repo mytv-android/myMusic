@@ -18,8 +18,7 @@ internal fun playlistGroupOfSource(source: String): String = if (source == LOCAL
  * 自己不会绑定平台歌单，所以退回歌曲原本所属的平台（[primarySong]，即聚合里的主来源）。
  * 不在播放的歌（列表里对别的歌点「加到歌单」）只用它自己的来源，不借用当前播放源。
  *
- * 注意这和收藏写回平台的 [favoriteSourceSong] 不同：收藏遇到普通换源也写回原平台，
- * 这里则是普通换源跟随取流源、只有 lx 才退回原平台。两条规则各自有单测，不要合并。
+ * 这只决定面板打开时停在哪一组：加入 / 移出写回哪个平台仍按歌单绑定走，和这里不是一套规则。
  */
 internal fun defaultPlaylistGroup(
     song: Song,

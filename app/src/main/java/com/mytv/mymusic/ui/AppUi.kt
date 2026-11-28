@@ -942,7 +942,8 @@ class PlaylistGrouping(
  * 传了 [grouping] 时列表上方多一排分组 tab（全部 / 本地 / 各绑定平台），默认选中项由调用方按当前音源算好；
  * 「新建歌单」固定在 tab 下面，任何分组里都能建，建好归「本地」组。
  * [snackbar] 是面板自己的提示条（撤销）：面板是单独的窗口，外壳的 Snackbar 被它盖着，看不见也点不到。
- * [focusId] 是电视上从 tab 进入列表时焦点落的那一行（第一个还没加入的歌单），没有就落在「新建歌单」。
+ * [focusId] 是电视上焦点落的那一行（当前分组里第一个还没加入、能改的歌单）：有分组 tab 时从 tab 按确认后落这里，
+ * 没有 tab（只有一类歌单）时打开面板就直接落这里；这一组连一个歌单都没有就落在「新建歌单」。
  */
 @Composable
 fun PlaylistPickerSheet(
@@ -995,6 +996,8 @@ fun PlaylistPickerSheet(
             // 勾选模式建好就回到列表，新歌单排在最前、已经勾上
             creating = false
             name = ""
+            // 新建的歌单归本地组：还停在平台页签上它会被分组过滤掉、看不见，切回「本地」
+            tabs?.onSelect?.invoke("")
         }
     }
     /** 从 tab 进入列表：滚到目标行并拿焦点；这一组没有歌单就落在「新建歌单」上。 */
@@ -1031,14 +1034,32 @@ fun PlaylistPickerSheet(
             }
         }
     }
-    // 电视：打开或新建完回到列表时，焦点先落在选中的分组 tab 上，确认键再进列表（见 [enterList]）
+    // 电视：打开或新建完回到列表时焦点落哪。
+    // 有分组 tab 时先落选中的 tab，按确认键再进列表（见 [enterList]）；
+    // 没有 tab 的单曲勾选模式（只有一类歌单）直接落目标行，这一组连一个歌单都没有就落「新建歌单」——
+    // 不然面板打开了却拿不到焦点。批量加入模式没有可落的目标行，仍交给方向键自己走
     androidx.compose.runtime.LaunchedEffect(grouped, creating) {
-        if (!window.isTv || tabs == null || creating) return@LaunchedEffect
-        tabFocused = false
+        if (!window.isTv || creating) return@LaunchedEffect
+        if (tabs != null) {
+            tabFocused = false
+            repeat(10) {
+                androidx.compose.runtime.withFrameNanos { }
+                if (tabFocused) return@LaunchedEffect
+                runCatching { focusTabs.requestFocus() }
+            }
+            return@LaunchedEffect
+        }
+        if (checks == null) return@LaunchedEffect
+        rowFocused = false
         repeat(10) {
             androidx.compose.runtime.withFrameNanos { }
-            if (tabFocused) return@LaunchedEffect
-            runCatching { focusTabs.requestFocus() }
+            if (rowFocused) return@LaunchedEffect
+            if (rowTarget == null) {
+                runCatching { focusNew.requestFocus() }
+            } else {
+                runCatching { listState.scrollToItem(visible.indexOfFirst { it.id == rowTarget }.coerceAtLeast(0)) }
+                runCatching { focusRow.requestFocus() }
+            }
         }
     }
     // 换分组时列表回到顶部：每个 tab 都从第一个看起
@@ -1095,7 +1116,8 @@ fun PlaylistPickerSheet(
                     count = 1,
                     onClick = { creating = true },
                     modifier = Modifier.fillMaxWidth().then(
-                        if (tabs != null && window.isTv) {
+                        // 电视上这一行是「这个分组里一个歌单都没有」时的焦点落点，有没有 tab 都要能接
+                        if (window.isTv) {
                             Modifier.focusRequester(focusNew).onFocusChanged { rowFocused = it.isFocused }
                         } else {
                             Modifier
@@ -1105,9 +1127,11 @@ fun PlaylistPickerSheet(
                     summary = if (checks != null) "建好后直接把这首加进去" else "",
                     showChevron = false,
                 )
+                // 这一行搬出了 LazyColumn，补上和列表里一样的缝，不然和第一个歌单贴在一起
+                Spacer(Modifier.height(2.dp))
                 LazyColumn(
                     // 加了 tab 以后手机底部面板会顶到屏幕上半屏，列表高度压一点让总高基本不变
-                    Modifier.fillMaxWidth().heightIn(max = if (window.isPhone) 332.dp else 380.dp),
+                    Modifier.fillMaxWidth().heightIn(max = if (window.isPhone && tabs != null) 332.dp else 380.dp),
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {

@@ -59,11 +59,29 @@ fun AddToPlaylistSheet(
     // 第一次查出来之前不出面板：电视的焦点要落在“还没加入的第一个”上，勾也不能先空着再闪出来
     val inPlaylists = containing ?: return
 
-    // 分组跟着歌单列表更新（新建 / 删掉歌单后 tab 要跟上）；打开时的默认选中项只按当前音源算一次
+    // 分组跟着歌单列表更新（新建 / 删掉歌单后 tab 要跟上）；默认选中项按当前音源算
     val groups = remember(ordered) { libraryPlaylistGroups(ordered).keys.toList() }
-    var chosenGroup by remember { mutableStateOf(resolvePlaylistGroup(defaultGroup, groups)) }
-    // 选中的分组已经被删掉 / 解绑时回到「全部」，和面板里的 tab 显示保持一致
-    val group = chosenGroup?.takeIf { it in groups }
+    // 默认分组不写成 state：冷启动时 localPlaylists 还是空列表，groups 要等几帧才有内容，
+    // 写死就永远是「全部」了。用户手选过之后才换成 chosenGroup（分组被删 / 解绑一样回到「全部」）
+    var chosenGroup by remember(song.key) { mutableStateOf<String?>(null) }
+    var groupPicked by remember(song.key) { mutableStateOf(false) }
+    val group = when {
+        groupPicked -> chosenGroup?.takeIf { it in groups }
+        else -> resolvePlaylistGroup(defaultGroup, groups)
+    }
+    // 只有一类歌单时不显示 tab，保持原来的扁平列表；PlaylistGrouping 每次重组都新建会让面板没法跳过重组
+    val grouping: PlaylistGrouping? = remember(groups, group, providers) {
+        if (groups.size > 1) {
+            PlaylistGrouping(
+                groups = groups,
+                selected = group,
+                providers = providers,
+                onSelect = { picked -> chosenGroup = picked; groupPicked = true },
+            )
+        } else {
+            null
+        }
+    }
 
     fun binding(playlist: LocalPlaylistSummary): PlaylistBinding {
         if (!playlist.bound) return PlaylistBinding.None
@@ -161,17 +179,7 @@ fun AddToPlaylistSheet(
         snackbar = snackbar,
         // 电视焦点落在当前分组里第一个还没加入、能改的歌单上（tab 上按确认才进列表）
         focusId = focusTarget,
-        // 只有一类歌单时不显示 tab，保持原来的扁平列表
-        grouping = if (groups.size > 1) {
-            PlaylistGrouping(
-                groups = groups,
-                selected = group,
-                providers = providers,
-                onSelect = { chosenGroup = it },
-            )
-        } else {
-            null
-        },
+        grouping = grouping,
     )
 }
 
