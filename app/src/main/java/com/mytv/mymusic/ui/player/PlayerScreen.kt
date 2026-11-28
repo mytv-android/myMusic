@@ -404,7 +404,7 @@ fun PlayerScreen(
         val stageBackdrop = remember(
             stageCoversBackdrop, song.cover, state.playing, state.lyricsBackground, state.rhythmIntensity, wideBackdrop, state.rhythmOffsetMs, scrim,
         ) {
-            StageBackdrop(hostVisible = !stageCoversBackdrop) { m ->
+            StageBackdrop(hostVisible = !stageCoversBackdrop, scrim = scrim) { m ->
                 LyricsBackdrop(
                     cover = song.cover,
                     playing = state.playing,

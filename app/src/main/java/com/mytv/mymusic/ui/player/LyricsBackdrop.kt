@@ -275,10 +275,6 @@ fun LyricsBackdrop(
         }
     }
 
-    val scrimBlend = remember { ScrimBlend(scrim) }
-    val scrimSpec = MaterialTheme.motionScheme.slowEffectsSpec<Float>()
-    LaunchedEffect(scrimBlend, scrim) { scrimBlend.animateTo(scrim, scrimSpec) }
-
     val surface = scheme.surface
     val downscale = if (tv) TV_FIELD_DOWNSCALE else FIELD_DOWNSCALE
     // 流光层已经缩小 downscale 倍，封面节点相对屏幕仍是 1/COVER_DOWNSCALE，模糊半径不变
@@ -319,25 +315,38 @@ fun LyricsBackdrop(
                 CoverSheet(image, wide, coverDownscale, motion, tick) { motion.coverAlpha * motion.coverFade }
             }
         }
-        Spacer(
-            Modifier
-                .fillMaxSize()
-                .drawWithCache {
-                    // 只有样式淡变时这里读到的值才会变；平时渐变一直复用，也不跟着帧循环重画
-                    val stops = scrimBlend.stops
-                    val vertical = stops.verticalBrush(surface)
-                    val horizontal = stops.horizontalBrush(surface)
-                    val footerTop = size.height * (1f - SCRIM_FOOTER_SPAN)
-                    val footer = stops.footerBrush(surface, footerTop, size.height)
-                    onDrawBehind {
-                        vertical?.let { drawRect(it) }
-                        horizontal?.let { drawRect(it) }
-                        // 电视底部那道只铺下面 40%，少填一大块全屏像素
-                        footer?.let { drawRect(it, Offset(0f, footerTop), Size(size.width, size.height - footerTop)) }
-                    }
-                },
-        )
+        BackdropScrimLayer(scrim)
     }
+}
+
+/**
+ * 播放页背景最上面那层遮罩，按全分辨率画；换样式（如进入歌词页）时用 slowEffects 淡变过去。
+ * 自己画背景的歌词动画（AMLL 的网格）也在背景上叠这一层，歌词、页头和控件的对比度和流光背景一样。
+ */
+@Composable
+internal fun BackdropScrimLayer(scrim: BackdropScrim, modifier: Modifier = Modifier) {
+    val scrimBlend = remember { ScrimBlend(scrim) }
+    val scrimSpec = MaterialTheme.motionScheme.slowEffectsSpec<Float>()
+    LaunchedEffect(scrimBlend, scrim) { scrimBlend.animateTo(scrim, scrimSpec) }
+    val surface = MaterialTheme.colorScheme.surface
+    Spacer(
+        modifier
+            .fillMaxSize()
+            .drawWithCache {
+                // 只有样式淡变时这里读到的值才会变；平时渐变一直复用，也不跟着帧循环重画
+                val stops = scrimBlend.stops
+                val vertical = stops.verticalBrush(surface)
+                val horizontal = stops.horizontalBrush(surface)
+                val footerTop = size.height * (1f - SCRIM_FOOTER_SPAN)
+                val footer = stops.footerBrush(surface, footerTop, size.height)
+                onDrawBehind {
+                    vertical?.let { drawRect(it) }
+                    horizontal?.let { drawRect(it) }
+                    // 电视底部那道只铺下面 40%，少填一大块全屏像素
+                    footer?.let { drawRect(it, Offset(0f, footerTop), Size(size.width, size.height - footerTop)) }
+                }
+            },
+    )
 }
 
 /**

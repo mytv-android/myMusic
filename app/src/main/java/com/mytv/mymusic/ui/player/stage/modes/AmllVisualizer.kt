@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import com.mytv.mymusic.ui.player.BackdropScrimLayer
 import com.mytv.mymusic.ui.player.stage.LocalStageBackdrop
 import com.mytv.mymusic.ui.player.stage.LyricSetting
 import com.mytv.mymusic.ui.player.stage.LyricStageContext
@@ -86,7 +87,11 @@ object AmllVisualizer : LyricVisualizer {
                 val surface = animateColorAsState(ctx.colors.surface, colorSpec(ctx), label = "amllSurface")
                 Box(modifier.background(surface.value))
             }
-            else -> AmllMeshBackground(ctx, modifier)
+            // 网格上叠和播放页流光背景同样的遮罩：浅色封面揉出来的网格也很亮，白字和控件要靠它压出对比度
+            else -> Box(modifier) {
+                AmllMeshBackground(ctx, Modifier.matchParentSize())
+                LocalStageBackdrop.current?.let { BackdropScrimLayer(it.scrim, Modifier.matchParentSize()) }
+            }
         }
     }
 

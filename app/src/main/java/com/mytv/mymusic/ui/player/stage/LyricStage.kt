@@ -65,6 +65,7 @@ import com.mytv.mymusic.playback.RhythmAnalyzer
 import com.mytv.mymusic.playback.RhythmTimeline
 import com.mytv.mymusic.ui.ParsedLyrics
 import com.mytv.mymusic.ui.components.LocalAppWindow
+import com.mytv.mymusic.ui.player.BackdropScrim
 import com.mytv.mymusic.ui.player.LocalLyricFont
 import com.mytv.mymusic.ui.player.RhythmFeed
 import com.mytv.mymusic.ui.player.TvFrameGate
@@ -151,9 +152,10 @@ internal fun LyricStage(
  * 播放页的流光背景，给想直接用它当背景的模式（AMLL 的“流光”）：[draw] 按播放页当前的参数画一份 LyricsBackdrop。
  * [hostVisible] 时宿主自己的流光还铺在舞台下面（电视、桌面姿态），模式什么都不画、让它透出来就行；
  * 手机歌词页、平板专注里宿主背景会停掉，这时模式在自己的 Background 里画这一份。缩略图、预览里没有（null）。
+ * [scrim] 是播放页此刻的遮罩样式，模式自己画的背景（AMLL 的网格）上叠同样一层。
  */
 @androidx.compose.runtime.Stable
-internal class StageBackdrop(val hostVisible: Boolean, val draw: @Composable (Modifier) -> Unit)
+internal class StageBackdrop(val hostVisible: Boolean, val scrim: BackdropScrim, val draw: @Composable (Modifier) -> Unit)
 
 internal val LocalStageBackdrop = compositionLocalOf<StageBackdrop?> { null }
 
