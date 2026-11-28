@@ -802,7 +802,7 @@ internal fun PlaybackSettingsScreen(
             SettingsNote(
                 when (aggregation.playbackMode) {
                     PlaybackMode.Auto -> "按码率从高到低选择播放平台。"
-                    PlaybackMode.Priority -> "按「音乐源」页排好的顺序选择播放平台。"
+                    PlaybackMode.Priority -> "歌曲来源平台已启用时优先尝试，其余平台按「音乐源」页排好的顺序选择。"
                     PlaybackMode.Pinned -> "选定平台排最前，平台不可用时按「音乐源」页排好的顺序选择。"
                 },
             )
