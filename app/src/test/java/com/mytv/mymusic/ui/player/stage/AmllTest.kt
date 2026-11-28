@@ -5,6 +5,7 @@ import com.mytv.mymusic.ui.LyricWord
 import com.mytv.mymusic.ui.player.stage.modes.AMLL_FOCUS_INTERLUDE
 import com.mytv.mymusic.ui.player.stage.modes.AMLL_FOCUS_LINE
 import com.mytv.mymusic.ui.player.stage.modes.AmllFocus
+import com.mytv.mymusic.ui.player.stage.modes.AmllGlide
 import com.mytv.mymusic.ui.player.stage.modes.AmllInterlude
 import com.mytv.mymusic.ui.player.stage.modes.AmllLayout
 import com.mytv.mymusic.ui.player.stage.modes.AmllLineText
@@ -12,6 +13,7 @@ import com.mytv.mymusic.ui.player.stage.modes.AmllTimeline
 import com.mytv.mymusic.ui.player.stage.modes.AmllVisualizer
 import com.mytv.mymusic.ui.player.stage.modes.AmllWord
 import com.mytv.mymusic.ui.player.stage.modes.RushVisualizer
+import com.mytv.mymusic.ui.player.stage.modes.amllAlignTop
 import com.mytv.mymusic.ui.player.stage.modes.amllBackgroundSplit
 import com.mytv.mymusic.ui.player.stage.modes.amllBlur
 import com.mytv.mymusic.ui.player.stage.modes.amllBlurLabel
@@ -22,6 +24,7 @@ import com.mytv.mymusic.ui.player.stage.modes.amllInterludes
 import com.mytv.mymusic.ui.player.stage.modes.amllIsCjk
 import com.mytv.mymusic.ui.player.stage.modes.amllLook
 import com.mytv.mymusic.ui.player.stage.modes.amllOpacity
+import com.mytv.mymusic.ui.player.stage.modes.amllRiseProgress
 import com.mytv.mymusic.ui.player.stage.modes.amllSong
 import com.mytv.mymusic.ui.player.stage.modes.amllVoicePrefix
 import org.junit.Assert.assertArrayEquals
@@ -186,6 +189,38 @@ class AmllTest {
     }
 
     @Test
+    fun lineTimedLinesLetGoAtTheirOwnEndWhenOverlapping() {
+        // 两句重叠：只有行时间戳的，前一句唱到自己的结束就熄，焦点交给还在唱的那句
+        val lineLevel = AmllTimeline()
+        lineLevel.setBounds(doubleArrayOf(0.0, 1000.0), doubleArrayOf(1500.0, 2000.0), emptyList(), booleanArrayOf(true, true))
+        lineLevel.sync(500.0)
+        lineLevel.sync(1100.0)
+        assertEquals(setOf(0, 1), lineLevel.highlighted)
+        assertEquals(0, lineLevel.scrollToIndex)
+        lineLevel.sync(1600.0)
+        assertEquals(setOf(1), lineLevel.highlighted)
+        assertEquals(listOf(0), lineLevel.removedHighlighted)
+        assertEquals(1, lineLevel.scrollToIndex)
+        assertTrue(lineLevel.scrollToChanged)
+
+        // 有逐字时间的：重叠的这组一起亮着
+        val timed = AmllTimeline()
+        timed.setBounds(doubleArrayOf(0.0, 1000.0), doubleArrayOf(1500.0, 2000.0), emptyList(), booleanArrayOf(false, false))
+        timed.sync(500.0)
+        timed.sync(1100.0)
+        timed.sync(1600.0)
+        assertEquals(setOf(0, 1), timed.highlighted)
+        assertEquals(0, timed.scrollToIndex)
+
+        // 没人在唱（空档）时行时间戳的句子也照样留到下一句开始
+        val gap = AmllTimeline()
+        gap.setBounds(doubleArrayOf(0.0, 3000.0), doubleArrayOf(1000.0, 4000.0), emptyList(), booleanArrayOf(true, true))
+        gap.sync(500.0)
+        gap.sync(2000.0)
+        assertEquals(setOf(0), gap.highlighted)
+    }
+
+    @Test
     fun interludeTakesFocusWhenNothingIsLit() {
         val starts = doubleArrayOf(0.0, 10000.0)
         val ends = doubleArrayOf(2000.0, 12000.0)
@@ -239,35 +274,36 @@ class AmllTest {
     // ---- 排版 ----
 
     @Test
-    fun layoutCentersTheFocusAtThirtyFivePercent() {
+    fun layoutPutsTheFocusTextTopAtTheAnchor() {
         val layout = AmllLayout()
         layout.setHeights(doubleArrayOf(100.0, 50.0, 80.0))
-        layout.begin(1000.0, AMLL_FOCUS_LINE, 1, 0.0, null)
+        // 字顶对齐 246（组的上边再往下 10 是字）：焦点组的上边落在 236，和折几行、组多高无关
+        layout.begin(1000.0, AMLL_FOCUS_LINE, 1, 0.0, null, alignTop = 246.0, lineInset = 10.0)
         assertEquals(-100.0, layout.minOffset, 0.0)
         assertEquals(0.0, layout.maxOffset, 0.0)
         layout.commit(1000.0, 0.0)
-        assertArrayEquals(doubleArrayOf(225.0, 325.0, 375.0), layout.ys.copyOf(3), 1e-9)
+        assertArrayEquals(doubleArrayOf(136.0, 236.0, 286.0), layout.ys.copyOf(3), 1e-9)
         assertFalse(layout.hasInterlude)
         assertEquals(-100.0, layout.clampOffset(-500.0), 0.0)
         assertEquals(0.0, layout.clampOffset(50.0), 0.0)
         layout.commit(1000.0, -100.0)
-        assertArrayEquals(doubleArrayOf(325.0, 425.0, 475.0), layout.ys.copyOf(3), 1e-9)
+        assertArrayEquals(doubleArrayOf(236.0, 336.0, 386.0), layout.ys.copyOf(3), 1e-9)
 
-        // 三点挂在第 0 组后面：后面的组整体下移
-        layout.begin(1000.0, AMLL_FOCUS_LINE, 1, 40.0, 0)
+        // 三点挂在第 0 组后面：后面的组整体下移，焦点组还在原处
+        layout.begin(1000.0, AMLL_FOCUS_LINE, 1, 40.0, 0, alignTop = 246.0, lineInset = 10.0, interludeInset = 8.0)
         layout.commit(1000.0, 0.0)
-        assertArrayEquals(doubleArrayOf(185.0, 325.0, 375.0), layout.ys.copyOf(3), 1e-9)
+        assertArrayEquals(doubleArrayOf(96.0, 236.0, 286.0), layout.ys.copyOf(3), 1e-9)
         assertTrue(layout.hasInterlude)
-        assertEquals(285.0, layout.interludeY, 1e-9)
+        assertEquals(196.0, layout.interludeY, 1e-9)
 
-        // 焦点是第一句之前的三点
-        layout.begin(1000.0, AMLL_FOCUS_INTERLUDE, -1, 60.0, -1)
+        // 焦点是第一句之前的三点：三点的上边再往下 8 对齐
+        layout.begin(1000.0, AMLL_FOCUS_INTERLUDE, -1, 60.0, -1, alignTop = 246.0, lineInset = 10.0, interludeInset = 8.0)
         layout.commit(1000.0, 0.0)
-        assertEquals(320.0, layout.interludeY, 1e-9)
-        assertEquals(380.0, layout.ys[0], 1e-9)
+        assertEquals(238.0, layout.interludeY, 1e-9)
+        assertEquals(298.0, layout.ys[0], 1e-9)
 
         // 焦点越界：不排
-        layout.begin(1000.0, AMLL_FOCUS_LINE, 5, 0.0, null)
+        layout.begin(1000.0, AMLL_FOCUS_LINE, 5, 0.0, null, alignTop = 246.0)
         assertFalse(layout.valid)
         layout.commit(1000.0, 0.0)
         assertTrue(layout.inViewport.take(3).none { it })
@@ -277,7 +313,7 @@ class AmllTest {
     fun farGroupsLeaveTheViewport() {
         val layout = AmllLayout()
         layout.setHeights(doubleArrayOf(100.0, 2000.0, 100.0))
-        layout.begin(1000.0, AMLL_FOCUS_LINE, 0, 0.0, null)
+        layout.begin(1000.0, AMLL_FOCUS_LINE, 0, 0.0, null, alignTop = 300.0)
         layout.commit(1000.0, 0.0)
         assertArrayEquals(doubleArrayOf(300.0, 400.0, 2400.0), layout.ys.copyOf(3), 1e-9)
         // 视口上下各留 300 + 40% 视口高
@@ -296,9 +332,9 @@ class AmllTest {
         assertEquals(0f, amllBlur(0, false, false, 2, 2, narrow = false, touchScrolled = false, strength = 1f), 0f)
         assertEquals(0f, amllBlur(0, false, true, 2, 2, narrow = false, touchScrolled = true, strength = 1f), 0f)
         assertEquals(0f, amllBlur(0, false, true, 2, 2, narrow = false, touchScrolled = false, strength = 0f), 0f)
-        assertEquals(0f, amllOpacity(inViewport = false, highlighted = true), 0f)
-        assertEquals(0.85f, amllOpacity(inViewport = true, highlighted = true), 0f)
-        assertEquals(1f, amllOpacity(inViewport = true, highlighted = false), 0f)
+        // 亮着的组不再打 85 折
+        assertEquals(0f, amllOpacity(inViewport = false), 0f)
+        assertEquals(1f, amllOpacity(inViewport = true), 0f)
     }
 
     // ---- 声明与设置默认值 ----
@@ -405,4 +441,89 @@ class AmllTest {
         StageLine(index, start, end, text, words, translation, "")
 
     private fun word(text: String, start: Long, end: Long) = LyricWord(start, end, text)
+
+    // ---- Apple Music 的换句曲线 ----
+
+    @Test
+    fun glideMatchesTheIphoneRecording() {
+        // iOS 16.2 录屏（B 站 BV13K41127Tc，30 帧）里当前句离停稳位置还差多少 px：38805ms 出发，430ms 走完 160px
+        val times = doubleArrayOf(38800.0, 38833.3, 38866.7, 38900.0, 38933.3, 38966.7, 39000.0, 39033.3, 39066.7, 39100.0, 39133.3, 39166.7, 39200.0, 39233.3, 39300.0)
+        val measured = doubleArrayOf(160.0, 154.0, 132.0, 104.0, 78.0, 57.0, 39.0, 26.0, 17.0, 11.0, 6.0, 4.0, 2.0, 1.0, 0.0)
+        val glide = AmllGlide(160.0)
+        var clock = 38805.0
+        glide.setTarget(0.0)
+        times.forEachIndexed { k, t ->
+            if (t >= clock) {
+                glide.update((t - clock) / 1000.0)
+                clock = t
+            }
+            val shown = if (t < 38805.0) 160.0 else glide.position
+            assertEquals("t=$t", measured[k], shown, 2.0)
+        }
+        assertTrue(glide.arrived())
+        assertEquals(0.0, glide.position, 0.0)
+    }
+
+    @Test
+    fun glideRetargetsWithoutJumpingAndHonoursDelays() {
+        val glide = AmllGlide(0.0)
+        glide.setTarget(100.0)
+        repeat(12) { glide.update(1.0 / 60) }
+        val before = glide.position
+        assertTrue(before in 1.0..99.0)
+        // 中途改目标：位置不跳，接着往新目标走，430ms 后到位
+        glide.setTarget(200.0)
+        assertEquals(before, glide.position, 1e-9)
+        var last = before
+        repeat(26) {
+            glide.update(1.0 / 60)
+            assertTrue("moves forward", glide.position >= last - 1e-9)
+            last = glide.position
+        }
+        assertEquals(200.0, glide.position, 1e-6)
+        assertTrue(glide.arrived())
+
+        // 延迟目标：到点前不动，到点后再走 430ms
+        val delayed = AmllGlide(0.0)
+        delayed.setTarget(50.0, delay = 0.1)
+        delayed.update(0.05)
+        assertEquals(0.0, delayed.position, 0.0)
+        assertFalse(delayed.arrived())
+        delayed.update(0.05)
+        delayed.update(0.43)
+        assertEquals(50.0, delayed.position, 1e-6)
+        assertTrue(delayed.arrived())
+
+        // 直接放：清掉在走的段和排队的目标
+        delayed.setTarget(80.0, delay = 0.2)
+        delayed.setPosition(10.0)
+        delayed.update(0.5)
+        assertEquals(10.0, delayed.position, 0.0)
+    }
+
+    @Test
+    fun focusTopSitsAQuarterDownTheStage() {
+        // 舞台 800、歌词栏从 100 开始：24.6% 处在栏里的 96.8
+        assertEquals(96.8, amllAlignTop(800.0, 100.0, 600.0), 1e-9)
+        // 歌词栏开得太低：不落进上端渐隐区（44dp）
+        assertEquals(44.0, amllAlignTop(800.0, 300.0, 400.0), 1e-9)
+        // 很高的舞台：最多到栏高的一半
+        assertEquals(150.0, amllAlignTop(2000.0, 0.0, 300.0), 1e-9)
+        // 舞台让开了状态栏 50、导航栏 40：按整块屏幕 800 算，24.6% 是 196.8，在舞台里是 146.8，在栏里是 66.8
+        assertEquals(66.8, amllAlignTop(710.0, 80.0, 500.0, 50.0, 40.0), 1e-9)
+        // 手机实测：屏高 2400px（2.625 倍），状态栏 136、导航栏 126，栏从舞台 330 开始：字顶在屏幕 590.4px
+        val density = 2.625
+        val column = amllAlignTop(2138 / density, 330 / density, 1700 / density, 136 / density, 126 / density)
+        assertEquals(590.4, (column * density) + 330 + 136, 1e-6)
+    }
+
+    @Test
+    fun wordsRiseAfterATenthOfASecondOverTheirOwnLength() {
+        assertEquals(0f, amllRiseProgress(1050.0, 1000.0, 400.0), 0f)
+        assertEquals(0f, amllRiseProgress(1100.0, 1000.0, 400.0), 0f)
+        assertEquals(0.5f, amllRiseProgress(1300.0, 1000.0, 400.0), 1e-6f)
+        assertEquals(1f, amllRiseProgress(1500.0, 1000.0, 400.0), 0f)
+        // 时长为 0 的词：到点就上去
+        assertEquals(1f, amllRiseProgress(1101.0, 1000.0, 0.0), 0f)
+    }
 }

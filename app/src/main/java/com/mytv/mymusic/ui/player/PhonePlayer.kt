@@ -624,6 +624,8 @@ private fun PhoneLyricsPage(
     onSkip: (Int) -> Unit,
 ) {
     val insets = remember { StageInsets() }
+    // 播放页整体让开了系统栏：舞台外面上下各还有一截屏幕，按屏幕定焦点位置的模式要算上
+    val systemBars = WindowInsets.safeDrawing
     val bottomChrome = LocalPlayerBottomChrome.current
     DisposableEffect(bottomChrome) { onDispose { bottomChrome.clear(PlayerBottomChrome.PanelLyrics) } }
     Layout(
@@ -723,6 +725,7 @@ private fun PhoneLyricsPage(
         // 安全区 = 原来歌词列表占的那块：顶栏下面、控件上面，左右各 16dp
         val side = 16.dp.toPx()
         insets.set(top = header.height.toFloat(), bottom = controls.height.toFloat(), start = side, end = side)
+        insets.setOuter(systemBars.getTop(this).toFloat(), systemBars.getBottom(this).toFloat())
         val stagePlaceable = measurables[0].first().measure(Constraints.fixed(width, height))
         layout(width, height) {
             stagePlaceable.place(0, 0)

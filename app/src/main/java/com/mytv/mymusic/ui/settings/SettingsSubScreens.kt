@@ -2186,8 +2186,6 @@ private const val FOLIA_MIT_NOTICE =
         "Copyright (c) 2026 w0w1w2（stardrift）\n" +
         "Copyright (c) 2026 LingShiQwQ（bpm-style-director）\n\n" + MIT_PERMISSION
 
-/** AMLL 的弹簧求解（utils/spring.ts）注明“MIT License github.com/pushkine/”。 */
-private const val AMLL_SPRING_MIT_NOTICE = "Copyright (c) pushkine（github.com/pushkine）\n\n" + MIT_PERMISSION
 
 
 @Composable
@@ -2213,8 +2211,8 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
             "“按速度”换动画的思路来自 bpm-style-director（MIT）。全部用 Kotlin 原生重写，不运行、也不打包原模组的代码和素材。",
         "Rush（shub39）" to "歌词动画“Rush”照 Rush 7.2.1 的歌词页用 Kotlin 改写：封面取色底、左对齐大字、景深模糊、逐字羽化扫光、间奏三点和六种背景。" +
             "GPL-3.0-or-later，与本应用的 AGPL-3.0 代码按两份许可的第 13 条组合分发。不打包它的字体和图标。",
-        "AMLL（amll-dev）" to "歌词动画“AMLL”照 AMLL core 0.7.2 的歌词播放器和网格背景用 Kotlin 改写：一句推一句的弹簧错峰、景深模糊、逐字扫光和上浮、" +
-            "长音强调、和声与对唱、间奏三点和封面网格。AGPL-3.0，弹簧求解部分为 MIT（pushkine）。不运行、也不打包它的脚本、着色器和素材。",
+        "AMLL（amll-dev）" to "歌词动画“AMLL”照 AMLL core 0.7.2 的歌词播放器和网格背景用 Kotlin 改写：一句推一句的错峰、景深模糊、逐字扫光和上浮、" +
+            "长音强调、和声与对唱、间奏三点和封面网格；换句的时机、曲线和位置按 Apple Music 实测调过。AGPL-3.0。不运行、也不打包它的脚本、着色器和素材。",
     )
     SettingsPage(SettingsSection.Licenses, embedded, onBack) {
         item(key = "app", contentType = "licenseCard") {
@@ -2262,15 +2260,7 @@ fun LicensesScreen(onBack: () -> Unit, embedded: Boolean = false) {
                 title = "MIT License（MiSide 掉落、动感波光、黑胶唱片、星潮·银河、按速度）",
                 body = FOLIA_MIT_NOTICE,
                 index = 0,
-                count = 2,
-            )
-        }
-        item(key = "mitSpring", contentType = "licenseCard") {
-            TextCard(
-                title = "MIT License（AMLL 弹簧求解）",
-                body = AMLL_SPRING_MIT_NOTICE,
-                index = 1,
-                count = 2,
+                count = 1,
                 footer = {
                     TextButton(onClick = { openUri(NOTICES_URL) }, modifier = Modifier.tvFocusRing(CircleShape)) {
                         Text("查看完整第三方声明")

@@ -25,17 +25,24 @@
 // 两层叠加在数学上等于一层透明度为“亮层 × 遮罩 + 暗层 × 0.2”的字，这里直接按这个透明度画一次；
 // 离开当前句时上浮和强调在 0.25 秒里落回（原版倒放，最长也是 0.25 秒收完辉光）；辉光要 Android 12 起才画，更早只有放大和上浮。
 // 不搬：注音、逐字音译、换行平衡（LineBalancer）、脏词遮罩。
+// 2026-11-28 按 Apple Music 网页版（MusicKit v3）改：每个词唱到 100ms 后才开始上浮、用时就是这个词的时长（原版 max(1 秒, 词长)）；
+// 对唱一侧留白 20%（原版 15%，iOS 录屏里靠右的句子也是左边空两成）；下面那一行（翻译 / 罗马音）当前句 45%、别的句子 20%
+// （原版一律 30%）。
 package com.mytv.mymusic.ui.player.stage.modes
 
 import android.os.Build
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.text.TextLayoutResult
@@ -45,6 +52,8 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import kotlin.math.PI
 import kotlin.math.floor
 import kotlin.math.max
@@ -53,7 +62,7 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** 一行字的三种字体：主句、和声（0.7 倍）、下面那一行（0.5 倍）。字号单位是 sp，像素在测量时换。 */
+/** 一行字的三种字体：主句、和声（0.65 倍）、下面那一行（0.5 倍）。字号单位是 sp，像素在测量时换。 */
 @Immutable
 internal class AmllStyles(val main: TextStyle, val bg: TextStyle, val sub: TextStyle, val bgSub: TextStyle) {
     /** 中日韩字的字体：和 Rush 一样，没有指定字体时退回系统默认字体（主题字体只有拉丁字，回退时粗体不生效）。 */
@@ -83,6 +92,29 @@ internal class AmllTextCache(private val measurer: TextMeasurer, val styles: Aml
         val width = if (pair > 0f) pair else fontPx * 0.25f
         if (bgLine) bgSpace = width else mainSpace = width
         return width
+    }
+
+    /**
+     * 参照字 [text]（主句字号）的墨迹上沿离行框上边多少 px：画进一张小图，找第一行过半覆盖的像素。
+     * 字体、缺字回退、行高都和正式画的一样（Compose 的 getPathForRange 给的是选区框，不是字形）。
+     */
+    fun inkTop(text: String, density: Density): Float {
+        val layout = token(text, false)
+        val width = layout.size.width
+        val height = layout.size.height
+        if (width <= 0 || height <= 0) return 0f
+        val bitmap = ImageBitmap(width, height)
+        CanvasDrawScope().draw(density, LayoutDirection.Ltr, Canvas(bitmap), Size(width.toFloat(), height.toFloat())) {
+            drawText(layout, Color.Black)
+        }
+        val pixels = IntArray(width * height)
+        bitmap.readPixels(pixels)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                if ((pixels[y * width + x] ushr 24) >= INK_ALPHA) return y.toFloat()
+            }
+        }
+        return 0f
     }
 
     fun sub(text: String, maxWidth: Int, bgLine: Boolean, end: Boolean): TextLayoutResult =
@@ -425,7 +457,7 @@ internal fun DrawScope.drawAmllLine(geom: AmllLineGeom, frame: AmllLineFrame, co
         }
         var dy = 0f
         if (frame.motion > 0f) {
-            val p = amllClamp01((frame.motionMs - token.word.startMs) / max(1000.0, token.word.durationMs)).toFloat()
+            val p = amllRiseProgress(frame.motionMs, token.word.startMs, token.word.durationMs)
             dy = -up * geom.fontPx * AmllEase.cssOut.transform(p) * frame.motion
         }
         val at = Offset(token.x, token.y + dy)
@@ -446,8 +478,15 @@ internal fun DrawScope.drawAmllLine(geom: AmllLineGeom, frame: AmllLineFrame, co
             )
         }
     }
-    geom.sub?.let { drawText(it, color.copy(alpha = color.alpha * SUB_ALPHA * alpha), geom.subOffset, shadow = Shadow.None) }
+    geom.sub?.let {
+        val subAlpha = SUB_DIM_ALPHA + (SUB_LIT_ALPHA - SUB_DIM_ALPHA) * lit
+        drawText(it, color.copy(alpha = color.alpha * subAlpha * alpha), geom.subOffset, shadow = Shadow.None)
+    }
 }
+
+/** 一个词上浮到哪儿（0..1）：唱到 100ms 后开始，用时就是这个词的时长（Apple 网页版的关键帧）。 */
+internal fun amllRiseProgress(ms: Double, startMs: Double, durationMs: Double): Float =
+    amllClamp01((ms - startMs - RISE_DELAY_MS) / max(1.0, durationMs)).toFloat()
 
 /**
  * 长音强调的词：每个字自己放大、往两侧推、上提、发白光（字的原点在字的中心），扫光遮罩不跟着字动：
@@ -544,9 +583,14 @@ internal fun amllBlurRadius(sigmaPx: Float): Float = max(0f, (sigmaPx - 0.5f) / 
 /** 羽化宽度：0.5 字号（原版注释：模拟 Apple Music for iPad 用 0.5）。 */
 internal const val AMLL_FADE_WIDTH = 0.5f
 
-/** 有对唱的歌，句子一侧留白的比例。 */
-internal const val AMLL_DUET_PADDING = 0.15f
+/** 有对唱的歌，句子一侧留白的比例（Apple 网页版 20%）。 */
+internal const val AMLL_DUET_PADDING = 0.2f
 private const val AMLL_KEYFRAMES = 32
 private const val DIM_ALPHA = 0.2f
 private const val DARK_MASK_ALPHA = 0.4f
-private const val SUB_ALPHA = 0.3f
+private const val SUB_LIT_ALPHA = 0.45f
+private const val SUB_DIM_ALPHA = 0.2f
+private const val RISE_DELAY_MS = 100.0
+
+/** 墨迹算到哪：覆盖过半的像素。 */
+private const val INK_ALPHA = 128

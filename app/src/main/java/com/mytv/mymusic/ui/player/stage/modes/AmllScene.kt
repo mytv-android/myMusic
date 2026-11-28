@@ -18,15 +18,23 @@
 // 2026-11-28 myMusic 改写：取自 AMLL core 0.7.2（@4d8e0270）的 lyric-player/base/index.ts（syncTime、calcLayout、
 // updateSpringParams、pause / resume、resetScroll）、lyric-player/base/group.ts 和 dom/lyric-group.ts（每组的位移、和声展开、
 // 缩放、透明度、模糊）、lyric-player/base/scroll.ts（拖动、惯性、停手 0.5 秒后才允许回到当前句）。
-// 照原样：每组一个纵向弹簧（质量 0.9，刚度按句间隔取）、错峰延迟、当前句 100% 其余 97%（质量 2、阻尼 25、刚度 100）、
-// 和声 75%（质量 1、阻尼 20、刚度 50）并从主句下面滑出（−80% → 0，和位移同一套弹簧参数）、亮暗两层切换、透明度和模糊 0.4 秒过渡、
-// 暂停时全部回到 100% 并展开和声；跳转时不错峰并重新开始间奏三点；拖动时去掉模糊、跟手，惯性每 16.7ms 乘 0.95。
-// 新歌词照原样从视口下方两个屏高处同时出发飞到各自的位置（慢弹簧 90 / 15、不错峰）；只有换歌（换了一份歌词）时飞，
-// 第一次显示（切到这个模式、打开歌词页）直接摆好。
-// 改动：DOM 换成一个自定义 Layout，每组一个子节点，位置、透明度、模糊在图层里读弹簧，逐帧只重画不重组；
+// 照原样：每组一个纵向位移、错峰延迟、当前句和别的句子大小不同、和声缩小并从主句下面滑出（−80% → 0）、亮暗两层切换、
+// 透明度和模糊 0.4 秒过渡、暂停时全部回到 100% 并展开和声；跳转时不错峰并重新开始间奏三点；拖动时去掉模糊、跟手，
+// 惯性每 16.7ms 乘 0.95。
+// 改动：DOM 换成一个自定义 Layout，每组一个子节点，位置、透明度、模糊在图层里读，逐帧只重画不重组；
 // 缩放和位移用同一个错峰延迟（原版缩放不延迟，稿子定的）；和声展开时的高度直接按这一帧的状态算（原版等 ResizeObserver 再排一次）；
-// 恢复自动对齐不要求当前句在视口里（稿子：停手 0.5 秒后，等到下一次换句就回来）；跳转靠舞台时钟判定（见 amllDetectSeek）；
+// 恢复自动对齐不要求当前句在视口里（停手之后等到下一次换句就回来）；跳转靠舞台时钟判定（见 amllDetectSeek）；
 // 鼠标滚轮、底栏、隐藏已唱句、关闭弹簧不搬。减少动画时一切直接到位，三点静止。
+// 2026-11-28 对照 Apple Music 改（iOS 16.2 录屏逐帧拟合为主，Android 7.0.3 反编译、网页版 MusicKit 为辅）：
+// - 位移不用弹簧：每组 430ms 的 cubic-bezier(0.25, 0.1, 0.25, 1)（AmllGlide），错峰照旧；缩放跟着走同一条；
+// - 换句提前 500ms：时间线、焦点、亮暗、间奏三点都按“播放时间 + 500ms”算，扫光、上浮、强调按真实时间
+//   （录屏里新句在开唱前约 0.5 秒变亮并开始滚，滚完再开始扫光）；
+// - 别的句子 98%（Android 版 dimen，原版 97%）；亮层进出 0.1 秒（录屏里一两帧就亮了，网页版 color .1s）；
+// - 和声 0.65 倍字号、唱到的 35%，展开收起 0.3 秒 ease-in-out（网页版）；
+// - 停手 4.5 秒后才允许回到当前句（网页版 4500ms，原版 0.5 秒）；
+// - 换歌不再从屏下两个屏高处飞入（Apple 三端都没有这种做法）：新歌词直接摆好，整列 430ms 淡入；
+// - 焦点句字的墨迹上沿对齐到屏高 24.6%：按整块屏幕算（舞台外面的系统栏也算上，见 StageInsets.outerTop），
+//   对齐的是参照字（汉字为主的歌用“国”，否则“H”）的墨迹，不是行框。
 package com.mytv.mymusic.ui.player.stage.modes
 
 import android.os.Build
@@ -76,6 +84,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextMotion
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -98,20 +107,28 @@ import kotlin.math.roundToInt
  * 主线程上用：测量阶段 [measure]（排字、第一次摆放），帧循环里 [frame]，手势 [dragStart] / [dragBy] / [dragEnd]。
  * 图层和绘制读 [frame]（每帧变）和 [versions]（这一组要重画时变）两种状态。
  */
-internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
+internal class AmllEngine(val song: AmllSong, private val fadeIn: Boolean) {
     val groups: List<AmllGroup> = song.groups
     val count: Int = groups.size
     private val timeline = AmllTimeline().apply {
-        setBounds(DoubleArray(count) { groups[it].startMs }, DoubleArray(count) { groups[it].endMs }, song.interludes)
+        setBounds(
+            DoubleArray(count) { groups[it].startMs },
+            DoubleArray(count) { groups[it].endMs },
+            song.interludes,
+            BooleanArray(count) { !groups[it].main.timed },
+        )
     }
     private val focus = AmllFocus()
     private val layout = AmllLayout()
     val dots = AmllDots()
 
-    private val posY = Array(count) { AmllSpring(0.0) }
-    private val scale = Array(count) { AmllSpring(100.0) }
-    private val bgScale = Array(count) { AmllSpring(100.0) }
-    private val bgSlide = Array(count) { AmllSpring(BG_HIDDEN_SLIDE) }
+    private val posY = Array(count) { AmllGlide(0.0) }
+    private val scale = Array(count) { AmllGlide(FULL_SCALE) }
+    private val bgScale = Array(count) { AmllGlide(FULL_SCALE, BG_SECONDS, AmllEase.cssInOut) }
+    private val bgSlide = Array(count) { AmllGlide(BG_HIDDEN_SLIDE, BG_SECONDS, AmllEase.cssInOut) }
+
+    /** 换歌时整列淡入。 */
+    private val appear = AmllTween(1f)
     private val lit = Array(count) { AmllTween(0f) }
     private val opacity = Array(count) { AmllTween(1f) }
     private val blur = Array(count) { AmllTween(0f) }
@@ -150,6 +167,12 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
     private var viewportDp = 0.0
     private var fontDp = 30.0
     private var padXDp = 20.0
+
+    /** 焦点的字顶对齐到歌词栏里的这个位置（dp）：屏高的 24.6%，换算到歌词栏里（见 [amllAlignTop]）。 */
+    private var alignTopDp = 0.0
+
+    /** 行框上边到字的墨迹上沿（dp）：对齐的是墨迹，录屏量的就是它。 */
+    private var inkDp = 0.0
     private var geometryKey: Any? = null
 
     private var blurStrength = 1f
@@ -159,6 +182,9 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
     private var configured = false
 
     private var playing = true
+
+    /** 舞台时钟的真实歌词时间：扫光、上浮、强调用它；时间线用它加上 [LEAD_MS]。 */
+    private var clockMs = 0.0
     private var lastMs = Double.NaN
     private var lastNs = NO_FRAME
 
@@ -180,16 +206,6 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
     private val bgFrame = AmllLineFrame()
     private val paint = Paint()
 
-    init {
-        for (i in 0 until count) {
-            posY[i].setParams(AMLL_SLOW_STIFFNESS, AMLL_SLOW_DAMPING, POS_Y_MASS)
-            bgSlide[i].setParams(AMLL_SLOW_STIFFNESS, AMLL_SLOW_DAMPING, POS_Y_MASS)
-            scale[i].setParams(SCALE_STIFFNESS, SCALE_DAMPING, SCALE_MASS)
-            bgScale[i].setParams(BG_SCALE_STIFFNESS, BG_SCALE_DAMPING, BG_SCALE_MASS)
-        }
-        dots.posY.setParams(AMLL_SLOW_STIFFNESS, AMLL_SLOW_DAMPING, POS_Y_MASS)
-    }
-
     /** 面板设置：景深强度（Android 12 以下按 0）、长音强调、减少动画。变了下一帧按 ConfigChange 重排。 */
     fun configure(blurStrength: Float, emphasis: Boolean, reduceMotion: Boolean) {
         val strength = if (Build.VERSION.SDK_INT >= 31) blurStrength else 0f
@@ -207,14 +223,18 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
     }
 
     /**
-     * 测量：[widthPx] × [heightPx] 是歌词栏，[stageWidthPx] × [stageHeightPx] 是整个舞台（窄屏留白、三点高度、飞入起点用）。
-     * 字号或宽度变了重新排字；第一次有尺寸时按 [clockMs] 摆好（或排好飞入）。
+     * 测量：[widthPx] × [heightPx] 是歌词栏，[stageWidthPx] × [stageHeightPx] 是整个舞台（窄屏留白、三点高度、对齐位置用），
+     * [columnTopPx] 是歌词栏在舞台里的上边，[outerTopPx]、[outerBottomPx] 是舞台外面上下还有多少屏幕。
+     * 字号或宽度变了重新排字；第一次有尺寸时按 [clockMs] 摆好。
      */
     fun measure(
         widthPx: Int,
         heightPx: Int,
         stageWidthPx: Int,
         stageHeightPx: Int,
+        columnTopPx: Int,
+        outerTopPx: Int,
+        outerBottomPx: Int,
         cache: AmllTextCache,
         fontPx: Float,
         density: Float,
@@ -224,7 +244,15 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
         unit = density
         val newWidth = widthPx / density.toDouble()
         val newHeight = heightPx / density.toDouble()
-        val resized = newWidth != widthDp || newHeight != heightDp
+        val newAlign = amllAlignTop(
+            stageHeightPx / density.toDouble(),
+            columnTopPx / density.toDouble(),
+            newHeight,
+            outerTopPx / density.toDouble(),
+            outerBottomPx / density.toDouble(),
+        )
+        val resized = newWidth != widthDp || newHeight != heightDp || newAlign != alignTopDp
+        alignTopDp = newAlign
         widthDp = newWidth
         heightDp = newHeight
         viewportDp = stageHeightPx / density.toDouble()
@@ -250,6 +278,9 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
         val padX = (padXDp * density).toFloat()
         val box = (widthPx - padX * 2).coerceAtLeast(1f)
         val bgFont = fontPx * BG_FONT_RATIO
+        // 参照字的墨迹上沿：汉字为主的歌按“国”，否则按大写 H（画出来量，换字体也对）
+        val cjk = groups.count { group -> group.main.units.any { amllIsCjk(it.text) } } * 2 >= count
+        inkDp = cache.inkTop(if (cjk) "国" else "H", Density(density)) / density.toDouble()
         if (childHeights.size != count) childHeights = IntArray(count)
         for (i in 0 until count) {
             val group = groups[i]
@@ -269,14 +300,14 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
 
     private fun bgBlockPx(bg: AmllLineGeom, bgFont: Float): Float = bgFont * BG_LINE_PAD_EM * 2 + bg.height
 
-    /** 第一次摆放（rebuildLyricView）：按跳转同步一次时间再整体排一次；不飞入时直接到位。 */
+    /** 第一次摆放（rebuildLyricView）：按跳转同步一次时间再整体排一次，直接到位；换歌时整列淡入。 */
     private fun start(ms: Double, isPlaying: Boolean) {
         placed = true
         playing = isPlaying
         if (!isPlaying) dots.pause()
-        if (flyIn && !reduceMotion) {
-            val from = viewportDp * 2
-            for (i in 0 until count) posY[i].setPosition(from)
+        if (fadeIn && !reduceMotion) {
+            appear.snapTo(0f)
+            appear.animateTo(1f, APPEAR_SECONDS, AmllEase.css)
         }
         place(ms)
         fresh = true
@@ -284,12 +315,13 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
         wake.intValue++
     }
 
-    /** 按 [ms] 整体摆一次：跳转同步时间、RebuildView 排版，不飞入时直接到位。 */
+    /** 按 [ms] 整体摆一次：跳转同步时间、RebuildView 排版，直接到位。 */
     private fun place(ms: Double) {
         lastMs = ms
-        syncTime(ms, seek = true)
+        clockMs = ms
+        syncTime(ms + LEAD_MS, seek = true)
         calcLayout(AmllLayoutReason.RebuildView)
-        if (!flyIn || reduceMotion) snapAll()
+        snapAll()
     }
 
     /**
@@ -316,7 +348,8 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
         } else {
             if (timeMoved) fresh = false
             lastMs = ms
-            syncTime(ms, seek)
+            clockMs = ms
+            syncTime(ms + LEAD_MS, seek)
         }
 
         if (inertia != 0.0 && !interacting) {
@@ -331,8 +364,9 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
             }
         }
 
-        var moving = false
         val dtF = dt.toFloat()
+        var moving = appear.running
+        appear.update(dtF)
         for (i in 0 until count) {
             val layerBusy = !posY[i].arrived() || opacity[i].running || blur[i].running
             val drawBusy = !scale[i].arrived() || !bgScale[i].arrived() || !bgSlide[i].arrived() ||
@@ -374,6 +408,7 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
     }
 
     private fun snapAll() {
+        appear.snap()
         for (i in 0 until count) {
             posY[i].setPosition(posY[i].target)
             scale[i].setPosition(scale[i].target)
@@ -388,7 +423,7 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
         dots.posY.setPosition(dots.posY.target)
     }
 
-    /** syncTime：推进时间线，按差异开关各组的逐字动画、决定要不要回到当前句、调弹簧参数，再排一次。 */
+    /** syncTime：按提前过的时间 [ms] 推进时间线，按差异开关各组的逐字动画、决定要不要回到当前句，再排一次。 */
     private fun syncTime(ms: Double, seek: Boolean) {
         val wasFocusOnInterlude = timeline.focusOnInterlude
         timeline.sync(ms, seek)
@@ -411,9 +446,6 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
         ) {
             resetScroll()
         }
-        if (timeline.interludeChanged || timeline.scrollToChanged || timeline.endOfSongChanged || jumped) {
-            updateSpringParams(timeline.activeInterlude != null, jumped, timeline.endOfSong)
-        }
         calcLayout(if (jumped) AmllLayoutReason.Seek else AmllLayoutReason.PlaybackTick)
     }
 
@@ -427,7 +459,7 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
     private fun disable(index: Int) {
         if (index !in 0 until count) return
         enabled[index] = false
-        frozenMs[index] = timeline.currentTime
+        frozenMs[index] = clockMs
         motion[index].animateTo(0f, SETTLE_SECONDS, LinearEasing)
         if (reduceMotion) motion[index].snap()
         dirty[index] = true
@@ -435,19 +467,6 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
 
     private fun canResumeAutoAlign(): Boolean =
         scrollEndAt != NO_TIME && SystemClock.uptimeMillis() - scrollEndAt >= AUTO_ALIGN_RESUME_MS
-
-    /** 按焦点句和上一句的开始间隔调纵向弹簧（句子、和声滑出、三点一起）。 */
-    private fun updateSpringParams(interlude: Boolean, seeking: Boolean, endOfSong: Boolean) {
-        if (count == 0) return
-        val current = timeline.scrollToIndex
-        val interval = if (current in 1 until count) groups[current].startMs - groups[current - 1].startMs else null
-        val policy = amllPosYPolicy(seeking, interlude, interval, endOfSong)
-        for (i in 0 until count) {
-            posY[i].setParams(policy.stiffness, policy.damping, POS_Y_MASS)
-            bgSlide[i].setParams(policy.stiffness, policy.damping, POS_Y_MASS)
-        }
-        dots.posY.setParams(policy.stiffness, policy.damping, POS_Y_MASS)
-    }
 
     /** calcLayout：间奏三点、焦点、每组的目标位置（带错峰）、缩放、亮暗、透明度、模糊。 */
     private fun calcLayout(reason: AmllLayoutReason) {
@@ -470,7 +489,7 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
         val interludeHeight = dotsSize.height + dotMargin * 2
         layout.setHeights(heights)
         val anchor = amllInterludeAnchor(if (canDisplayInterlude) interlude else null, focus)
-        layout.begin(heightDp, focus.kind, focus.index, interludeHeight, anchor)
+        layout.begin(heightDp, focus.kind, focus.index, interludeHeight, anchor, alignTopDp, fontDp * GROUP_PAD_EM + inkDp, dotMargin)
         scrollOffset = layout.clampOffset(scrollOffset)
         layout.commit(heightDp, scrollOffset)
         if (layout.hasInterlude && canDisplayInterlude && interlude != null) {
@@ -483,7 +502,6 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
         for (i in 0 until count) {
             val isActive = active[i]
             val inViewport = layout.inViewport[i]
-            val highlighted = timeline.highlighted.contains(i)
             val delay = delays[i]
             val y = layout.ys[i]
             val slide = if (isActive || !playing) 0.0 else BG_HIDDEN_SLIDE
@@ -496,10 +514,10 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
             }
             scale[i].setTarget(if (!isActive && playing) INACTIVE_SCALE else FULL_SCALE, delay)
             bgScale[i].setTarget(if (!isActive && playing) BG_INACTIVE_SCALE else FULL_SCALE, delay)
-            // 亮层进当前句 0.3 秒淡入，离开 0.45 秒，都是 ease-out
-            if (isActive) lit[i].animateTo(1f, LIT_IN_SECONDS, AmllEase.cssOut) else lit[i].animateTo(0f, LIT_OUT_SECONDS, AmllEase.cssOut)
+            // 亮层进出当前句都是 0.1 秒（iOS 录屏里一两帧就亮了；网页版 color .1s）
+            lit[i].animateTo(if (isActive) 1f else 0f, LIT_SECONDS, AmllEase.css)
             bgOpacity[i].animateTo(if (isActive || !playing) 1f else 0f, BG_FADE_SECONDS, AmllEase.css)
-            opacity[i].animateTo(amllOpacity(inViewport, highlighted), GROUP_FADE_SECONDS, AmllEase.css)
+            opacity[i].animateTo(amllOpacity(inViewport), GROUP_FADE_SECONDS, AmllEase.css)
             val blurLevel = amllBlur(i, isActive, inViewport, scrollTo, latest, narrow, touchScrolled, blurStrength)
             blur[i].animateTo(blurLevel, GROUP_FADE_SECONDS, AmllEase.css)
         }
@@ -552,7 +570,7 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
 
     fun layerY(index: Int): Float = (posY[index].position * unit).toFloat()
 
-    fun layerAlpha(index: Int): Float = opacity[index].value
+    fun layerAlpha(index: Int): Float = opacity[index].value * appear.value
 
     /** 模糊（CSS 的 blur(σ)，σ 是 dp）换成图层的模糊效果。 */
     fun layerBlur(index: Int): androidx.compose.ui.graphics.RenderEffect? {
@@ -573,7 +591,7 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
         val padX = (padXDp * unit).toFloat()
         val padTop = em * GROUP_PAD_EM
         val origin = if (group.duet) padX + main.boxWidth else padX
-        val time = if (enabled[index]) timeline.currentTime else frozenMs[index]
+        val time = if (enabled[index]) clockMs else frozenMs[index]
         val still = reduceMotion
         fill(mainFrame, index, time, still)
         bgGeom[index]?.let { bg ->
@@ -621,38 +639,37 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
     }
 
     fun drawDots(scope: DrawScope, color: Color) {
-        scope.drawAmllDots(dots, dotsSize, color, unit, still = reduceMotion)
+        val shown = appear.value
+        if (shown <= 0.001f) return
+        scope.drawAmllDots(dots, dotsSize, if (shown < 1f) color.copy(alpha = color.alpha * shown) else color, unit, still = reduceMotion)
     }
 
     private companion object {
         const val NO_FRAME = Long.MIN_VALUE
         const val NO_TIME = Long.MIN_VALUE
         const val MAX_FRAME_S = 0.1
-        const val POS_Y_MASS = 0.9
-        const val SCALE_MASS = 2.0
-        const val SCALE_DAMPING = 25.0
-        const val SCALE_STIFFNESS = 100.0
-        const val BG_SCALE_MASS = 1.0
-        const val BG_SCALE_DAMPING = 20.0
-        const val BG_SCALE_STIFFNESS = 50.0
+
+        /** 换句提前量：iOS 录屏里新句在开唱前约 0.5 秒变亮并开始滚（430ms 滚完，再过一两帧开始扫光）。 */
+        const val LEAD_MS = 500.0
         const val FULL_SCALE = 100.0
-        const val INACTIVE_SCALE = 97.0
+        const val INACTIVE_SCALE = 98.0
         const val BG_INACTIVE_SCALE = 75.0
         const val BG_HIDDEN_SLIDE = -80.0
-        const val LIT_IN_SECONDS = 0.3f
-        const val LIT_OUT_SECONDS = 0.45f
+        const val BG_SECONDS = 0.3
+        const val LIT_SECONDS = 0.1f
         const val BG_FADE_SECONDS = 0.3f
+        const val APPEAR_SECONDS = 0.43f
         const val GROUP_FADE_SECONDS = 0.4f
         const val SETTLE_SECONDS = 0.25f
         const val GROUP_PAD_EM = 0.4f
         const val BG_GAP_EM = 0.3f
         const val BG_LINE_PAD_EM = 0.2f
-        const val BG_FONT_RATIO = 0.7f
-        const val BG_LINE_ALPHA = 0.4f
+        const val BG_FONT_RATIO = AMLL_BG_FONT_RATIO
+        const val BG_LINE_ALPHA = 0.35f
         const val DOT_MARGIN_EM = 0.4
         const val NARROW_SCREEN_DP = 500f
         const val NARROW_PAD_DP = 20.0
-        const val AUTO_ALIGN_RESUME_MS = 500L
+        const val AUTO_ALIGN_RESUME_MS = 4_500L
 
         /** 刚摆好之后多久以内的跳转按重新摆放算（舞台时钟头一两帧还没发布）。 */
         const val FRESH_WINDOW_MS = 1_000L
@@ -663,11 +680,11 @@ internal class AmllEngine(val song: AmllSong, private val flyIn: Boolean) {
     }
 }
 
-/** 记住上一份歌词：换了一份（换歌、歌词到了）才飞入；第一次显示不飞。 */
+/** 记住上一份歌词：换了一份（换歌、歌词到了）才淡入；第一次显示直接出现。 */
 private class AmllMount {
     var lines: List<StageLine>? = null
 
-    fun flyIn(next: List<StageLine>, reduceMotion: Boolean): Boolean {
+    fun fadeIn(next: List<StageLine>, reduceMotion: Boolean): Boolean {
         val first = lines == null
         val fresh = lines !== next
         lines = next
@@ -685,7 +702,7 @@ internal fun AmllLyrics(ctx: LyricStageContext, look: AmllLook, color: State<Col
     val reduceMotion = display.reduceMotion
     val song = remember(ctx.lines, ctx.subline, look.voices) { amllSong(ctx.lines, ctx.subline, look.voices) }
     val mount = remember { AmllMount() }
-    val engine = remember(song) { AmllEngine(song, mount.flyIn(ctx.lines, reduceMotion)) }
+    val engine = remember(song) { AmllEngine(song, mount.fadeIn(ctx.lines, reduceMotion)) }
     SideEffect { engine.configure(look.blur, look.emphasis, reduceMotion) }
     val current = rememberUpdatedState(ctx)
 
@@ -701,9 +718,10 @@ internal fun AmllLyrics(ctx: LyricStageContext, look: AmllLook, color: State<Col
             letterSpacing = LETTER_SPACING_EM.em,
             textMotion = TextMotion.Animated,
         )
-        val bg = base.copy(fontSize = (fontSp * 0.7f).sp, lineHeight = (fontSp * 0.7f * LINE_HEIGHT_EM).sp)
+        val bgSp = fontSp * AMLL_BG_FONT_RATIO
+        val bg = base.copy(fontSize = bgSp.sp, lineHeight = (bgSp * LINE_HEIGHT_EM).sp)
         val sub = base.copy(fontSize = (fontSp * 0.5f).sp, lineHeight = (fontSp * 0.75f).sp, fontWeight = FontWeight.Medium, letterSpacing = 0.sp)
-        val bgSub = sub.copy(fontSize = (fontSp * 0.35f).sp, lineHeight = (fontSp * 0.525f).sp)
+        val bgSub = sub.copy(fontSize = (bgSp * 0.5f).sp, lineHeight = (bgSp * 0.75f).sp)
         AmllStyles(base, bg, sub, bgSub)
     }
     val measurer = rememberTextMeasurer(cacheSize = 0)
@@ -724,7 +742,7 @@ internal fun AmllLyrics(ctx: LyricStageContext, look: AmllLook, color: State<Col
 
     AmllFrames(engine, ctx, display.tv)
 
-    val stage = remember { IntArray(2) }
+    val stage = remember { IntArray(5) }
     Layout(
         content = {
             for (i in 0 until engine.count) {
@@ -753,7 +771,7 @@ internal fun AmllLyrics(ctx: LyricStageContext, look: AmllLook, color: State<Col
         val height = constraints.maxHeight
         val clockMs = Snapshot.withoutReadObservation { ctx.clock.ms.toDouble() }
         val isPlaying = Snapshot.withoutReadObservation { !ctx.paused.value }
-        engine.measure(width, height, stage[0], stage[1], cache, fontPx, density, clockMs, isPlaying)
+        engine.measure(width, height, stage[0], stage[1], stage[2], stage[3], stage[4], cache, fontPx, density, clockMs, isPlaying)
         val heights = engine.childHeights
         val placeables = measurables.mapIndexed { i, m ->
             if (i < engine.count) {
@@ -839,7 +857,8 @@ private fun Modifier.amllDrag(engine: AmllEngine): Modifier = pointerInput(engin
 }
 
 /**
- * 歌词栏放进安全区：宽度最多 24 个字号、靠起始边。[stage] 记下整个舞台的宽高（测量歌词栏时用），只在布局阶段读安全区。
+ * 歌词栏放进安全区：宽度最多 24 个字号、靠起始边。[stage] 记下整个舞台的宽高、歌词栏的上边、舞台外面上下的屏幕
+ * （测量歌词栏时用），只在布局阶段读安全区。
  */
 private fun Modifier.amllSafeArea(display: StageDisplay, fontPx: Float, stage: IntArray): Modifier = layout { measurable, constraints ->
     val width = constraints.maxWidth
@@ -847,10 +866,30 @@ private fun Modifier.amllSafeArea(display: StageDisplay, fontPx: Float, stage: I
     stage[0] = width
     stage[1] = height
     val rect = display.safeRect(Size(width.toFloat(), height.toFloat()))
+    stage[2] = rect.top.roundToInt()
+    stage[3] = display.insets.outerTop.roundToInt()
+    stage[4] = display.insets.outerBottom.roundToInt()
     val columnWidth = min(rect.width, fontPx * MAX_COLUMN_EM).roundToInt().coerceAtLeast(0)
     val columnHeight = rect.height.roundToInt().coerceAtLeast(0)
     val placeable = measurable.measure(Constraints.fixed(columnWidth, columnHeight))
     layout(width, height) { placeable.placeRelative(rect.left.roundToInt(), rect.top.roundToInt()) }
+}
+
+/**
+ * 焦点字顶在歌词栏里的位置（dp）：屏高的 24.6% 换算到歌词栏里。屏幕 = 舞台 [stageDp] 加上舞台外面上下的
+ * [outerTopDp]、[outerBottomDp]（手机播放页让开的状态栏、导航栏；iPhone 录屏量的是整块屏幕）；
+ * 再减去舞台外面的上边和歌词栏上边 [columnTopDp]。不落进上端渐隐区（[FADE_TOP] 或栏高 12%），也不低于栏高的一半。
+ */
+internal fun amllAlignTop(
+    stageDp: Double,
+    columnTopDp: Double,
+    columnDp: Double,
+    outerTopDp: Double = 0.0,
+    outerBottomDp: Double = 0.0,
+): Double {
+    val fade = min(FADE_TOP.value.toDouble(), columnDp * 0.12)
+    val screen = stageDp + outerTopDp + outerBottomDp
+    return (screen * AMLL_ANCHOR_TOP - outerTopDp - columnTopDp).coerceIn(fade, max(fade, columnDp * 0.5))
 }
 
 /** 上下两端渐隐（上 44dp、下 60dp，矮的时候按高度收），离屏合成一次再用 DstIn 擦；超出栏的部分裁掉。 */
@@ -869,6 +908,9 @@ private fun Modifier.amllEdgeFade(): Modifier = this
             if (h > 0f) drawRect(mask, blendMode = BlendMode.DstIn)
         }
     }
+
+/** 和声行的字号：主句的 0.65 倍（Apple 网页版和 Android 版都是 34 配 22）。 */
+internal const val AMLL_BG_FONT_RATIO = 0.65f
 
 /** 行高 1.22 字号、字距 −0.01 字号（AMLL 的默认样式）。 */
 private const val LINE_HEIGHT_EM = 1.22f

@@ -288,46 +288,27 @@ These features were written from the mods' public descriptions only; none of the
 - Usage: the "AMLL" lyric animation is a Kotlin / Jetpack Compose rewrite of
   AMLL's lyric player and mesh background: line grouping with background
   vocals and duet sides, the timeline that decides which lines are playing and
-  highlighted, the layout (focus at 35 % of the viewport, interlude gap,
-  staggered spring delays, depth blur levels), the per-line position and scale
-  springs with the interval-based stiffness table, the word-by-word mask sweep
-  and float, the emphasis of long notes, the three-dot interlude indicator,
-  the cover processing (contrast, saturation, brightness, box blur), the
-  control-point presets and generator and the bicubic Hermite mesh. Options
+  highlighted, the layout (interlude gap, staggered per-line delays, depth blur
+  levels), the word-by-word mask sweep and float, the emphasis of long notes,
+  the three-dot interlude indicator, the cover processing (contrast,
+  saturation, brightness, box blur), the control-point presets and generator
+  and the bicubic Hermite mesh. Options
   the app does not expose keep the upstream defaults. Bezier easings use
   Compose's own `CubicBezierEasing`; the mesh is drawn with
   `Canvas.drawBitmapMesh` instead of WebGL, with per-vertex colors sampled on
   the CPU. No upstream JavaScript, shaders, fonts, images or other assets are
   bundled.
+- Changed on 2026-11-28 to follow measurements of Apple Music (frame-by-frame
+  fits of an iOS 16.2 screen recording, plus constants from the Android app and
+  the web player): the per-line springs and their solver were replaced by a
+  430 ms cubic-bezier(0.25, 0.1, 0.25, 1) glide, lines change 500 ms before
+  they are sung, the focus line's top edge sits at 24.6 % of the stage height,
+  and several sizes, opacities and timings were adjusted (see the change notes
+  at the top of each `Amll*.kt` file). The upstream spring solver, which was
+  marked "MIT License github.com/pushkine/", is no longer included.
 - These files keep the upstream AGPL-3.0 notice and carry a notice of the
   changes made and the date. Modifications must retain this notice and the
   AGPL-3.0 terms.
-- The spring solver in AMLL's `utils/spring.ts` (ported in `AmllSpring.kt`) is
-  marked "MIT License github.com/pushkine/" and is used under that license:
-
-```
-MIT License
-
-Copyright (c) pushkine (https://github.com/pushkine)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
 
 ## MaterialKolor
 

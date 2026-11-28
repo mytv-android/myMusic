@@ -3,7 +3,6 @@ package com.mytv.mymusic.ui.player.stage
 import com.mytv.mymusic.ui.player.stage.modes.AMLL_MESH_PRESETS
 import com.mytv.mymusic.ui.player.stage.modes.AmllDots
 import com.mytv.mymusic.ui.player.stage.modes.AmllMeshPreset
-import com.mytv.mymusic.ui.player.stage.modes.AmllSpring
 import com.mytv.mymusic.ui.player.stage.modes.AmllWord
 import com.mytv.mymusic.ui.player.stage.modes.amllChunkWords
 import com.mytv.mymusic.ui.player.stage.modes.amllEmphasis
@@ -14,7 +13,6 @@ import com.mytv.mymusic.ui.player.stage.modes.amllKeyframed
 import com.mytv.mymusic.ui.player.stage.modes.amllMask
 import com.mytv.mymusic.ui.player.stage.modes.amllMeshGeometry
 import com.mytv.mymusic.ui.player.stage.modes.amllPickPreset
-import com.mytv.mymusic.ui.player.stage.modes.amllPosYPolicy
 import com.mytv.mymusic.ui.player.stage.modes.amllProcessCover
 import com.mytv.mymusic.ui.player.stage.modes.amllStaggerDelays
 import com.mytv.mymusic.ui.player.stage.modes.amllSubdivisions
@@ -24,67 +22,12 @@ import org.junit.Test
 
 /**
  * AMLL 的金样本：AMLL core 0.7.2 的 TS 源码照抄成 JS，在 Node 里跑出 [AmllGolden]，这里逐个对照 Kotlin 改写。
- * Double 算的部分（弹簧、错峰、网格、图片处理）要求几乎逐位一致；用 Compose 贝塞尔（Float）的部分放宽到 1e-3 以内。
+ * 间奏三点的样本是同一份 JS 换上按 Apple Music 改过的常量跑的（位移已经不用弹簧，弹簧样本删了）。
+ * Double 算的部分（错峰、网格、图片处理）要求几乎逐位一致；用 Compose 贝塞尔（Float）的部分放宽到 1e-3 以内。
  */
 class AmllGoldenTest {
 
-    // ---- 弹簧 ----
-
-    private fun runSpring(start: Double, stiffness: Double, damping: Double, mass: Double, steps: Int, actions: Map<Int, (AmllSpring) -> Unit>): Pair<DoubleArray, Int> {
-        val spring = AmllSpring(start)
-        spring.setParams(stiffness = stiffness, damping = damping, mass = mass)
-        val out = DoubleArray(steps)
-        var arrivedAt = -1
-        for (k in 0 until steps) {
-            actions[k]?.invoke(spring)
-            spring.update(0.016)
-            out[k] = spring.position
-            if (arrivedAt < 0 && spring.arrived()) arrivedAt = k
-        }
-        return out to arrivedAt
-    }
-
-    private fun assertSpring(expected: DoubleArray, arrived: Int, actual: Pair<DoubleArray, Int>) {
-        assertArrayEquals(expected, actual.first, 1e-9)
-        assertEquals(arrived, actual.second)
-    }
-
-    @Test
-    fun springsFollowAmll() {
-        assertSpring(AmllGolden.spring1, AmllGolden.spring1Arrived, runSpring(0.0, 90.0, 15.0, 0.9, 60, mapOf(0 to { s -> s.setTarget(100.0) })))
-        val p300 = amllPosYPolicy(seeking = false, interlude = false, intervalMs = 300.0)
-        assertSpring(
-            AmllGolden.spring2,
-            AmllGolden.spring2Arrived,
-            runSpring(0.0, p300.stiffness, p300.damping, 0.9, 60, mapOf(0 to { s -> s.setTarget(-250.0, 0.1) })),
-        )
-        assertSpring(
-            AmllGolden.spring3,
-            AmllGolden.spring3Arrived,
-            runSpring(0.0, 90.0, 15.0, 0.9, 60, mapOf(0 to { s -> s.setTarget(100.0) }, 12 to { s -> s.setTarget(40.0) })),
-        )
-        assertSpring(AmllGolden.spring4, AmllGolden.spring4Arrived, runSpring(100.0, 100.0, 25.0, 2.0, 80, mapOf(0 to { s -> s.setTarget(97.0, 0.05) })))
-        assertSpring(AmllGolden.spring5, AmllGolden.spring5Arrived, runSpring(-80.0, 90.0, 15.0, 0.9, 120, mapOf(0 to { s -> s.setTarget(0.0) })))
-        assertSpring(AmllGolden.spring6, AmllGolden.spring6Arrived, runSpring(75.0, 50.0, 20.0, 1.0, 120, mapOf(0 to { s -> s.setTarget(100.0) })))
-    }
-
-    @Test
-    fun posYPolicyFollowsAmll() {
-        AmllGolden.policyIntervals.forEachIndexed { i, interval ->
-            val policy = amllPosYPolicy(false, false, if (interval < 0) null else interval)
-            assertEquals("interval $interval", AmllGolden.policy[i][0], policy.stiffness, 1e-9)
-            assertEquals("interval $interval", AmllGolden.policy[i][1], policy.damping, 1e-9)
-        }
-        amllPosYPolicy(seeking = true, interlude = false, intervalMs = 300.0).let {
-            assertArrayEquals(AmllGolden.policySeek, doubleArrayOf(it.stiffness, it.damping), 1e-9)
-        }
-        amllPosYPolicy(seeking = false, interlude = true, intervalMs = 300.0).let {
-            assertArrayEquals(AmllGolden.policyInterlude, doubleArrayOf(it.stiffness, it.damping), 1e-9)
-        }
-        amllPosYPolicy(seeking = false, interlude = false, intervalMs = 300.0, endOfSong = true).let {
-            assertArrayEquals(AmllGolden.policyEnd, doubleArrayOf(it.stiffness, it.damping), 1e-9)
-        }
-    }
+    // ---- 错峰 ----
 
     @Test
     fun staggerFollowsAmll() {
@@ -117,7 +60,7 @@ class AmllGoldenTest {
     }
 
     @Test
-    fun interludeDotsFollowAmll() {
+    fun interludeDotsFollowAmllWithAppleValues() {
         assertDots(10000.0, 17800.0, 10000.0, false, 3, AmllGolden.dots1Ok, AmllGolden.dots1Times, AmllGolden.dots1)
         assertDots(0.0, 3500.0, 0.0, false, -1, AmllGolden.dots2Ok, AmllGolden.dots2Times, AmllGolden.dots2)
         assertDots(10000.0, 20000.0, 12000.0, true, 2, AmllGolden.dots3Ok, AmllGolden.dots3Times, AmllGolden.dots3)

@@ -17,10 +17,13 @@
  */
 // 2026-11-28 myMusic 改写：取自 AMLL core 0.7.2（@4d8e0270）的 lyric-player/base/interlude-dots.ts（InterludeDotsBase）
 // 和 lyric-player/dom/interlude-dots.ts、styles/lyric-player.module.css 的 .interludeDots。
-// 进场（非开头的空档先等 0.5 秒、整组 180ms 淡入、三颗点各错开 80ms 用 750ms 淡入）、三段点亮（20% → 90%，第三颗留一截给退场补满）、
-// 按主体时长取整周期的 1 ↔ 1.25 倍呼吸（主体不足 3 秒不呼吸）、退场（750ms 放大蓄力、250ms 缩到 0.4 倍并淡出）、
-// 打断时 150ms 淡出照原样。改动：演出时钟每帧直接对齐舞台的歌词时间，原版是按帧间隔累加再在推送进度时校准；
-// 画法从 DOM 换成 Canvas 画三个圆（点 0.3 字号、间距 0.18 字号）。
+// 进场（非开头的空档先等 0.5 秒、整组 180ms 淡入、三颗点各错开 80ms 用 750ms 淡入）、三段点亮（第三颗留 750ms 给退场补满）、
+// 按主体时长取整周期的呼吸（主体不足 3 秒不呼吸）、退场先放大再缩小淡出、打断时 150ms 淡出照原样。
+// 改动：演出时钟每帧直接对齐舞台的歌词时间，原版是按帧间隔累加再在推送进度时校准；画法从 DOM 换成 Canvas 画三个圆
+// （点 0.3 字号、间距 0.18 字号，和 Apple Android 版 34sp 字配 10dp 点、6dp 间距一致）。
+// 2026-11-28 按 Apple Music Android 7.0.3（player/A.java）改数值：呼吸 1 ↔ 1.2 倍（原版 1.25）；每颗点亮的曲线换成
+// PathInterpolator(0, 0.25, 1, 0.58)，点亮后 85% 白（原版 90%）；退场 750ms 按 cubic-bezier(0.25, 0.1, 0.25, 1) 放大到 1.2 倍、
+// 再 250ms 按 (0.25, 0, 1, 0.2) 缩到 0.5 倍并淡出（原版 0.4 倍、另三条曲线）；位置跟句子一样走 430ms 的贝塞尔过渡。
 package com.mytv.mymusic.ui.player.stage.modes
 
 import androidx.compose.ui.geometry.Offset
@@ -37,7 +40,7 @@ import kotlin.math.sin
  * [dotOpacities] 里，位置是 [left] 和 [posY]（弹簧平滑过的纵向位置，dp）。
  */
 internal class AmllDots {
-    val posY = AmllSpring(0.0)
+    val posY = AmllGlide(0.0)
     var left = 0.0
         private set
     private var top = 0.0
@@ -137,7 +140,7 @@ internal class AmllDots {
         phase = FADING
     }
 
-    /** 摆到（[left], [top]）（dp）；演出进行中走弹簧，刚排好的第一帧和 [immediate] 时直接放。 */
+    /** 摆到（[left], [top]）（dp）；演出进行中走过渡，刚排好的第一帧和 [immediate] 时直接放。 */
     fun setTransform(left: Double, top: Double, immediate: Boolean) {
         this.left = left
         this.top = top
@@ -174,7 +177,7 @@ internal class AmllDots {
                 hidePerformance()
                 return
             }
-            opacity = fadeInitialOpacity * (1f - AmllEase.dotFade.transform(progress.toFloat()))
+            opacity = fadeInitialOpacity * (1f - AmllEase.dotExit.transform(progress.toFloat()))
             active = true
             posY.update(deltaMs / 1000.0)
             return
@@ -204,12 +207,12 @@ internal class AmllDots {
         if (elapsedMs >= bodyEndMs) {
             val exit = elapsedMs - bodyEndMs
             val fadeT = amllClamp01((exit - (EXIT_TOTAL_MS - EXIT_FADE_MS)) / EXIT_FADE_MS)
-            opacity = enterOpacity(internal) * (1f - AmllEase.dotFade.transform(fadeT.toFloat()))
+            opacity = enterOpacity(internal) * (1f - AmllEase.dotExit.transform(fadeT.toFloat()))
             scale = if (exit < EXIT_PHASE1_MS) {
-                1f + AmllEase.dotExit1.transform((exit / EXIT_PHASE1_MS).toFloat()) * (BREATHE_MAX_SCALE - 1f)
+                1f + AmllEase.css.transform((exit / EXIT_PHASE1_MS).toFloat()) * (BREATHE_MAX_SCALE - 1f)
             } else {
                 val t = amllClamp01((exit - EXIT_PHASE1_MS) / EXIT_PHASE2_MS)
-                BREATHE_MAX_SCALE - AmllEase.dotExit2.transform(t.toFloat()) * (BREATHE_MAX_SCALE - BREATHE_MIN_SCALE)
+                BREATHE_MAX_SCALE - AmllEase.dotExit.transform(t.toFloat()) * (BREATHE_MAX_SCALE - EXIT_MIN_SCALE)
             }
             val trailing = amllClamp01(exit / DOT3_TRAILING_MS)
             writeDots(internal, 1.0, 1.0, dot3Target + (1 - dot3Target) * trailing)
@@ -271,10 +274,10 @@ internal class AmllDots {
         const val DOT_ENTER_TOTAL_MS = 2 * DOT_ENTER_STAGGER_MS + DOT_ENTER_FADE_MS
         const val BREATHE_BASE_PERIOD_MS = 4000.0
         const val FALLBACK_HOLD_THRESHOLD_MS = 3000.0
-        const val BREATHE_MAX_SCALE = 1.25f
-        const val BREATHE_MIN_SCALE = 0.4f
+        const val BREATHE_MAX_SCALE = 1.2f
+        const val EXIT_MIN_SCALE = 0.5f
         const val DOT_INACTIVE_OPACITY = 0.2f
-        const val DOT_ACTIVE_OPACITY = 0.9f
+        const val DOT_ACTIVE_OPACITY = 0.85f
         const val DOT_COUNT = 3
 
         fun dotOpacity(fraction: Double): Float = DOT_INACTIVE_OPACITY + (DOT_ACTIVE_OPACITY - DOT_INACTIVE_OPACITY) * amllClamp01(fraction).toFloat()
@@ -294,7 +297,7 @@ internal class AmllDots {
     }
 }
 
-/** 呼吸曲线（breathingProgress）：在 t 上叠了一点正弦，让放大和缩小都先慢后快再慢。 */
+/** 呼吸曲线（breathingProgress）：在 t 上叠了一点正弦，让放大和缩小都先慢后快再慢（Apple Android 版也是查表的 S 形曲线）。 */
 internal fun amllBreathing(t: Double): Double {
     if (t <= 0) return 0.0
     if (t >= 1) return 1.0
@@ -319,7 +322,7 @@ internal class AmllDotsSize(fontDp: Double, viewportDp: Double, padX: Double) {
 
 /**
  * 画三点：容器绕中心缩放 [AmllDots.scale]，整体透明度 [AmllDots.opacity]，每颗点各自的透明度。[unit] 是 dp → px。
- * [still]（减少动画）时有演出就画成静止的三颗 90% 的点。
+ * [still]（减少动画）时有演出就画成静止的三颗 85% 的点。
  */
 internal fun DrawScope.drawAmllDots(dots: AmllDots, size: AmllDotsSize, color: Color, unit: Float, still: Boolean = false) {
     val alpha = if (still) (if (dots.showing) 1f else 0f) else dots.opacity
@@ -338,4 +341,4 @@ internal fun DrawScope.drawAmllDots(dots: AmllDots, size: AmllDotsSize, color: C
     }
 }
 
-private const val STILL_DOT_OPACITY = 0.9f
+private const val STILL_DOT_OPACITY = 0.85f

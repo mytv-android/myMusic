@@ -19,6 +19,8 @@
 // 和 lyric-player/base/focus.ts（FocusController）。正在唱的集合、亮着的集合（新句开始才熄掉唱完的句子）、焦点句、
 // 跳转（倒退或调用方标明）时的重建、间奏焦点照原样；改动：时间用毫秒的 Double，底栏（歌曲信息行）不搬，焦点不会落到底栏。
 // 跳转判定另见 [amllDetectSeek]：原版的 SeekDetector 按物理时钟比对，这里按舞台时钟和帧间隔比对。
+// 2026-11-28 按 Apple Music 改：只有行时间戳的句子和别的句子重叠时，唱到自己的结束就熄，不等下一句开始
+// （AMLL issue #593 里 iPhone 实录的行为；有逐字时间的句子照原样，重叠的这组一起亮到有新句开始）。
 package com.mytv.mymusic.ui.player.stage.modes
 
 import kotlin.math.max
@@ -34,6 +36,7 @@ internal class AmllTimeline {
     private var ends = DoubleArray(0)
     private var maxEnd = 0.0
     private var interludes: List<AmllInterlude> = emptyList()
+    private var lineLevel: BooleanArray? = null
     private var playbackCursor = 0
     private var interludeCursor = 0
     private val nextPlaying = LinkedHashSet<Int>()
@@ -77,10 +80,12 @@ internal class AmllTimeline {
 
     val size: Int get() = starts.size
 
-    fun setBounds(starts: DoubleArray, ends: DoubleArray, interludes: List<AmllInterlude>) {
+    /** [lineLevel] 标出只有行时间戳（没有逐字时间）的句子，null 时都按逐字处理。 */
+    fun setBounds(starts: DoubleArray, ends: DoubleArray, interludes: List<AmllInterlude>, lineLevel: BooleanArray? = null) {
         this.starts = starts
         this.ends = ends
         this.interludes = interludes
+        this.lineLevel = lineLevel
         maxEnd = ends.fold(0.0) { a, b -> max(a, b) }
         reset()
     }
@@ -150,6 +155,18 @@ internal class AmllTimeline {
                 removedHighlighted += id
             }
             scrollToIndex = highlighted.minOrNull() ?: Int.MAX_VALUE
+        } else if (playing.isNotEmpty() && expired.isNotEmpty()) {
+            // 还有句子在唱：只有行时间戳的句子唱完就熄（逐字的等这组都唱完、新句开始）
+            val levels = lineLevel ?: return
+            var dropped = false
+            for (id in expired) {
+                if (levels.getOrElse(id) { false }) {
+                    highlighted -= id
+                    removedHighlighted += id
+                    dropped = true
+                }
+            }
+            if (dropped) scrollToIndex = highlighted.minOrNull() ?: Int.MAX_VALUE
         }
     }
 

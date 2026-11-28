@@ -679,11 +679,23 @@ class StageInsets {
     var start by mutableFloatStateOf(0f)
     var end by mutableFloatStateOf(0f)
 
+    /**
+     * 舞台外面上下还有多少屏幕（px，系统栏这类）：按整块屏幕定位置的模式用（AMLL 的焦点在屏高 24.6%）。
+     * 舞台本来就铺满屏幕、或者宿主不知道时都是 0。
+     */
+    var outerTop by mutableFloatStateOf(0f)
+    var outerBottom by mutableFloatStateOf(0f)
+
     fun set(top: Float, bottom: Float, start: Float, end: Float) {
         this.top = top
         this.bottom = bottom
         this.start = start
         this.end = end
+    }
+
+    fun setOuter(top: Float, bottom: Float) {
+        outerTop = top
+        outerBottom = bottom
     }
 
     /** 尺寸为 [size] 的舞台上的安全区。 */

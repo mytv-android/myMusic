@@ -128,6 +128,7 @@ internal fun LyricStage(
     BoxWithConstraints(
         modifier.layout { measurable, constraints ->
             adjusted.set(insets.top + tagReserve.value.toPx(), insets.bottom, insets.start, max(insets.end, coverEndPx.value.toPx()))
+            adjusted.setOuter(insets.outerTop, insets.outerBottom)
             val placeable = measurable.measure(constraints)
             layout(placeable.width, placeable.height) { placeable.place(0, 0) }
         },
