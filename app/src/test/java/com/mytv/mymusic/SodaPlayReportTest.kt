@@ -2,6 +2,7 @@ package com.mytv.mymusic.data.native
 
 import com.mytv.mymusic.data.playreport.PlayEndReason
 import com.mytv.mymusic.data.playreport.PlayFrame
+import com.mytv.mymusic.data.playreport.PlayReportHub
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -82,16 +83,17 @@ class SodaPlayReportTest {
             awaitQuiesce()
         }
 
-        /** 上报在自己的 IO scope 里跑，等到不再有新事件才算稳。 */
+        /** 上报在自己的 IO scope 里跑，等这一帧触发的上报全部落地再返回。 */
         private fun awaitQuiesce() {
+            // 不能按「events 数量连续两次没变」判断：CI 上协程排队超过一个采样间隔就会提前返回，
+            // 后面 endBatch() 拿到空列表。按 hub 里还没跑完的任务数等，才和调度快慢无关。
             val deadline = System.currentTimeMillis() + 5_000
-            var seen = -1
-            while (System.currentTimeMillis() < deadline) {
-                Thread.sleep(20)
-                if (events.size == seen) return
-                seen = events.size
+            while (PlayReportHub.pendingReports() > 0) {
+                if (System.currentTimeMillis() > deadline) {
+                    throw AssertionError("上报没有落地，还剩 ${PlayReportHub.pendingReports()} 条")
+                }
+                Thread.sleep(10)
             }
-            throw AssertionError("上报没有稳定下来，最后 ${events.size} 条")
         }
     }
 

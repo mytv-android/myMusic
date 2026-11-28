@@ -3,6 +3,7 @@ package com.mytv.mymusic.data.playreport
 import com.mytv.mymusic.data.native.NativeProviders
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
@@ -144,6 +145,12 @@ object PlayReportHub {
     internal fun launch(block: suspend () -> Unit) {
         scope.launch { runCatching { block() } }
     }
+
+    /**
+     * 还有多少条上报没跑完。上报是异步的，单测只能靠它判断「这一帧触发的请求已经落地」，
+     * 不能睡固定时长（CI 上线程池调度一慢就会读到空结果）。
+     */
+    internal fun pendingReports(): Int = scope.coroutineContext[Job]?.children?.count() ?: 0
 
     /** 供设置页 / 调试用：某个平台当前攒了多少条最近播放。 */
     fun playedCount(providerId: String): Int =
