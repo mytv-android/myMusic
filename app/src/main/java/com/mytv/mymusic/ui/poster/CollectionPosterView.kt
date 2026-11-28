@@ -137,6 +137,7 @@ internal class PosterExtraAction(
  * - 墙铺满整页，曲目就是这张歌单，序号是曲目序号；正在放的歌的 key 在这张歌单里就把它放大、跟着切歌走，
  *   不在（这张歌单没在放）就不放大任何格，镜头对准第一块；
  * - 原来的头部收成顶部胶囊（标题 +“歌单 · 网易云 · 30 首”）和底部浮动工具栏（播放全部 / 随机 / 收藏或编辑 / 定位 / 列表 / 设置）；
+ *   手机 / 平板上工具栏 4 秒不操作淡出，和队列海报墙右下角那一排一样（见 PosterWallScreen），标题胶囊一直留着；
  * - 电视上不放工具栏：墙自己收方向键、而且是无限的，选中格子后上键永远在墙里走，顶上的按钮遥控器选不到。
  *   顶排和队列海报墙一样只有胶囊、一行按键提示和时钟，底部留给大卡；进页面焦点直接给墙（在放就落在大卡上，
  *   否则落在离中心最近的格），工具栏那几项接在长按 OK / 菜单键打开的单曲面板下面（[collectionWallMenu]）；
@@ -352,16 +353,19 @@ internal fun CollectionPosterView(
                     contentAlignment = Alignment.Center,
                 ) { message() }
             }
-            // 电视空闲 6 秒浮层淡出（墙的 chromeVisible）；手机、平板一直显示——队列海报墙右下角那一排另按 4 秒淡出，
-            // 那是队列墙自己的事（见 PosterWallScreen），海报视图这一层整块留着，胶囊上的返回钮和工具栏不淡
+            // 电视空闲 6 秒整层浮层淡出（墙的 chromeVisible）；手机 / 平板 4 秒只淡底部工具栏，
+            // 和队列海报墙右下角那一排一样（见 PosterWallScreen）——标题胶囊上的返回钮一直留着
             val chromeAlpha = rememberPosterChromeAlpha(wall)
             val fade = Modifier.graphicsLayer { alpha = if (tv) chromeAlpha.value else 1f }
+            val toolbarShown = wall.chromeVisible
+            val toolbarFade = Modifier.graphicsLayer { alpha = chromeAlpha.value }
             // 书本 / 双竖：工具栏收在右页里（约 356dp），平板的 48dp 图标钮会把“播放全部”挤成“播…”，换手机的 40dp
             val toolbarChrome = if (segment?.vertical == true) chrome.copy(itemWidth = minOf(chrome.itemWidth, 40f)) else chrome
             val toolbar: @Composable (Modifier) -> Unit = { modifier ->
                 PosterToolbar(
                     chrome = toolbarChrome,
                     playLabel = playLabel,
+                    shown = toolbarShown,
                     canShuffle = hasSongs,
                     extra = extra,
                     canLocate = currentIndex >= 0,
@@ -424,7 +428,9 @@ internal fun CollectionPosterView(
                         .align(if (page != null) Alignment.BottomStart else Alignment.BottomCenter)
                         .then(if (page != null) Modifier.inWallSegment(page).wrapContentWidth() else Modifier)
                         .padding(start = chrome.side.dp, end = chrome.side.dp, bottom = overlay + chrome.bottom.dp)
-                        .then(fade),
+                        .then(toolbarFade)
+                        // 淡出后整条不再接触摸、也不再进读屏：看不见的按钮不该还能点
+                        .then(if (toolbarShown) Modifier else Modifier.clearAndSetSemantics {}),
                 )
             }
         }
@@ -434,7 +440,7 @@ internal fun CollectionPosterView(
     }
 }
 
-/** 浮层跟着 [PosterWallState.chromeVisible] 淡入淡出；在效果里收集，只改图层透明度，不重组。 */
+/** 浮层跟着 [PosterWallState.chromeVisible] 淡入淡出（电视空闲 6 秒整层，手机 / 平板 4 秒只淡工具栏）；在效果里收集，只改图层透明度，不重组。 */
 @Composable
 private fun rememberPosterChromeAlpha(wall: PosterWallState): State<Float> {
     val alpha = remember { Animatable(1f) }
@@ -710,11 +716,14 @@ private fun KeyCap(label: String) {
 /**
  * M3E 浮动工具栏（只在手机、平板上）：48dp 高的“播放全部”主按钮（primary），右边随机 / 收藏或编辑 / 定位 / 列表 / 设置。
  * “定位”在这张歌单没在放时置灰，正在放的那首没放大时高亮（primaryContainer 底）。榜单的换源设置在胶囊右端。
+ * [shown] 是浮层的淡出状态（[PosterWallState.chromeVisible]）：4 秒不操作整条淡出，这一下按钮一起停用——
+ * 看不见的钮不该还能点；淡入回来（拖动、点按、按键都算）后又都能点。墙让出的底部高度不变，大卡不挪位。
  */
 @Composable
 private fun PosterToolbar(
     chrome: PosterChrome,
     playLabel: String,
+    shown: Boolean,
     canShuffle: Boolean,
     extra: PosterExtraAction?,
     canLocate: Boolean,
@@ -741,6 +750,7 @@ private fun PosterToolbar(
         // 360dp 的手机上整条约 328dp，放大字体放不下时主按钮的字省略，图标钮不被挤掉
         Button(
             onClick = onPlayAll,
+            enabled = shown,
             shapes = ButtonDefaults.shapes(),
             modifier = Modifier
                 .weight(1f, fill = false)
@@ -753,13 +763,22 @@ private fun PosterToolbar(
             Text(playLabel, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.width(if (chrome.itemWidth < 48f) 2.dp else 6.dp))
-        ToolButton(Icons.Filled.Shuffle, "随机播放", onShuffle, width, height, enabled = canShuffle)
+        ToolButton(Icons.Filled.Shuffle, "随机播放", onShuffle, width, height, enabled = canShuffle && shown)
         if (extra != null) {
-            ToolButton(extra.icon, extra.description, extra.onClick, width, height, on = extra.on, state = extra.stateDescription)
+            ToolButton(
+                extra.icon,
+                extra.description,
+                extra.onClick,
+                width,
+                height,
+                enabled = shown,
+                on = extra.on,
+                state = extra.stateDescription,
+            )
         }
-        ToolButton(Icons.Filled.MyLocation, "定位正在播放", onLocate, width, height, enabled = canLocate, selected = locateHot)
-        ToolButton(Icons.AutoMirrored.Filled.ViewList, "切回列表视图", onList, width, height)
-        ToolButton(Icons.Filled.Tune, "海报墙设置", onSettings, width, height)
+        ToolButton(Icons.Filled.MyLocation, "定位正在播放", onLocate, width, height, enabled = canLocate && shown, selected = locateHot)
+        ToolButton(Icons.AutoMirrored.Filled.ViewList, "切回列表视图", onList, width, height, enabled = shown)
+        ToolButton(Icons.Filled.Tune, "海报墙设置", onSettings, width, height, enabled = shown)
     }
 }
 
