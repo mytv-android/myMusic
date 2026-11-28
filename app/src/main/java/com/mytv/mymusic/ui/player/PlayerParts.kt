@@ -532,7 +532,7 @@ private data class LyricsShown(
 )
 
 /** 「正在加载歌词」换歌后等这么久才淡入（毫秒），淡入用时 [LoadingRevealMs]。 */
-private const val LoadingRevealDelayMs = 400
+private const val LoadingRevealDelayMs = 600
 private const val LoadingRevealMs = 200
 
 internal const val LoadingContentKey = "\u0000loading"
