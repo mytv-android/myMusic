@@ -968,6 +968,9 @@ fun PlaylistPickerSheet(
     val focusTabs = remember { androidx.compose.ui.focus.FocusRequester() }
     val focusNew = remember { androidx.compose.ui.focus.FocusRequester() }
     var rowFocused by remember { mutableStateOf(false) }
+    // 「新建歌单」单独一个标志：面板一打开系统会先把焦点放在它上面，要是和目标行共用 rowFocused，
+    // 落焦点的循环第一帧就以为已经成功了，目标行永远拿不到焦点
+    var newFocused by remember { mutableStateOf(false) }
     var tabFocused by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // 分组只在勾选模式、且确实不止一个分组时出现：只有一组时 tab 没有意义（例如全是本地歌单）
@@ -1055,6 +1058,8 @@ fun PlaylistPickerSheet(
             androidx.compose.runtime.withFrameNanos { }
             if (rowFocused) return@LaunchedEffect
             if (rowTarget == null) {
+                // 这一组连一个歌单都没有：等「新建歌单」真的拿到焦点才算完
+                if (newFocused) return@LaunchedEffect
                 runCatching { focusNew.requestFocus() }
             } else {
                 runCatching { listState.scrollToItem(visible.indexOfFirst { it.id == rowTarget }.coerceAtLeast(0)) }
@@ -1118,7 +1123,7 @@ fun PlaylistPickerSheet(
                     modifier = Modifier.fillMaxWidth().then(
                         // 电视上这一行是「这个分组里一个歌单都没有」时的焦点落点，有没有 tab 都要能接
                         if (window.isTv) {
-                            Modifier.focusRequester(focusNew).onFocusChanged { rowFocused = it.isFocused }
+                            Modifier.focusRequester(focusNew).onFocusChanged { newFocused = it.isFocused }
                         } else {
                             Modifier
                         },
