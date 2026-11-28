@@ -5,7 +5,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.automirrored.filled.CallMerge
+import com.mytv.mymusic.ui.components.PlaylistGroupTabs
+import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.tvFocusRing
+import com.mytv.mymusic.ui.library.CountTag
+import com.mytv.mymusic.ui.library.libraryPlaylistGroups
 import androidx.compose.material3.toShape
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.verticalScroll
@@ -71,6 +75,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -90,6 +95,7 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.semantics.heading
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -111,6 +117,7 @@ import com.mytv.mymusic.data.DownloadRecord
 import com.mytv.mymusic.data.MiniPlayerTarget
 import com.mytv.mymusic.data.SearchKind
 import com.mytv.mymusic.data.Playlist
+import com.mytv.mymusic.data.ProviderInfo
 import com.mytv.mymusic.data.Song
 import com.mytv.mymusic.data.TopList
 import com.mytv.mymusic.data.sync.SyncStrategy
@@ -910,13 +917,27 @@ private fun WallPageGroup(menu: WallMenu, scroll: androidx.compose.foundation.Sc
 class PlaylistCheck(val checked: Boolean, val busy: Boolean = false, val note: String = "", val locked: Boolean = false)
 
 /**
+ * 「加到歌单」面板顶部的分组 tab：只在单曲勾选模式传（见 [AddToPlaylistSheet]），不传就是原来的扁平列表。
+ * [groups] 是打开那一刻存在的分组 id（空串 = 本地歌单），[selected] 为 null 是「全部」。
+ */
+@androidx.compose.runtime.Immutable
+class PlaylistGrouping(
+    val groups: List<String>,
+    val selected: String?,
+    val providers: List<ProviderInfo>,
+    val onSelect: (String?) -> Unit,
+)
+
+/**
  * 加入歌单：列出本地歌单，也可以新建一个并直接加入。
  * 默认是多选的批量加入：点一行就加入并关面板。常规单曲入口在 TrackActionsSheet 里。
  *
  * 传了 [checks] 是单曲勾选模式（播放页「加到歌单」，见 [AddToPlaylistSheet]）：每行右边是勾选框，已经有这首的勾上，
  * 点一下由 [onPick] 加入或移出；新建歌单后回到列表；面板不自动关，可以一次加到几个歌单。
+ * 传了 [grouping] 时列表上方多一排分组 tab（全部 / 本地 / 各绑定平台），默认选中项由调用方按当前音源算好；
+ * 「新建歌单」固定在 tab 下面，任何分组里都能建，建好归「本地」组。
  * [snackbar] 是面板自己的提示条（撤销）：面板是单独的窗口，外壳的 Snackbar 被它盖着，看不见也点不到。
- * [focusId] 是电视上打开时焦点落的那一行（第一个还没加入的歌单），没有就落在「新建歌单」。
+ * [focusId] 是电视上从 tab 进入列表时焦点落的那一行（第一个还没加入的歌单），没有就落在「新建歌单」。
  */
 @Composable
 fun PlaylistPickerSheet(
@@ -930,6 +951,7 @@ fun PlaylistPickerSheet(
     note: String = "",
     snackbar: androidx.compose.material3.SnackbarHostState? = null,
     focusId: String? = null,
+    grouping: PlaylistGrouping? = null,
 ) {
     var creating by remember { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
@@ -937,7 +959,28 @@ fun PlaylistPickerSheet(
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val focusRow = remember { androidx.compose.ui.focus.FocusRequester() }
     val focusField = remember { androidx.compose.ui.focus.FocusRequester() }
+    val focusTabs = remember { androidx.compose.ui.focus.FocusRequester() }
+    val focusNew = remember { androidx.compose.ui.focus.FocusRequester() }
     var rowFocused by remember { mutableStateOf(false) }
+    var tabFocused by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    // 分组只在勾选模式、且确实不止一个分组时出现：只有一组时 tab 没有意义（例如全是本地歌单）
+    val grouped = checks != null && grouping != null && grouping.groups.size > 1
+    val tabs = grouping?.takeIf { grouped }
+    // 选中的分组已经不在（歌单解绑 / 删除）时按「全部」显示，和 PlaylistGroupTabs 的内部判断保持一致
+    val selected = tabs?.selected?.takeIf { it in tabs.groups }
+    val sections: List<Pair<String, List<LocalPlaylistSummary>>> = when {
+        tabs == null -> listOf("" to playlists)
+        selected == null -> libraryPlaylistGroups(playlists).toList()
+        else -> listOf(selected to playlists.filter { playlistGroupOf(it) == selected })
+    }
+    // 「全部」下每段有小标题；选中单个分组时不重复显示
+    val showSections = tabs != null && selected == null
+    val visible = sections.flatMap { it.second }
+    // 从 tab 进列表时落哪一行：优先面板给的第一个未加入可改歌单，没有就这一组的第一行
+    val rowTarget = focusId?.takeIf { id -> visible.any { it.id == id } } ?: visible.firstOrNull()?.id
+    fun sectionName(groupId: String): String =
+        if (groupId.isBlank()) "本地歌单" else providerName(tabs?.providers.orEmpty(), groupId)
     fun submit() {
         if (name.isBlank()) return
         onCreate(name.trim())
@@ -949,29 +992,59 @@ fun PlaylistPickerSheet(
             name = ""
         }
     }
-    // 电视：打开时焦点落在第一个还没加入的歌单上（没有就落在「新建歌单」），确认键直接勾。
-    // 面板是滑进来的，内容晚几帧才摆好，没接住就下一帧再试；只在打开时落一次，之后焦点跟着用户走
-    val target by androidx.compose.runtime.rememberUpdatedState(
-        if (focusId == null) 0 else playlists.indexOfFirst { it.id == focusId } + 1,
-    )
-    val focusIndex = target
+    /** 从 tab 进入列表：滚到目标行并拿焦点；这一组没有歌单就落在「新建歌单」上。 */
+    fun enterList() {
+        if (tabs == null) return
+        if (rowTarget == null) {
+            runCatching { focusNew.requestFocus() }
+            return
+        }
+        // 「全部」下段标题也占一个 Lazy 项，目标行在 LazyColumn 里的位置要加上前面所有标题和歌单
+        var lazyIndex = 0
+        if (showSections) {
+            for ((_, group) in sections) {
+                if (group.isEmpty()) continue
+                lazyIndex++ // 段标题
+                val at = group.indexOfFirst { it.id == rowTarget }
+                if (at >= 0) {
+                    lazyIndex += at
+                    break
+                }
+                lazyIndex += group.size
+            }
+        } else {
+            lazyIndex = visible.indexOfFirst { it.id == rowTarget }.coerceAtLeast(0)
+        }
+        // 面板是滑进来的、切分组会重排列表，晚几帧再滚/请求焦点，没接住就下一帧再试
+        scope.launch {
+            rowFocused = false
+            repeat(10) {
+                androidx.compose.runtime.withFrameNanos { }
+                if (rowFocused) return@launch
+                runCatching { listState.scrollToItem(lazyIndex) }
+                runCatching { focusRow.requestFocus() }
+            }
+        }
+    }
+    // 电视：打开或新建完回到列表时，焦点先落在选中的分组 tab 上，确认键再进列表（见 [enterList]）
+    androidx.compose.runtime.LaunchedEffect(grouped, creating) {
+        if (!window.isTv || tabs == null || creating) return@LaunchedEffect
+        tabFocused = false
+        repeat(10) {
+            androidx.compose.runtime.withFrameNanos { }
+            if (tabFocused) return@LaunchedEffect
+            runCatching { focusTabs.requestFocus() }
+        }
+    }
+    // 换分组时列表回到顶部：每个 tab 都从第一个看起
+    androidx.compose.runtime.LaunchedEffect(selected) {
+        runCatching { listState.scrollToItem(0) }
+    }
     com.mytv.mymusic.ui.components.AdaptiveSheet(
         onDismiss = onDismiss,
         title = if (creating) "新建歌单" else title,
         subtitle = if (creating) "" else subtitle,
     ) {
-        // 新建完回到列表时再落一次：输入框没了，焦点不能丢
-        if (checks != null && window.isTv && !creating) {
-            androidx.compose.runtime.LaunchedEffect(Unit) {
-                rowFocused = false
-                repeat(10) {
-                    androidx.compose.runtime.withFrameNanos { }
-                    if (rowFocused) return@LaunchedEffect
-                    runCatching { listState.scrollToItem(target) }
-                    runCatching { focusRow.requestFocus() }
-                }
-            }
-        }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             if (creating) {
                 // 点掉的「新建歌单」行已经不在了，焦点直接放进输入框（电视上不然会丢）。
@@ -997,76 +1070,99 @@ fun PlaylistPickerSheet(
                 )
                 TextButton(onClick = { creating = false }, modifier = Modifier.padding(top = 8.dp)) { Text("返回") }
             } else {
-                val rows = playlists.size + 1
+                if (tabs != null) {
+                    // 分组 tab：默认选中项由调用方按当前音源算好，这里只负责显示和切换
+                    PlaylistGroupTabs(
+                        groups = tabs.groups,
+                        selected = selected,
+                        providers = tabs.providers,
+                        onSelect = tabs.onSelect,
+                        focus = focusTabs,
+                        onFocusChange = { tabFocused = it },
+                        onConfirm = ::enterList,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                // 新建歌单固定在分组 tab 下面：任何分组里都能建，建好归「本地」组
+                com.mytv.mymusic.ui.components.ListRow(
+                    title = "新建歌单",
+                    index = 0,
+                    count = 1,
+                    onClick = { creating = true },
+                    modifier = Modifier.fillMaxWidth().then(
+                        if (tabs != null && window.isTv) {
+                            Modifier.focusRequester(focusNew).onFocusChanged { rowFocused = it.isFocused }
+                        } else {
+                            Modifier
+                        },
+                    ),
+                    icon = Icons.Filled.Add,
+                    summary = if (checks != null) "建好后直接把这首加进去" else "",
+                    showChevron = false,
+                )
                 LazyColumn(
-                    Modifier.fillMaxWidth().heightIn(max = 380.dp),
+                    // 加了 tab 以后手机底部面板会顶到屏幕上半屏，列表高度压一点让总高基本不变
+                    Modifier.fillMaxWidth().heightIn(max = if (window.isPhone) 332.dp else 380.dp),
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    item(key = "new", contentType = "pickerNew") {
-                        com.mytv.mymusic.ui.components.ListRow(
-                            title = "新建歌单",
-                            index = 0,
-                            count = rows,
-                            onClick = { creating = true },
-                            modifier = if (checks != null && focusIndex == 0) {
-                                Modifier.focusRequester(focusRow).onFocusChanged { rowFocused = it.isFocused }
+                    sections.forEach { (groupId, group) ->
+                        if (group.isEmpty()) return@forEach
+                        // 「全部」下按组插小标题，和歌单库的样子一致
+                        if (showSections) {
+                            item(key = "head:$groupId", contentType = "pickerSection") {
+                                SectionLabel(sectionName(groupId), trailing = { CountTag("${group.size} 个") })
+                            }
+                        }
+                        itemsIndexed(group, key = { _, playlist -> playlist.id }, contentType = { _, _ -> "pickerPlaylist" }) { index, playlist ->
+                            if (checks == null) {
+                                com.mytv.mymusic.ui.components.ListRow(
+                                    title = playlist.name,
+                                    index = index,
+                                    count = group.size,
+                                    onClick = { onPick(playlist.id); onDismiss() },
+                                    icon = Icons.AutoMirrored.Filled.QueueMusic,
+                                    value = "${playlist.trackCount} 首",
+                                    showChevron = false,
+                                )
                             } else {
-                                Modifier
-                            },
-                            icon = Icons.Filled.Add,
-                            summary = if (checks != null) "建好后直接把这首加进去" else "",
-                            showChevron = false,
-                        )
-                    }
-                    itemsIndexed(playlists, key = { _, playlist -> playlist.id }, contentType = { _, _ -> "pickerPlaylist" }) { index, playlist ->
-                        if (checks == null) {
-                            com.mytv.mymusic.ui.components.ListRow(
-                                title = playlist.name,
-                                index = index + 1,
-                                count = rows,
-                                onClick = { onPick(playlist.id); onDismiss() },
-                                icon = Icons.AutoMirrored.Filled.QueueMusic,
-                                value = "${playlist.trackCount} 首",
-                                showChevron = false,
-                            )
-                        } else {
-                            val check = checks(playlist.id)
-                            com.mytv.mymusic.ui.components.ListRow(
-                                title = playlist.name,
-                                index = index + 1,
-                                count = rows,
-                                onClick = if (check.locked) null else ({ if (!check.busy) onPick(playlist.id) }),
-                                // 行内勾选框不带语义，勾没勾由整行提供（同 SwitchRow）
-                                modifier = Modifier
-                                    .then(
-                                        if (focusIndex == index + 1) {
-                                            Modifier.focusRequester(focusRow).onFocusChanged { rowFocused = it.isFocused }
-                                        } else {
-                                            Modifier
+                                val check = checks(playlist.id)
+                                com.mytv.mymusic.ui.components.ListRow(
+                                    title = playlist.name,
+                                    index = index,
+                                    count = group.size,
+                                    onClick = if (check.locked) null else ({ if (!check.busy) onPick(playlist.id) }),
+                                    // 行内勾选框不带语义，勾没勾由整行提供（同 SwitchRow）
+                                    modifier = Modifier
+                                        .then(
+                                            if (playlist.id == rowTarget) {
+                                                Modifier.focusRequester(focusRow).onFocusChanged { rowFocused = it.isFocused }
+                                            } else {
+                                                Modifier
+                                            },
+                                        )
+                                        .semantics {
+                                            role = androidx.compose.ui.semantics.Role.Checkbox
+                                            toggleableState = androidx.compose.ui.state.ToggleableState(check.checked)
                                         },
-                                    )
-                                    .semantics {
-                                        role = androidx.compose.ui.semantics.Role.Checkbox
-                                        toggleableState = androidx.compose.ui.state.ToggleableState(check.checked)
-                                    },
-                                icon = Icons.AutoMirrored.Filled.QueueMusic,
-                                summary = listOf("${playlist.trackCount} 首", check.note).filter { it.isNotBlank() }.joinToString(" · "),
-                                showChevron = false,
-                                trailing = {
-                                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                                        if (check.busy) {
-                                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
-                                        } else {
-                                            androidx.compose.material3.Checkbox(
-                                                checked = check.checked,
-                                                onCheckedChange = null,
-                                                enabled = !check.locked,
-                                            )
+                                    icon = Icons.AutoMirrored.Filled.QueueMusic,
+                                    summary = listOf("${playlist.trackCount} 首", check.note).filter { it.isNotBlank() }.joinToString(" · "),
+                                    showChevron = false,
+                                    trailing = {
+                                        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                                            if (check.busy) {
+                                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                                            } else {
+                                                androidx.compose.material3.Checkbox(
+                                                    checked = check.checked,
+                                                    onCheckedChange = null,
+                                                    enabled = !check.locked,
+                                                )
+                                            }
                                         }
-                                    }
-                                },
-                            )
+                                    },
+                                )
+                            }
                         }
                     }
                 }

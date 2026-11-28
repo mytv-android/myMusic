@@ -59,7 +59,6 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SyncProblem
-import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -75,7 +74,6 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -83,7 +81,6 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleFloatingActionButton
@@ -140,6 +137,7 @@ import com.mytv.mymusic.ui.LocalPlaylistSummary
 import com.mytv.mymusic.ui.MusicActions
 import com.mytv.mymusic.ui.MusicUiState
 import com.mytv.mymusic.ui.providerName
+import com.mytv.mymusic.ui.playlistGroupOf
 import com.mytv.mymusic.ui.adaptive.DialogAvoidsFold
 import com.mytv.mymusic.ui.adaptive.FoldRow
 import com.mytv.mymusic.ui.adaptive.LocalFoldPane
@@ -151,7 +149,7 @@ import com.mytv.mymusic.ui.components.LocalAppSnackbar
 import com.mytv.mymusic.ui.components.LocalAppWindow
 import com.mytv.mymusic.ui.components.LocalOverlayPadding
 import com.mytv.mymusic.ui.components.PageScaffold
-import com.mytv.mymusic.ui.components.ProviderIcon
+import com.mytv.mymusic.ui.components.PlaylistGroupTabs
 import com.mytv.mymusic.ui.components.SectionLabel
 import com.mytv.mymusic.ui.components.SegmentGap
 import com.mytv.mymusic.ui.components.Skeleton
@@ -348,7 +346,7 @@ private fun PhoneLibrary(
 }
 
 internal fun libraryPlaylistGroups(playlists: List<LocalPlaylistSummary>): Map<String, List<LocalPlaylistSummary>> =
-    playlists.groupBy { if (it.bound) it.linkProvider else "" }
+    playlists.groupBy { playlistGroupOf(it) }
         .entries.sortedBy { it.key.isNotEmpty() }.associate { it.key to it.value }
 
 private fun playlistGroupName(providerId: String, providers: List<ProviderInfo>): String =
@@ -362,44 +360,15 @@ private fun PlaylistSourceTabs(
     focus: FocusRequester? = null,
 ) {
     if (!playlists.hasPlatformSources) return
-    val platformIds = playlists.groups.keys.filter { it.isNotBlank() }.sortedBy { providerName(providers, it) }
-    val sourceIds = listOf(null, "") + platformIds
-    val container = MaterialTheme.colorScheme.surface
-    SecondaryScrollableTabRow(
-        selectedTabIndex = sourceIds.indexOf(playlists.source),
-        modifier = Modifier.fillMaxWidth().background(container).then(modifier),
-        edgePadding = 0.dp,
-        minTabWidth = 64.dp,
-        containerColor = container,
-    ) {
-        sourceIds.forEach { source ->
-            val selected = source == playlists.source
-            val label = when (source) {
-                null -> "全部"
-                "" -> "本地"
-                else -> providerName(providers, source)
-            }
-            Tab(
-                selected = selected,
-                onClick = { if (!selected) playlists.selectSource(source) },
-                modifier = Modifier.tvFocusRing(scale = 1f)
-                    .then(if (selected && focus != null) Modifier.focusRequester(focus) else Modifier),
-            ) {
-                Row(
-                    Modifier.heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    if (source == null) {
-                        Icon(Icons.Outlined.Apps, null, Modifier.size(18.dp))
-                    } else {
-                        ProviderIcon(id = source.ifBlank { "local" }, name = label, size = 20.dp, active = selected)
-                    }
-                    Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-    }
+    // 歌单库的「本地」固定出现（哪怕暂时没有本地歌单），平台分组只在有绑定歌单时才有 tab
+    PlaylistGroupTabs(
+        groups = listOf("") + playlists.groups.keys.filter { it.isNotBlank() },
+        selected = playlists.source,
+        providers = providers,
+        onSelect = playlists.selectSource,
+        modifier = modifier,
+        focus = focus,
+    )
 }
 
 private fun LazyListScope.libraryEntryItems(

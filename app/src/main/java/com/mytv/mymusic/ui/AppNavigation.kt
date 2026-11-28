@@ -546,9 +546,20 @@ fun MyMusicApp(model: MusicViewModel) {
         if (timerOpen) {
             PlayerTheme { SleepTimerSheet(state, sleep, actions, onDismiss = { timerOpen = false }) }
         }
-        // 列表滑动的「加到歌单」：和播放页同一个勾选面板
+        // 列表滑动的「加到歌单」：和播放页同一个勾选面板，默认分组同样按这首歌的音源算
         swipePlaylistSong?.let { song ->
-            AddToPlaylistSheet(song = song, providers = state.providers, actions = actions, onDismiss = { swipePlaylistSong = null })
+            AddToPlaylistSheet(
+                song = song,
+                providers = state.providers,
+                actions = actions,
+                defaultGroup = defaultPlaylistGroup(
+                    song = song,
+                    currentSong = state.current,
+                    currentSourceId = state.currentSource?.providerId,
+                    primarySong = state.currentTrack?.sources?.firstOrNull()?.song,
+                ),
+                onDismiss = { swipePlaylistSong = null },
+            )
         }
         // 从文件导入的预览（设计稿 06 节 ⑬）：从哪一页导入都盖在上面，电视扫码收到的文件也直接弹
         if (transfer !is TransferUi.Idle) {
