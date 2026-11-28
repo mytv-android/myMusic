@@ -1,0 +1,1774 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Apple Music 式歌词与切歌 · myMusic 设计方案</title>
+<meta name="description" content="全屏歌词照 Apple Music 的换行方式做成一种新动画（逐句错峰弹簧、亮暗两档、逐字扫光与长音、和声与对唱、间奏三点、封面网格背景），切歌照 Apple Music 的「歌曲过渡」补齐：换页时机、首尾静音、同专辑不过渡、1–12 秒交叉淡化、队列里的开关。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Roboto+Flex:opsz,wdth,wght@8..144,100..125,300..900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #f4f1f2; --paper: #ffffff; --ink: #1d1b20; --muted: #6b6772; --line: #e4e0e3;
+  --red: #c8102e; --soft-red: #fbe9ec; --dark: #151318; --blue: #2f5fd0; --green: #1b6b3a;
+  --body: "Roboto Flex", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --lyric: "Noto Sans SC", "Roboto Flex", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  --spring: cubic-bezier(.3,1.35,.4,1);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.7 var(--body); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, p { margin: 0; }
+svg { display: block; }
+.ico { width: 24px; height: 24px; fill: currentColor; flex: none; }
+.ico.s16 { width: 16px; height: 16px; } .ico.s18 { width: 18px; height: 18px; } .ico.s20 { width: 20px; height: 20px; } .ico.s28 { width: 28px; height: 28px; }
+.page-head, main, footer { width: min(1180px, calc(100% - 40px)); margin-inline: auto; }
+.page-head { padding: 62px 0 30px; }
+.doc-label { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .16em; }
+h1 { max-width: 980px; margin-top: 14px; font-size: clamp(38px, 5.8vw, 72px); line-height: 1.08; letter-spacing: -.045em; font-weight: 900; text-wrap: balance; }
+h1 em { font-style: normal; color: var(--red); }
+.lede { max-width: 900px; margin-top: 24px; color: var(--muted); font-size: 17px; line-height: 1.85; }
+.lede strong { color: var(--ink); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.chip2 { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 13px; }
+.chip2 b { color: var(--ink); font-weight: 700; }
+.chip2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 22px; font-size: 13.5px; }
+nav.toc a { color: var(--muted); text-decoration: none; } nav.toc a:hover { color: var(--red); }
+nav.toc a b { color: var(--red); font: 700 12px var(--mono); margin-right: 4px; }
+section.block { padding: 46px 0; border-top: 1px solid var(--line); }
+.block-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.kicker { color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .14em; }
+h2 { font-size: clamp(24px, 3vw, 31px); line-height: 1.25; letter-spacing: -.025em; font-weight: 800; }
+.sub { margin: 10px 0 22px; color: var(--muted); font-size: 14.5px; line-height: 1.8; max-width: 920px; }
+.sub strong { color: var(--ink); font-weight: 700; }
+h3 { margin: 30px 0 12px; font-size: 18px; font-weight: 750; letter-spacing: -.01em; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 14px; margin-top: 20px; }
+.tile { padding: 18px 18px 15px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.tile b { display: block; font-size: 32px; line-height: 1.15; letter-spacing: -.03em; font-weight: 900; }
+.tile span { color: var(--muted); font-size: 13px; }
+.tile small { display: block; margin-top: 6px; color: #918d97; font-size: 12px; line-height: 1.5; }
+table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; font-size: 13.5px; }
+th, td { padding: 11px 14px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; line-height: 1.65; }
+thead th { border-top: 0; background: #faf7f8; color: var(--muted); font-size: 12.5px; font-weight: 700; }
+td code, p code, li code, .sub code, figcaption code, .note code { font-family: var(--mono); font-size: 12px; background: #f1edf1; border-radius: 6px; padding: 1px 6px; }
+.scroll { overflow-x: auto; border-radius: 16px; }
+.scroll table { min-width: 760px; }
+pre { margin: 12px 0 0; padding: 16px 18px; background: var(--dark); color: #d9d5df; border-radius: 16px; overflow: auto; font: 12.5px/1.75 var(--mono); }
+pre .c { color: #8c8797; } pre .k { color: #a9d8d6; } pre .n { color: #f2c98a; } pre .s { color: #ffb6c1; }
+.note { margin-top: 14px; padding: 14px 16px; border-left: 3px solid var(--red); background: #fbf6f7; border-radius: 0 14px 14px 0; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
+.note b { color: var(--ink); }
+.note.plain { border-left-color: #cfcad4; background: #f7f5f7; }
+ul.clean { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; line-height: 1.85; }
+ul.clean b { color: var(--ink); }
+.yes { color: var(--green); font-weight: 700; } .no { color: var(--red); font-weight: 700; } .adj { color: #8a5a00; font-weight: 700; } .keep { color: var(--muted); font-weight: 700; }
+.phases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
+.phase { padding: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.phase header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.phase .tag { font: 700 11px var(--mono); padding: 2px 7px; border-radius: 999px; background: var(--soft-red); color: var(--red); }
+.phase h3 { margin: 0; font-size: 15px; }
+.phase ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+footer { padding: 34px 0 70px; border-top: 1px solid var(--line); color: #8f8b95; font-size: 12.5px; line-height: 1.8; }
+footer b { color: var(--muted); font-weight: 700; }
+
+/* ── 演示控制条 ── */
+.demo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 4px 0 18px; padding: 12px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; font-size: 13px; color: var(--muted); position: sticky; top: 8px; z-index: 50; box-shadow: 0 10px 30px -24px rgb(0 0 0 / .5); }
+.demo-bar.static { position: static; box-shadow: none; }
+.demo-bar .grp { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.demo-bar button { height: 32px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font: 600 12.5px/1 var(--body); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: border-radius .3s var(--spring); }
+.demo-bar button.on { background: var(--ink); color: #fff; border-color: var(--ink); border-radius: 16px; }
+.demo-bar button.act { background: var(--soft-red); border-color: #f3c6cf; color: var(--red); }
+.demo-bar button i { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+.demo-bar .sep { width: 1px; height: 22px; background: var(--line); }
+
+/* ── 手机外框与播放页（PlayerTheme 深色，令牌随封面色相换） ── */
+.demo { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+.demo > figure { margin: 0; display: grid; gap: 10px; }
+.demo figcaption, .devpane figcaption, .devices figcaption { color: var(--muted); font-size: 12.5px; line-height: 1.7; max-width: 380px; }
+.demo figcaption b, .devpane figcaption b, .devices figcaption b { display: block; color: var(--ink); font-size: 13.5px; margin-bottom: 2px; }
+.phone { position: relative; width: 380px; height: 800px; padding: 10px; border-radius: 52px; background: #080b0b; box-shadow: 0 30px 70px -36px rgb(0 0 0 / .6); flex: none; }
+.scr { position: relative; width: 360px; height: 780px; border-radius: 43px; overflow: hidden; background: var(--pl-surface); color: var(--pl-on-surface); font-family: var(--body); user-select: none; }
+canvas.mbg { position: absolute; left: 0; top: 0; z-index: 0; image-rendering: auto; }
+.status { position: absolute; left: 0; right: 0; top: 0; height: 28px; display: flex; justify-content: space-between; align-items: center; padding: 0 26px; font: 600 12px/1 var(--body); color: rgb(255 255 255 / .9); z-index: 8; }
+.p-cover { position: absolute; left: 20px; top: 40px; width: 52px; height: 52px; border-radius: 50%; overflow: hidden; box-shadow: 0 4px 16px rgb(0 0 0 / .35); z-index: 6; }
+.p-cover i { position: absolute; inset: 0; background-size: cover; transition: opacity .35s ease; }
+.p-head { position: absolute; left: 86px; right: 8px; top: 40px; height: 52px; display: flex; align-items: center; z-index: 6; }
+.p-titles { flex: 1; min-width: 0; }
+.p-title { font-size: 17px; font-weight: 700; line-height: 22px; color: var(--pl-on-surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-artist { font-size: 14px; font-weight: 500; line-height: 19px; color: var(--pl-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--pl-on-surface); flex: none; border: 0; background: transparent; cursor: pointer; }
+.p-bottom { position: absolute; left: 20px; right: 16px; bottom: 32px; z-index: 6; }
+.wave { height: 28px; margin: 0 8px 0 4px; }
+.wave svg { width: 100%; height: 28px; overflow: visible; }
+.p-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+.ptg { display: flex; align-items: center; gap: 8px; height: 56px; }
+.ptg .side { width: 50px; height: 56px; display: grid; place-items: center; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); cursor: pointer; }
+.ptg .side.l { border-radius: 28px 14px 14px 28px; } .ptg .side.r { border-radius: 14px 28px 28px 14px; }
+.cookie { position: relative; width: 56px; height: 56px; border: 0; padding: 0; background: none; cursor: pointer; flex: none; }
+.cookie > svg { position: absolute; inset: 0; width: 56px; height: 56px; fill: var(--pl-primary); }
+.cookie i { position: absolute; inset: 0; display: grid; place-items: center; color: var(--pl-on-primary); }
+.cookie i .ico { width: 32px; height: 32px; }
+.toolbar { height: 60px; display: flex; align-items: center; padding: 0 6px; border-radius: 30px; background: color-mix(in srgb, var(--pl-surface-container-high) 84%, transparent); box-shadow: 0 6px 18px rgb(0 0 0 / .3); }
+.tb { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--pl-on-surface); border: 0; background: transparent; }
+.tb.sel { border-radius: 16px; background: var(--pl-primary-container); color: var(--pl-on-primary-container); }
+.navpill { position: absolute; left: 50%; bottom: 9px; width: 108px; height: 4px; margin-left: -54px; border-radius: 2px; background: rgb(255 255 255 / .45); z-index: 8; }
+.modechip { position: absolute; left: 20px; bottom: 130px; z-index: 9; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 14px; background: rgb(0 0 0 / .42); color: #fff; font: 600 12px/1 var(--body); pointer-events: none; transition: opacity .4s; }
+
+/* ── AMLL 式歌词舞台（1px＝1dp） ── */
+.am { position: absolute; overflow: hidden; z-index: 3; color: #fff; font-family: var(--lyric); touch-action: none; cursor: grab;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 7%, #000 86%, transparent 100%);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 7%, #000 86%, transparent 100%); }
+.am.drag { cursor: grabbing; }
+.am.static { cursor: default; }
+.ag { position: absolute; left: 0; top: 0; width: 100%; padding: .4em var(--px); will-change: transform; transition: opacity .4s ease, filter .4s ease; display: flex; flex-direction: column; align-items: flex-start; gap: .3em; border-radius: .25em; mix-blend-mode: plus-lighter; }
+.ag.old { transition: opacity .25s ease; opacity: 0 !important; }
+.ag.duet { align-items: flex-end; }
+.al { position: relative; width: 100%; transform-origin: left center; }
+.al.duet { text-align: right; transform-origin: right center; }
+.song-duet .al:not(.duet) { padding-right: 15%; } .song-duet .al.duet { padding-left: 15%; }
+.am-main { font-weight: 700; line-height: 1.22; letter-spacing: -.01em; }
+.am-main .w { display: inline-block; white-space: pre-wrap; margin: -.5em; padding: .5em; vertical-align: bottom; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; transition: transform .25s ease; }
+.am-main .w .ch { display: inline-block; white-space: pre; }
+.am-sub { font-size: .5em; line-height: 1.5; opacity: .3; font-weight: 500; margin-top: .3em; }
+.bgw { width: 100%; font-size: .7em; opacity: 0; transform-origin: left top; transition: opacity .3s ease; position: absolute; left: var(--px); top: 100%; width: calc(100% - var(--px) * 2); }
+.bgw.on { position: relative; left: 0; top: auto; width: 100%; opacity: .4; }
+.ag.duet .bgw { transform-origin: right top; text-align: right; }
+.adots { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: .18em; padding: .4em var(--px); transform-origin: center; will-change: transform, opacity; }
+.adots i { width: .3em; height: .3em; border-radius: 50%; background: #fff; display: block; }
+/* 经典（现在）：整列一个弹簧、当前行放大、透明度分三档 */
+.am.classic .ag { mix-blend-mode: normal; transition: opacity .18s ease, filter .18s ease; }
+.am.classic .am-main { font-weight: 600; line-height: 1.3; }
+.am.classic .ag.on .am-main { font-weight: 900; }
+.am.classic .am-sub { opacity: 1; color: var(--pl-on-surface-variant); font-size: .62em; margin-top: 2px; }
+.am.reduce .ag, .am.reduce .w { transition: none !important; }
+
+/* ── 位移曲线 ── */
+.chart { background: var(--paper); border: 1px solid var(--line); border-radius: 22px; padding: 16px 16px 12px; width: 420px; max-width: 100%; }
+.chart h4 { font-size: 14px; margin: 0 0 4px; }
+.chart p { color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+.chart canvas { display: block; margin-top: 10px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.readout { margin-top: 10px; padding: 10px 12px; border-radius: 14px; background: #f7f5f7; font: 12px/1.7 var(--mono); color: #4a4650; white-space: pre-wrap; min-height: 92px; }
+
+/* ── 单句放大舞台 ── */
+.wide { position: relative; height: 230px; border-radius: 24px; overflow: hidden; background: #111; box-shadow: 0 24px 60px -36px rgb(0 0 0 / .6); }
+.wide canvas.mbg { width: 100%; height: 100%; }
+.twin { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.twin figure { margin: 0; display: grid; gap: 8px; }
+.twin figcaption { color: var(--muted); font-size: 12.5px; line-height: 1.65; }
+.twin figcaption b { color: var(--ink); }
+
+/* ── 间奏三点图 ── */
+.dotsdemo { display: grid; grid-template-columns: 220px 1fr; gap: 18px; align-items: stretch; }
+.dotsbox { position: relative; border-radius: 24px; overflow: hidden; background: #1b1418; min-height: 220px; }
+.dotsbox .adots { font-size: 46px; left: 50%; top: 50%; padding: 0; }
+.dotsplot { background: var(--paper); border: 1px solid var(--line); border-radius: 22px; padding: 12px; }
+
+/* ── 切歌时间线 ── */
+.mixline { background: var(--paper); border: 1px solid var(--line); border-radius: 22px; padding: 14px 16px; width: 520px; max-width: 100%; }
+.mixline h4 { font-size: 14px; margin: 0 0 2px; }
+.mixline p { color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+.mixline svg { width: 100%; height: auto; margin-top: 8px; overflow: visible; }
+.mixline input[type=range] { width: 100%; margin-top: 6px; accent-color: var(--red); }
+.hear { margin-top: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.hear div { padding: 10px 12px; border-radius: 14px; background: #f7f5f7; font-size: 12.5px; line-height: 1.55; color: var(--muted); min-height: 64px; }
+.hear div b { display: block; color: var(--ink); font-size: 13px; }
+
+/* ── 其它设备（照 user-feedback 稿的 devFrame / devBlock） ── */
+.devtabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
+.devtabs button { height: 38px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font: 600 13px/1 var(--body); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: border-radius .3s var(--spring); }
+.devtabs button small { font: 500 11px/1 var(--mono); color: var(--muted); }
+.devtabs button.on { background: var(--ink); color: #fff; border-color: var(--ink); border-radius: 19px; }
+.devtabs button.on small { color: #cfcad4; }
+.devpane { display: none; gap: 18px 26px; align-items: flex-start; flex-wrap: wrap; }
+.devpane.on { display: flex; }
+.devpane > figcaption { flex: 1 1 240px; max-width: 420px; }
+.dev { position: relative; flex: none; background: #0b0d0d; box-shadow: 0 30px 70px -36px rgb(0 0 0 / .6); }
+.dev .dscr { position: absolute; transform-origin: 0 0; overflow: hidden; font-family: var(--body); user-select: none; }
+.dscr.pl { background: var(--pl-surface); color: var(--pl-on-surface); }
+.dscr.lt { background: var(--md-surface); color: var(--md-on-surface); }
+.dev.tv { margin-bottom: 22px; }
+.dev.tv::after { content: ""; position: absolute; left: 50%; top: 100%; width: 22%; height: 16px; transform: translateX(-50%); background: linear-gradient(#1b1f1f, #0b0d0d); clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%); }
+.dev .hinge { position: absolute; pointer-events: none; z-index: 60; }
+.dev .hinge.v { top: 6px; bottom: 6px; width: 12px; margin-left: -6px; background: linear-gradient(90deg, transparent, rgb(0 0 0 / .38) 38%, rgb(255 255 255 / .12) 50%, rgb(0 0 0 / .38) 62%, transparent); }
+.dev .hinge.h { left: 6px; right: 6px; height: 12px; margin-top: -6px; background: linear-gradient(180deg, transparent, rgb(0 0 0 / .38) 38%, rgb(255 255 255 / .12) 50%, rgb(0 0 0 / .38) 62%, transparent); }
+.dstat { position: absolute; left: 0; right: 0; top: 0; height: 24px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; font: 600 12px/1 var(--body); z-index: 40; opacity: .85; pointer-events: none; color: rgb(255 255 255 / .9); }
+.fdock { position: absolute; width: 88px; border-radius: 44px; padding: 12px 8px; display: flex; flex-direction: column; align-items: center; gap: 10px; background: color-mix(in srgb, var(--pl-surface-container-high) 90%, transparent); color: var(--pl-on-surface); transform-origin: 0 0; z-index: 8; }
+.fdock .cv0 { width: 64px; height: 64px; border-radius: 50%; flex: none; background-size: cover; }
+.fdock .b48 { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; flex: none; }
+.fdock .b48 .ico { width: 28px; height: 28px; }
+.fdock .play { width: 72px; height: 72px; display: grid; place-items: center; background: var(--pl-primary); color: var(--pl-on-primary); flex: none; }
+.fdock .play .ico { width: 36px; height: 36px; }
+.fdock .dv { width: 40px; height: 1px; background: rgb(255 255 255 / .2); flex: none; }
+.fdock .sel { border-radius: 16px; background: var(--pl-primary-container); color: var(--pl-on-primary-container); }
+.fhead { position: absolute; z-index: 8; display: flex; align-items: center; gap: 4px; font-size: 17px; font-weight: 500; color: var(--pl-on-surface-variant); white-space: nowrap; }
+.wcol { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 14px; z-index: 4; }
+.wmeta { display: flex; align-items: center; gap: 4px; }
+.wmeta .tt { flex: 1; min-width: 0; }
+.wmeta .tt b { display: block; font-size: 32px; font-weight: 900; line-height: 1.15; letter-spacing: -.02em; }
+.wmeta .tt span { font-size: 19px; color: var(--pl-primary); }
+.favbtn { width: 48px; height: 48px; display: grid; place-items: center; color: var(--pl-on-surface); }
+.srcpill { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 16px; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.tm2 { display: flex; justify-content: space-between; font-size: 12px; color: var(--pl-on-surface-variant); }
+.ptgL { display: flex; align-items: center; justify-content: center; gap: 10px; height: 88px; }
+.ptgL .side { width: 72px; height: 72px; display: grid; place-items: center; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); }
+.ptgL .side.l { border-radius: 36px 18px 18px 36px; } .ptgL .side.r { border-radius: 18px 36px 36px 18px; }
+.ptgL .pp { width: 88px; height: 88px; display: grid; place-items: center; background: var(--pl-primary); color: var(--pl-on-primary); }
+.ptgL .ico { width: 32px; height: 32px; }
+.toolbar.wt { height: 56px; justify-content: space-around; }
+.tvcover { position: absolute; left: 72px; top: 50px; width: 280px; height: 280px; z-index: 4; background-size: cover; }
+.tvpill { position: absolute; left: 72px; top: 350px; height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 18px; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); font-size: 14px; font-weight: 600; z-index: 4; }
+.tvtitle { position: absolute; left: 400px; top: 46px; right: 56px; z-index: 4; }
+.tvtitle b { display: block; font-size: 34px; font-weight: 900; line-height: 1.15; }
+.tvtitle span { font-size: 20px; color: var(--pl-primary); }
+.tvdock { position: absolute; left: 48px; right: 48px; bottom: 24px; border-radius: 38px; padding: 10px 16px; display: flex; flex-direction: column; gap: 6px; z-index: 8; background: color-mix(in srgb, var(--pl-surface-container-highest) 90%, transparent); }
+.tvdock .r1 { display: flex; align-items: center; gap: 12px; }
+.tvdock .tg { display: flex; gap: 6px; height: 56px; width: 192px; flex: none; }
+.tvdock .tg > span { display: grid; place-items: center; }
+.tvdock .tg .side { width: 56px; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); }
+.tvdock .tg .side.l { border-radius: 28px 12px 12px 28px; } .tvdock .tg .side.r { border-radius: 12px 28px 28px 12px; }
+.tvdock .tg .pp { flex: 1; border-radius: 16px; background: var(--pl-primary); color: var(--pl-on-primary); }
+.tvdock .c48 { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--pl-surface-container-high); color: var(--pl-on-surface); }
+.tvdock .chip48 { height: 48px; border-radius: 12px; padding: 0 14px; display: flex; align-items: center; gap: 6px; font-size: 14px; background: var(--pl-surface-container-high); white-space: nowrap; }
+.tvdock .r2 { display: flex; align-items: center; gap: 14px; padding: 0 8px; font-size: 13px; color: var(--pl-on-surface-variant); }
+.tt-top { position: absolute; left: 0; right: 0; top: 0; height: calc(50% - 8px); overflow: hidden; }
+.tt-bot { position: absolute; left: 0; right: 0; bottom: 0; height: calc(50% - 8px); display: flex; flex-direction: column; overflow: hidden; z-index: 4; }
+.ttbar { position: absolute; left: 0; right: 0; top: 0; height: 52px; display: flex; align-items: center; padding: 0 8px; z-index: 5; }
+.ttbar .sp { flex: 1; }
+.ttc { width: min(560px, calc(100% - 48px)); margin: auto; display: flex; flex-direction: column; gap: 12px; }
+.ttmeta { display: flex; align-items: center; gap: 12px; height: 56px; }
+.ttmeta .cv { width: 48px; height: 48px; border-radius: 12px; flex: none; background-size: cover; }
+.ttmeta .tt { flex: 1; min-width: 0; } .ttmeta .tt b { display: block; font-size: 20px; font-weight: 800; } .ttmeta .tt span { font-size: 15px; color: var(--pl-primary); }
+.focusring { outline: 3px solid #fff; outline-offset: 3px; }
+.qrow.focusring { box-shadow: inset 0 0 0 3px #fff; }
+
+/* ── 面板（AdaptiveSheet，PlayerTheme 深色）── */
+.scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .32); z-index: 19; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; top: 64px; z-index: 20; background: var(--pl-surface-container-low); color: var(--pl-on-surface); border-radius: 28px 28px 0 0; display: flex; flex-direction: column; overflow: hidden; }
+.sheet.side { left: auto; right: 12px; top: 12px; bottom: 12px; width: 400px; border-radius: 28px; }
+.sheet.tvp { left: auto; right: 0; top: 0; bottom: 0; width: 360px; border-radius: 0; }
+.grab { width: 32px; height: 4px; border-radius: 2px; background: var(--pl-on-surface-variant); opacity: .6; margin: 12px auto 4px; flex: none; }
+.sh-head { padding: 6px 24px 6px; flex: none; }
+.sh-head h5 { margin: 0; font-size: 22px; font-weight: 600; line-height: 28px; }
+.sh-head p { margin: 2px 0 0; font-size: 14px; color: var(--pl-on-surface-variant); }
+.sh-body { overflow-y: auto; padding: 4px 16px 28px; flex: 1; scrollbar-width: thin; }
+.lbl { font-size: 16px; font-weight: 700; line-height: 24px; padding: 20px 4px 8px; display: flex; align-items: center; justify-content: space-between; }
+.txtbtn { border: 0; background: none; color: var(--pl-primary); font: 600 14px/1 var(--body); height: 40px; padding: 0 12px; border-radius: 20px; cursor: pointer; }
+.ctg { display: flex; gap: 2px; }
+.ctg button { flex: 1; min-width: 0; height: 48px; border: 0; background: var(--pl-surface-container); color: var(--pl-on-surface-variant); font: 600 14px/1 var(--body); border-radius: 8px; cursor: pointer; transition: border-radius .35s var(--spring), background .2s; padding: 0 4px; white-space: nowrap; }
+.ctg button:first-child { border-radius: 24px 8px 8px 24px; } .ctg button:last-child { border-radius: 8px 24px 24px 8px; }
+.ctg button.on { background: var(--pl-primary); color: var(--pl-on-primary); border-radius: 24px; }
+.mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mcard { border: 0; padding: 4px; background: none; color: var(--pl-on-surface-variant); text-align: left; cursor: pointer; border-radius: 14px; display: grid; gap: 6px; font: inherit; }
+.mcard .th { position: relative; aspect-ratio: 1.5; border-radius: 14px; overflow: hidden; transition: border-radius .35s var(--spring), padding .2s; background: var(--pl-surface-container); }
+.mcard .th canvas { width: 100%; height: 100%; display: block; border-radius: inherit; }
+.mcard.on .th { padding: 4px; border-radius: 22px; box-shadow: inset 0 0 0 2.5px var(--pl-primary); }
+.mcard.on .th canvas { border-radius: 18px; }
+.mcard .ck { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--pl-primary); color: var(--pl-on-primary); display: none; place-items: center; font-size: 12px; font-weight: 900; }
+.mcard.on .ck { display: grid; }
+.mcard .nm { padding-left: 4px; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+.mcard.on .nm { color: var(--pl-on-surface); font-weight: 700; }
+.mcard .new { font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 6px; background: var(--pl-tertiary); color: #102030; }
+.seg { display: flex; flex-direction: column; gap: 2px; }
+.row { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 8px 10px 16px; background: var(--pl-surface-container); border-radius: 4px; }
+.row.col { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 16px 12px; }
+.seg > :first-child { border-top-left-radius: 16px; border-top-right-radius: 16px; }
+.seg > :last-child { border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; }
+.row .t { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; line-height: 22px; }
+.row .t small { display: block; font-size: 13.5px; font-weight: 400; line-height: 19px; color: var(--pl-on-surface-variant); }
+.sw { width: 52px; height: 32px; border-radius: 16px; flex: none; position: relative; background: var(--pl-surface-container-highest); box-shadow: inset 0 0 0 2px var(--pl-outline); cursor: pointer; transition: background .2s; margin-right: 8px; }
+.sw::after { content: ""; position: absolute; left: 8px; top: 8px; width: 16px; height: 16px; border-radius: 50%; background: var(--pl-outline); transition: all .25s var(--spring); }
+.sw.on { background: var(--pl-primary); box-shadow: none; }
+.sw.on::after { left: 24px; top: 4px; width: 24px; height: 24px; background: var(--pl-on-primary); }
+.stp { display: flex; align-items: center; gap: 6px; }
+.stp button { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); font: 700 20px/1 var(--body); cursor: pointer; }
+.stp b { min-width: 56px; text-align: center; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sl { position: relative; height: 44px; margin: 0 4px; cursor: pointer; }
+.sl .tr { position: absolute; left: 0; right: 0; top: 14px; height: 16px; border-radius: 8px; background: var(--pl-secondary-container); }
+.sl .fi { position: absolute; left: 0; top: 14px; height: 16px; border-radius: 8px 2px 2px 8px; background: var(--pl-primary); }
+.sl .hd { position: absolute; top: 0; width: 4px; height: 44px; margin-left: -2px; border-radius: 2px; background: var(--pl-primary); }
+.sl .tk { position: absolute; top: 20px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--pl-on-secondary-container); opacity: .6; }
+.tklb { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--pl-on-surface-variant); padding: 0 2px; }
+.sh-note { font-size: 14px; line-height: 1.55; color: var(--pl-on-surface-variant); padding: 8px 4px 4px; }
+
+/* 播放队列（QueueSheet） */
+.qhead { display: flex; align-items: center; gap: 8px; padding: 0 16px; flex: none; }
+.ftb { height: 40px; border-radius: 20px; padding: 0 14px 0 12px; display: inline-flex; align-items: center; gap: 6px; font: 600 14px/1 var(--body); background: var(--pl-secondary-container); color: var(--pl-on-secondary-container); white-space: nowrap; }
+.ftb.on { background: var(--pl-primary); color: var(--pl-on-primary); }
+.qhead .sp { flex: 1; }
+.qlist { display: flex; flex-direction: column; gap: 2px; padding: 8px 16px 16px; overflow: hidden; }
+.qrow { display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 12px 0 8px; border-radius: 4px; background: var(--pl-surface-container); }
+.qrow .cv { width: 48px; height: 48px; border-radius: 12px; flex: none; background-size: cover; }
+.qrow .tx { flex: 1; min-width: 0; }
+.qrow .tx b { display: block; font-size: 15.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qrow .tx small { display: block; font-size: 13px; color: var(--pl-on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qrow.cur { background: var(--pl-secondary-container); }
+.qrow.cur .tx b { color: var(--pl-on-secondary-container); font-weight: 700; }
+.qrow.mix { height: 60px; padding-left: 12px; background: color-mix(in srgb, var(--pl-surface-container) 70%, var(--pl-primary-container)); }
+.qrow.mix .mi { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--pl-primary-container); color: var(--pl-on-primary-container); flex: none; }
+.qlist > :first-child { border-top-left-radius: 16px; border-top-right-radius: 16px; }
+.qlist > :last-child { border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; }
+.newmark { position: relative; outline: 2px dashed var(--red); outline-offset: 2px; }
+.newmark::after { content: attr(data-new); position: absolute; right: 8px; top: -9px; background: var(--red); color: #fff; font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 6px; white-space: nowrap; font-family: var(--body); }
+
+/* ── 浅色设置页手机（沿用 expressive-redesign 的 M3E 令牌） ── */
+.devices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; align-items: start; margin: 10px 0 6px; }
+.lt, .devices {
+  --md-primary:#206a5f;--md-on-primary:#e2fff8;--md-primary-container:#a9f0e2;--md-on-primary-container:#095c52;
+  --md-secondary:#4b645f;--md-on-secondary:#e3fff8;--md-secondary-container:#cde8e1;--md-on-secondary-container:#3e5751;
+  --md-surface:#f6faf8;--md-surface-container-lowest:#ffffff;--md-surface-container-low:#eef5f2;--md-surface-container:#e7f0ec;
+  --md-surface-container-high:#e1eae7;--md-surface-container-highest:#dae5e1;
+  --md-on-surface:#2a3532;--md-on-surface-variant:#56615e;--md-outline:#727d7a;--md-outline-variant:#a9b4b1; }
+.devices .dv2 { margin: 0; display: grid; gap: 10px; }
+.lphone { position: relative; width: 100%; aspect-ratio: 380/800; padding: 2.5%; border-radius: 52px; background: #17191b; box-shadow: 0 18px 40px -18px rgb(0 0 0 / .45), inset 0 0 0 2px #34383c; }
+.m-app { position: absolute; inset: 2.5%; border-radius: 44px; overflow: hidden; background: var(--md-surface); color: var(--md-on-surface); font-size: 14px; line-height: 1.4; }
+.m-fit { position: absolute; left: 0; top: 0; width: 360px; height: 780px; transform-origin: 0 0; }
+.m-status { position: absolute; top: 0; left: 0; right: 0; height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 26px; font-size: 13px; font-weight: 600; z-index: 30; color: var(--md-on-surface); }
+.m-appbar { height: 88px; padding: 32px 6px 0; display: flex; align-items: center; color: var(--md-on-surface-variant); }
+.m-big { padding: 0 20px 6px; }
+.m-big h5 { margin: 0; font-size: 30px; line-height: 1.15; font-weight: 800; letter-spacing: -.5px; }
+.s-label { margin: 18px 20px 8px; font-size: 16px; font-weight: 700; }
+.s-seg { display: flex; flex-direction: column; gap: 2px; margin: 0 16px; }
+.s-seg > * { background: var(--md-surface-container); border-radius: 4px; }
+.s-seg > :first-child { border-top-left-radius: 16px; border-top-right-radius: 16px; }
+.s-seg > :last-child { border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; }
+.s-row { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 10px 16px; }
+.s-ic { width: 40px; height: 40px; border-radius: 50%; background: var(--md-secondary-container); color: var(--md-on-secondary-container); display: grid; place-items: center; flex: none; }
+.s-t { flex: 1; min-width: 0; }
+.s-t b { display: block; font-size: 15.5px; font-weight: 500; }
+.s-t small { display: block; margin-top: 1px; font-size: 13px; line-height: 1.4; color: var(--md-on-surface-variant); }
+.lsw { width: 52px; height: 32px; border-radius: 16px; flex: none; position: relative; background: var(--md-primary); }
+.lsw::after { content: ""; position: absolute; left: 24px; top: 4px; width: 24px; height: 24px; border-radius: 50%; background: var(--md-on-primary); }
+.lsw.off { background: var(--md-surface-container-highest); box-shadow: inset 0 0 0 2px var(--md-outline); }
+.lsw.off::after { left: 8px; top: 8px; width: 16px; height: 16px; background: var(--md-outline); }
+.lctg { display: flex; gap: 2px; margin: 0 16px; }
+.lctg span { flex: 1; height: 48px; display: grid; place-items: center; background: var(--md-surface-container); color: var(--md-on-surface-variant); font-weight: 600; font-size: 14px; border-radius: 8px; cursor: pointer; }
+.lctg span:first-child { border-radius: 24px 8px 8px 24px; } .lctg span:last-child { border-radius: 8px 24px 24px 8px; }
+.lctg span.on { background: var(--md-primary); color: var(--md-on-primary); border-radius: 24px; }
+.lnote { margin: 8px 20px 0; font-size: 14px; line-height: 1.55; color: var(--md-on-surface-variant); }
+.vcard { margin: 0 16px; padding: 14px 16px; border-radius: 16px; background: var(--md-surface-container); }
+.vcard .hd { display: flex; align-items: center; gap: 12px; }
+.vcard .hd .ico { color: var(--md-primary); }
+.vcard .hd div { flex: 1; } .vcard .hd b { display: block; font-size: 14px; font-weight: 700; } .vcard .hd small { display: block; font-size: 14px; color: var(--md-on-surface-variant); line-height: 1.45; }
+.vcard .hd em { font-style: normal; font-size: 16px; font-weight: 800; color: var(--md-primary); }
+.lsl { position: relative; height: 44px; margin-top: 6px; cursor: pointer; }
+.lsl .tr { position: absolute; left: 0; right: 0; top: 14px; height: 16px; border-radius: 8px; background: var(--md-secondary-container); }
+.lsl .fi { position: absolute; left: 0; top: 14px; height: 16px; border-radius: 8px 2px 2px 8px; background: var(--md-primary); }
+.lsl .hd2 { position: absolute; top: 0; width: 4px; height: 44px; margin-left: -2px; border-radius: 2px; background: var(--md-primary); }
+.lsl .tk { position: absolute; top: 20px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--md-on-secondary-container); opacity: .55; }
+.lsl.focus { outline: 3px solid var(--md-on-surface); outline-offset: 4px; border-radius: 12px; }
+
+@media (max-width: 980px) { .twin, .dotsdemo { grid-template-columns: 1fr; } .devices { grid-template-columns: 1fr; max-width: 380px; margin-inline: auto; } .phases { grid-template-columns: 1fr; } }
+@media (max-width: 420px) { .phone { transform: scale(.86); transform-origin: top left; margin-bottom: -112px; } }
+</style>
+</head>
+<body>
+
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></symbol>
+  <symbol id="i-heart-o" viewBox="0 0 24 24"><path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18A3 3 0 1 0 19 17V8h3V6h-5z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></symbol>
+  <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h12v2H4zm0 5h9v2H4zm14.5-3a2.5 2.5 0 1 0 2.5 2.5V10h2V8h-3v5.05A2.5 2.5 0 0 0 18.5 13z"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><path d="M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z"/></symbol>
+  <symbol id="i-sweep" viewBox="0 0 24 24"><path d="M15 16h4v2h-4zm0-8h7v2h-7zm0 4h6v2h-6zM3 18c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2V8H3v10zM14 5h-3l-1-1H6L5 5H2v2h12z"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61 1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42C16.07 4.74 14.12 4 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M6.99 11 3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/></symbol>
+  <symbol id="i-person" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></symbol>
+</svg>
+
+<header class="page-head">
+  <div class="doc-label">设 计 方 案 · 2 0 2 6 - 1 1 - 2 8</div>
+  <h1>歌词照 <em>Apple Music</em> 的走法换行，切歌照它的走法接</h1>
+  <p class="lede">
+    研究两件事：一是 Apple Music 全屏歌词页<strong>上一句到下一句是怎么过渡的</strong>，二是它<strong>切歌时怎么接</strong>。
+    第一件做成全屏歌词的第 11 种动画「AMLL」，和经典、Rush 并列放在动画面板里；页头、进度条和控件仍是 myMusic 自己的。
+    第二件是在已有的「切歌过渡」上补 Apple 有、我们没有的几处：页面什么时候换到下一首、首尾静音、整张专辑连着放时不过渡、1–12 秒的交叉淡化、播放队列里随手开关。
+  </p>
+  <div class="chips">
+    <span class="chip2"><span class="dot"></span>歌词参数来源：<b>amll-dev/applemusic-like-lyrics</b> @ 4d8e027（core 0.7.2，AGPL-3.0）</span>
+    <span class="chip2">切歌来源：<b>Apple 支持文档</b>「Transition songs」「105067」与 iOS 26 新闻稿</span>
+    <span class="chip2">新模式 <b>1</b> 个 · 新依赖 <b>0</b> 个</span>
+  </div>
+  <nav class="toc">
+    <a href="#verdict"><b>00</b>结论</a><a href="#line"><b>01</b>上下句怎么过渡</a><a href="#word"><b>02</b>一句之内</a><a href="#dots"><b>03</b>间奏三点</a><a href="#bg"><b>04</b>封面网格背景</a>
+    <a href="#skipvis"><b>05</b>切歌：画面</a><a href="#skipaudio"><b>06</b>切歌：声音</a><a href="#devices"><b>07</b>平板、折叠屏和电视</a><a href="#panel"><b>08</b>动画面板</a><a href="#impl"><b>09</b>实现和分期</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="block" id="verdict">
+  <div class="block-head"><span class="kicker">00</span><h2>结论</h2></div>
+  <p class="sub">Apple 没有公开歌词页的动画参数。这里的数都取自 <strong>AMLL</strong>：它是照 Apple Music 歌词页做的开源组件，源码注释里写明了哪些值是对着 Apple Music 调的（例如渐变宽度「模拟 Apple Music for iPad 的效果，可以设置为 0.5」）。切歌部分只用 Apple 官方文档里写到的行为。
+    现有的经典和 Rush 换行时<strong>整列一起滚</strong>；Apple Music 的感觉来自<strong>每句各有一个弹簧、从上往下一句晚 50 毫秒出发</strong>，再加上当前句只比别的句子大 3%、别的句子按距离发虚。</p>
+  <div class="tiles">
+    <div class="tile"><b>50 ms</b><span>每往下一句晚出发</span><small>过了当前句，间隔每句再乘 1/1.05</small></div>
+    <div class="tile"><b>97%</b><span>非当前句的大小</span><small>经典是当前句放大 1.22 倍</small></div>
+    <div class="tile"><b>85 / 34 / 20</b><span>唱到 / 没唱到 / 其它句的亮度 %</span><small>经典是 100 / 60 / 38</small></div>
+    <div class="tile"><b>7 秒</b><span>空档到这么长才出三点</span><small>Rush 是 5 秒；三点会呼吸、退场前蓄力</small></div>
+    <div class="tile"><b>1–12 秒</b><span>Apple 的交叉淡化时长</span><small>我们现在只有 4 / 6 / 8 / 10</small></div>
+  </div>
+  <div class="note"><b>一句话：</b>动画面板选「AMLL」后，换句时下面的句子像被上一句一个个推上去；唱到的字从左往右亮起并微微上浮，拖长的字会一个个放大发光；和声在轮到时从句子下面展开，「男：」「女：」对唱分左右；间奏出三颗会呼吸的点；背景是封面揉成的网格。
+    切歌时，自动接歌过了交叉点（或下一首第一句快开始时）页面就换到下一首，新歌词从下面整体飞上来；智能过渡会先裁掉首尾静音，整张专辑连着放时不叠；交叉淡化可以设 1–12 秒；播放队列里当前这首下面多一行「切歌过渡」开关。</div>
+</section>
+
+<section class="block" id="line">
+  <div class="block-head"><span class="kicker">01</span><h2>上下句怎么过渡（交互稿）</h2></div>
+  <p class="sub">左边是全屏歌词页，右边是每次换句时各句的位移曲线。用上面的按钮在<strong>「AMLL（新）」和「经典（现在）」</strong>之间切换对比；<strong>慢放</strong>能看清一句推一句；「到下一句前」直接跳到换句前 0.8 秒。歌词能拖动、滚轮滚动，点一句跳过去。歌名、歌词和封面都是为这份稿子写的示例。</p>
+  <div class="demo-bar" id="barMain">
+    <div class="grp"><button data-mode="amll" class="on">AMLL（新）</button><button data-mode="classic">经典（现在）</button></div>
+    <span class="sep"></span>
+    <div class="grp"><button id="btnPlay" class="on">播放中</button><button id="btnSlow">慢放 ×0.25</button><button id="btnNextLine" class="act">到下一句前</button><button id="btnSkip" class="act">切到下一首</button></div>
+    <span class="sep"></span>
+    <div class="grp"><button id="btnReduce">减少动画</button><button data-sub="tr" class="on">翻译</button><button data-sub="off">不显示翻译</button></div>
+  </div>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr" id="phA"></div></div>
+      <figcaption><b>① 全屏歌词页 · AMLL</b>背景是这个模式自己画的封面网格（第 04 节），铺到状态栏和导航条下面。歌词排在页头和控件之间，上下两端渐隐。页头和控件颜色仍跟着封面，换歌时一起变。</figcaption>
+    </figure>
+    <figure>
+      <div class="chart">
+        <h4>② 最近一次换句：每句的位移</h4>
+        <p>横轴是换句后的时间（0–1.2 秒），纵轴是每句走完了多少路。AMLL 的曲线一条条错开，越往下越晚；经典只有一条线，所有句同时动。</p>
+        <canvas id="curve" width="388" height="230"></canvas>
+        <div class="legend" id="legend"></div>
+        <div class="readout" id="readout">等第一次换句…</div>
+      </div>
+    </figure>
+  </div>
+
+  <h3>换句这一下同时发生的事</h3>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:15%">项目</th><th style="width:46%">AMLL（照着做）</th><th>经典（现在）</th></tr></thead>
+    <tbody>
+      <tr><td>哪句算当前句</td><td>正在唱的句子都亮；一句唱完<b>不马上灭</b>，等下一句开始才一起灭；两句时间重叠时两句同时亮。焦点对着亮着的句子里最靠前的那句</td><td>按开始时间取最后一句，一次只亮一句</td></tr>
+      <tr><td>停在哪</td><td>焦点句的中心对齐视口高度的 <b>35%</b> 处</td><td>42% 处</td></tr>
+      <tr><td>怎么滚</td><td><b>每句一个弹簧</b>。从视口里最上面那句开始，每往下一句晚 <b>50 ms</b> 出发；过了当前句，这个间隔每句再乘 1/1.05。滚出视口上方的句子不算延迟</td><td>整列一个弹簧，所有句同时动</td></tr>
+      <tr><td>弹簧多硬</td><td>质量 0.9。正常播放按这句和上一句的开始间隔调：间隔 ≤100 ms 时刚度 220，≥800 ms 时 170，中间按间隔开五次方根插值；阻尼 = 2.2 × √刚度（略过阻尼，不回弹）。跳转、间奏、第一句用刚度 90、阻尼 15（轻微回弹）；播完用 140 / 22</td><td>MotionScheme.expressive 的 slowSpatial（阻尼比 0.8、刚度 200）</td></tr>
+      <tr><td>大小</td><td>当前句 100%，其余 <b>97%</b>，弹簧质量 2、阻尼 25、刚度 100，和位移用同一个延迟；暂停时全部回到 100%</td><td>当前句放大到 1.22 倍，其余原大</td></tr>
+      <tr><td>亮度</td><td>两层叠：亮层按逐字进度一半 100%、一半 40%，暗层整句 20%；用加亮混合。进当前句时亮层 0.3 秒淡入、暗层淡出，离开时 0.45 秒换回去。当前句整体再乘 85%</td><td>当前句 100%，相邻 60%，更远 38%</td></tr>
+      <tr><td>模糊</td><td>下方第 n 句 (1+n) px，上方第 n 句 (2+n) px，最多 5 px；视口窄于 1024 时乘 0.8；0.4 秒过渡；手指拖动时全部去掉</td><td>只有隔两句以上才 1.4 dp</td></tr>
+      <tr><td>手动滚动</td><td>拖动时跟手；停手 0.5 秒后，<b>等到下一次换句</b>才回到当前句</td><td>停手 3 秒后滚回来</td></tr>
+      <tr><td>跳转、点句</td><td>不错峰，整体用慢弹簧滑过去；间奏三点重新开始</td><td>同一个弹簧</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note plain"><b>为什么错峰看起来像「推」：</b>上面的句子先走，下面的句子还停着，句与句之间被临时拉开，后面的句子再依次追上来、合拢。所有弹簧都略过阻尼，没有回弹，所以整体是稳的；只有跳转这种大跨度才用会轻微回弹的慢弹簧。</div>
+</section>
+
+<section class="block" id="word">
+  <div class="block-head"><span class="kicker">02</span><h2>一句之内：逐字、长音、和声、对唱</h2></div>
+  <p class="sub">左边循环放一句带长音的中文和一句英文，右边循环放一段对唱和和声。都可以慢放看细节。</p>
+  <div class="demo-bar static" id="barWord">
+    <div class="grp"><button id="wSlow" class="on">慢放 ×0.35</button><button id="wEmp" class="on">长音强调</button><button id="wFloat" class="on">逐字上浮</button><button id="wFade" class="on">羽化 0.5 字</button></div>
+  </div>
+  <div class="twin">
+    <figure><div class="wide" id="wideA"></div><figcaption><b>逐字和长音。</b>「晚安」唱了 1.6 秒、「wind」唱了 1.4 秒，都超过 1 秒，逐字放大、往两边轻推、发白光；它们又是整句最后一个词，效果再加强。其它字只是扫亮、上浮一点点。</figcaption></figure>
+    <figure><div class="wide" id="wideB"></div><figcaption><b>对唱和和声。</b>原歌词写着「男：」「女：」「合：」，前缀去掉，女声那句靠右；「（再唱一遍）」是和声，轮到这句时才在下面展开，字号 0.7 倍、40% 亮度，上浮是主句的两倍。</figcaption></figure>
+  </div>
+  <div class="scroll" style="margin-top:22px"><table>
+    <thead><tr><th style="width:14%">项目</th><th style="width:46%">AMLL</th><th>移植时</th></tr></thead>
+    <tbody>
+      <tr><td>逐字扫光</td><td>每个词一张横向渐变遮罩：唱过 100%、没唱 40%，交界处羽化宽度 = 0.5 × 字号（注释：模拟 Apple Music for iPad 用 0.5）</td><td>和 Rush 一样用 DstIn 渐变画，只有亮着的句子每帧重画</td></tr>
+      <tr><td>上浮</td><td>每个词唱到时上移 0.05 em，用时 max(1 秒, 这个词的时长)，ease-out，唱完停在上面；和声行上移两倍</td><td>同；离开当前句时 0.25 秒落回</td></tr>
+      <tr><td>长音强调</td><td>词长 ≥ 1 秒才强调：中文按字，英文要 2–7 个字母。强度 a = 时长/2000、辉光 b = 时长/3000（大于 1 开方、小于 1 立方），再乘 0.6 / 0.5；整句最后一个词 a × 1.6、b × 1.5、时长 × 1.2；上限 1.2 / 0.8。每个字晚 时长/2.5/字数 出发，先放大到 1 + 0.1a、往两侧推 0.03a em、上提 0.025a em、白色辉光 b，过半后收回</td><td>同。辉光用 0.3 em 的模糊阴影；Android 12 以下没有实时模糊，只保留缩放和上浮</td></tr>
+      <tr><td>和声</td><td>背景人声行：字号 0.7 倍、40%；不在当前句时收起（缩到 75%、不占位置），轮到时展开，把下面的句子推开</td><td>我们的歌词源都没有和声标记：只认<b>句末的括号段</b>「…（…）」和<b>整句都在括号里的行</b>，括号去掉显示</td></tr>
+      <tr><td>对唱</td><td>第二位歌手靠右，缩放原点在右；整首有对唱时，靠左的句子右边留 15%、靠右的句子左边留 15%；间奏三点跟着下一句靠哪边</td><td>源里也没有歌手标记：认中文歌词常见的「男：」「女：」「合：」前缀（全角半角冒号都认），一个前缀管到下一个前缀为止；「女」靠右，「男」「合」靠左；前缀不显示</td></tr>
+      <tr><td>翻译行</td><td>句子下面，0.5 倍字号、30%</td><td>跟应用里「歌词下面那一行」的设置（翻译 / 罗马音 / 都显示）</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note plain"><b>经典模式不受影响：</b>前缀和括号的识别只在 AMLL 模式里做，<code>LyricsParser</code> 和其它模式看到的歌词原样不变。没有逐字时间的歌词按字数均分时间，和其它模式一致；长音强调在这种歌词上不触发（均分出来的字长没有意义）。</div>
+</section>
+
+<section class="block" id="dots">
+  <div class="block-head"><span class="kicker">03</span><h2>间奏三点</h2></div>
+  <p class="sub">上一句唱完到下一句开始隔了 <strong>7 秒以上</strong>（第一句开始前也算），焦点就从句子换到三颗点上。下面左边是三点本身，右边是同一段 7.8 秒间奏里整组的缩放和三颗点的亮度。</p>
+  <div class="dotsdemo">
+    <div class="dotsbox" id="dotsBox"></div>
+    <div class="dotsplot"><canvas id="dotsPlot" width="860" height="220" style="width:100%;height:auto"></canvas></div>
+  </div>
+  <div class="scroll" style="margin-top:22px"><table>
+    <thead><tr><th style="width:14%">阶段</th><th style="width:50%">AMLL</th><th>Rush（现在）</th></tr></thead>
+    <tbody>
+      <tr><td>出现条件</td><td>句间空档 ≥ 7 秒；挂在空档前那句下面，高度 = 点 + 上下各 0.4 em</td><td>≥ 5 秒，单独一行</td></tr>
+      <tr><td>进场</td><td>不是开头的空档先等 0.5 秒（让歌词先滑上去）；整组 180 ms 淡入；三颗点各错开 80 ms、各用 750 ms 淡入</td><td>直接出现</td></tr>
+      <tr><td>点亮</td><td>三颗点依次从 20% 点到 90%：每段 = (主体时长 + 750 ms) / 3；第三颗只点到一部分，剩下的留给退场补满</td><td>第 i 颗进度 (p − 0.15i) × 1.4</td></tr>
+      <tr><td>呼吸</td><td>整组在 1 ↔ 1.25 倍之间缩放，周期约 4 秒，按主体时长取整周期；主体不足 3 秒时不呼吸、直接全亮</td><td>每颗 1 → 1.8 倍</td></tr>
+      <tr><td>退场</td><td>下一句开始前 1 秒：先 750 ms 放大到 1.25 倍蓄力，再 250 ms 缩到 0.4 倍并淡出，正好在下一句开始时消失</td><td>随句子滚走</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="block" id="bg">
+  <div class="block-head"><span class="kicker">04</span><h2>背景：封面揉成的网格</h2></div>
+  <p class="sub">AMLL 的默认背景是把封面<strong>压低对比 → 饱和度 ×3 → 对比 ×1.7 → 亮度 0.75</strong> 再模糊，贴到一张由控制点生成的网格上（每张封面随机挑一套控制点），网格本身不动，纹理慢慢转；四周压暗到 60%；低频响度越大纹理放得越大。换封面时新网格叠在上面 <strong>0.5 秒</strong>内淡入，淡完删掉旧的。点下面的封面看换封面的过渡。</p>
+  <div class="demo-bar static" id="barBg">
+    <div class="grp" id="bgCovers"></div><span class="sep"></span><div class="grp"><button id="bgBeat">跟低频</button></div>
+  </div>
+  <div class="twin">
+    <figure><div class="wide" id="bgMesh" style="height:280px"></div><figcaption><b>网格（AMLL 模式默认）。</b>Android 上用 <code>Canvas.drawVertices</code> 贴一张处理过的封面小图（<code>BitmapShader</code>），网格换封面时生成一次，每帧只改着色器的旋转矩阵；和现有流光背景一样画在半分辨率离屏图层里。</figcaption></figure>
+    <figure><div class="wide" id="bgFlow" style="height:280px"></div><figcaption><b>流光（现在的宿主背景）。</b>封面取色的几团光漂移。AMLL 模式的设置里保留「流光」这一项，选它就直接用宿主的 <code>LyricsBackdrop</code>，律动强度、跟拍校准都照旧。</figcaption></figure>
+  </div>
+</section>
+
+<section class="block" id="skipvis">
+  <div class="block-head"><span class="kicker">05</span><h2>切歌：画面怎么换</h2></div>
+  <p class="sub">分两种。<strong>手动切歌</strong>（点下一首、通知栏、耳机）：AMLL 把旧歌词撤掉，新歌词的每一句都从视口下方两个屏高处同时出发，用慢弹簧（刚度 90、阻尼 15）飞到各自的位置，不错峰；因为起点相同，句子一开始挤在一起，越接近越散开。封面背景 0.5 秒淡入。第 01 节的「切到下一首」就是这个。
+  <strong>自动接歌</strong>是我们自己的问题：现在要等淡化<strong>全部做完</strong>才换主播放器，播放页、通知栏、状态栏歌词才换到下一首；8–12 秒的淡化里，下一首可能已经唱了一两句。</p>
+  <div class="demo-bar static" id="barMix">
+    <div class="grp"><button data-sw="end">现在：淡完才换页</button><button data-sw="early" class="on">改后：提前换页</button></div><span class="sep"></span>
+    <div class="grp"><button id="mixPlay" class="act">播放这次接歌</button></div>
+  </div>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr" id="phB"></div></div>
+      <figcaption><b>① 接歌时的全屏歌词页</b>上一首《潮汐来信》尾奏和下一首《雾港》开头等功率叠 8 秒。拖右边的时间条，看两种换页时机下页面上是哪首、哪句。</figcaption>
+    </figure>
+    <figure>
+      <div class="mixline">
+        <h4>② 这次接歌的时间线</h4>
+        <p>红线是上一首的音量，蓝线是下一首。竖线是两个换页点：<b>交叉点</b>（两边一样响）和<b>下一首第一句前 0.3 秒</b>，取早的那个，但不早于上一首最后一句唱完。</p>
+        <svg id="mixSvg" viewBox="0 0 520 210"></svg>
+        <input type="range" id="mixRange" min="0" max="1000" value="80">
+        <div class="hear"><div id="hearNow"></div><div id="seeNow"></div></div>
+      </div>
+    </figure>
+  </div>
+  <div class="scroll" style="margin-top:22px"><table>
+    <thead><tr><th style="width:16%">项目</th><th style="width:40%">改后</th><th>现在</th></tr></thead>
+    <tbody>
+      <tr><td>换页时机</td><td>自动接歌时，在<b>换页点</b>把下一首提升为主播放器：交叉点（等功率、低频交接、尾奏承接都是 t = 0.5；切拍就是切点）和下一首第一句前 0.3 秒取早的，但不早于上一首最后一句唱完。上一首转成「尾巴」继续按原曲线淡完再释放</td><td>淡完（t = 1）才 <code>promote</code></td></tr>
+      <tr><td>歌词</td><td>预载下一首时顺手把歌词取回来进缓存，换页时直接有；新歌词从下方飞入，时钟用下一首自己的进度</td><td>换主后才去取歌词，第一句可能已经过去</td></tr>
+      <tr><td>页头、封面、背景</td><td>和手动切歌一样：小圆封面淡入、网格 0.5 秒淡入、页头配色过渡</td><td>同，但晚了一个淡化长度</td></tr>
+      <tr><td>过渡动画（圆环 / 封面描边）</td><td>不变，仍按整个淡化时长画；换页点之后画在新封面上</td><td>—</td></tr>
+      <tr><td>通知栏、状态栏歌词、小组件</td><td>跟着主播放器在换页点一起换（它们都读 MediaSession）</td><td>淡完才换</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="block" id="skipaudio">
+  <div class="block-head"><span class="kicker">06</span><h2>切歌：声音怎么接</h2></div>
+  <p class="sub">Apple 的做法以官方文档为准：iPhone 在<strong>设置 › App › 音乐 › 歌曲过渡</strong>里选 AutoMix 或交叉淡化；AutoMix 从 iOS 26 起有、默认打开，「像 DJ 一样」接歌，会按音乐挑接法，例如<strong>去掉开头和结尾的静音</strong>或简单交叉淡化，新闻稿说它用<strong>变速（time stretching）和对拍（beat matching）</strong>；交叉淡化时长是 <strong>1–12 秒</strong>的滑块；「待播清单」里有 AutoMix / 交叉淡化按钮，打开时高亮；<strong>专辑和部分流派不过渡</strong>，按顺序播专辑、流派或速度不搭、上传或购买的内容可能不做动态过渡；开着 Hi-Res 无损时两者都不可用。</p>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:14%">项目</th><th style="width:28%">Apple Music</th><th style="width:26%">myMusic 现在</th><th style="width:8%">处理</th><th>做法</th></tr></thead>
+    <tbody>
+      <tr><td>设置入口</td><td>歌曲过渡：AutoMix / 交叉淡化 / 关</td><td>播放与换源 › 切歌过渡：总开关 + 智能过渡 / 交叉淡化 / 不过渡</td><td class="keep">不改</td><td>已经对应上</td></tr>
+      <tr><td>播放中开关</td><td>待播清单里的按钮</td><td>只能去设置</td><td class="yes">照做</td><td>播放队列里当前这首下面加一行「切歌过渡」：左边图标，标题写方式，下面一行写这次会怎么接，右边开关。顶上那排按钮已经放满（窄手机和电视侧边面板只有三百来 dp），不往里塞</td></tr>
+      <tr><td>交叉淡化时长</td><td>1–12 秒滑块</td><td>4 / 6 / 8 / 10 秒</td><td class="yes">照做</td><td>换成和「播放器音量」同款的滑块卡片，1–12 秒、每格 1 秒，默认仍 6 秒；旧值都在范围内，不用迁移。智能过渡自己的时长范围不变</td></tr>
+      <tr><td>首尾静音</td><td>AutoMix 会去掉开头和结尾的静音</td><td>离线分析算了第一个 / 最后一个有声位置，但接歌时没用它裁</td><td class="yes">照做</td><td>上一首的淡出按「最后有声处」结束，而不是文件末尾；下一首从「第一个有声处 − 150 ms」开始放（切拍仍对齐它自己的小节首拍）</td></tr>
+      <tr><td>变速对拍</td><td>变速 + 对拍</td><td>上一首在淡化开始时一下变到目标速度（±6% 内）</td><td class="adj">调整</td><td>改成在淡化的前 1/4 里分 8 步渐变到目标速度，避免一下变调感；每步要真机听有没有咔嗒声，有就退回一步到位</td></tr>
+      <tr><td>整张专辑</td><td>专辑不过渡</td><td>照样叠</td><td class="yes">照做</td><td>下一首和这首 <code>albumId</code> 相同、没开随机时，不叠、直接无缝接；「上一次接歌」记一条「同一张专辑，直接接」</td></tr>
+      <tr><td>流派、上传、购买</td><td>可能不做动态过渡</td><td>—</td><td class="keep">不做</td><td>我们的歌没有可靠的流派数据；本地 / 云盘歌曲本来就能分析，不需要排除</td></tr>
+      <tr><td>Hi-Res 无损</td><td>不可用</td><td>24 位 FLAC 照样能接</td><td class="keep">不做</td><td>我们的混音在解码后做，和音质档位无关，没有理由跟着限制</td></tr>
+      <tr><td>默认值</td><td>AutoMix 默认开</td><td>总开关默认关</td><td class="keep">不改</td><td>老用户的习惯不动</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>设置页：交叉淡化时长改滑块</h3>
+  <div class="devices" id="setPhones"></div>
+
+  <h3>播放队列：当前这首下面一行开关</h3>
+  <p class="sub" style="margin-top:0">点开关就是总开关；方式是「不过渡」时打开会改成「智能过渡」。下一首还没准备好时写方式本身（「交叉淡化 · 6 秒」「智能过渡 · 按两首歌挑接法」），准备好后写这一次的接法（「切拍 · 1.2 秒」「同一张专辑，直接接」）。</p>
+  <div id="dvQueue"></div>
+</section>
+
+<section class="block" id="devices">
+  <div class="block-head"><span class="kicker">07</span><h2>平板、折叠屏和电视</h2></div>
+  <p class="sub">舞台只拿安全区，页头、专注栏、控制条都是各自布局原有的。字号按宿主基准等比；视口宽度超过 1024 时模糊不乘 0.8。电视没有触摸，不接收拖动和点按，景深模糊默认关、帧率按宿主的 30 fps；窗口太矮时和其它模式一样回到经典。每台都是真跑的，切过去才开始动。</p>
+  <div id="dvStage"></div>
+</section>
+
+<section class="block" id="panel">
+  <div class="block-head"><span class="kicker">08</span><h2>动画面板里的设置</h2></div>
+  <p class="sub">AMLL 原组件的选项大多是给开发者调的（锚点、弹簧参数、隐藏已唱句……），面板里只放用户看得懂、会想改的五项，其余 8 项保持原默认值，面板底部照其它移植模式的写法注明。改这里的设置，第 01、07 节的舞台会跟着变。</p>
+  <div class="demo">
+    <figure>
+      <div class="phone"><div class="scr" id="phC"></div></div>
+      <figcaption><b>动画面板 · 选中 AMLL</b>沿用现有 <code>AnimationSheet</code>：两列模式卡片、每首歌换动画、频谱叠加，然后是这个模式的设置。五项都用现有的设置控件，不新造。</figcaption>
+    </figure>
+    <div style="flex:1 1 420px;min-width:300px">
+      <div class="scroll"><table>
+        <thead><tr><th style="width:20%">设置</th><th style="width:30%">选项（默认加粗）</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>背景</td><td><b>网格</b> · 流光 · 纯色</td><td>流光＝宿主的流光 / 律动背景；纯色＝播放页 surface</td></tr>
+          <tr><td>字号</td><td>×0.8 – ×1.4，默认 <b>×1</b></td><td>×1 时手机 30 sp，平板、电视按宿主基准等比</td></tr>
+          <tr><td>景深模糊</td><td>关 · 弱 · <b>中</b> · 强</td><td>按 AMLL 的档位乘 0 / 0.5 / 1 / 1.5；Android 12 起；电视和低内存设备默认关</td></tr>
+          <tr><td>长音强调</td><td><b>开</b> / 关</td><td>唱满 1 秒以上的字逐字放大、发光</td></tr>
+          <tr><td>对唱与和声</td><td><b>开</b> / 关</td><td>认「男：/女：」前缀和括号和声；关掉就按原文一行一行显示</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note plain"><b>保持默认的 8 项：</b>对齐锚点（居中）、对齐位置（35%）、弹簧开关、缩放开关、隐藏已唱句（关）、渐变宽度（0.5 字）、位移和缩放弹簧参数、脏词遮罩（关）。</div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="impl">
+  <div class="block-head"><span class="kicker">09</span><h2>实现和分期</h2></div>
+  <p class="sub">歌词部分是 <code>ui/player/stage/modes/</code> 下一个新模式，<code>LyricVisualizer</code> 接口不用改（Rush 已经加过 <code>interactive</code> 和 <code>seek</code>）。切歌部分改 <code>playback/</code> 里的三个类和队列面板、设置页各一处。</p>
+  <div class="scroll"><table>
+    <thead><tr><th style="width:24%">文件</th><th>内容</th></tr></thead>
+    <tbody>
+      <tr><td><code>AmllVisualizer.kt</code></td><td>id <code>"amll"</code>、显示名「AMLL」、order 2（Rush 后面）；<code>ModOrigin("AMLL", "core 0.7.2", "amll-dev", "AGPL-3.0", kind = "开源组件")</code>；<code>interactive = true</code>；<code>hostSubtitles = false</code>（翻译排在句子里）；<code>hostBackground = false</code>，背景选「流光」时在 <code>Background()</code> 里直接画宿主的 <code>LyricsBackdrop</code></td></tr>
+      <tr><td><code>AmllLyrics.kt</code></td><td><code>StageLine</code> → 句组（主句 / 和声 / 对唱），「男：女：合：」前缀和括号和声在这里识别；算 ≥7 秒的间奏区间</td></tr>
+      <tr><td><code>AmllTimeline.kt</code></td><td>正在唱的集合、亮着的集合（新句开始才熄旧句）、焦点句、跳转判定</td></tr>
+      <tr><td><code>AmllLayout.kt</code></td><td>行高前缀和、35% 对齐、间奏插入、错峰延迟（50 ms，过当前句后 ÷1.05）、模糊档位</td></tr>
+      <tr><td><code>AmllSpring.kt</code></td><td>阻尼振子解析解 + 延迟队列（AMLL 的 <code>utils/spring.ts</code>，其中求解部分注明 MIT · pushkine）；按句间隔取刚度</td></tr>
+      <tr><td><code>AmllLine.kt</code></td><td>一句的绘制：按词 DstIn 渐变遮罩、上浮、长音逐字变换和辉光、亮暗两层插值。不用 LazyColumn：所有句子在一个自定义 <code>Layout</code> 里，位置和缩放在 <code>graphicsLayer</code> 里读弹簧数组，逐帧只重画不重组</td></tr>
+      <tr><td><code>AmllDots.kt</code> / <code>AmllMesh.kt</code></td><td>三点的进场、点亮、呼吸、退场状态机；网格背景（<code>drawVertices</code> + <code>BitmapShader</code>，0.5 秒淡入）</td></tr>
+      <tr><td><code>CrossfadeController.kt</code></td><td>换页点到了就 <code>promote</code>，旧播放器转成「尾巴」按原曲线淡完再释放；<code>CrossfadeStatus.transition</code> 延续到淡完；同专辑不过渡；变速分 8 步渐变</td></tr>
+      <tr><td><code>AutomixPlanner.kt</code></td><td>新字段 <code>switchAtMs</code>；淡出终点改用 <code>outroMs</code>，下一首起点改用 <code>introMs − 150</code></td></tr>
+      <tr><td><code>MusicViewModel.kt</code></td><td>预载下一首地址时顺手把歌词取进缓存；队列行的开关动作</td></tr>
+      <tr><td><code>PlayerSheets.kt</code> / <code>SettingsSubScreens.kt</code></td><td>队列里的「切歌过渡」行；交叉淡化时长滑块卡片（电视上左右键一格 1 秒，复用 <code>tvSliderKeys</code>）</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>许可</h3>
+  <p class="sub" style="margin-top:0">AMLL 是 AGPL-3.0，和本项目相同，可以直接移植：移植的文件头保留原版权声明并写明改动；<code>THIRD_PARTY_NOTICES</code> 加「## AMLL」一节（含弹簧求解部分的 MIT 声明）；开源许可页加一张 AMLL 卡片；README 只加模式名和一行链接。</p>
+
+  <h3>分期和验收</h3>
+  <div class="phases">
+    <div class="phase"><header><span class="tag">P1</span><h3>歌词核心</h3></header><ul>
+      <li>句组、时间线、布局、弹簧、错峰、亮暗两层、逐字扫光和上浮、间奏三点、拖动与点按、减少动画静帧</li>
+      <li>金样本：用 AMLL 的 TS 源码直接跑出弹簧轨迹、错峰延迟序列、刚度表、三点在关键时刻的缩放和亮度，Kotlin 单测逐值比对</li>
+      <li>经典和其它模式一个像素不变</li>
+    </ul></div>
+    <div class="phase"><header><span class="tag">P2</span><h3>一句之内和背景</h3></header><ul>
+      <li>长音强调、和声展开、对唱分边、新歌词飞入</li>
+      <li>网格背景，流光 / 纯色两项接宿主</li>
+      <li>平板、横屏、折叠屏、电视各一张截图；THIRD_PARTY_NOTICES、开源许可页、README</li>
+    </ul></div>
+    <div class="phase"><header><span class="tag">P3</span><h3>切歌</h3></header><ul>
+      <li>换页点提前、尾巴播放器、预取下一首歌词</li>
+      <li>首尾静音、同专辑不过渡、变速渐变</li>
+      <li>时长滑块、队列开关行；<code>AutomixTest</code> 补换页点、静音裁剪和同专辑三组用例</li>
+    </ul></div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <b>参考</b>：AMLL core（packages/core/src/lyric-player、bg-render/mesh-renderer，@4d8e0270，2026-11-28 拉取）；Apple 支持文档「在 iPhone 上的“音乐”中过渡歌曲」、「在 Apple Music 中打开或关闭 AutoMix 或交叉淡化」（support.apple.com/en-us/105067）；Apple Newsroom「iOS 26」新闻稿。<br>
+  <b>本地代码对照</b>：<code>PlayerParts.kt</code>（LyricsList / LyricsSizing）、<code>RushLyricList.kt</code>、<code>CrossfadeController.kt</code>、<code>AutomixPlanner.kt</code>、<code>AutomixAnalysis.kt</code>、<code>PlayerSheets.kt</code>（QueueSheet）、<code>SettingsSubScreens.kt</code>（切歌过渡、PlayerVolumeCard）。<br>
+  稿子里的歌名、歌词、封面都是为本稿编写的示例。
+</footer>
+<script>
+'use strict';
+/* =====================================================================
+   歌词引擎：照 AMLL core（amll-dev/applemusic-like-lyrics @4d8e027）的
+   lyric-player/base（timeline、layout、spring、interlude-dots）和
+   dom/animation（mask、float、emphasize）写成的稿子版本，数值原样。
+   ===================================================================== */
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, k) => a + (b - a) * k;
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+const ico = (id, cls = '') => `<svg class="ico ${cls}"><use href="#i-${id}"/></svg>`;
+const hsl = (h, s, l) => { s /= 100; l /= 100; const f = n => { const k = (n + h / 30) % 12; return l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }; return [f(0) * 255, f(8) * 255, f(4) * 255]; };
+const rgb = (a, al = 1) => `rgba(${a[0] | 0},${a[1] | 0},${a[2] | 0},${al})`;
+const cookiePath = (() => { let d = ''; for (let i = 0; i <= 120; i++) { const a = i / 120 * Math.PI * 2, r = 28 * (0.93 + 0.07 * Math.cos(12 * a)); d += (i ? 'L' : 'M') + (28 + r * Math.cos(a)).toFixed(2) + ' ' + (28 + r * Math.sin(a)).toFixed(2); } return d + 'Z'; })();
+const cookiePoly = (lobes = 12, amp = .06) => { const p = []; for (let i = 0; i < 96; i++) { const a = i / 96 * Math.PI * 2, r = 50 * (1 - amp + amp * Math.cos(lobes * a)); p.push(`${(50 + r * Math.cos(a)).toFixed(2)}% ${(50 + r * Math.sin(a)).toFixed(2)}%`); } return `polygon(${p.join(',')})`; };
+
+/* 三次贝塞尔缓动（bezier-easing 的牛顿迭代 + 二分兜底） */
+function bezier(p1x, p1y, p2x, p2y) {
+  const cx = 3 * p1x, bx = 3 * (p2x - p1x) - cx, ax = 1 - cx - bx;
+  const cy = 3 * p1y, by = 3 * (p2y - p1y) - cy, ay = 1 - cy - by;
+  const sx = t => ((ax * t + bx) * t + cx) * t, sy = t => ((ay * t + by) * t + cy) * t, dx = t => (3 * ax * t + 2 * bx) * t + cx;
+  return x => {
+    if (x <= 0) return 0; if (x >= 1) return 1;
+    let t = x;
+    for (let i = 0; i < 8; i++) { const e = sx(t) - x; if (Math.abs(e) < 1e-5) return sy(t); const d = dx(t); if (Math.abs(d) < 1e-6) break; t -= e / d; }
+    let lo = 0, hi = 1; t = x;
+    for (let i = 0; i < 40; i++) { const v = sx(t); if (Math.abs(v - x) < 1e-5) break; if (v < x) lo = t; else hi = t; t = (lo + hi) / 2; }
+    return sy(t);
+  };
+}
+const cssEaseOut = bezier(0, 0, .58, 1);
+const easeInOutSine = x => -(Math.cos(Math.PI * x) - 1) / 2;
+/* emphasize/index.ts 的强调曲线：前半 bezIn 升到 1，后半 1 − bezOut 落回 0 */
+const bezIn = bezier(.2, .4, .58, 1), bezOut = bezier(.3, 0, .58, 1);
+const empEasing = x => x < .5 ? bezIn(x / .5) : 1 - bezOut((x - .5) / .5);
+/* interlude-dots.ts 的五条曲线 */
+const lightingEasing = bezier(.56, .01, .45, 1), enterFadeEasing = bezier(.59, .02, .07, 1);
+const exitPhase1Easing = bezier(.14, .06, .25, 1), exitPhase2Easing = bezier(.29, .03, 1, .38), exitFadeEasing = bezier(.43, .08, .83, .31);
+
+/* ---------- 弹簧：阻尼振子解析解 + 延迟队列（utils/spring.ts） ---------- */
+class Spring {
+  constructor(p = 0) { this.p = p; this.to = p; this.from = p; this.v0 = 0; this.t = 0; this.m = 1; this.c = 10; this.k = 100; this.q = null; this.rest = true; }
+  at(t) {
+    const x0 = this.from - this.to, v0 = this.v0, w0 = Math.sqrt(this.k / this.m), z = this.c / (2 * Math.sqrt(this.k * this.m));
+    if (z < 1) { const wd = w0 * Math.sqrt(1 - z * z); return this.to + Math.exp(-z * w0 * t) * (x0 * Math.cos(wd * t) + (v0 + z * w0 * x0) / wd * Math.sin(wd * t)); }
+    return this.to + (x0 + (v0 + w0 * x0) * t) * Math.exp(-w0 * t);
+  }
+  vel() { if (this.rest) return 0; const h = 1e-3; return (this.at(this.t + h) - this.at(this.t)) / h; }
+  params(o) {
+    const v = this.vel(); this.from = this.p; this.v0 = v; this.t = 0;
+    if (o.mass != null) this.m = o.mass; if (o.damping != null) this.c = o.damping; if (o.stiffness != null) this.k = o.stiffness;
+  }
+  target(to, delay = 0) {
+    if (delay > 0) { this.q = { to, d: delay }; return; }
+    this.q = null;
+    if (Math.abs(to - this.to) < 1e-3) return;
+    const v = this.vel(); this.from = this.p; this.v0 = v; this.t = 0; this.to = to; this.rest = false;
+  }
+  snap(p) { this.p = this.to = this.from = p; this.v0 = 0; this.t = 0; this.q = null; this.rest = true; }
+  step(dt) {
+    if (this.q) { this.q.d -= dt; if (this.q.d <= 0) { const to = this.q.to; this.q = null; this.target(to); } }
+    if (this.rest) return;
+    this.t += dt; this.p = this.at(this.t);
+    if (Math.abs(this.p - this.to) < .01 && Math.abs(this.vel()) < .01) this.snap(this.to);
+  }
+}
+/* base/spring.ts：纵向弹簧按句间隔取刚度 */
+function posYPolicy(slow, intervalMs) {
+  if (slow || intervalMs == null) return { stiffness: 90, damping: 15 };
+  const c = clamp(intervalMs, 100, 800), ratio = Math.pow(1 - (c - 100) / 700, .2), k = 170 + ratio * 50;
+  return { stiffness: k, damping: Math.sqrt(k) * 2.2 };
+}
+const SCALE_SPRING = { mass: 2, damping: 25, stiffness: 100 }, BG_SCALE_SPRING = { mass: 1, damping: 20, stiffness: 50 };
+/* 经典：MotionScheme.expressive 的 slowSpatial（阻尼比 0.8、刚度 200） */
+const CLASSIC_SPRING = { mass: 1, stiffness: 200, damping: 2 * .8 * Math.sqrt(200) };
+/* base/consts.ts 的排版策略 */
+const STRAT = {
+  tick: { stagger: true, snap: false }, seek: { stagger: false, snap: false }, rebuild: { stagger: false, snap: false },
+  wheel: { stagger: false, snap: false }, drag: { stagger: false, snap: true }, config: { stagger: false, snap: false }, place: { stagger: false, snap: true },
+};
+/* base/line.ts：长音强调的条件 */
+const isCJK = s => /[぀-ヿ㐀-鿿豈-﫿가-힯]/.test(s);
+function shouldEmphasize(w) {
+  const d = w.e - w.s, t = w.text.trim();
+  if (isCJK(t)) return d >= 1000;
+  return d >= 1000 && t.length <= 7 && t.length > 1;
+}
+function emphasisParams(w, last) {
+  let du = Math.max(1000, w.e - w.s);
+  let amount = du / 2000; amount = amount > 1 ? Math.sqrt(amount) : amount ** 3;
+  let blur = du / 3000; blur = blur > 1 ? Math.sqrt(blur) : blur ** 3;
+  amount *= .6; blur *= .5;
+  if (last) { amount *= 1.6; blur *= 1.5; du *= 1.2; }
+  return { amount: Math.min(1.2, amount), blur: Math.min(.8, blur), du };
+}
+
+/* ---------- 间奏三点：interlude-dots.ts 的状态机（按时间直接求值） ---------- */
+function dotsState(ms, inter) {
+  const delayEnd = inter.s + (inter.intro ? 0 : 500), bodyEnd = inter.e - 1000, body = bodyEnd - delayEnd;
+  if (body <= 0 || ms < delayEnd || ms >= inter.e) return { opacity: 0, scale: 1, dots: [0, 0, 0], phase: ms < delayEnd ? 'hold' : 'off' };
+  const internal = ms - delayEnd;
+  const hold = body < 3000;
+  const cycles = Math.max(1, Math.floor(body / 4000)), period = body / cycles;
+  const seg = Math.round((body + 750) / 3), d3 = body - seg * 2, d3T = hold ? 1 : d3 / seg;
+  const enterOp = enterFadeEasing(clamp(internal / 180));
+  const frac = (start, dur, target) => internal <= start ? 0 : lightingEasing(clamp((internal - start) / dur)) * target;
+  const dotOp = (i, f) => (.2 + .7 * clamp(f)) * Math.pow(clamp((internal - i * 80) / 750), 2);
+  let opacity, scale, f, phase;
+  if (ms >= bodyEnd) {
+    const ex = ms - bodyEnd, fadeT = clamp((ex - 750) / 250);
+    opacity = enterOp * (1 - exitFadeEasing(fadeT));
+    scale = ex < 750 ? 1 + exitPhase1Easing(ex / 750) * .25 : 1.25 - exitPhase2Easing(clamp((ex - 750) / 250)) * (1.25 - .4);
+    f = [1, 1, d3T + (1 - d3T) * clamp(ex / 750)]; phase = 'exit';
+  } else {
+    opacity = enterOp;
+    if (hold) { scale = 1; f = [1, 1, 1]; }
+    else {
+      const t = (internal % period) / period, a = 4 * Math.PI * t, s = Math.sin(a), c = Math.cos(a);
+      const p = t <= 0 ? 0 : t >= 1 ? 1 : t - .084 * s + .008 * (1 - c) + .0046 * s * (c - s);
+      scale = p <= .5 ? 1 + p / .5 * .25 : 1.25 - (p - .5) / .5 * .25;
+      f = [frac(0, seg, 1), frac(seg, seg, 1), frac(seg * 2, d3, d3T)];
+    }
+    phase = 'body';
+  }
+  return { opacity, scale, dots: f.map((x, i) => dotOp(i, x)), phase };
+}
+
+/* ---------- 示例封面（为本稿绘制） ---------- */
+const COVERS = [
+  { id: 'tide', name: '潮汐', hue: 196, stops: ['#ffd27a', '#ff6f61', '#2b5ea8', '#0d1f4a'] },
+  { id: 'fog', name: '雾港', hue: 168, stops: ['#d8f7e4', '#56c2a7', '#1f6f8b', '#13293d'] },
+  { id: 'iris', name: '鸢尾', hue: 280, stops: ['#ffc3e8', '#b56cf0', '#4730a8', '#1a1240'] },
+];
+for (const cv of COVERS) {
+  const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
+  const lg = g.createLinearGradient(0, 0, 256, 256); cv.stops.forEach((s, i) => lg.addColorStop(i / (cv.stops.length - 1), s));
+  g.fillStyle = lg; g.fillRect(0, 0, 256, 256);
+  g.globalAlpha = .75; g.fillStyle = cv.stops[0]; g.beginPath(); g.arc(186, 70, 40, 0, 7); g.fill();
+  g.globalAlpha = .55; g.fillStyle = cv.stops[3]; g.beginPath(); g.moveTo(0, 256); g.lineTo(0, 176); g.quadraticCurveTo(96, 130, 256, 186); g.lineTo(256, 256); g.fill();
+  g.globalAlpha = .35; g.strokeStyle = '#fff'; g.lineWidth = 3; for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(0, 150 + i * 14); g.bezierCurveTo(80, 130 + i * 14, 170, 175 + i * 14, 256, 150 + i * 14); g.stroke(); }
+  g.globalAlpha = 1; cv.img = c; cv.url = c.toDataURL();
+}
+/* 播放页令牌：PlayerTheme 以封面为种子的深色方案，按色相近似 */
+function plTokens(h) {
+  const t = (s, l) => rgb(hsl(h, s, l));
+  return {
+    '--pl-primary': t(90, 84), '--pl-on-primary': t(100, 18), '--pl-primary-container': t(70, 30), '--pl-on-primary-container': t(90, 90),
+    '--pl-secondary-container': t(45, 24), '--pl-on-secondary-container': t(70, 90), '--pl-tertiary': rgb(hsl((h + 70) % 360, 90, 76)),
+    '--pl-surface': t(55, 5), '--pl-surface-container-low': t(42, 8), '--pl-surface-container': t(36, 11), '--pl-surface-container-high': t(32, 14), '--pl-surface-container-highest': t(28, 18),
+    '--pl-on-surface': t(40, 91), '--pl-on-surface-variant': t(16, 72), '--pl-outline': t(14, 52), '--pl-outline-variant': t(18, 28),
+  };
+}
+const applyTokens = (el, h) => Object.entries(plTokens(h)).forEach(([k, v]) => el.style.setProperty(k, v));
+
+/* ---------- 示例歌曲（为本稿编写）。词用 | 分开，词尾 ~ 表示拖长 ---------- */
+function makeSong(def) {
+  const lines = def.lines.map(([s, e, text, tr]) => {
+    const toks = text.split('|');
+    const wts = toks.map(t => { const hold = t.endsWith('~'); const clean = t.replace(/~$/, '').replace(/^(男|女|合)[：:]/, ''); return Math.max(1, [...clean.trim()].length) * (hold ? 5 : 1); });
+    const sum = wts.reduce((a, b) => a + b, 0);
+    let c = s;
+    const words = toks.map((t, k) => { const d = (e - s) * wts[k] / sum; const w = { text: t.replace(/~$/, ''), s: c, e: c + d }; c += d; return w; });
+    return { s, e, words, tr, raw: words.map(w => w.text).join('') };
+  });
+  let singer = null;
+  for (const L of lines) {
+    const m = L.words[0].text.match(/^(男|女|合)[：:]/);
+    if (m) singer = m[1];
+    const main = [], bg = [];
+    L.words.forEach((w, k) => {
+      let text = w.text; if (k === 0 && m) text = text.slice(m[0].length);
+      if (/^[（(].*[）)]$/.test(text.trim())) bg.push({ ...w, text: text.trim().replace(/^[（(]|[）)]$/g, '') });
+      else main.push({ ...w, text });
+    });
+    L.main = main; L.bg = bg.length ? bg : null; L.duet = singer === '女';
+  }
+  return { ...def, lines, hasDuet: lines.some(l => l.duet) };
+}
+const SONG_A = makeSong({
+  title: '潮汐来信', artist: '示例歌手 · 示例专辑', cover: COVERS[0], dur: 54000, loop: 48500,
+  lines: [
+    [7200, 10700, '城市的|灯 |一盏|一盏|熄灭', 'The city lights go out one by one'],
+    [11000, 14500, '我把|耳机里|的海 |调到|最大', 'I turn the sea in my headphones all the way up'],
+    [14800, 18000, '风从|楼顶|经过|（经过）', 'The wind passes over the rooftop'],
+    [18200, 22200, '顺手|带走|一句|晚安~', 'and carries off a goodnight'],
+    [30000, 33700, '男：你说过|的话 |还在|轨道上|回旋', 'What you said still circles on the tracks'],
+    [34000, 37100, '女：等到|天亮|以前', 'Before the sky turns light'],
+    [37400, 40800, '合：我们|再唱|一遍|（再唱一遍）', "Let's sing it one more time"],
+    [41000, 45400, 'Signal |in |the |evening |wind~', '晚风里的信号'],
+  ],
+});
+const SONG_B = makeSong({
+  title: '雾港', artist: '另一位示例歌手', cover: COVERS[1], dur: 60000, loop: 26000,
+  lines: [
+    [1600, 4700, '雾把|港口|折成|两半', 'The fog folds the harbor in two'],
+    [5000, 8300, '灯塔|替我|数着|浪', 'The lighthouse counts the waves for me'],
+    [8600, 11900, '你在|另一边|招手', 'You wave from the other side'],
+    [12200, 16000, '我听见|汽笛|很远~', 'I hear a horn far away'],
+    [16400, 19600, '像一封|迟到|的信', 'like a letter arriving late'],
+    [20000, 23600, 'Hold |on |to |the |tide', '抓住这阵潮水'],
+  ],
+});
+function sliceSong(src, idx, offset, loop, title) {
+  const lines = idx.map(i => { const L = src.lines[i]; const sh = w => ({ ...w, s: w.s - offset, e: w.e - offset }); return { ...L, s: L.s - offset, e: L.e - offset, words: L.words.map(sh), main: L.main.map(sh), bg: L.bg && L.bg.map(sh) }; });
+  return { ...src, title: title || src.title, lines, hasDuet: lines.some(l => l.duet), loop };
+}
+/* 句间空档 ≥ 7 秒算间奏（timeline.ts 的 MIN_INTERLUDE_GAP）；第一句前也算 */
+function interludesOf(lines) {
+  const out = [];
+  if (lines.length && lines[0].s >= 7000) out.push({ s: 0, e: lines[0].s, anchor: -1, intro: true });
+  let maxEnd = lines.length ? lines[0].e : 0;
+  for (let i = 0; i + 1 < lines.length; i++) {
+    maxEnd = Math.max(maxEnd, lines[i].e);
+    if (lines[i + 1].s - maxEnd >= 7000) out.push({ s: maxEnd, e: lines[i + 1].s, anchor: i, intro: false });
+  }
+  return out;
+}
+
+/* ---------- 面板设置（第 08 节），所有舞台共用 ---------- */
+const SET = { bg: 'mesh', size: 1, blur: 'mid', emphasis: true, duet: true, float: true, fade: .5 };
+const BLUR_K = { off: 0, low: .5, mid: 1, high: 1.5 };
+const STAGES = new Set();
+function settingsChanged(kind) { STAGES.forEach(s => s.refresh(kind)); }
+
+/* =====================================================================
+   舞台：一个歌词视口。mode = 'amll' | 'classic'
+   ===================================================================== */
+class AmStage {
+  constructor(host, o) {
+    this.o = Object.assign({ x: 0, y: 0, w: 360, h: 540, fs: 30, px: 20, interactive: true, tv: false, zoom: 1, sub: true }, o);
+    this.mode = this.o.mode || 'amll';
+    this.el = document.createElement('div'); this.el.className = 'am';
+    Object.assign(this.el.style, { left: this.o.x + 'px', top: this.o.y + 'px', width: this.o.w + 'px', height: this.o.h + 'px' });
+    host.appendChild(this.el);
+    this.dotsEl = document.createElement('div'); this.dotsEl.className = 'adots'; this.dotsEl.innerHTML = '<i></i><i></i><i></i>'; this.el.appendChild(this.dotsEl);
+    this.dotsY = new Spring(0);
+    this.groups = []; this.scroll = 0; this.suspended = false; this.touching = false; this.lastInteract = -1e9;
+    this.playing = true; this.reduce = false; this.onTransition = null; this.onSeek = null;
+    if (this.o.interactive) this.bindInput(); else this.el.classList.add('static');
+    STAGES.add(this);
+  }
+  get amll() { return this.mode === 'amll'; }
+  get fs() { return this.o.fs * SET.size; }
+  setSong(song, fly = false) { this.song = song; this.build(fly); }
+  setMode(m) { if (m === this.mode) return; this.mode = m; this.build(false); }
+  refresh(kind) { if (!this.song) return; if (kind === 'rebuild') this.build(false, true); else this.pending = 'config'; }
+
+  build(fly, keepPos) {
+    const old = this.groups, amll = this.amll, song = this.song;
+    old.forEach(G => { if (fly) { G.el.classList.add('old'); setTimeout(() => G.el.remove(), 320); } else G.el.remove(); });
+    this.groups = [];
+    this.el.classList.toggle('classic', !amll);
+    this.el.classList.toggle('song-duet', amll && SET.duet && song.hasDuet);
+    this.el.style.fontSize = (amll ? this.fs : this.o.fs * SET.size * .78 * 1.22) + 'px';
+    this.el.style.setProperty('--px', this.o.px + 'px');
+    this.inters = amll ? interludesOf(song.lines) : [];
+    song.lines.forEach((L, i) => this.groups.push(this.makeGroup(L, i)));
+    this.measure();
+    this.started = false; this.hi = new Set(); this.prevPlaying = new Set(); this.scrollTo = 0; this.latest = 0; this.inter = null; this.sig = '';
+    this.scroll = 0; this.suspended = false; this.frozen = null; this.ppKey = '';
+    if (fly) { this.groups.forEach(G => G.posY.snap(this.o.h * 2)); this.pending = 'rebuild'; }
+    else this.pending = 'place';
+    this.lastMs = null;
+  }
+
+  makeGroup(L, i) {
+    const amll = this.amll, el = document.createElement('div');
+    el.className = 'ag'; el.dataset.i = i;
+    const duet = amll && SET.duet && L.duet;
+    if (duet) el.classList.add('duet');
+    const line = document.createElement('div'); line.className = 'al' + (duet ? ' duet' : '');
+    const main = document.createElement('div'); main.className = 'am-main';
+    const words = amll ? (SET.duet ? L.main : L.words) : L.words;
+    const ws = this.makeWords(main, words, false);
+    line.appendChild(main);
+    if (this.o.sub && L.tr) { const sub = document.createElement('div'); sub.className = 'am-sub'; sub.textContent = L.tr; line.appendChild(sub); }
+    el.appendChild(line);
+    let bgEl = null, bgWs = null;
+    if (amll && SET.duet && L.bg) {
+      bgEl = document.createElement('div'); bgEl.className = 'bgw';
+      const bm = document.createElement('div'); bm.className = 'am-main'; bgEl.appendChild(bm);
+      bgWs = this.makeWords(bm, L.bg, true); el.appendChild(bgEl);
+    }
+    this.el.insertBefore(el, this.dotsEl);
+    const G = { el, line, L, i, ws, bgEl, bgWs, posY: new Spring(0), scale: new Spring(1), bgScale: new Spring(.75), active: false, bgOn: false,
+      B: amll ? .2 : 1, D: amll ? .2 : 1, fade: null, dirty: true, h0: 0, h1: 0, lastT: '', lastS: '', lastBS: '', lastOp: '', lastBlur: -1 };
+    G.scale.params(amll ? SCALE_SPRING : CLASSIC_SPRING); G.bgScale.params(BG_SCALE_SPRING);
+    if (!amll) { G.scale.snap(1 / 1.22); }
+    else G.scale.snap(.97);
+    return G;
+  }
+  makeWords(host, words, isBg) {
+    const amll = this.amll;
+    return words.map((w, k) => {
+      const span = document.createElement('span'); span.className = 'w';
+      const emp = amll && SET.emphasis && shouldEmphasize(w);
+      if (emp) [...w.text].forEach(ch => { const c = document.createElement('span'); c.className = 'ch'; c.textContent = ch; span.appendChild(c); });
+      else span.textContent = w.text;
+      host.appendChild(span);
+      return { el: span, w, emp, chars: emp ? [...span.children] : null, ep: emp ? emphasisParams(w, k === words.length - 1) : null, isBg, width: 0, pad: 0, last: '' };
+    });
+  }
+  measure() {
+    for (const G of this.groups) {
+      const set = (on, bg) => { G.el.classList.toggle('on', on); if (G.bgEl) G.bgEl.classList.toggle('on', bg); };
+      set(false, false); G.h0 = G.el.offsetHeight;
+      if (!this.amll) { set(true, false); G.h1 = G.el.offsetHeight; }
+      else if (G.bgEl) { set(false, true); G.h1 = G.el.offsetHeight; } else G.h1 = G.h0;
+      set(G.active, G.bgOn);
+      for (const W of [...G.ws, ...(G.bgWs || [])]) { const pad = parseFloat(getComputedStyle(W.el).paddingLeft) || 0; W.pad = pad; W.width = Math.max(1, W.el.offsetWidth - pad * 2); W.last = ''; }
+      G.dirty = true;
+    }
+    this.dotsH = this.dotsEl.offsetHeight || this.fs * 1.1; this.dotsW = this.dotsEl.offsetWidth || this.fs * 2;
+    this.dotMargin = this.fs * .4;
+  }
+
+  /* timeline.ts：正在唱的集合、亮着的集合（新句开始才熄旧句）、焦点句 */
+  updateState(ms, rebuild) {
+    const L = this.song.lines, n = L.length;
+    const playing = new Set(); for (let i = 0; i < n; i++) if (L[i].s <= ms && ms < L[i].e) playing.add(i);
+    const inter = this.amll ? (this.inters.find(g => ms >= g.s && ms < g.e) || null) : null;
+    if (this.amll) {
+      if (rebuild || !this.started) {
+        this.hi = new Set(playing);
+        if (!this.hi.size && !inter) { let k = -1; for (let i = 0; i < n; i++) if (L[i].s <= ms) k = i; if (k >= 0) this.hi.add(k); }
+        this.started = true;
+      } else {
+        const added = [...playing].filter(i => !this.prevPlaying.has(i));
+        if (added.length) { for (const i of [...this.hi]) if (!playing.has(i)) this.hi.delete(i); added.forEach(i => this.hi.add(i)); }
+      }
+      if (inter) this.hi.clear();
+      if (this.hi.size) this.scrollTo = Math.min(...this.hi);
+      else if (inter) this.scrollTo = Math.max(0, inter.anchor);
+    } else {
+      let k = -1; for (let i = 0; i < n; i++) if (L[i].s <= ms) k = i;
+      this.hi = new Set(k >= 0 ? [k] : []); this.scrollTo = Math.max(0, k);
+    }
+    this.prevPlaying = playing; this.inter = inter;
+    this.latest = this.hi.size ? Math.max(...this.hi) : this.scrollTo;
+    const sig = [...this.hi].join(',') + '|' + this.scrollTo + '|' + (inter ? inter.s : '-');
+    const changed = sig !== this.sig; this.sig = sig; return changed;
+  }
+
+  /* layout.ts + index.ts calcLayout：前缀和、35% 对齐、间奏插入、错峰延迟 */
+  layout(reason) {
+    const st = STRAT[reason] || STRAT.config, amll = this.amll, H = this.o.h, n = this.groups.length;
+    const L = this.song.lines;
+    const slow = reason === 'seek' || reason === 'rebuild' || reason === 'place';
+    const interval = this.scrollTo > 0 ? L[this.scrollTo].s - L[this.scrollTo - 1].s : null;
+    const pp = amll ? { mass: .9, ...posYPolicy(slow || !!this.inter, interval) } : CLASSIC_SPRING;
+    const key = pp.stiffness.toFixed(2) + '/' + pp.damping.toFixed(2);
+    if (key !== this.ppKey) { this.ppKey = key; this.groups.forEach(G => G.posY.params(pp)); this.dotsY.params(pp); }
+    this.springInfo = { ...pp, interval, reason };
+    const showDots = amll && !!this.inter;
+    let focal = this.suspended && this.frozen ? this.frozen : showDots ? { type: 'inter', anchor: this.inter.anchor } : { type: 'line', index: this.scrollTo };
+    this.frozen = focal;
+    // 先定每句状态，经典的占位高度跟着缩放走
+    const act = this.groups.map((G, i) => this.hi.has(i) || (i >= this.scrollTo && i < this.latest));
+    const slot = this.groups.map((G, i) => {
+      if (amll) return (G.bgEl && (act[i] || !this.playing)) ? G.h1 : G.h0;
+      const sc = act[i] ? 1 : 1 / 1.22; return (act[i] ? G.h1 : G.h0) * sc + this.fs * .25;
+    });
+    const pre = [0]; for (let i = 0; i < n; i++) pre.push(pre[i] + slot[i]);
+    const ia = focal.type === 'inter' ? focal.anchor : (showDots ? this.inter.anchor : null);
+    const ih = ia != null ? this.dotsH + this.dotMargin * 2 : 0;
+    let ft, fh;
+    if (focal.type === 'line') { const k = Math.min(focal.index, n - 1); ft = pre[k] + (ia != null && k > ia ? ih : 0); fh = slot[k]; }
+    else { ft = pre[focal.anchor + 1]; fh = ih; }
+    const align = amll ? .35 : .42;
+    const total = pre[n] + ih;
+    this.scroll = clamp(this.scroll, Math.min(0, -ft), Math.max(0, H * align - ft - fh / 2 + total - H / 2));
+    const base = H * align - ft - fh / 2 - this.scroll;
+    let delay = 0, step = st.stagger && amll && !this.reduce ? .05 : 0;
+    const snap = st.snap || this.reduce;
+    this.lastDelays = [];
+    for (let i = 0; i < n; i++) {
+      const G = this.groups[i];
+      const y = base + pre[i] + (ia != null && i > ia ? ih : 0);
+      const inView = y <= H * 1.4 && y + slot[i] >= -H * .4;
+      this.applyGroup(G, i, y, snap, delay, act[i], inView);
+      this.lastDelays[i] = delay;
+      if (y + slot[i] >= 0) { delay += step; if (i >= this.scrollTo) step /= 1.05; }
+    }
+    if (ia != null) {
+      const y = base + pre[ia + 1] + this.dotMargin;
+      if (!this.dotsWas || snap) this.dotsY.snap(y); else this.dotsY.target(y);
+      const next = this.groups[ia + 1];
+      this.dotsX = next && next.L.duet && SET.duet && amll ? this.o.w - this.dotsW : 0;
+    }
+    this.dotsWas = ia != null;
+  }
+  applyGroup(G, i, y, snap, delay, active, inView) {
+    const amll = this.amll;
+    if (snap) G.posY.snap(y); else G.posY.target(y, delay);
+    const sT = amll ? (active || !this.playing ? 1 : .97) : (active ? 1 : 1 / 1.22);
+    if (snap) G.scale.snap(sT); else G.scale.target(sT, delay);
+    if (G.bgEl) { const t = active || !this.playing ? 1 : .75; if (snap) G.bgScale.snap(t); else G.bgScale.target(t, delay); }
+    if (active !== G.active) {
+      G.active = active; G.el.classList.toggle('on', active);
+      const to = amll ? (active ? { B: 1, D: .4 } : { B: .2, D: .2 }) : (active ? { B: 1, D: .45 } : { B: 1, D: 1 });
+      G.fade = this.reduce ? null : { from: { B: G.B, D: G.D }, to, t: 0, dur: amll ? (active ? .3 : .45) : .12 };
+      if (this.reduce) { G.B = to.B; G.D = to.D; }
+      if (!active) this.resetWords(G);
+      G.dirty = true;
+    }
+    const bgOn = !!G.bgEl && (active || !this.playing);
+    if (bgOn !== G.bgOn) { G.bgOn = bgOn; G.bgEl.classList.toggle('on', bgOn); }
+    let op;
+    if (!inView) op = 0;
+    else if (amll) op = this.hi.has(i) ? .85 : 1;
+    else { const d = Math.min(2, Math.abs(i - this.scrollTo)); op = d <= 1 ? 1 - .4 * d : .6 - .22 * (d - 1); }
+    let blur = 0;
+    const k = this.o.tv ? 0 : BLUR_K[SET.blur];
+    if (amll && k > 0 && inView && !this.touching && !active) {
+      const d = i < this.scrollTo ? (this.scrollTo - i) + 1 : Math.abs(i - this.latest);
+      blur = Math.min(5, (1 + d) * (this.o.w <= 1024 ? .8 : 1)) * k;
+    } else if (!amll && inView && Math.abs(i - this.scrollTo) >= 2) blur = 1.4;
+    const opS = op.toFixed(2); if (opS !== G.lastOp) { G.lastOp = opS; G.el.style.opacity = opS; }
+    if (Math.abs(blur - G.lastBlur) >= .05) { G.lastBlur = blur; G.el.style.filter = blur > .05 ? `blur(${blur.toFixed(2)}px)` : ''; }
+  }
+  resetWords(G) {
+    for (const W of [...G.ws, ...(G.bgWs || [])]) {
+      W.el.style.transform = '';
+      if (W.chars) W.chars.forEach(c => { c.style.transform = ''; c.style.textShadow = ''; });
+    }
+  }
+
+  /* 每帧：判定换句 → 排版 → 推弹簧 → 写样式 → 逐字 */
+  frame(ms, dt) {
+    if (!this.song) return;
+    const first = this.lastMs == null;
+    const seek = !first && (ms < this.lastMs - 30 || ms - this.lastMs > dt * 1000 + 350);
+    this.lastMs = ms;
+    const changed = this.updateState(ms, first || seek);
+    const now = performance.now();
+    if (!this.amll && this.suspended && !this.touching && now - this.lastInteract >= 3000) { this.suspended = false; this.scroll = 0; this.pending = this.pending || 'seek'; }
+    if (this.pending) { const r = this.pending; this.pending = null; this.layout(r); }
+    else if (seek) this.layout('seek');
+    else if (changed) {
+      if (this.amll && this.suspended && !this.touching && now - this.lastInteract >= 500) { this.suspended = false; this.scroll = 0; }
+      this.layout('tick');
+      if (this.onTransition) this.onTransition(this);
+    }
+    const sdt = this.reduce ? 10 : dt;
+    for (const G of this.groups) {
+      G.posY.step(sdt); G.scale.step(sdt); if (G.bgEl) G.bgScale.step(sdt);
+      const t = `translate3d(0,${G.posY.p.toFixed(2)}px,0)`; if (t !== G.lastT) { G.lastT = t; G.el.style.transform = t; }
+      const s = `scale(${G.scale.p.toFixed(4)})`; if (s !== G.lastS) { G.lastS = s; G.line.style.transform = s; }
+      if (G.bgEl) { const b = `scale(${G.bgScale.p.toFixed(4)})`; if (b !== G.lastBS) { G.lastBS = b; G.bgEl.style.transform = b; } }
+      if (G.fade) { G.fade.t += dt; const k = cssEaseOut(clamp(G.fade.t / G.fade.dur)); G.B = lerp(G.fade.from.B, G.fade.to.B, k); G.D = lerp(G.fade.from.D, G.fade.to.D, k); if (G.fade.t >= G.fade.dur) G.fade = null; G.dirty = true; }
+      if (G.active || G.dirty) { this.paint(G, ms); G.dirty = !!G.fade; }
+    }
+    this.dotsY.step(sdt);
+    this.paintDots(ms);
+  }
+  paint(G, ms) {
+    const amll = this.amll, live = G.active && !this.reduce;
+    for (const W of [...G.ws, ...(G.bgWs || [])]) {
+      const w = W.w, fsz = this.fs * (W.isBg ? .7 : 1);
+      const p = this.reduce && G.active ? 1 : (w.e <= w.s ? (ms >= w.s ? 1 : 0) : clamp((ms - w.s) / (w.e - w.s)));
+      let m;
+      if (Math.abs(G.B - G.D) < .002) m = G.B >= .999 ? 'none' : `linear-gradient(rgba(0,0,0,${G.B.toFixed(3)}),rgba(0,0,0,${G.B.toFixed(3)}))`;
+      else {
+        const f = amll ? Math.max(.0001, fsz * SET.fade) : .5;
+        const x = W.pad - f / 2 + p * (W.width + f);
+        m = `linear-gradient(90deg,rgba(0,0,0,${G.B.toFixed(3)}) ${(x - f / 2).toFixed(1)}px,rgba(0,0,0,${G.D.toFixed(3)}) ${(x + f / 2).toFixed(1)}px)`;
+      }
+      if (m !== W.last) { W.last = m; W.el.style.webkitMaskImage = m === 'none' ? '' : m; W.el.style.maskImage = m === 'none' ? '' : m; }
+      if (!amll || !live) continue;
+      const up = W.isBg ? .1 : .05;
+      if (W.emp && SET.emphasis) {
+        const { amount, blur, du } = W.ep, n = W.chars.length;
+        W.chars.forEach((c, i) => {
+          const st = w.s + du / 2.5 / n * i;
+          const x = clamp((ms - st) / du), tx = empEasing(x);
+          const sc = 1 + tx * .1 * amount, ox = -tx * .03 * amount * (n / 2 - i), oy = -tx * .025 * amount;
+          const xf = clamp((ms - st) / (du * 1.4)), fy = SET.float ? -(Math.sin(xf * Math.PI) * .05 * (W.isBg ? 2 : 1) + xf * up) : 0;
+          c.style.transform = `scale(${sc.toFixed(4)}) translate(${ox.toFixed(4)}em,${(oy + fy).toFixed(4)}em)`;
+          const g = tx * blur; c.style.textShadow = g > .01 ? `0 0 ${Math.min(.3, blur * .3).toFixed(3)}em rgba(255,255,255,${g.toFixed(3)})` : '';
+        });
+      } else if (SET.float) {
+        const k = ms <= w.s ? 0 : cssEaseOut(clamp((ms - w.s) / Math.max(1000, w.e - w.s)));
+        W.el.style.transform = k > 0 ? `translateY(${(-up * k).toFixed(4)}em)` : '';
+      }
+    }
+  }
+  paintDots(ms) {
+    const d = this.dotsEl;
+    if (!this.amll || !this.inter) { if (d.style.opacity !== '0') d.style.opacity = '0'; return; }
+    const s = this.reduce ? { opacity: 1, scale: 1, dots: [.9, .9, .9] } : dotsState(ms, this.inter);
+    d.style.opacity = s.opacity.toFixed(3);
+    d.style.transform = `translate(${this.dotsX || 0}px,${this.dotsY.p.toFixed(2)}px) scale(${s.scale.toFixed(4)})`;
+    [...d.children].forEach((c, i) => c.style.opacity = s.dots[i].toFixed(3));
+  }
+
+  /* 拖动、滚轮、点句（scroll.ts：拖动跟手、去模糊；停手 0.5 秒后等下一次换句才回去） */
+  bindInput() {
+    const el = this.el; let down = null;
+    el.addEventListener('wheel', e => { e.preventDefault(); this.interact(); this.scroll += e.deltaY * .7 / this.o.zoom; this.pending = 'wheel'; }, { passive: false });
+    el.addEventListener('pointerdown', e => { down = { y: e.clientY, s: this.scroll, moved: false }; });
+    window.addEventListener('pointermove', e => {
+      if (!down) return; const dy = (e.clientY - down.y) / this.o.zoom;
+      if (!down.moved && Math.abs(dy) > 10) { down.moved = true; this.touching = true; el.classList.add('drag'); }
+      if (down.moved) { this.interact(); this.scroll = down.s - dy; this.pending = 'drag'; }
+    });
+    window.addEventListener('pointerup', e => {
+      if (!down) return; const moved = down.moved; down = null;
+      if (moved) { this.touching = false; el.classList.remove('drag'); this.lastInteract = performance.now(); this.pending = 'wheel'; return; }
+      const g = e.target.closest && e.target.closest('.ag');
+      if (g && g.parentNode === el && this.onSeek) { this.suspended = false; this.scroll = 0; this.onSeek(this.song.lines[+g.dataset.i].s); }
+    });
+  }
+  interact() { if (!this.suspended) { this.suspended = true; } this.lastInteract = performance.now(); }
+}
+
+/* =====================================================================
+   背景：封面网格（bg-render/mesh-renderer）与宿主流光
+   ===================================================================== */
+function prepTexture(img) {
+  const S = 48, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, 0, 0, S, S);
+  const d = g.getImageData(0, 0, S, S), p = d.data;
+  for (let i = 0; i < p.length; i += 4) {
+    let r = p[i], gg = p[i + 1], b = p[i + 2];
+    r = (r - 128) * .4 + 128; gg = (gg - 128) * .4 + 128; b = (b - 128) * .4 + 128;          // contrast 0.4
+    const gray = r * .3 + gg * .59 + b * .11; r = gray * -2 + r * 3; gg = gray * -2 + gg * 3; b = gray * -2 + b * 3; // saturate 3
+    r = (r - 128) * 1.7 + 128; gg = (gg - 128) * 1.7 + 128; b = (b - 128) * 1.7 + 128;      // contrast 1.7
+    p[i] = r * .75; p[i + 1] = gg * .75; p[i + 2] = b * .75;                                  // brightness 0.75
+  }
+  g.putImageData(d, 0, 0);
+  const c2 = document.createElement('canvas'); c2.width = c2.height = S; const g2 = c2.getContext('2d');
+  g2.filter = 'blur(3px)'; g2.drawImage(c, -6, -6, S + 12, S + 12);
+  return c2;
+}
+function rand(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return ((s >>> 0) % 100000) / 100000; }; }
+class MeshBg {
+  constructor(host, w, h, o = {}) {
+    this.w = w; this.h = h; this.lw = Math.max(40, Math.round(w / 5)); this.lh = Math.max(24, Math.round(h * this.lw / w));
+    this.c = document.createElement('canvas'); this.c.className = 'mbg'; this.c.width = this.lw; this.c.height = this.lh;
+    Object.assign(this.c.style, { width: w + 'px', height: h + 'px', filter: `blur(${Math.round(Math.max(w, h) / 22)}px) saturate(1.1)`, transform: 'scale(1.25)' });
+    host.prepend(this.c); this.g = this.c.getContext('2d');
+    this.states = []; this.time = Math.random() * 100; this.vol = 0; this.beat = !!o.beat;
+  }
+  setCover(cv, immediate) {
+    const r = rand(Math.floor(Math.random() * 1e9)), N = 4, pts = [];
+    for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+      const edge = i === 0 || j === 0 || i === N || j === N;
+      pts.push({ x: i / N + (edge ? 0 : (r() - .5) * .28), y: j / N + (edge ? 0 : (r() - .5) * .28), u: clamp(.15 + .7 * (i / N) + (r() - .5) * .5, .08, .92), v: clamp(.15 + .7 * (j / N) + (r() - .5) * .5, .08, .92) });
+    }
+    this.states.push({ tex: prepTexture(cv.img), alpha: immediate ? 1.1 : 0, pts, N, spin: (r() - .5) * .6 });
+    if (immediate) this.states.splice(0, this.states.length - 1);
+  }
+  frame(dtMs, playing, ms) {
+    if (!this.states.length) return;
+    if (playing) this.time += dtMs / 1000;
+    if (this.beat && playing) { const ph = (ms % 625) / 625; this.vol = .06 * Math.exp(-ph * 6); } else this.vol *= .9;
+    const last = this.states[this.states.length - 1];
+    if (last.alpha < 1.1) last.alpha = Math.min(1.1, last.alpha + dtMs / 500);
+    else if (this.states.length > 1) this.states.splice(0, this.states.length - 1);
+    const g = this.g, W = this.lw, H = this.lh;
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+    this.states.forEach((st, si) => { g.globalAlpha = si === 0 ? 1 : easeInOutSine(clamp(st.alpha)); this.drawMesh(st, W, H); });
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1;
+    const vg = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * .25, W / 2, H / 2, Math.max(W, H) * .75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.4)'); g.fillStyle = vg; g.fillRect(0, 0, W, H);
+  }
+  drawMesh(st, W, H) {
+    const g = this.g, N = st.N, S = st.tex.width, ang = this.time * .05 + st.spin, ca = Math.cos(ang), sa = Math.sin(ang), z = 1 - this.vol * 2;
+    const uv = p => { const cx = p.u - .5, cy = p.v - .5; return [S * (.5 + (ca * cx - sa * cy) * .82 * z), S * (.5 + (sa * cx + ca * cy) * .82 * z)]; };
+    const P = st.pts.map(p => ({ x: p.x * W, y: p.y * H, t: uv(p) }));
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const a = P[j * (N + 1) + i], b = P[j * (N + 1) + i + 1], c = P[(j + 1) * (N + 1) + i], d = P[(j + 1) * (N + 1) + i + 1];
+      tri(g, st.tex, a, b, d); tri(g, st.tex, a, d, c);
+    }
+  }
+}
+function tri(g, img, p0, p1, p2) {
+  const cx = (p0.x + p1.x + p2.x) / 3, cy = (p0.y + p1.y + p2.y) / 3, inf = p => { const dx = p.x - cx, dy = p.y - cy, l = Math.hypot(dx, dy) || 1; return [p.x + dx / l * .9, p.y + dy / l * .9]; };
+  const [x0, y0] = inf(p0), [x1, y1] = inf(p1), [x2, y2] = inf(p2);
+  const [u0, v0] = p0.t, [u1, v1] = p1.t, [u2, v2] = p2.t;
+  const du1 = u1 - u0, dv1 = v1 - v0, du2 = u2 - u0, dv2 = v2 - v0, det = du1 * dv2 - du2 * dv1;
+  if (Math.abs(det) < 1e-6) return;
+  const X1 = p1.x - p0.x, Y1 = p1.y - p0.y, X2 = p2.x - p0.x, Y2 = p2.y - p0.y;
+  const a = (X1 * dv2 - X2 * dv1) / det, b = (Y1 * dv2 - Y2 * dv1) / det, c = (X2 * du1 - X1 * du2) / det, d = (Y2 * du1 - Y1 * du2) / det;
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0);
+  g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.lineTo(x2, y2); g.closePath(); g.clip();
+  g.setTransform(a, b, c, d, p0.x - a * u0 - c * v0, p0.y - b * u0 - d * v0);
+  g.drawImage(img, 0, 0); g.restore();
+}
+/* 宿主流光（LyricsBackdrop 的示意）：封面取色的几团光漂移 */
+class FlowBg {
+  constructor(host, w, h) {
+    this.w = w; this.h = h; this.c = document.createElement('canvas'); this.c.className = 'mbg';
+    this.c.width = Math.round(w / 3); this.c.height = Math.round(h / 3); Object.assign(this.c.style, { width: w + 'px', height: h + 'px' });
+    host.prepend(this.c); this.g = this.c.getContext('2d'); this.time = 0; this.cols = null; this.prev = null; this.k = 1;
+  }
+  setCover(cv, immediate) { this.prev = immediate ? null : this.cols; this.cols = cv.stops.slice(0, 3); this.k = immediate ? 1 : 0; this.hue = cv.hue; }
+  frame(dtMs, playing) {
+    if (!this.cols) return; if (playing) this.time += dtMs / 1000; this.k = Math.min(1, this.k + dtMs / 800);
+    const g = this.g, W = this.c.width, H = this.c.height;
+    g.globalAlpha = 1; g.fillStyle = rgb(hsl(this.hue, 55, 5)); g.fillRect(0, 0, W, H);
+    const draw = (cols, al) => cols.forEach((c, i) => {
+      const t = this.time * .12 + i * 2.1, x = W * (.5 + .34 * Math.sin(t * .9 + i)), y = H * (.35 + .28 * Math.cos(t * .7 + i * 1.7)), r = Math.max(W, H) * (.42 + .06 * Math.sin(t * 1.3));
+      const rg = g.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, c); rg.addColorStop(1, 'rgba(0,0,0,0)');
+      g.globalAlpha = .8 * al; g.fillStyle = rg; g.fillRect(0, 0, W, H);
+    });
+    if (this.prev && this.k < 1) draw(this.prev, 1 - this.k);
+    draw(this.cols, this.k);
+    g.globalAlpha = .3; g.fillStyle = '#000'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+  }
+}
+</script>
+<script>
+'use strict';
+/* =====================================================================
+   页面上的演示
+   ===================================================================== */
+const DEMOS = [];
+function watch(el, demo) {
+  demo.visible = false; DEMOS.push(demo);
+  new IntersectionObserver(es => es.forEach(e => { demo.visible = e.isIntersecting; }), { rootMargin: '200px' }).observe(el);
+}
+
+/* ---------- 播放页：背景 + 舞台 + 页头控件 ---------- */
+const SW = 360, SH = 780;
+function phoneChrome() {
+  return `<div class="status"><span>9:41</span><span>5G ▮▮▮ 86%</span></div>
+  <div class="p-cover"><i class="cv0"></i><i class="cv1" style="opacity:0"></i></div>
+  <div class="p-head"><div class="p-titles"><div class="p-title"></div><div class="p-artist"></div></div>
+    <button class="ib js-spark" aria-label="歌词动画">${ico('spark')}</button><button class="ib" aria-label="收藏">${ico('heart-o')}</button></div>
+  <span class="modechip"></span>
+  <div class="p-bottom">
+    <div class="wave"><svg viewBox="0 0 312 28" preserveAspectRatio="none"><path class="wvP" fill="none" stroke="var(--pl-primary)" stroke-width="4" stroke-linecap="round"/><line class="wvR" y1="14" y2="14" x2="312" stroke="var(--pl-outline-variant)" stroke-width="4" stroke-linecap="round"/><rect class="wvT" width="4" height="22" y="3" rx="2" fill="var(--pl-primary)"/></svg></div>
+    <div class="p-row">
+      <div class="ptg"><span class="side l js-prev">${ico('prev')}</span><button class="cookie js-play" aria-label="暂停"><svg viewBox="0 0 56 56"><path d="${cookiePath}"/></svg><i>${ico('pause')}</i></button><span class="side r js-next">${ico('next')}</span></div>
+      <div class="toolbar"><span class="tb sel" aria-label="退出全屏歌词">${ico('lyrics')}</span><span class="tb" aria-label="播放队列">${ico('queue')}</span></div>
+    </div>
+  </div>
+  <div class="navpill"></div>`;
+}
+class StagePage {
+  constructor(scr, o) {
+    this.scr = scr; this.o = Object.assign({ w: SW, h: SH, box: { x: 0, y: 100, w: SW, h: 540 }, fs: 30, px: 20, interactive: true, tv: false, zoom: 1, chrome: null }, o);
+    if (this.o.chrome != null) scr.innerHTML = this.o.chrome;
+    this.mesh = new MeshBg(scr, this.o.w, this.o.h); this.flow = new FlowBg(scr, this.o.w, this.o.h);
+    const b = this.o.box;
+    this.stage = new AmStage(scr, { x: b.x, y: b.y, w: b.w, h: b.h, fs: this.o.fs, px: this.o.px, interactive: this.o.interactive, tv: this.o.tv, zoom: this.o.zoom, mode: this.o.mode });
+    this.stage.onSeek = ms => { this.ms = ms; };
+    this.ms = 0; this.playing = true; this.speed = 1; this.auto = true; this.acc = 0; this.coverSlot = 0;
+  }
+  setSong(song, fly, startMs) {
+    this.song = song; if (startMs != null) this.ms = startMs;
+    this.stage.setSong(song, fly);
+    this.mesh.setCover(song.cover, !fly); this.flow.setCover(song.cover, !fly);
+    applyTokens(this.scr, song.cover.hue);
+    $$('.p-title, .js-title', this.scr).forEach(e => e.textContent = song.title);
+    $$('.p-artist, .js-artist', this.scr).forEach(e => e.textContent = song.artist);
+    const cvs = $$('.p-cover i', this.scr);
+    if (cvs.length) { this.coverSlot = fly ? 1 - this.coverSlot : this.coverSlot; const a = cvs[this.coverSlot], z = cvs[1 - this.coverSlot]; a.style.backgroundImage = `url(${song.cover.url})`; a.style.opacity = 1; z.style.opacity = 0; if (!fly) z.style.backgroundImage = a.style.backgroundImage; }
+    $$('.js-cover', this.scr).forEach(e => e.style.backgroundImage = `url(${song.cover.url})`);
+  }
+  bgKind() { return this.stage.mode === 'classic' ? 'flow' : SET.bg; }
+  setPlaying(v) { this.playing = v; this.stage.playing = v; this.stage.pending = 'config'; $$('.js-play i', this.scr).forEach(i => i.innerHTML = ico(v ? 'pause' : 'play')); }
+  frame(dtMs) {
+    if (!this.song) return;
+    if (this.o.tv) { this.acc += dtMs; if (this.acc < 1000 / 30) return; dtMs = this.acc; this.acc = 0; }
+    const dt = dtMs * this.speed;
+    if (this.playing && this.auto) { this.ms += dt; if (this.ms >= this.song.loop) this.ms %= this.song.loop; }
+    const kind = this.bgKind();
+    this.mesh.c.style.display = kind === 'mesh' ? '' : 'none'; this.flow.c.style.display = kind === 'flow' ? '' : 'none';
+    if (kind === 'mesh') this.mesh.frame(dt, this.playing, this.ms); else if (kind === 'flow') this.flow.frame(dt, this.playing);
+    this.stage.frame(this.ms, dt / 1000);
+    const wv = $('.wvP', this.scr);
+    if (wv) {
+      const frac = clamp(this.ms / this.song.dur), x = 312 * frac, ph = performance.now();
+      let d = ''; for (let i = 0; i <= x; i += 3) { const y = 14 + Math.sin(i / 7 - ph / 300) * (this.playing ? 4 : 0); d += (i ? 'L' : 'M') + i.toFixed(1) + ' ' + y.toFixed(1); }
+      wv.setAttribute('d', d || 'M0 14'); $('.wvR', this.scr).setAttribute('x1', Math.min(312, x + 8)); $('.wvT', this.scr).setAttribute('x', x - 2);
+    }
+  }
+}
+
+/* ---------- 01 主演示 ---------- */
+const phA = $('#phA');
+phA.innerHTML = phoneChrome();
+const pageA = new StagePage(phA, {});
+pageA.setSong(SONG_A, false, 6200);
+watch(phA, pageA);
+let songIdx = 0;
+const modeChip = $('.modechip', phA);
+function setMainMode(m) {
+  pageA.stage.setMode(m);
+  $$('#barMain [data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  modeChip.innerHTML = `${ico('spark', 's16')}${m === 'amll' ? '正在用：AMLL' : '正在用：经典（现在）'}`;
+  curve.rec = null; drawCurve();
+}
+$$('#barMain [data-mode]').forEach(b => b.onclick = () => setMainMode(b.dataset.mode));
+const btnPlay = $('#btnPlay');
+function setMainPlaying(v) { pageA.setPlaying(v); btnPlay.classList.toggle('on', v); btnPlay.textContent = v ? '播放中' : '已暂停'; }
+btnPlay.onclick = () => setMainPlaying(!pageA.playing);
+$('.js-play', phA).onclick = () => setMainPlaying(!pageA.playing);
+$('#btnSlow').onclick = e => { pageA.speed = pageA.speed === 1 ? .25 : 1; e.currentTarget.classList.toggle('on', pageA.speed !== 1); };
+$('#btnNextLine').onclick = () => {
+  const L = pageA.song.lines, ms = pageA.ms; const next = L.find(l => l.s > ms + 900) || L[0];
+  pageA.ms = Math.max(0, next.s - 800); if (!pageA.playing) setMainPlaying(true);
+};
+function skipSong(dir = 1) { songIdx = (songIdx + (dir > 0 ? 1 : 1)) % 2; const s = songIdx ? SONG_B : SONG_A; pageA.setSong(s, true, s.lines[0].s - 1400); }
+$('#btnSkip').onclick = () => skipSong(1);
+$('.js-next', phA).onclick = () => skipSong(1); $('.js-prev', phA).onclick = () => skipSong(-1);
+$('#btnReduce').onclick = e => { const v = !pageA.stage.reduce; pageA.stage.reduce = v; pageA.stage.el.classList.toggle('reduce', v); e.currentTarget.classList.toggle('on', v); pageA.stage.pending = 'place'; };
+$$('#barMain [data-sub]').forEach(b => b.onclick = () => { pageA.stage.o.sub = b.dataset.sub === 'tr'; pageA.stage.build(false); $$('#barMain [data-sub]').forEach(x => x.classList.toggle('on', x === b)); });
+$('.js-spark', phA).onclick = () => $('#panel').scrollIntoView({ behavior: 'smooth' });
+
+/* 位移曲线：每次换句后 1.2 秒内，各句走完了多少路 */
+const curve = { rec: null, cv: $('#curve') };
+const curveG = (() => { const c = curve.cv; const w = 388, h = 230; c.width = w * DPR; c.height = h * DPR; c.style.width = w + 'px'; c.style.height = h + 'px'; const g = c.getContext('2d'); g.setTransform(DPR, 0, 0, DPR, 0, 0); return g; })();
+const LINE_COLORS = ['#c8102e', '#d9452b', '#e0782a', '#c79a1c', '#5f9e3a', '#2f8f87', '#2f5fd0', '#6b4bc8', '#a03b9a'];
+pageA.stage.onTransition = st => {
+  const H = st.o.h;
+  const items = st.groups.filter(G => G.posY.p > -60 && G.posY.p < H + 20).slice(0, 9).map(G => ({ G, y0: G.posY.p, yT: G.posY.q ? G.posY.q.to : G.posY.to, pts: [], delay: st.lastDelays[G.i] || 0, active: G.active }));
+  curve.rec = { t: 0, items: items.filter(it => Math.abs(it.y0 - it.yT) > 2), mode: st.mode, info: st.springInfo, idx: st.scrollTo };
+  const r = curve.rec, s = r.info;
+  legend.innerHTML = r.items.map((it, k) => `<span><i style="background:${it.active ? '#1d1b20' : LINE_COLORS[k % LINE_COLORS.length]}"></i>第 ${it.G.i + 1} 句${it.active ? '（当前）' : ''}</span>`).join('');
+  $('#readout').textContent = (r.mode === 'amll'
+    ? `AMLL · 焦点第 ${r.idx + 1} 句\n纵向弹簧 质量 ${s.mass ?? 1} · 刚度 ${s.stiffness.toFixed(0)} · 阻尼 ${s.damping.toFixed(1)}\n（这句和上一句开始隔 ${s.interval == null ? '—' : (s.interval / 1000).toFixed(1) + ' 秒'}）\n出发延迟：${r.items.map(it => Math.round(it.delay * 1000)).join(' / ')} ms`
+    : `经典 · 当前第 ${r.idx + 1} 句\n整列一个弹簧 阻尼比 0.8 · 刚度 200\n所有句同时出发`);
+};
+function drawCurve() {
+  const g = curveG, W = 388, H = 230, L = 34, R = 10, T = 12, B = 30, pw = W - L - R, ph = H - T - B;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = '#e4e0e3'; g.lineWidth = 1; g.fillStyle = '#8f8b95'; g.font = '11px Roboto Flex, sans-serif';
+  for (let i = 0; i <= 4; i++) { const y = T + ph - ph * i / 4 / 1.1; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.fillText((i * 25) + '%', 2, y + 4); }
+  for (let i = 0; i <= 6; i++) { const x = L + pw * i / 6; g.fillText((i * .2).toFixed(1) + 's', x - 9, H - 10); }
+  const rec = curve.rec; if (!rec) return;
+  rec.items.forEach((it, k) => {
+    g.strokeStyle = it.active ? '#1d1b20' : LINE_COLORS[k % LINE_COLORS.length]; g.lineWidth = it.active ? 3 : 1.8; g.beginPath();
+    it.pts.forEach(([t, p], j) => { const x = L + pw * t / 1.2, y = T + ph - ph * clamp(p, -.05, 1.1) / 1.1; j ? g.lineTo(x, y) : g.moveTo(x, y); });
+    g.stroke();
+  });
+}
+const legend = $('#legend');
+DEMOS.push({ visible: true, frame(dt) {
+  const rec = curve.rec; if (!rec || rec.t > 1.2) return;
+  rec.t += dt * pageA.speed / 1000;
+  rec.items.forEach(it => it.pts.push([rec.t, (it.y0 - it.G.posY.p) / (it.y0 - it.yT)]));
+  drawCurve();
+} });
+drawCurve();
+setMainMode('amll');
+
+/* ---------- 02 单句放大 ---------- */
+/* 挑几句首尾相接重新排时间，句间留 gap 毫秒，末尾留 tail 毫秒再循环 */
+function compactSong(src, idx, lead, gap, tail) {
+  let t = lead;
+  const lines = idx.map(i => {
+    const L = src.lines[i], off = L.s - t, sh = w => ({ ...w, s: w.s - off, e: w.e - off });
+    t = L.e - off + gap;
+    return { ...L, s: L.s - off, e: L.e - off, words: L.words.map(sh), main: L.main.map(sh), bg: L.bg && L.bg.map(sh) };
+  });
+  const end = t - gap + tail;
+  return { ...src, lines, hasDuet: lines.some(l => l.duet), loop: end, dur: end };
+}
+function wideDemo(host, song) {
+  const w = host.clientWidth || 560, h = host.clientHeight || 230;
+  const page = new StagePage(host, { w, h, box: { x: 18, y: 0, w: w - 36, h }, fs: Math.min(36, w / 15), px: 12, interactive: false });
+  page.setSong(song, false, 0); page.speed = .35;
+  watch(host, page); return page;
+}
+const wideA = wideDemo($('#wideA'), compactSong(SONG_A, [3, 7], 600, 300, 1600));
+const wideB = wideDemo($('#wideB'), compactSong(SONG_A, [4, 5, 6], 600, 300, 1600));
+$('#wSlow').onclick = e => { const v = wideA.speed === 1 ? .35 : 1; wideA.speed = wideB.speed = v; e.currentTarget.classList.toggle('on', v !== 1); };
+$('#wEmp').onclick = () => setSetting('emphasis', !SET.emphasis);
+$('#wFloat').onclick = () => setSetting('float', !SET.float);
+$('#wFade').onclick = () => setSetting('fade', SET.fade > .1 ? .0001 : .5);
+function syncWordBar() { $('#wEmp').classList.toggle('on', SET.emphasis); $('#wFloat').classList.toggle('on', SET.float); $('#wFade').classList.toggle('on', SET.fade > .1); $('#wFade').textContent = SET.fade > .1 ? '羽化 0.5 字' : '不羽化'; }
+
+/* ---------- 03 间奏三点 ---------- */
+const dotsBox = $('#dotsBox');
+dotsBox.innerHTML = '<div class="adots" style="--px:0px"><i></i><i></i><i></i></div>';
+const dotsEl = $('.adots', dotsBox), INTER = { s: 0, e: 7800, intro: false }, dotsPlot = $('#dotsPlot'), dpg = dotsPlot.getContext('2d');
+dotsPlot.width = 860 * DPR; dotsPlot.height = 250 * DPR; dpg.setTransform(DPR, 0, 0, DPR, 0, 0);
+const dotsDemo = { ms: 0, frame(dt) {
+  this.ms = (this.ms + dt) % 9000;
+  const s = dotsState(this.ms, INTER);
+  dotsEl.style.opacity = s.opacity; dotsEl.style.transform = `translate(-50%,-50%) scale(${s.scale})`;
+  [...dotsEl.children].forEach((c, i) => c.style.opacity = s.dots[i]);
+  drawDotsPlot(this.ms);
+} };
+watch(dotsBox, dotsDemo);
+function drawDotsPlot(ms) {
+  const g = dpg, W = 860, H = 250, L = 46, R = 16, T = 40, B = 62, pw = W - L - R, ph = H - T - B, X = t => L + pw * t / 7800;
+  g.clearRect(0, 0, W, H); g.font = '13px Roboto Flex, Noto Sans SC, sans-serif';
+  [[0, 500, '等待', '#f7f5f7'], [500, 6800, '主体：点亮 + 呼吸', '#fbf6f7'], [6800, 7800, '退场', '#f1edf1']].forEach(([a, b, t, c]) => { g.fillStyle = c; g.fillRect(X(a), T, X(b) - X(a), ph); g.strokeStyle = '#b9b4bd'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(X(a) + 3, H - 30); g.lineTo(X(a) + 3, H - 26); g.lineTo(X(b) - 3, H - 26); g.lineTo(X(b) - 3, H - 30); g.stroke(); g.fillStyle = '#6b6772'; g.fillText(t, (X(a) + X(b)) / 2 - g.measureText(t).width / 2, H - 8); });
+  g.strokeStyle = '#e4e0e3'; g.lineWidth = 1;
+  for (let i = 0; i <= 7; i++) { const x = X(i * 1000); g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + ph); g.stroke(); g.fillStyle = '#8f8b95'; g.fillText(i + 's', x - 6, T + ph + 17); }
+  const curveOf = (fn, color, wd) => { g.strokeStyle = color; g.lineWidth = wd; g.beginPath(); for (let t = 0; t <= 7800; t += 20) { const v = fn(dotsState(t, INTER)), x = X(t), y = T + ph - ph * v; t ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); };
+  curveOf(s => s.opacity > 0 ? (s.scale - .4) / (1.25 - .4) : 0, '#1d1b20', 2.5);
+  ['#c8102e', '#e0782a', '#2f5fd0'].forEach((c, i) => curveOf(s => s.dots[i], c, 1.6));
+  const leg = [['整组缩放（0.4 – 1.25 倍）', '#1d1b20'], ['第 1 颗亮度', '#c8102e'], ['第 2 颗亮度', '#e0782a'], ['第 3 颗亮度', '#2f5fd0']]; let lx = L;
+  leg.forEach(([t, c]) => { g.fillStyle = c; g.fillRect(lx, 12, 14, 3); g.fillStyle = '#1d1b20'; g.fillText(t, lx + 20, 18); lx += g.measureText(t).width + 40; });
+  if (ms <= 7800) { g.strokeStyle = '#c8102e'; g.lineWidth = 2; g.beginPath(); g.moveTo(X(ms), T); g.lineTo(X(ms), T + ph); g.stroke(); }
+}
+
+/* ---------- 04 背景 ---------- */
+function bgDemo(host, Kind) {
+  const w = host.clientWidth || 560, h = host.clientHeight || 280, bg = new Kind(host, w, h);
+  bg.setCover(COVERS[0], true);
+  const label = document.createElement('div'); label.style.cssText = 'position:absolute;left:24px;bottom:20px;color:#fff;font:800 26px/1.2 var(--lyric);mix-blend-mode:plus-lighter;opacity:.9'; label.textContent = '我把耳机里的海调到最大'; host.appendChild(label);
+  const d = { bg, frame(dt) { bg.frame(dt, true, performance.now()); } }; watch(host, d); return bg;
+}
+const meshDemo = bgDemo($('#bgMesh'), MeshBg), flowDemo = bgDemo($('#bgFlow'), FlowBg);
+COVERS.forEach((c, i) => {
+  const b = document.createElement('button'); b.innerHTML = `<i style="background:url(${c.url}) center/cover"></i>${c.name}`; if (!i) b.classList.add('on');
+  b.onclick = () => { meshDemo.setCover(c, false); flowDemo.setCover(c, false); $$('#bgCovers button').forEach(x => x.classList.toggle('on', x === b)); };
+  $('#bgCovers').appendChild(b);
+});
+$('#bgBeat').onclick = e => { meshDemo.beat = !meshDemo.beat; e.currentTarget.classList.toggle('on', meshDemo.beat); };
+
+/* ---------- 05 自动接歌的换页时机 ---------- */
+const phB = $('#phB');
+phB.innerHTML = phoneChrome();
+const pageB = new StagePage(phB, { interactive: false });
+pageB.auto = false;
+const MIX = { F: 46000, fade: 8000, lastAEnd: SONG_A.lines[SONG_A.lines.length - 1].e, firstB: SONG_B.lines[0].s, from: -3000, to: 11000 };
+MIX.early = Math.max(MIX.lastAEnd - MIX.F, Math.min(MIX.fade / 2, MIX.firstB - 300));
+const mix = { policy: 'early', tl: -2000, onB: null, playing: false };
+pageB.setSong(SONG_A, false, MIX.F + mix.tl); $('.modechip', phB).innerHTML = `${ico('spark', 's16')}智能过渡 · 等功率 8.0 秒`;
+const gainOut = tl => tl <= 0 ? 1 : tl >= MIX.fade ? 0 : Math.cos(tl / MIX.fade * Math.PI / 2);
+const gainIn = tl => tl <= 0 ? 0 : tl >= MIX.fade ? 1 : Math.sin(tl / MIX.fade * Math.PI / 2);
+function mixSvg() {
+  const X = t => 30 + 480 * (t - MIX.from) / (MIX.to - MIX.from), Y = v => 150 - 112 * v;
+  let po = '', pi = ''; for (let t = MIX.from; t <= MIX.to; t += 100) { po += (po ? 'L' : 'M') + X(t).toFixed(1) + ' ' + Y(gainOut(t)).toFixed(1); pi += (pi ? 'L' : 'M') + X(t).toFixed(1) + ' ' + Y(gainIn(t)).toFixed(1); }
+  const vline = (t, c, label, y, dash = '') => `<line x1="${X(t)}" x2="${X(t)}" y1="26" y2="160" stroke="${c}" stroke-width="2" ${dash ? `stroke-dasharray="${dash}"` : ''}/><text x="${X(t) + 4}" y="${y}" font-size="11" fill="${c}">${label}</text>`;
+  const XC = t => clamp(X(t), 30, 510), bar = (a, b, y, c) => `<rect x="${XC(a)}" y="${y}" width="${Math.max(0, XC(b) - XC(a))}" height="8" rx="4" fill="${c}" opacity=".35"/>`;
+  const ticks = SONG_B.lines.slice(0, 3).filter(l => l.s < MIX.to).map((l, i) => bar(l.s, l.e, 170, '#2f5fd0') + `<text x="${XC(l.s)}" y="194" font-size="11" fill="#2f5fd0">下一首第 ${i + 1} 句</text>`).join('');
+  const aLast = bar(SONG_A.lines.at(-1).s - MIX.F, MIX.lastAEnd - MIX.F, 170, '#c8102e') + `<text x="30" y="194" font-size="11" fill="#c8102e">上一首最后一句</text>`;
+  $('#mixSvg').innerHTML = `<rect x="${X(0)}" y="26" width="${X(MIX.fade) - X(0)}" height="134" fill="#f7f5f7"/>
+    <path d="${po}" fill="none" stroke="#c8102e" stroke-width="3"/><path d="${pi}" fill="none" stroke="#2f5fd0" stroke-width="3"/>
+    ${vline(MIX.fade / 2, '#8a5a00', '交叉点', 20, '4 3')}${vline(MIX.early, '#1b6b3a', '改后换页', 38)}${vline(MIX.fade, '#6b6772', '现在换页（淡完）', 20)}
+    ${ticks}${aLast}
+    <text x="${X(0) + 4}" y="20" font-size="11" fill="#8f8b95">淡化开始</text>
+    <line id="mixHead" x1="0" x2="0" y1="20" y2="182" stroke="#1d1b20" stroke-width="2"/>`;
+}
+mixSvg();
+function lineAt(song, ms) { const i = song.lines.findIndex(l => l.s <= ms && ms < l.e); return i; }
+function updateMix() {
+  const tl = mix.tl, sw = mix.policy === 'early' ? MIX.early : MIX.fade, onB = tl >= sw;
+  if (onB !== mix.onB) { pageB.setSong(onB ? SONG_B : SONG_A, onB && mix.onB === false); mix.onB = onB; $('.modechip', phB).innerHTML = `${ico('spark', 's16')}智能过渡 · 等功率 8.0 秒`; }
+  pageB.ms = onB ? tl : MIX.F + tl;
+  const X = t => 30 + 480 * (t - MIX.from) / (MIX.to - MIX.from), head = $('#mixHead'); head.setAttribute('x1', X(tl)); head.setAttribute('x2', X(tl));
+  const go = gainOut(tl), gi = gainIn(tl), bi = lineAt(SONG_B, tl), ai = lineAt(SONG_A, MIX.F + tl);
+  const heard = bi >= 0 && gi > .05 ? `下一首正在唱第 ${bi + 1} 句「${SONG_B.lines[bi].main.map(w => w.text).join('')}」` : ai >= 0 && go > .05 ? `上一首正在唱「${SONG_A.lines[ai].main.map(w => w.text).join('')}」` : tl < 0 ? '上一首尾奏' : '下一首前奏';
+  $('#hearNow').innerHTML = `<b>耳朵里 · ${(tl / 1000).toFixed(1)} 秒</b>上一首 ${Math.round(go * 100)}% · 下一首 ${Math.round(gi * 100)}%<br>${heard}`;
+  const st = pageB.stage, idx = [...st.hi].sort((a, b) => a - b)[0];
+  const song = onB ? SONG_B : SONG_A, shown = idx != null && song.lines[idx] ? `第 ${idx + 1} 句「${song.lines[idx].main.map(w => w.text).join('')}」` : '（还没到第一句）';
+  const miss = onB && mix.policy === 'end' && tl >= MIX.fade ? '<br><span style="color:#c8102e">下一首的前两句没在页面上出现过</span>' : '';
+  $('#seeNow').innerHTML = `<b>页面上 · 《${song.title}》</b>${shown}${miss}`;
+}
+$('#mixRange').oninput = e => { mix.playing = false; mix.tl = MIX.from + (MIX.to - MIX.from) * e.target.value / 1000; updateMix(); };
+$$('#barMix [data-sw]').forEach(b => b.onclick = () => { mix.policy = b.dataset.sw; $$('#barMix [data-sw]').forEach(x => x.classList.toggle('on', x === b)); mix.onB = null; updateMix(); });
+$('#mixPlay').onclick = () => { mix.tl = -2500; mix.onB = null; mix.playing = true; updateMix(); };
+const mixDemo = { frame(dt) {
+  if (mix.playing) { mix.tl += dt; if (mix.tl >= MIX.to) { mix.tl = MIX.to; mix.playing = false; } $('#mixRange').value = Math.round((mix.tl - MIX.from) / (MIX.to - MIX.from) * 1000); }
+  updateMix(); pageB.frame(dt);
+} };
+mix.onB = null; updateMix(); watch(phB, mixDemo);
+
+/* ---------- 设备外框（照 user-feedback 稿的 devFrame / devBlock） ---------- */
+const DEV = {
+  tab: { w: 1280, h: 800, k: .7, bz: 14, r: 34, size: '1280×800' },
+  land: { w: 800, h: 360, k: 1, bz: 10, r: 42, size: '800×360' },
+  book: { w: 841, h: 701, k: .8, bz: 12, r: 30, hinge: 'v', size: '841×701' },
+  table: { w: 701, h: 841, k: .66, bz: 12, r: 30, hinge: 'h', size: '701×841' },
+  tv: { w: 960, h: 540, k: .92, bz: 10, r: 6, size: '960×540' },
+};
+function devFrame(kind, inner, theme = 'pl') {
+  const d = DEV[kind];
+  return `<div class="dev ${kind}" style="width:${Math.round(d.w * d.k + 2 * d.bz)}px;height:${Math.round(d.h * d.k + 2 * d.bz)}px;border-radius:${d.r}px">
+    <div class="dscr ${theme}" style="left:${d.bz}px;top:${d.bz}px;width:${d.w}px;height:${d.h}px;transform:scale(${d.k});border-radius:${((d.r - d.bz) / d.k).toFixed(1)}px">${inner}</div>
+    ${d.hinge ? `<div class="hinge ${d.hinge}" style="${d.hinge === 'v' ? `left:${d.bz + d.w * d.k / 2}px` : `top:${d.bz + d.h * d.k / 2}px`}"></div>` : ''}</div>`;
+}
+function devBlock(host, panes) {
+  host.innerHTML = `<div class="devtabs">${panes.map((p, i) => `<button data-i="${i}" class="${i ? '' : 'on'}">${p.tab}<small>${DEV[p.kind].size}</small></button>`).join('')}</div>` +
+    panes.map((p, i) => `<div class="devpane ${i ? '' : 'on'}" data-i="${i}">${devFrame(p.kind, p.html || '', p.theme)}<figcaption><b>${p.title}</b>${p.cap}</figcaption></div>`).join('');
+  panes.forEach((p, i) => { const pane = $(`.devpane[data-i="${i}"]`, host); p.scr = $('.dscr', pane); p.pane = pane; if (p.hue != null) applyTokens(p.scr, p.hue); if (p.init) p.init(p.scr); });
+  const show = i => { panes.forEach((p, j) => { p.on = i === j; }); const p = panes[i]; if (p.show) p.show(p.scr); };
+  $('.devtabs', host).onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    $$('.devtabs button', host).forEach(x => x.classList.toggle('on', x === b)); $$('.devpane', host).forEach(x => x.classList.toggle('on', x.dataset.i === b.dataset.i)); show(+b.dataset.i);
+  };
+  show(0); return panes;
+}
+const dstat = (t = '22:48') => `<div class="dstat"><span>${t}</span><span>▮▮▮ 76%</span></div>`;
+const cookieClip = cookiePoly(12, .06);
+const dockW = h => 88 * Math.min(1, (h - 24) / 471);
+function fdock(x, h) {
+  const k = Math.min(1, (h - 24) / 471), y = Math.max(12, h * .45 - 471 * k / 2);
+  return `<div class="fdock" style="left:${x}px;top:${y}px;transform:scale(${k.toFixed(3)})"><span class="cv0 js-cover"></span><span class="b48">${ico('prev')}</span><span class="play" style="clip-path:${cookieClip}">${ico('pause')}</span><span class="b48">${ico('next')}</span><span class="dv"></span><span class="b48 sel">${ico('lyrics')}</span><span class="b48">${ico('spark')}</span><span class="b48">${ico('queue')}</span></div>`;
+}
+function waveRow(w = 312) { let d = 'M0 14'; for (let i = 0; i <= w * .64; i += 2) d += ` L${i} ${(14 + 4 * Math.sin(i / 20 * Math.PI)).toFixed(2)}`; return `<div><svg viewBox="0 0 ${w} 28" preserveAspectRatio="none" style="width:100%;height:24px"><path d="${d}" fill="none" stroke="var(--pl-primary)" stroke-width="4" stroke-linecap="round"/><path d="M${w * .66} 14 L${w} 14" stroke="var(--pl-secondary-container)" stroke-width="4" stroke-linecap="round"/></svg><div class="tm2"><span>0:31</span><span>0:54</span></div></div>`; }
+function wideColumn(x, y, w, h) {
+  const cover = Math.min(320, w - 40, h - 400);
+  return `<div class="wcol" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px">
+    <div class="js-cover" style="width:${cover}px;height:${cover}px;align-self:center;background-size:cover;clip-path:${cookiePoly(9, .07)};flex:none"></div>
+    <div class="wmeta"><div class="tt"><b class="js-title"></b><span class="js-artist"></span></div><span class="favbtn">${ico('heart-o')}</span></div>
+    <span class="srcpill">${ico('swap', 's16')}网易云音乐 · 无损</span>${waveRow()}
+    <div class="ptgL"><span class="side l">${ico('prev')}</span><span class="pp" style="clip-path:${cookieClip}">${ico('pause')}</span><span class="side r">${ico('next')}</span></div>
+    <div class="toolbar wt"><span class="tb sel">${ico('lyrics')}</span><span class="tb">${ico('spark')}</span><span class="tb">${ico('queue')}</span><span class="tb">${ico('timer')}</span><span class="tb">${ico('swap')}</span><span class="tb">${ico('more')}</span></div>
+  </div>`;
+}
+function tvChrome() {
+  let d = 'M0 10'; for (let i = 0; i <= 160; i += 3) d += ` L${i} ${(10 + 3 * Math.sin(i / 22 * Math.PI)).toFixed(2)}`;
+  return `<div class="tvcover js-cover" style="clip-path:${cookiePoly(9, .07)}"></div><span class="tvpill">${ico('swap', 's16')}网易云音乐 · 无损</span>
+    <div class="tvtitle"><b class="js-title"></b><span class="js-artist"></span></div>
+    <div class="tvdock"><div class="r1"><div class="tg"><span class="side l">${ico('prev')}</span><span class="pp">${ico('pause')}</span><span class="side r">${ico('next')}</span></div>
+      ${['timer', 'heart-o', 'queue', 'grid', 'swap'].map(i => `<span class="c48">${ico(i)}</span>`).join('')}<span class="chip48">${ico('person', 's18')}歌手：示例歌手</span><span class="c48">${ico('spark')}</span></div>
+      <div class="r2"><span>0:31</span><svg viewBox="0 0 400 20" preserveAspectRatio="none" style="flex:1;height:20px"><path d="${d}" fill="none" stroke="var(--pl-primary)" stroke-width="4" stroke-linecap="round"/><path d="M162 10 L400 10" stroke="var(--pl-secondary-container)" stroke-width="4" stroke-linecap="round"/></svg><span>0:54</span></div></div>`;
+}
+function stagePane(kind, o) {
+  const d = DEV[kind];
+  return {
+    kind, tab: o.tab, title: o.title, cap: o.cap, html: '',
+    init(scr) {
+      scr.innerHTML = o.chrome(); this.page = new StagePage(scr, { w: d.w, h: d.h, box: o.box, fs: o.fs, px: o.px ?? 8, interactive: !o.tv, tv: !!o.tv, zoom: d.k, chrome: null });
+      this.page.setSong(SONG_A, false, o.start ?? 9800);
+      const self = this; DEMOS.push({ get visible() { return self.on && devVis.on; }, frame(dt) { self.page.frame(dt); } });
+    },
+    /* 隐藏的分页量不出行高，切过来时重新量一次再排 */
+    show() { const st = this.page.stage; st.measure(); st.pending = 'place'; },
+  };
+}
+const devVis = { on: false }; new IntersectionObserver(es => es.forEach(e => devVis.on = e.isIntersecting), { rootMargin: '200px' }).observe($('#dvStage'));
+devBlock($('#dvStage'), [
+  stagePane('tab', { tab: '平板 · 专注歌词', title: '平板 · 专注歌词', fs: 44, px: 16, box: { x: 168, y: 96, w: 1016, h: 650 },
+    chrome: () => dstat() + fdock(24, 800) + `<div class="fhead" style="left:168px;top:36px"><span class="js-title"></span>&nbsp;·&nbsp;<span class="js-artist"></span></div>`,
+    cap: '专注歌词（<code>WidePlayer</code> 的 <code>TabletFocus</code>）：左边 88dp 专注栏，舞台占右边全部。字号按宿主基准放大到 44；宽度 1016dp 仍小于 1024，模糊照手机乘 0.8。' }),
+  stagePane('tab', { tab: '平板 · 常规', title: '平板 · 左封面右歌词', fs: 34, px: 12, box: { x: 600, y: 80, w: 624, h: 660 },
+    chrome: () => dstat() + wideColumn(40, 0, 520, 800),
+    cap: '常规宽布局：左栏封面、歌名、进度和按钮组不动，右栏整列给舞台。网格背景铺满整屏，左栏的控件压在背景上，和现在的流光一样。' }),
+  stagePane('land', { tab: '手机横屏', title: '手机横屏 · 专注歌词', fs: 24, px: 6, box: { x: 16 + dockW(360) + 28, y: 44, w: 800 - (16 + dockW(360) + 28) - 24, h: 308 },
+    chrome: () => fdock(16, 360) + `<div class="fhead" style="left:${16 + dockW(360) + 28}px;top:10px"><span class="js-title"></span>&nbsp;·&nbsp;<span class="js-artist"></span></div>`,
+    cap: '横屏手机进专注歌词，专注栏缩到约 0.7。文字区只有 300dp 左右高，焦点仍在 35% 处，所以上面只露一句、下面露两三句；高度不够 160dp 时退回经典。' }),
+  stagePane('book', { tab: '折叠屏 · 书本', title: '折叠屏书本姿态 · 右页歌词', fs: 28, px: 6, box: { x: 452, y: 60, w: 353, h: 593 },
+    chrome: () => wideColumn(24, 24, 372, 653),
+    cap: '书本姿态按铰链分栏：左页是播放控件，右页整页给舞台，文字不跨折痕。对唱靠右的句子贴着右页右边。' }),
+  stagePane('table', { tab: '折叠屏 · 桌面', title: '折叠屏桌面姿态 · 上半屏歌词', fs: 28, px: 4, box: { x: 32, y: 56, w: 637, h: 350 },
+    chrome: () => `<div class="tt-top"><div class="ttbar"><span class="ib">${ico('down')}</span><span class="sp"></span><span class="srcpill" style="align-self:center">网易云音乐</span><span class="sp"></span><span class="ib">${ico('more')}</span></div></div>
+      <div class="tt-bot" style="background:color-mix(in srgb,var(--pl-surface) 55%,transparent)"><div class="ttc"><div class="ttmeta"><div class="cv js-cover"></div><div class="tt"><b class="js-title"></b><span class="js-artist"></span></div><span class="favbtn">${ico('heart-o')}</span></div>${waveRow()}
+      <div class="ptgL"><span class="side l">${ico('prev')}</span><span class="pp" style="clip-path:${cookieClip}">${ico('pause')}</span><span class="side r">${ico('next')}</span></div></div></div>`,
+    cap: '<code>TabletopPlayer</code>：上半屏立着当舞台，下半屏平放着是控件。背景铺满整屏，下半屏盖一层半透明底色，和现在桌面姿态下宿主背景不关的规则一致。' }),
+  stagePane('tv', { tab: '电视', title: '电视 · 封面左、歌词右', fs: 28, px: 0, tv: true, box: { x: 400, y: 118, w: 500, h: 272 },
+    chrome: () => tvChrome(),
+    cap: '<code>TvPlayer</code> 的歌词区在封面右边、控制条上面。电视不接收拖动和点按，景深模糊默认关（第 08 节的设置在电视上也能打开），帧率 30 fps；错峰、亮暗和逐字照常。' }),
+]);
+
+/* ---------- 06 设置页手机（浅色） ---------- */
+function lphone(inner, cap, title) { return `<figure class="dv2"><div class="lphone"><div class="m-app"><div class="m-fit">${inner}</div></div></div><figcaption><b>${title}</b>${cap}</figcaption></figure>`; }
+const setTop = `<div class="m-status"><span>9:41</span><span>▮▮▮ 86%</span></div><div class="m-appbar"><span style="width:48px;height:48px;display:grid;place-items:center">${ico('back')}</span></div><div class="m-big"><h5>播放与换源</h5></div>
+  <div class="s-label">播放音量</div><div class="vcard"><div class="hd">${ico('volume')}<div><b>播放器音量</b><small>只改应用内的音量，和系统音量相乘</small></div><em>100%</em></div><div class="lsl"><div class="tr"></div><div class="fi" style="width:100%"></div><div class="hd2" style="left:100%"></div></div></div>
+  <div class="s-label">切歌过渡</div><div class="s-seg"><div class="s-row"><span class="s-ic">${ico('spark', 's20')}</span><div class="s-t"><b>切歌过渡</b><small>上一首还没收完就把下一首接进来；关掉则整首播完再切</small></div><span class="lsw"></span></div></div>`;
+const modeRow = sel => `<div class="s-label">方式</div><div class="lctg">${['智能过渡', '交叉淡化', '不过渡'].map(t => `<span class="${t === sel ? 'on' : ''}">${t}</span>`).join('')}</div>`;
+const fadeNote = `<p class="lnote">淡化发生在这首歌结尾的最后几秒。手动切歌、直播和带版权的整曲仍然直接切。</p>`;
+$('#setPhones').innerHTML =
+  lphone(setTop + modeRow('交叉淡化') + `<div class="s-label">过渡时长</div><div class="lctg">${[4, 6, 8, 10].map(n => `<span class="${n === 6 ? 'on' : ''}">${n} 秒</span>`).join('')}</div>` + fadeNote,
+    '四档连接按钮组，最短 4 秒、最长 10 秒。', '① 现在 · 交叉淡化') +
+  lphone(setTop + modeRow('交叉淡化') + `<div class="s-label">过渡时长</div><div class="vcard newmark" data-new="改：1–12 秒滑块" id="fadeCard"><div class="hd">${ico('timer')}<div><b>交叉淡化时长</b><small>上一首最后几秒和下一首开头叠在一起</small></div><em id="fadeVal">6 秒</em></div><div class="lsl" id="fadeSl"><div class="tr"></div><div class="fi"></div>${Array.from({ length: 12 }, (_, i) => `<span class="tk" style="left:${i / 11 * 100}%"></span>`).join('')}<div class="hd2"></div></div></div>` + fadeNote,
+    '和「播放器音量」同一种滑块卡片，1–12 秒、每格 1 秒，可以拖。电视上焦点停在滑块上时左右键一格 1 秒。', '② 改后 · 交叉淡化') +
+  lphone(setTop + modeRow('智能过渡') + `<div class="s-label">过渡动画</div><div class="lctg"><span>关闭</span><span class="on">屏幕圆环</span><span>封面描边</span></div><p class="lnote">短于 5 秒的过渡不画动画；播放页点一下圆环就消失。</p>
+    <div class="s-seg" style="margin-top:14px"><div class="s-row"><span class="s-ic">${ico('history', 's20')}</span><div class="s-t"><b>播放缓存 2 GB</b><small>分析要完整读完两首歌；缓存不够时会退回等功率淡化</small></div></div></div>
+    <div class="s-seg" style="margin-top:14px"><div class="s-row newmark" data-new="新的一种结果"><span class="s-ic">${ico('spark', 's20')}</span><div class="s-t"><b>同一张专辑，无缝接</b><small>《潮汐来信》→《雾港》</small></div></div></div>`,
+    '智能过渡的设置不变；「上一次接歌」多一种结果：整张专辑连着放时不叠，直接无缝接。', '③ 改后 · 智能过渡');
+function fitPhones() { $$('#setPhones .m-app, #qPhone .m-app').forEach(a => { const f = $('.m-fit', a); f.style.transform = `scale(${a.clientWidth / 360})`; }); }
+let fadeSec = 6;
+function drawFade() { const k = (fadeSec - 1) / 11; $('#fadeSl .fi').style.width = `calc(${k * 100}% - 6px)`; $('#fadeSl .hd2').style.left = k * 100 + '%'; $('#fadeVal').textContent = fadeSec + ' 秒'; }
+(() => {
+  const sl = $('#fadeSl'); let dragging = false;
+  const at = e => { const r = sl.getBoundingClientRect(); fadeSec = Math.round(1 + clamp((e.clientX - r.left) / r.width) * 11); drawFade(); };
+  sl.onpointerdown = e => { dragging = true; at(e); }; window.addEventListener('pointermove', e => dragging && at(e)); window.addEventListener('pointerup', () => dragging = false);
+  drawFade();
+})();
+
+/* ---------- 06 播放队列 ---------- */
+const QUEUE = [['晚风信号', '示例歌手', 2], ['潮汐来信', '示例歌手 · 示例专辑', 0], ['雾港', '另一位示例歌手', 1], ['夜航', '示例乐队', 2], ['回声小站', '示例歌手', 0], ['北岸', '示例乐队', 1]];
+const mixState = { on: true, mode: '智能过渡' };
+function queueBody(rows = 6) {
+  const sum = mixState.on ? (mixState.mode === '智能过渡' ? '这次按切拍接，1.2 秒' : '交叉淡化 · 6 秒') : '整首播完再直接切';
+  return `<div class="sh-head"><h5>播放队列</h5><p>8 首 · 正在播放第 2 首</p></div>
+    <div class="qhead"><span class="ftb">${ico('shuffle', 's18')}随机</span><span class="ftb">${ico('repeat', 's18')}顺序播放</span><span class="sp"></span><span class="ib">${ico('grid')}</span><span class="ib">${ico('sweep')}</span></div>
+    <div class="qlist">${QUEUE.slice(0, rows).map(([t, a, c], i) => `<div class="qrow ${i === 1 ? 'cur' : ''}"><span class="cv" style="background-image:url(${COVERS[c].url})"></span><span class="tx"><b>${t}</b><small>${a}</small></span>${i === 1 ? `<span class="ico" style="color:var(--pl-on-secondary-container)">${ico('lyrics')}</span>` : ''}</div>` + (i === 1 ? `<div class="qrow mix newmark js-mix" data-new="新：切歌过渡"><span class="mi">${ico('spark', 's20')}</span><span class="tx"><b>${mixState.on ? mixState.mode : '切歌过渡'}</b><small>${sum}</small></span><span class="sw ${mixState.on ? 'on' : ''}"></span></div>` : '')).join('')}</div>`;
+}
+const QVIEWS = [];
+function drawQueues() { QVIEWS.forEach(f => f()); }
+document.addEventListener('click', e => { if (e.target.closest('.js-mix')) { mixState.on = !mixState.on; drawQueues(); } });
+const qBg = song => `<div style="position:absolute;inset:0;background:radial-gradient(70% 60% at 30% 30%, ${rgb(hsl(song.cover.hue, 60, 22))}, var(--pl-surface))"></div>`;
+const dvQ = $('#dvQueue');
+dvQ.innerHTML = `<div class="demo" style="margin-bottom:22px"><figure id="qPhone"><div class="phone"><div class="scr" id="qScr"></div></div><figcaption><b>手机 · 底部面板</b>当前这首下面一行，左边图标、标题写方式、下面一行写这次会怎么接，右边开关。点开关试试。下一首（《雾港》）已经预载好，所以写的是这一次的接法。</figcaption></figure></div><div id="qDevs"></div>`;
+(() => { const scr = $('#qScr'); applyTokens(scr, SONG_A.cover.hue); const draw = () => { scr.innerHTML = qBg(SONG_A) + `<div class="status"><span>9:41</span><span>5G ▮▮▮ 86%</span></div><div class="scrim"></div><div class="sheet" style="top:150px"><div class="grab"></div>${queueBody(6)}</div>`; }; draw(); QVIEWS.push(draw); })();
+const qPane = (kind, cls, rows, extra = '') => ({
+  kind, hue: SONG_A.cover.hue,
+  init(scr) { const draw = () => { scr.innerHTML = qBg(SONG_A) + extra + `<div class="scrim"></div><div class="sheet ${cls}">${cls === 'tvp' ? '' : '<div class="grab" style="visibility:hidden"></div>'}${queueBody(rows)}</div>`; if (cls === 'tvp') $('.js-mix', scr).classList.add('focusring'); }; draw(); QVIEWS.push(draw); },
+});
+devBlock($('#qDevs'), [
+  { ...qPane('tab', 'side', 6, dstat()), tab: '平板', title: '平板 · 右侧 400dp 浮动面板', cap: '<code>AdaptiveSheet</code> 的平板形态，同一行放在当前这首下面。' },
+  { ...qPane('land', 'side', 3), tab: '手机横屏', title: '手机横屏 · 右侧浮动面板', cap: '高度只有 336dp，面板里列表照常滚，这一行跟着当前这首走。' },
+  { ...qPane('book', 'side', 6), tab: '折叠屏 · 书本', title: '折叠屏书本姿态 · 面板只占一页', cap: '面板落在右页，不跨折痕。' },
+  { ...qPane('table', 'side', 4), tab: '折叠屏 · 桌面', title: '折叠屏桌面姿态 · 面板在上半屏', cap: '按现有规则面板只放在上半屏。' },
+  { ...qPane('tv', 'tvp', 5), tab: '电视', title: '电视 · 右侧 360dp 整高面板', cap: '遥控器上下键能停到这一行，确认键切换开关；焦点描边和其它行一样。' },
+]);
+
+/* ---------- 08 动画面板 ---------- */
+const phC = $('#phC');
+const MODES = [['classic', '经典'], ['rush', 'Rush'], ['amll', 'AMLL'], ['aurora', '虹光'], ['rings', '52Hz'], ['miside', 'MiSide 掉落'], ['wave', '动感波光'], ['vinyl', '黑胶唱片'], ['cinerama', '巨幕'], ['stardrift', '星潮·银河'], ['jump', '跳一跳']];
+applyTokens(phC, SONG_A.cover.hue);
+phC.innerHTML = `<div class="status"><span>9:41</span><span>5G ▮▮▮ 86%</span></div><div class="scrim" style="background:rgb(0 0 0 / .45)"></div>
+  <div class="sheet" role="dialog" aria-label="歌词动画"><div class="grab"></div><div class="sh-head"><h5>歌词动画</h5><p>只在全屏歌词页生效</p></div>
+  <div class="sh-body" id="shBody"><div class="mgrid" id="mgrid"></div>
+    <div class="lbl">每首歌换动画</div><div class="ctg"><button class="on">固定</button><button>随机</button><button>按速度</button></div>
+    <div class="sh-note">所有歌都用上面选中的动画。</div>
+    <div class="lbl">叠加</div><div class="seg"><div class="row"><div class="t">频谱<small>全屏歌词页左下角显示 48 段频谱、响度和峰值频率；经典模式不显示</small></div><span class="sw"></span></div></div>
+    <div class="lbl"><span>“AMLL”的设置</span><button class="txtbtn" id="resetBtn">恢复默认</button></div>
+    <div class="seg" id="form"></div>
+    <div class="sh-note">移植自 AMLL core 0.7.2（amll-dev，AGPL-3.0）。原开源组件另有 8 项保持默认值。</div>
+  </div></div>`;
+(() => { const bg = new MeshBg(phC, SW, SH); bg.setCover(SONG_A.cover, true); bg.frame(16, false, 0); bg.c.style.zIndex = 0; })();
+MODES.forEach(([id, name]) => {
+  const b = document.createElement('button'); b.className = 'mcard' + (id === 'amll' ? ' on' : '');
+  b.innerHTML = `<span class="th"><canvas width="292" height="194"></canvas><span class="ck">✓</span></span><span class="nm">${name}${id === 'amll' ? '<span class="new">新</span>' : ''}</span>`;
+  b.onclick = () => $$('.mcard', phC).forEach(x => x.classList.toggle('on', x === b));
+  $('#mgrid').appendChild(b); thumb(id, $('canvas', b));
+});
+function thumb(id, c) {
+  const g = c.getContext('2d'), w = 292, h = 194, pl = hsl(SONG_A.cover.hue, 55, 7), on = hsl(SONG_A.cover.hue, 40, 91), pri = hsl(SONG_A.cover.hue, 90, 84);
+  g.fillStyle = rgb(pl); g.fillRect(0, 0, w, h);
+  const txt = (s, x, y, size, col, weight = 700, al = 'center', blur = 0) => { g.save(); if (blur) g.filter = `blur(${blur}px)`; g.font = `${weight} ${size}px "Noto Sans SC",sans-serif`; g.textAlign = al; g.fillStyle = col; g.fillText(s, x, y); g.restore(); };
+  if (id === 'amll') {
+    const t = prepTexture(SONG_A.cover.img); g.save(); g.filter = 'blur(18px)'; g.drawImage(t, -40, -40, w + 80, h + 80); g.restore();
+    txt('城市的灯 一盏一盏', 18, 46, 19, 'rgba(255,255,255,.35)', 700, 'left', 1.6);
+    txt('我把耳机里的海', 18, 92, 30, '#fff', 800, 'left');
+    txt('风从楼顶经过', 22, 136, 19, 'rgba(255,255,255,.35)', 700, 'left', 1.3);
+    txt('顺手带走一句晚安', 24, 172, 19, 'rgba(255,255,255,.3)', 700, 'left', 2);
+    return;
+  }
+  if (id === 'rush') { g.fillStyle = '#7d1a2a'; g.fillRect(0, 0, w, h); txt('城市的灯 一盏', 18, 52, 20, 'rgba(255,255,255,.6)', 700, 'left', 2); txt('我把耳机里的海', 18, 100, 28, '#fff', 800, 'left'); txt('风从楼顶经过', 18, 146, 20, 'rgba(255,255,255,.25)', 700, 'left', 2); return; }
+  if (id === 'classic') { txt('城市的灯 一盏一盏', w / 2, 66, 20, rgb(on, .5), 600); txt('我把耳机里的海', w / 2, 106, 26, rgb(pri), 800); txt('风从楼顶经过', w / 2, 146, 20, rgb(on, .5), 600); return; }
+  if (id === 'aurora') { for (let i = 0; i < 3; i++) { g.strokeStyle = rgb(hsl((SONG_A.cover.hue + i * 50) % 360, 80, 60), .5); g.lineWidth = 20 - i * 4; g.beginPath(); for (let x = 0; x <= w; x += 6) { const y = 60 + i * 24 + Math.sin(x / 36 + i) * 16; x ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); } txt('我把耳机里的海', w / 2, 156, 26, rgb(on), 800); return; }
+  if (id === 'rings') { for (let r = 16; r < 140; r += 14) { g.strokeStyle = rgb(pri, .5 - r / 320); g.lineWidth = 2; g.beginPath(); g.arc(w / 2, h / 2, r, 0, 7); g.stroke(); } txt('我把耳机里的海', w / 2, h / 2 + 8, 24, rgb(on), 800); return; }
+  if (id === 'miside') { '我把耳机里的海'.split('').forEach((ch, i) => txt(ch, 32 + i * 36, 60 + (i % 3) * 36 + i * 6, 28, rgb(on), 800)); return; }
+  if (id === 'wave') { g.fillStyle = rgb(hsl(SONG_A.cover.hue, 70, 30)); g.beginPath(); g.moveTo(0, h); for (let x = 0; x <= w; x += 6) g.lineTo(x, 132 + Math.sin(x / 28) * 14); g.lineTo(w, h); g.fill(); txt('我把耳机里的海', w / 2, 88, 26, rgb(on), 800); return; }
+  if (id === 'vinyl') { g.fillStyle = '#111'; g.beginPath(); g.arc(208, 96, 68, 0, 7); g.fill(); g.drawImage(SONG_A.cover.img, 184, 72, 48, 48); txt('我把耳机', 24, 88, 24, rgb(on), 800, 'left'); txt('里的海', 24, 124, 24, rgb(on), 800, 'left'); return; }
+  if (id === 'cinerama') { g.fillStyle = rgb(pri, .9); g.fillRect(0, 60, w, 68); txt('我把耳机里的海', w / 2, 104, 30, rgb(pl), 900); return; }
+  if (id === 'stardrift') { for (let i = 0; i < 120; i++) { g.fillStyle = rgb(on, (i * 37 % 10) / 12); g.fillRect((i * 53) % w, (i * 29) % h, 2.4, 2.4); } txt('我把耳机里的海', w / 2, 108, 24, rgb(on), 700); return; }
+  if (id === 'jump') { for (let i = 0; i < 5; i++) { g.fillStyle = rgb(hsl(SONG_A.cover.hue, 50, 30 + i * 6)); g.fillRect(28 + i * 52, 120 - i * 12, 36, 80); } g.fillStyle = rgb(pri); g.beginPath(); g.arc(150, 68, 10, 0, 7); g.fill(); txt('我把耳机里的海', w / 2, 40, 22, rgb(on), 800); }
+}
+const DEF = { bg: 'mesh', size: 1, blur: 'mid', emphasis: true, duet: true };
+const FORM = [
+  { k: 'bg', type: 'choice', label: '背景', opts: [['mesh', '网格'], ['flow', '流光'], ['solid', '纯色']] },
+  { k: 'size', type: 'num', label: '字号', min: .8, max: 1.4, step: .1 },
+  { k: 'blur', type: 'choice', label: '景深模糊', summary: '离当前句越远越模糊，拖动歌词时取消', opts: [['off', '关'], ['low', '弱'], ['mid', '中'], ['high', '强']] },
+  { k: 'emphasis', type: 'sw', label: '长音强调', summary: '唱满 1 秒以上的字逐字放大、发光' },
+  { k: 'duet', type: 'sw', label: '对唱与和声', summary: '「男：」「女：」分左右，括号里的和声在句子下面展开' },
+];
+function renderPanel() {
+  const f = $('#form'); f.innerHTML = '';
+  FORM.forEach(it => {
+    const row = document.createElement('div');
+    if (it.type === 'choice') {
+      row.className = 'row col';
+      row.innerHTML = `<div class="t">${it.label}${it.summary ? `<small>${it.summary}</small>` : ''}</div><div class="ctg">${it.opts.map(([v, n]) => `<button data-v="${v}" class="${SET[it.k] === v ? 'on' : ''}">${n}</button>`).join('')}</div>`;
+      $$('button', row).forEach(b => b.onclick = () => setSetting(it.k, b.dataset.v));
+    } else if (it.type === 'num') {
+      row.className = 'row';
+      row.innerHTML = `<div class="t">${it.label}</div><div class="stp"><button aria-label="字号减小">−</button><b>×${(+SET.size.toFixed(1))}</b><button aria-label="字号增大">+</button></div>`;
+      const [m, p] = $$('button', row);
+      m.onclick = () => setSetting('size', Math.max(it.min, Math.round((SET.size - it.step) * 10) / 10));
+      p.onclick = () => setSetting('size', Math.min(it.max, Math.round((SET.size + it.step) * 10) / 10));
+    } else {
+      row.className = 'row';
+      row.innerHTML = `<div class="t">${it.label}<small>${it.summary}</small></div><span class="sw ${SET[it.k] ? 'on' : ''}" role="switch" aria-checked="${SET[it.k]}"></span>`;
+      $('.sw', row).onclick = () => setSetting(it.k, !SET[it.k]);
+    }
+    f.appendChild(row);
+  });
+  $('#resetBtn').disabled = Object.keys(DEF).every(k => DEF[k] === SET[k]);
+}
+$('#resetBtn').onclick = () => { Object.assign(SET, DEF); renderPanel(); syncWordBar(); settingsChanged('rebuild'); };
+function setSetting(k, v) {
+  SET[k] = v; renderPanel(); syncWordBar();
+  settingsChanged(['emphasis', 'duet', 'size'].includes(k) ? 'rebuild' : 'config');
+}
+renderPanel(); syncWordBar();
+(() => { const b = $('#shBody'), l = $$('.lbl', b)[2]; b.scrollTop = l.offsetTop - b.offsetTop - 4; })();
+
+/* ---------- 帧循环 ---------- */
+let lastT = performance.now();
+function loop(t) {
+  const dt = Math.min(100, t - lastT); lastT = t;
+  for (const d of DEMOS) if (d.visible !== false) d.frame(dt);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(t => { lastT = t; loop(t); });
+window.addEventListener('resize', fitPhones); fitPhones();
+if (document.fonts) document.fonts.ready.then(() => { STAGES.forEach(s => s.song && s.build(false)); fitPhones(); });
+</script>
+</body>
+</html>
