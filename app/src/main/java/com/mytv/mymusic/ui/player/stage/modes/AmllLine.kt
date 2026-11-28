@@ -465,7 +465,9 @@ internal fun DrawScope.drawAmllLine(geom: AmllLineGeom, frame: AmllLineFrame, co
             uniform -> drawText(token.layout, color.copy(alpha = color.alpha * DIM_ALPHA * alpha), at, shadow = Shadow.None)
             end <= 0f -> drawText(token.layout, color.copy(alpha = color.alpha * lo), at, shadow = Shadow.None)
             start >= token.width -> drawText(token.layout, color.copy(alpha = color.alpha * hi), at, shadow = Shadow.None)
-            // drawText 先平移到 at 再上色，渐变的坐标是相对这个词的
+            // drawText 先平移到 at 再上色，渐变的坐标是相对这个词的。透明度已经在两端颜色里，alpha 必须给 1：
+            // 默认的 NaN 表示「沿用画笔上次的透明度」，而排字结果按词缓存、同一个词刚用纯色画过（没唱 40%、别的句子 20%），
+            // 扫到这个词时整词会再乘一遍那个透明度，比没唱的字还暗，扫过去才突然变白
             else -> drawText(
                 token.layout,
                 Brush.horizontalGradient(
@@ -474,6 +476,7 @@ internal fun DrawScope.drawAmllLine(geom: AmllLineGeom, frame: AmllLineFrame, co
                     endX = end,
                 ),
                 at,
+                alpha = 1f,
                 shadow = Shadow.None,
             )
         }
