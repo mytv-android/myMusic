@@ -923,6 +923,13 @@ private fun WallPageGroup(menu: WallMenu, scroll: androidx.compose.foundation.Sc
 class PlaylistCheck(val checked: Boolean, val busy: Boolean = false, val note: String = "", val locked: Boolean = false)
 
 /**
+ * 电视上面板焦点重试的帧数：面板是 Dialog 窗口，刚组合好时窗口还没拿到焦点，
+ * 这时候 [androidx.compose.ui.focus.FocusRequester.requestFocus] 会失败，
+ * 只能按帧重试到窗口真的能接焦点为止（约 1 秒，窗口早就绪了）。
+ */
+private const val PickerFocusRetryFrames = 60
+
+/**
  * 「加到歌单」面板顶部的分组 tab：只在单曲勾选模式传（见 [AddToPlaylistSheet]），不传就是原来的扁平列表。
  * [groups] 是打开那一刻存在的分组 id（空串 = 本地歌单），[selected] 为 null 是「全部」。
  */
@@ -1030,7 +1037,7 @@ fun PlaylistPickerSheet(
         // 面板是滑进来的、切分组会重排列表，晚几帧再滚/请求焦点，没接住就下一帧再试
         scope.launch {
             rowFocused = false
-            repeat(10) {
+            repeat(PickerFocusRetryFrames) {
                 androidx.compose.runtime.withFrameNanos { }
                 if (rowFocused) return@launch
                 runCatching { listState.scrollToItem(lazyIndex) }
@@ -1046,16 +1053,20 @@ fun PlaylistPickerSheet(
         if (!window.isTv || creating) return@LaunchedEffect
         if (tabs != null) {
             tabFocused = false
-            repeat(10) {
+            repeat(PickerFocusRetryFrames) {
                 androidx.compose.runtime.withFrameNanos { }
                 if (tabFocused) return@LaunchedEffect
                 runCatching { focusTabs.requestFocus() }
             }
+            // tab 上要不到焦点时不干等着：面板是单独的窗口，窗口还没拿到输入焦点时对可横向滚动的
+            // tab 行请求焦点会被静默拒绝（重试多久都没用）。退回列表里的目标行，面板照样能直接遥控操作，
+            // 想切分组按一下上键就回到 tab 行
+            if (rowTarget != null) runCatching { focusRow.requestFocus() }
             return@LaunchedEffect
         }
         if (checks == null) return@LaunchedEffect
         rowFocused = false
-        repeat(10) {
+        repeat(PickerFocusRetryFrames) {
             androidx.compose.runtime.withFrameNanos { }
             if (rowFocused) return@LaunchedEffect
             if (rowTarget == null) {
