@@ -71,11 +71,13 @@ class KugouWelfareTest {
         val today = KugouWelfare.beijingToday()
         val month = today.substring(0, 7)
         val yesterday = java.time.LocalDate.parse(today).minusDays(1).toString()
+        // 第三条要和今天、昨天都不重合：解析会按日期去重，写死 28 号在每月 28 日（或 29 日）会少算一条
+        val other = listOf("01", "15", "28").map { "$month-$it" }.first { it != today && it != yesterday }
         val raw = """
             {"status":1,"data":{"list":[
               {"date":"$yesterday","content":"1天畅听VIP"},
               {"date":"$today","content":"1天畅听VIP"},
-              {"date":"${month}-28","content":"1天畅听VIP"}
+              {"date":"$other","content":"1天畅听VIP"}
             ]}}
         """.trimIndent()
         val record = KugouWelfare.parseMonthRecord(raw)
