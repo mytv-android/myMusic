@@ -89,6 +89,28 @@ class ClassicLyricsMotionTest {
     }
 
     @Test
+    fun lyricsKeepTheirOwnerUntilTheNewSongsLyricsArrive() {
+        var owner = lyricsOwner("a", "a", loading = false)
+        assertEquals("a", owner)
+        // 换到 b：加载中，解析器手里还是 a 的词，仍按 a 显示（内容键不变、不过渡）
+        owner = lyricsOwner(owner, "b", loading = true)
+        assertEquals("a", owner)
+        val old = ParsedLyrics(emptyList(), "[00:01.00]一", true)
+        assertEquals("a", lyricsContentKey(owner, old, true))
+        // 连按到 c，还在加载
+        owner = lyricsOwner(owner, "c", loading = true)
+        assertEquals("a", owner)
+        // c 的词到了：归属换成 c，从 a 过渡到 c
+        owner = lyricsOwner(owner, "c", loading = false)
+        assertEquals("c", owner)
+        // 同一首重新取词
+        owner = lyricsOwner(owner, "c", loading = true)
+        assertEquals("c", owner)
+        assertEquals(LoadingContentKey, lyricsContentKey("c", ParsedLyrics(emptyList(), "", false), true))
+        assertEquals(NoLyricsContentKey, lyricsContentKey("c", ParsedLyrics(emptyList(), "", false), false))
+    }
+
+    @Test
     fun songTrailTellsPreviousFromNext() {
         val trail = SongTrail()
         assertEquals(1, trail.visit("a"))

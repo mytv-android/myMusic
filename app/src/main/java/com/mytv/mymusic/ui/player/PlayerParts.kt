@@ -442,7 +442,9 @@ internal fun anchorScrollStep(scrolled: Float, remaining: Float, progress: Float
  * 也不会把未同步原文里的时间戳当成歌词；已有上一份同步歌词时继续保留到新结果就绪。
  * 换歌（[songKey] 变了）按 M3 共享轴过渡：旧词 fastEffects 淡出，新词从下方 [LyricSwitchRise] 用 defaultSpatial 升上来、
  * slowEffects 淡入；回到上一首时从上方落下（[SongTrail]）；减少动画时只淡入淡出。每份歌词各用自己的列表状态，
- * 淡出的那份停在换歌前那一刻的当前句和进度上。
+ * 淡出的那份停在换歌前那一刻的当前句和进度上。换歌后头一两帧解析器还拿着上一首的歌词（[lyricsOwner]）：
+ * 这时仍按上一首显示、停住不动，不拿新歌的进度去对旧词。「正在加载」晚 [LoadingRevealDelayMs] 毫秒才露出来，
+ * 新词很快到时直接从旧词过渡到新词，不闪一下加载字样。
  */
 @Composable
 fun LyricsList(
@@ -466,7 +468,12 @@ fun LyricsList(
     val trail = remember { SongTrail() }
     // 每换一首只记一次：这首是不是刚才那首之前放过的（按了上一首）
     val backward = remember(songKey) { trail.visit(songKey) < 0 }
-    val shown = LyricsShown(lyricsContentKey(songKey, lyrics, loading), lyrics, loading, backward)
+    // 这份歌词是哪首歌的：加载中歌词没换时还是上一首的。只在歌词、加载状态（不加载时还有歌曲）变了时重算
+    val ownerState = remember { mutableStateOf(songKey) }
+    val owner = remember(lyrics, loading, if (loading) null else songKey) { lyricsOwner(ownerState.value, songKey, loading) }
+    SideEffect { ownerState.value = owner }
+    val stale = owner != songKey && lyrics.raw.isNotBlank()
+    val shown = LyricsShown(lyricsContentKey(if (stale) owner else songKey, lyrics, loading), lyrics, loading, backward, stale)
     val motion = MaterialTheme.motionScheme
     val reduceMotion = LocalAppearance.current.reduceMotion || rememberSystemAnimationsOff()
     val rise = with(LocalDensity.current) { LyricSwitchRise.roundToPx() }
@@ -478,25 +485,27 @@ fun LyricsList(
         modifier = modifier,
         transitionSpec = {
             val fadeInNew = fadeIn(enterFade)
-            val enter = if (reduceMotion) {
-                fadeInNew
-            } else {
-                val from = if (targetState.backward) -rise else rise
-                slideInVertically(enterMove) { from } + fadeInNew
+            val enter = when {
+                targetState.key == LoadingContentKey -> fadeIn(tween(LoadingRevealMs, delayMillis = LoadingRevealDelayMs))
+                reduceMotion -> fadeInNew
+                else -> {
+                    val from = if (targetState.backward) -rise else rise
+                    slideInVertically(enterMove) { from } + fadeInNew
+                }
             }
             (enter togetherWith fadeOut(exitFade)).using(null)
         },
         contentKey = { it.key },
         label = "lyricsSwitch",
     ) { content ->
-        // 淡出的那份不跟着新歌的当前句和进度走：否则 0.1 秒里旧词会换高亮、逐字填色退回开头
-        val exiting = transition.targetState == EnterExitState.PostExit
+        // 淡出的那份、还拿着上一首歌词的那一两帧，都不跟着新歌的当前句和进度走：否则旧词会换高亮、逐字填色退回开头
+        val frozen = content.stale || transition.targetState == EnterExitState.PostExit
         LyricsColumn(
             lyrics = content.lyrics,
             loading = content.loading,
-            active = rememberHeld(active, exiting),
+            active = rememberHeld(active, frozen),
             onSeek = onSeek,
-            position = position?.let { rememberHeld(it, exiting) },
+            position = position?.let { rememberHeld(it, frozen) },
             playing = playing,
             sizing = sizing,
             base = base,
@@ -513,17 +522,37 @@ private val LyricSwitchRise = 36.dp
 
 /** [LyricsList] 过渡里的一份内容；[key] 相同的两份是同一首歌，原地换内容、不做过渡。 */
 @Immutable
-private data class LyricsShown(val key: String, val lyrics: ParsedLyrics, val loading: Boolean, val backward: Boolean)
+private data class LyricsShown(
+    val key: String,
+    val lyrics: ParsedLyrics,
+    val loading: Boolean,
+    val backward: Boolean,
+    /** 换歌后还拿着上一首歌词的那一两帧（见 [lyricsOwner]）。 */
+    val stale: Boolean,
+)
+
+/** 「正在加载歌词」换歌后等这么久才淡入（毫秒），淡入用时 [LoadingRevealMs]。 */
+private const val LoadingRevealDelayMs = 400
+private const val LoadingRevealMs = 200
+
+internal const val LoadingContentKey = "\u0000loading"
+internal const val NoLyricsContentKey = "\u0000none"
 
 /**
  * 歌词列的内容键：显示歌词列表时是歌曲键，同一首歌重新取词、换翻译设置都原地更新；
  * 显示「正在加载」「没有歌词」时是占位键，换歌先过渡到占位，新词就绪再从占位过渡进来。
  */
 internal fun lyricsContentKey(songKey: String, lyrics: ParsedLyrics, loading: Boolean): String = when {
-    loading && (lyrics.raw.isBlank() || !lyrics.synced) -> "\u0000loading"
-    lyrics.raw.isBlank() -> "\u0000none"
+    loading && (lyrics.raw.isBlank() || !lyrics.synced) -> LoadingContentKey
+    lyrics.raw.isBlank() -> NoLyricsContentKey
     else -> songKey
 }
+
+/**
+ * 正在显示的歌词属于哪首歌。换歌后新歌词取回、解析完之前 [loading] 一直为 true，解析器手里还是上一首的结果，
+ * 归属不变（[previous]）；不在加载时就是当前这首 [songKey]。在歌词或加载状态变化时调用。
+ */
+internal fun lyricsOwner(previous: String, songKey: String, loading: Boolean): String = if (loading) previous else songKey
 
 /**
  * 换歌方向：记住依次显示过的歌。新的一首正好是上一首之前那首（按了上一首，或连按几次），算往回，从上方落下；
