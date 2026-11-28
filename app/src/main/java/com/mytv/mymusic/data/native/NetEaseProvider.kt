@@ -1001,13 +1001,16 @@ class NetEaseProvider internal constructor(
      * 放开到 internal 只为了能直接喂样本 JSON 做单测，不在模块外使用。
      */
     internal fun heartbeatSong(element: JsonObject): Song? {
-        val id = element.long("id").takeIf { it > 0 } ?: return null
-        val name = element.string("name").takeIf { it.isNotBlank() } ?: return null
-        val artists = (element["ar"] as? JsonArray ?: element["artists"] as? JsonArray)
+        // 心动推荐的候选条目把歌曲塞在 songInfo 里，旧格式才是扁平字段；
+        // 两种都认，songInfo 缺失时回退外层，坏项仍由 id/name 校验挡掉。
+        val song = element["songInfo"] as? JsonObject ?: element
+        val id = song.long("id").takeIf { it > 0 } ?: return null
+        val name = song.string("name").takeIf { it.isNotBlank() } ?: return null
+        val artists = (song["ar"] as? JsonArray ?: song["artists"] as? JsonArray)
             ?.mapNotNull { (it as? JsonObject)?.string("name")?.takeIf { value -> value.isNotBlank() } }
             .orEmpty()
-        val album = element["al"] as? JsonObject ?: element["album"] as? JsonObject
-        val duration = element.long("dt").takeIf { it > 0 } ?: element.long("duration")
+        val album = song["al"] as? JsonObject ?: song["album"] as? JsonObject
+        val duration = song.long("dt").takeIf { it > 0 } ?: song.long("duration")
         return Song(
             id = id.toString(),
             name = name,

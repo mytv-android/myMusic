@@ -64,6 +64,31 @@ class NeteaseListeningModeTest {
     }
 
     @Test
+    fun heartbeatSongAcceptsSongInfoWrapper() {
+        // 真实接口把歌曲放在 songInfo 里，外层只是候选条目；字段仍沿用新版 ar/al/dt
+        val song = songOf(
+            """{"songInfo":{"id":789,"name":"包裹样本","ar":[{"name":"歌手丁"}],
+               "al":{"id":10,"name":"包裹专辑","picUrl":"https://p3/wrapped.jpg"},"dt":200500}}""",
+        )!!
+        assertEquals("789", song.id)
+        assertEquals("包裹样本", song.name)
+        assertEquals("歌手丁", song.artist)
+        assertEquals("包裹专辑", song.album)
+        assertEquals("10", song.albumId)
+        assertEquals(200, song.duration)
+        assertEquals("https://p3/wrapped.jpg", song.cover)
+    }
+
+    @Test
+    fun heartbeatSongSkipsBrokenWrappedEntries() {
+        // 包裹项里没有 songInfo、songInfo 为空或缺少 id/name 时跳过，不让整批失败
+        assertNull(songOf("""{"songInfo":null}"""))
+        assertNull(songOf("""{"songInfo":{}}"""))
+        assertNull(songOf("""{"songInfo":{"name":"没有 id"}}"""))
+        assertNull(songOf("""{"songInfo":{"id":2}}"""))
+    }
+
+    @Test
     fun heartbeatSongSkipsEntriesWithoutIdOrName() {
         // 队列里混进残缺项时跳过这一首，不让整批失败
         assertNull(songOf("""{"name":"没有 id"}"""))
