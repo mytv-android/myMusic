@@ -1,5 +1,10 @@
 package com.mytv.mymusic.ui.library
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +37,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.Button
@@ -71,6 +77,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.mytv.mymusic.data.local.DownloadExport
 import com.mytv.mymusic.data.local.LOCAL_SOURCE
 import com.mytv.mymusic.data.DOWNLOAD_DONE
 import com.mytv.mymusic.data.DOWNLOAD_FAILED
@@ -695,6 +703,25 @@ fun DownloadsScreen(
     var bulkDeleting by remember { mutableStateOf<List<DownloadRecord>?>(null) }
     val order = remember(doneSongs) { doneSongs.map { it.key } }
     val selectedItems = { done.filter { it.record.key in selection.selected } }
+    val exportable = remember(done) { done.filter { !it.missing }.map { it.record } }
+    var exportingAll by remember { mutableStateOf(false) }
+    // 导出到公共 Download/myMusic：Android 10 起走 MediaStore 不要权限，9 及以下点导出时才申请
+    var pendingExport by remember { mutableStateOf<List<DownloadRecord>?>(null) }
+    val storagePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val pending = pendingExport
+        pendingExport = null
+        if (granted && pending != null) actions.exportDownloads(pending)
+    }
+    val export: (List<DownloadRecord>) -> Unit = { records ->
+        if (Build.VERSION.SDK_INT >= 29 ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        ) {
+            actions.exportDownloads(records)
+        } else {
+            pendingExport = records
+            storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
 
     val summary: LazyListScope.() -> Unit = {
         if (selection.active) {
@@ -707,6 +734,10 @@ fun DownloadsScreen(
                     onAddTo = { pickerOpen = true },
                     onRemove = { bulkDeleting = selectedItems().map { it.record } },
                     removeLabel = "删除",
+                    onExport = {
+                        export(selectedItems().filter { !it.missing }.map { it.record })
+                        selection.exit()
+                    },
                     onExit = { selection.exit() },
                     modifier = Modifier.selectionBackPreview(selection),
                 )
@@ -819,8 +850,19 @@ fun DownloadsScreen(
                         )
                     })
                     else -> ({
-                        IconButton(onClick = { deleting = item.record }, modifier = Modifier.tvFocusRing(CircleShape)) {
-                            Icon(Icons.Outlined.Delete, "删除“${item.song.title}”的下载文件", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (!item.missing) {
+                                IconButton(onClick = { export(listOf(item.record)) }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                                    Icon(
+                                        Icons.Filled.SaveAlt,
+                                        "导出“${item.song.title}”到 Download/${DownloadExport.FOLDER}",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            IconButton(onClick = { deleting = item.record }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                                Icon(Icons.Outlined.Delete, "删除“${item.song.title}”的下载文件", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     })
                 },
@@ -837,7 +879,14 @@ fun DownloadsScreen(
         subtitle = if (window.isTv) "失败项点按重试，菜单键删除" else "",
         onBack = onBack,
         actions = {
-            if (!selection.active && done.isNotEmpty()) SelectionMenu { selection.start() }
+            if (!selection.active && done.isNotEmpty()) {
+                if (exportable.isNotEmpty()) {
+                    IconButton(onClick = { exportingAll = true }, modifier = Modifier.tvFocusRing(CircleShape)) {
+                        Icon(Icons.Filled.SaveAlt, "导出全部到 Download/${DownloadExport.FOLDER}")
+                    }
+                }
+                SelectionMenu { selection.start() }
+            }
         },
     ) { padding ->
         when {
@@ -887,6 +936,19 @@ fun DownloadsScreen(
                 bulkDeleting = null
             },
             onDismiss = { bulkDeleting = null },
+        )
+    }
+    if (exportingAll) {
+        ConfirmDialog(
+            title = "导出到公共下载目录",
+            message = "把这 ${exportable.size} 首（${formatBytes(doneBytes)}）复制一份到 Download/${DownloadExport.FOLDER}，" +
+                "方便别的播放器或电脑取用。会多占一份存储空间，应用内的下载保留。",
+            confirmLabel = "导出",
+            onConfirm = {
+                export(exportable)
+                exportingAll = false
+            },
+            onDismiss = { exportingAll = false },
         )
     }
     if (pickerOpen) {

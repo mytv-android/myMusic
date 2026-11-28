@@ -279,6 +279,7 @@ class MusicActions(private val model: MusicViewModel) {
     fun playDownload(record: DownloadRecord) = model.playDownloaded(record)
     fun playDownloads(records: List<DownloadRecord>) = model.playDownloaded(records)
     fun deleteDownload(record: DownloadRecord) = model.deleteDownload(record)
+    fun exportDownloads(records: List<DownloadRecord>) = model.exportDownloads(records)
     fun restoreEntry(entry: com.mytv.mymusic.data.PlaylistEntryEntity) =
         model.insertPlaylistEntry(entry.playlistId, entry.position, entry.songKey, entry.payload)
     fun clearPlayHistory() = model.clearPlayHistory()

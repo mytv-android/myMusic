@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.RemoveCircleOutline
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -184,6 +185,7 @@ class SelectionContent(
     onRemove: (() -> Unit)? = null,
     removeLabel: String = "移除",
     onUpload: (() -> Unit)? = null,
+    onExport: (() -> Unit)? = null,
 ) {
     var keys: List<String> by mutableStateOf(keys)
         internal set
@@ -194,6 +196,8 @@ class SelectionContent(
     var removeLabel: String by mutableStateOf(removeLabel)
         internal set
     var onUpload: (() -> Unit)? by mutableStateOf(onUpload)
+        internal set
+    var onExport: (() -> Unit)? by mutableStateOf(onExport)
         internal set
 
     val count: Int get() = state.selected.size
@@ -266,6 +270,7 @@ fun SelectionBar(
     onRemove: (() -> Unit)? = null,
     removeLabel: String = "移除",
     onUpload: (() -> Unit)? = null,
+    onExport: (() -> Unit)? = null,
     showDock: Boolean? = null,
     sidePanel: Boolean? = null,
 ) {
@@ -288,6 +293,7 @@ fun SelectionBar(
             onRemove = onRemove,
             removeLabel = removeLabel,
             onUpload = onUpload,
+            onExport = onExport,
         )
     }
     SideEffect {
@@ -296,6 +302,7 @@ fun SelectionBar(
         content.onRemove = onRemove
         content.removeLabel = removeLabel
         content.onUpload = onUpload
+        content.onExport = onExport
         selection.chromeContent = content
     }
     if (sidePanel ?: window.twoPane) SelectionSidePanel(content, modifier)
@@ -468,6 +475,9 @@ private fun SelectionContent.actions(): List<SelectionAction> {
     } ?: onUpload?.let {
         result += SelectionAction("上传", "上传选中的本地歌曲", Icons.Filled.Upload, it)
     }
+    onExport?.let {
+        result += SelectionAction("导出", "导出选中的下载到公共下载目录", Icons.Filled.SaveAlt, it)
+    }
     return result
 }
 
@@ -558,7 +568,7 @@ private fun SelectionSideActions(content: SelectionContent) {
                 }
             }
         }
-        actions.getOrNull(3)?.let { action ->
+        actions.drop(3).forEach { action ->
             TextButton(
                 onClick = action.onClick,
                 enabled = enabled,

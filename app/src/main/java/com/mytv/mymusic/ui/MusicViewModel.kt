@@ -1,8 +1,11 @@
 package com.mytv.mymusic.ui
 
+import android.Manifest
 import android.app.Application
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -17,6 +20,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionToken
 import androidx.room.withTransaction
 import com.google.common.util.concurrent.ListenableFuture
+import com.mytv.mymusic.data.local.DownloadExport
 import com.mytv.mymusic.data.local.LocalUploadRules
 import com.mytv.mymusic.AppLog
 import com.mytv.mymusic.ForegroundActivity
@@ -3961,6 +3965,32 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             LocalLrc.writeSidecar(File(record.path), "")
         }
         app.database.dao().deleteDownload(record.key)
+    }
+
+    /** 把已下载的歌复制到公共 Download/myMusic（连同 .lrc），应用内那份留着继续离线播放。 */
+    fun exportDownloads(records: List<DownloadRecord>) = viewModelScope.launch {
+        val context = getApplication<Application>()
+        if (Build.VERSION.SDK_INT < 29 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            message("没有存储权限，无法导出到 Download", error = true)
+            return@launch
+        }
+        val targets = records.filter { it.state == DOWNLOAD_DONE && it.path.isNotBlank() }
+        if (targets.isEmpty()) {
+            message("没有可导出的下载", error = true)
+            return@launch
+        }
+        val failures = withContext(Dispatchers.IO) {
+            targets.filter { runCatching { DownloadExport.export(context, File(it.path)) }.isFailure }
+        }
+        val exported = targets.size - failures.size
+        when {
+            exported == 0 -> message("导出失败，歌曲文件可能已被删除", error = true)
+            failures.isNotEmpty() -> message("已导出 $exported 首，剩余 ${failures.size} 首失败", error = true)
+            targets.size == 1 -> message("已导出「${targets.first().song(json).title}」到 Download/${DownloadExport.FOLDER}")
+            else -> message("已导出 ${targets.size} 首到 Download/${DownloadExport.FOLDER}")
+        }
     }
 
     fun playDownloaded(record: DownloadRecord) {
